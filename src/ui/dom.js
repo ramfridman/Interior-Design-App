@@ -16,7 +16,7 @@ export function h(tag, props, ...kids) {
       const v = props[k];
       if (v == null || v === false) continue;
       if (k === 'class') el.className = v;
-      else if (k === 'style') { if (typeof v === 'string') el.style.cssText = v; else Object.assign(el.style, v); }
+      else if (k === 'style') { if (typeof v === 'string') el.style.cssText = v; else setStyle(el, v); }
       else if (k === 'dataset') Object.assign(el.dataset, v);
       else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
       else if (v === true) el.setAttribute(k, '');
@@ -25,6 +25,14 @@ export function h(tag, props, ...kids) {
   }
   append(el, kids);
   return el;
+}
+
+/** Assign inline styles; keys starting with "--" are custom properties. */
+export function setStyle(el, styles) {
+  for (const k of Object.keys(styles)) {
+    if (k.startsWith('--')) el.style.setProperty(k, styles[k]);
+    else el.style[k] = styles[k];
+  }
 }
 
 /** Append strings / nodes / nested arrays, skipping null and false. */
