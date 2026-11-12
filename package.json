@@ -1,0 +1,9 @@
+{
+  "name": "interior-design-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node dev/serve.mjs",
+    "test": "node tests/plan.test.mjs"
+  }
+}
