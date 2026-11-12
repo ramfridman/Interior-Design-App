@@ -1,9 +1,14 @@
 /**
  * HOUSE PLAN — single source of truth for the building and the lot.
  *
- * Source: architect drawing "E7" (Ohad Abutbul Architecture, scale 1:100, dated 8.11.26),
- * Kibbutz Afikim, "Gan Bayit" neighbourhood. All geometry below was measured from the
- * vector PDF (not eyeballed) and cross-checked against every written dimension chain.
+ * Source: architect drawings of house model "E7" by Ohad Abutbul Architecture, scale 1:100:
+ *   (a) the site plan for approval of LOT 98, Kibbutz Afikim, dated 10.11.26 — the owner's actual house.
+ *       Walls, lot boundary, building line, parking and paths below are measured from this vector PDF.
+ *   (b) the E7 dimension drawing dated 8.11.26 (drawn for the mirror-twin lot 99). Lot 98 is its exact
+ *       NORTH–SOUTH MIRROR; every written dimension (wall chains, opening width / height / sill, room
+ *       sizes) comes from that sheet and was cross-checked against (a): 160 of 166 wall edges coincide
+ *       exactly after mirroring; the only difference is the living-room north window, which sits 5 cm
+ *       further east on the lot-98 sheet (x 1040–1220) — the lot-98 sheet wins.
  *
  * COORDINATE SYSTEM (plan space)
  *   units : centimetres
@@ -18,12 +23,15 @@
  */
 
 export const META = {
-  name: 'E7 House — Kibbutz Afikim',
+  name: 'House 98 — Kibbutz Afikim',
+  lot: 98,
   model: 'E7',
   location: 'Kibbutz Afikim, Jordan Valley, Israel',
   neighbourhood: 'Gan Bayit',
+  // The dimension sheet (8.11.26) was drawn for the mirror-twin lot; this plan is its north–south mirror.
+  mirroredFromDimensionSheet: true,
   architect: 'Ohad Abutbul Architecture',
-  drawingDate: '2026-11-08',
+  drawingDate: '2026-11-10',
   drawingScale: '1:100',
   grossFloorArea: 163,        // m² — "שטח קומת קרקע" as written on the drawing
   floors: 1,
@@ -52,31 +60,31 @@ export const HOUSE_BOUNDS = { x: 0, y: 0, w: 1535, h: 1380 };
  * kind: 'exterior' (20 cm block), 'interior' (10 cm partition; a few 20 cm), 'mamad' (reinforced concrete shelter shell).
  */
 export const WALLS = [
-  [0, 0, 140, 20, 'exterior'], [220, 0, 140, 20, 'exterior'], [665, 0, 150, 20, 'exterior'],
-  [895, 0, 110, 20, 'exterior'], [1095, 0, 440, 20, 'exterior'], [0, 20, 20, 200, 'exterior'],
-  [340, 20, 20, 470, 'interior'], [665, 20, 20, 345, 'mamad'], [905, 20, 10, 200, 'interior'],
-  [1145, 20, 10, 200, 'interior'], [1515, 20, 20, 80, 'exterior'], [360, 80, 95, 30, 'mamad'],
-  [555, 80, 110, 30, 'mamad'], [660, 110, 5, 255, 'mamad'], [20, 180, 220, 10, 'interior'],
-  [330, 180, 10, 10, 'interior'], [915, 200, 90, 10, 'interior'], [1095, 200, 50, 10, 'interior'],
-  [1515, 240, 20, 170, 'exterior'], [0, 300, 20, 180, 'exterior'], [905, 310, 10, 20, 'interior'],
-  [1145, 310, 10, 30, 'interior'], [685, 320, 220, 10, 'interior'], [1155, 320, 360, 10, 'interior'],
-  [1145, 430, 10, 220, 'interior'], [660, 445, 25, 35, 'mamad'], [950, 450, 10, 80, 'interior'],
-  [360, 460, 300, 20, 'mamad'], [960, 500, 185, 10, 'interior'], [1135, 510, 10, 140, 'interior'],
-  [1515, 550, 20, 100, 'exterior'], [0, 560, 20, 120, 'exterior'], [340, 580, 20, 130, 'exterior'],
-  [360, 590, 325, 20, 'interior'], [950, 620, 10, 50, 'interior'], [960, 630, 120, 10, 'interior'],
-  [1120, 630, 15, 20, 'exterior'], [1155, 630, 360, 20, 'exterior'], [1050, 640, 30, 10, 'exterior'],
-  [1050, 650, 20, 45, 'exterior'], [20, 660, 320, 20, 'exterior'], [1050, 805, 20, 65, 'exterior'],
-  [950, 850, 100, 20, 'exterior'], [1070, 850, 250, 20, 'exterior'], [1300, 870, 20, 105, 'exterior'],
-  [340, 990, 20, 95, 'exterior'], [1300, 1155, 20, 125, 'exterior'], [910, 1260, 125, 20, 'exterior'],
-  [1215, 1260, 85, 20, 'exterior'], [340, 1265, 20, 115, 'exterior'], [910, 1280, 20, 100, 'exterior'],
-  [360, 1360, 80, 20, 'exterior'], [620, 1360, 290, 20, 'exterior'],
+  [340, 0, 100, 20, 'exterior'], [620, 0, 310, 20, 'exterior'], [340, 20, 20, 95, 'exterior'],
+  [910, 20, 20, 100, 'exterior'], [930, 100, 110, 20, 'exterior'], [1220, 100, 100, 20, 'exterior'],
+  [1300, 120, 20, 105, 'exterior'], [340, 295, 20, 95, 'exterior'], [1300, 405, 20, 125, 'exterior'],
+  [950, 510, 350, 20, 'exterior'], [1050, 530, 20, 45, 'exterior'], [340, 670, 20, 130, 'exterior'],
+  [1050, 685, 20, 65, 'exterior'], [0, 700, 340, 20, 'exterior'], [950, 710, 10, 50, 'interior'],
+  [0, 720, 20, 100, 'exterior'], [1070, 730, 10, 20, 'interior'], [1120, 730, 415, 20, 'exterior'],
+  [960, 740, 90, 10, 'interior'], [1135, 750, 20, 130, 'interior'], [1515, 750, 20, 80, 'exterior'],
+  [360, 770, 325, 20, 'interior'], [950, 850, 10, 80, 'interior'], [960, 870, 175, 10, 'interior'],
+  [1145, 880, 10, 70, 'interior'], [340, 890, 20, 490, 'interior'], [0, 900, 20, 180, 'exterior'],
+  [360, 900, 325, 20, 'mamad'], [660, 920, 25, 15, 'mamad'], [1515, 970, 20, 170, 'exterior'],
+  [660, 1015, 25, 285, 'mamad'], [1145, 1040, 10, 30, 'interior'], [685, 1050, 230, 10, 'interior'],
+  [1155, 1050, 360, 10, 'interior'], [905, 1060, 10, 10, 'interior'], [0, 1160, 20, 220, 'exterior'],
+  [905, 1160, 10, 220, 'interior'], [1145, 1160, 10, 220, 'interior'], [915, 1170, 90, 10, 'interior'],
+  [1095, 1170, 50, 10, 'interior'], [20, 1190, 220, 10, 'interior'], [330, 1190, 10, 10, 'interior'],
+  [360, 1270, 95, 30, 'mamad'], [555, 1270, 105, 30, 'mamad'], [1515, 1280, 20, 100, 'exterior'],
+  [665, 1300, 20, 80, 'mamad'], [20, 1360, 120, 20, 'exterior'], [220, 1360, 120, 20, 'exterior'],
+  [685, 1360, 130, 20, 'exterior'], [895, 1360, 10, 20, 'exterior'], [915, 1360, 90, 20, 'exterior'],
+  [1095, 1360, 50, 20, 'exterior'], [1155, 1360, 360, 20, 'exterior'],
 ].map(([x, y, w, h, kind], i) => ({ id: 'w' + String(i + 1).padStart(2, '0'), x, y, w, h, kind }));
 
 /**
  * Wall outline as drawn by the architect: thick line segments [x1, y1, x2, y2].
  * Use for crisp 2D rendering of wall edges (fill WALLS rects, stroke these).
  */
-export const WALL_OUTLINE = [[0,0,0,220],[0,0,140,0],[0,220,20,220],[0,300,0,480],[0,300,20,300],[0,480,20,480],[0,560,0,680],[0,560,20,560],[0,680,340,680],[20,20,20,180],[20,20,140,20],[20,180,240,180],[20,190,20,220],[20,190,240,190],[20,300,20,480],[20,560,20,660],[20,660,340,660],[140,0,140,20],[220,0,220,20],[220,0,360,0],[220,20,340,20],[240,180,240,190],[330,180,330,190],[330,180,340,180],[330,190,340,190],[340,20,340,180],[340,190,340,490],[340,490,360,490],[340,580,340,660],[340,580,360,580],[340,680,340,710],[340,710,360,710],[340,990,340,1085],[340,990,360,990],[340,1085,360,1085],[340,1265,340,1380],[340,1265,360,1265],[340,1380,440,1380],[360,0,360,80],[360,80,455,80],[360,110,360,460],[360,110,455,110],[360,460,660,460],[360,480,360,490],[360,480,685,480],[360,580,360,590],[360,590,685,590],[360,610,360,710],[360,610,685,610],[360,990,360,1085],[360,1265,360,1360],[360,1360,440,1360],[440,1360,440,1380],[455,80,455,110],[555,80,555,110],[555,80,665,80],[555,110,660,110],[620,1360,620,1380],[620,1360,910,1360],[620,1380,930,1380],[660,110,660,365],[660,365,685,365],[660,445,660,460],[660,445,685,445],[665,0,665,80],[665,0,815,0],[685,20,685,320],[685,20,815,20],[685,320,905,320],[685,330,685,365],[685,330,915,330],[685,445,685,480],[685,590,685,610],[815,0,815,20],[895,0,895,20],[895,0,1005,0],[895,20,905,20],[905,20,905,220],[905,220,915,220],[905,310,905,320],[905,310,915,310],[910,1260,910,1360],[910,1260,1035,1260],[915,20,915,200],[915,20,1005,20],[915,200,1005,200],[915,210,915,220],[915,210,1005,210],[915,310,915,330],[930,1280,930,1380],[930,1280,1035,1280],[950,450,950,530],[950,450,960,450],[950,530,960,530],[950,620,950,670],[950,620,960,620],[950,670,960,670],[950,850,950,870],[950,850,1050,850],[950,870,1300,870],[960,450,960,500],[960,500,1145,500],[960,510,960,530],[960,510,1135,510],[960,620,960,630],[960,630,1080,630],[960,640,960,670],[960,640,1050,640],[1005,0,1005,20],[1005,200,1005,210],[1035,1260,1035,1280],[1050,640,1050,695],[1050,695,1070,695],[1050,805,1050,850],[1050,805,1070,805],[1070,650,1070,695],[1070,650,1080,650],[1070,805,1070,850],[1070,850,1320,850],[1080,630,1080,650],[1095,0,1095,20],[1095,0,1535,0],[1095,20,1145,20],[1095,200,1095,210],[1095,200,1145,200],[1095,210,1145,210],[1120,630,1120,650],[1120,630,1135,630],[1120,650,1535,650],[1135,510,1135,630],[1145,20,1145,200],[1145,210,1145,220],[1145,220,1155,220],[1145,310,1145,340],[1145,310,1155,310],[1145,340,1155,340],[1145,430,1145,500],[1145,430,1155,430],[1155,20,1155,220],[1155,20,1515,20],[1155,310,1155,320],[1155,320,1515,320],[1155,330,1155,340],[1155,330,1515,330],[1155,430,1155,630],[1155,630,1515,630],[1215,1260,1215,1280],[1215,1260,1300,1260],[1215,1280,1320,1280],[1300,870,1300,975],[1300,975,1320,975],[1300,1155,1300,1260],[1300,1155,1320,1155],[1320,850,1320,975],[1320,1155,1320,1280],[1515,20,1515,100],[1515,100,1535,100],[1515,240,1515,320],[1515,240,1535,240],[1515,330,1515,410],[1515,410,1535,410],[1515,550,1515,630],[1515,550,1535,550],[1535,0,1535,100],[1535,240,1535,410],[1535,550,1535,650]];
+export const WALL_OUTLINE = [[0,700,0,820],[0,700,340,700],[0,820,20,820],[0,900,0,1080],[0,900,20,900],[0,1080,20,1080],[0,1160,0,1380],[0,1160,20,1160],[0,1380,140,1380],[20,720,20,820],[20,720,340,720],[20,900,20,1080],[20,1160,20,1190],[20,1190,240,1190],[20,1200,20,1360],[20,1200,240,1200],[20,1360,140,1360],[140,1360,140,1380],[220,1360,220,1380],[220,1360,340,1360],[220,1380,360,1380],[240,1190,240,1200],[330,1190,330,1200],[330,1190,340,1190],[330,1200,340,1200],[340,0,340,115],[340,0,440,0],[340,115,360,115],[340,295,340,390],[340,295,360,295],[340,390,360,390],[340,670,340,700],[340,670,360,670],[340,720,340,800],[340,800,360,800],[340,890,340,1190],[340,890,360,890],[340,1200,340,1360],[360,20,360,115],[360,20,440,20],[360,295,360,390],[360,670,360,770],[360,770,685,770],[360,790,360,800],[360,790,685,790],[360,890,360,900],[360,900,685,900],[360,920,360,1270],[360,920,660,920],[360,1270,455,1270],[360,1300,360,1380],[360,1300,455,1300],[440,0,440,20],[455,1270,455,1300],[555,1270,555,1300],[555,1270,660,1270],[555,1300,665,1300],[620,0,620,20],[620,0,930,0],[620,20,910,20],[660,920,660,935],[660,935,685,935],[660,1015,660,1270],[660,1015,685,1015],[665,1300,665,1380],[665,1380,815,1380],[685,770,685,790],[685,900,685,935],[685,1015,685,1050],[685,1050,915,1050],[685,1060,685,1360],[685,1060,905,1060],[685,1360,815,1360],[815,1360,815,1380],[895,1360,895,1380],[895,1360,905,1360],[895,1380,1005,1380],[905,1060,905,1070],[905,1070,915,1070],[905,1160,905,1360],[905,1160,915,1160],[910,20,910,120],[910,120,1040,120],[915,1050,915,1070],[915,1160,915,1170],[915,1170,1005,1170],[915,1180,915,1360],[915,1180,1005,1180],[915,1360,1005,1360],[930,0,930,100],[930,100,1040,100],[950,510,950,530],[950,510,1300,510],[950,530,1050,530],[950,710,950,760],[950,710,960,710],[950,760,960,760],[950,850,950,930],[950,850,960,850],[950,930,960,930],[960,710,960,740],[960,740,1050,740],[960,750,960,760],[960,750,1080,750],[960,850,960,870],[960,870,1135,870],[960,880,960,930],[960,880,1145,880],[1005,1170,1005,1180],[1005,1360,1005,1380],[1040,100,1040,120],[1050,530,1050,575],[1050,575,1070,575],[1050,685,1050,740],[1050,685,1070,685],[1070,530,1070,575],[1070,530,1320,530],[1070,685,1070,730],[1070,730,1080,730],[1080,730,1080,750],[1095,1170,1095,1180],[1095,1170,1145,1170],[1095,1180,1145,1180],[1095,1360,1095,1380],[1095,1360,1145,1360],[1095,1380,1535,1380],[1120,730,1120,750],[1120,730,1535,730],[1120,750,1135,750],[1135,750,1135,870],[1145,880,1145,950],[1145,950,1155,950],[1145,1040,1145,1070],[1145,1040,1155,1040],[1145,1070,1155,1070],[1145,1160,1145,1170],[1145,1160,1155,1160],[1145,1180,1145,1360],[1155,750,1155,950],[1155,750,1515,750],[1155,1040,1155,1050],[1155,1050,1515,1050],[1155,1060,1155,1070],[1155,1060,1515,1060],[1155,1160,1155,1360],[1155,1360,1515,1360],[1220,100,1220,120],[1220,100,1320,100],[1220,120,1300,120],[1300,120,1300,225],[1300,225,1320,225],[1300,405,1300,510],[1300,405,1320,405],[1320,100,1320,225],[1320,405,1320,530],[1515,750,1515,830],[1515,830,1535,830],[1515,970,1515,1050],[1515,970,1535,970],[1515,1060,1515,1140],[1515,1140,1535,1140],[1515,1280,1515,1360],[1515,1280,1535,1280],[1535,730,1535,830],[1535,970,1535,1140],[1535,1280,1535,1380]];
 
 /**
  * OPENINGS — doors and windows. Each is a gap through a wall.
@@ -97,32 +105,32 @@ export const WALL_OUTLINE = [[0,0,0,220],[0,0,140,0],[0,220,20,220],[0,300,0,480
  *   assumed    : list of fields that are NOT on the drawing (see ASSUMPTIONS)
  */
 export const OPENINGS = [
-  // ---- Windows (width / height (+sill) exactly as annotated on the drawing) ----
-  { id: 'win-parents-bath', kind: 'window', style: 'tilt',    axis: 'h', x: 140,  y: 0,    w: 80,  h: 20, width: 80,  height: 70,  sill: 140, exterior: true, outside: 'n', rooms: ['parents-bath', 'outside'], label: '80 / 70(+140)' },
-  { id: 'win-mamad',        kind: 'window', style: 'mamad',   axis: 'h', x: 455,  y: 80,   w: 100, h: 30, width: 100, height: 100, sill: 110, exterior: true, outside: 'n', rooms: ['mamad', 'outside'], label: '100 / 100(+110)' },
-  { id: 'win-bath',         kind: 'window', style: 'tilt',    axis: 'h', x: 815,  y: 0,    w: 80,  h: 20, width: 80,  height: 70,  sill: 140, exterior: true, outside: 'n', rooms: ['bath', 'outside'], label: '80 / 70(+140)' },
-  { id: 'win-parents-1',    kind: 'window', style: 'sliding', axis: 'v', x: 0,    y: 220,  w: 20,  h: 80, width: 80,  height: 120, sill: 90,  exterior: true, outside: 'w', rooms: ['parents-bedroom', 'outside'], label: '80 / 120(+90)' },
-  { id: 'win-parents-2',    kind: 'window', style: 'sliding', axis: 'v', x: 0,    y: 480,  w: 20,  h: 80, width: 80,  height: 120, sill: 90,  exterior: true, outside: 'w', rooms: ['parents-bedroom', 'outside'], label: '80 / 120(+90)' },
-  { id: 'win-kitchen-w',    kind: 'window', style: 'sliding', axis: 'v', x: 340,  y: 1085, w: 20,  h: 180, width: 180, height: 100, sill: 110, exterior: true, outside: 'w', rooms: ['main', 'terrace'], label: '180 / 100(+110)' },
-  { id: 'win-kitchen-s',    kind: 'window', style: 'sliding', axis: 'h', x: 440,  y: 1360, w: 180, h: 20, width: 180, height: 100, sill: 110, exterior: true, outside: 's', rooms: ['main', 'outside'], label: '180 / 100(+110)' },
-  { id: 'win-living-s',     kind: 'window', style: 'sliding', axis: 'h', x: 1035, y: 1260, w: 180, h: 20, width: 180, height: 120, sill: 90,  exterior: true, outside: 's', rooms: ['main', 'outside'], label: '180 / 120(+90)' },
-  { id: 'win-living-e',     kind: 'window', style: 'sliding', axis: 'v', x: 1300, y: 975,  w: 20,  h: 180, width: 180, height: 120, sill: 90,  exterior: true, outside: 'e', rooms: ['main', 'outside'], label: '180 / 120(+90)' },
-  { id: 'win-bedroom-1',    kind: 'window', style: 'sliding', axis: 'v', x: 1515, y: 100,  w: 20,  h: 140, width: 140, height: 100, sill: 110, exterior: true, outside: 'e', rooms: ['bedroom-1', 'outside'], label: '140 / 100(+110)' },
-  { id: 'win-bedroom-2',    kind: 'window', style: 'sliding', axis: 'v', x: 1515, y: 410,  w: 20,  h: 140, width: 140, height: 100, sill: 110, exterior: true, outside: 'e', rooms: ['bedroom-2', 'outside'], label: '140 / 100(+110)' },
-  { id: 'win-wc',           kind: 'window', style: 'tilt',    axis: 'h', x: 1080, y: 630,  w: 40,  h: 20, width: 40,  height: 60,  sill: 150, exterior: true, outside: 's', rooms: ['wc', 'entry-porch'], label: '40 (height not written)', assumed: ['height', 'sill'] },
+  // ---- Windows (width / height (+sill) exactly as annotated on the dimension drawing) ----
+  { id: 'win-parents-bath', kind: 'window', style: 'tilt', axis: 'h', x: 140, y: 1360, w: 80, h: 20, width: 80, height: 70, sill: 140, exterior: true, outside: 's', rooms: ['parents-bath', 'outside'], label: '80 / 70(+140)' },
+  { id: 'win-mamad', kind: 'window', style: 'mamad', axis: 'h', x: 455, y: 1270, w: 100, h: 30, width: 100, height: 100, sill: 110, exterior: true, outside: 's', rooms: ['mamad', 'outside'], label: '100 / 100(+110)' },
+  { id: 'win-bath', kind: 'window', style: 'tilt', axis: 'h', x: 815, y: 1360, w: 80, h: 20, width: 80, height: 70, sill: 140, exterior: true, outside: 's', rooms: ['bath', 'outside'], label: '80 / 70(+140)' },
+  { id: 'win-parents-1', kind: 'window', style: 'sliding', axis: 'v', x: 0, y: 1080, w: 20, h: 80, width: 80, height: 120, sill: 90, exterior: true, outside: 'w', rooms: ['parents-bedroom', 'outside'], label: '80 / 120(+90)' },
+  { id: 'win-parents-2', kind: 'window', style: 'sliding', axis: 'v', x: 0, y: 820, w: 20, h: 80, width: 80, height: 120, sill: 90, exterior: true, outside: 'w', rooms: ['parents-bedroom', 'outside'], label: '80 / 120(+90)' },
+  { id: 'win-kitchen-w', kind: 'window', style: 'sliding', axis: 'v', x: 340, y: 115, w: 20, h: 180, width: 180, height: 100, sill: 110, exterior: true, outside: 'w', rooms: ['main', 'terrace'], label: '180 / 100(+110)' },
+  { id: 'win-kitchen-n', kind: 'window', style: 'sliding', axis: 'h', x: 440, y: 0, w: 180, h: 20, width: 180, height: 100, sill: 110, exterior: true, outside: 'n', rooms: ['main', 'outside'], label: '180 / 100(+110)' },
+  { id: 'win-living-n', kind: 'window', style: 'sliding', axis: 'h', x: 1040, y: 100, w: 180, h: 20, width: 180, height: 120, sill: 90, exterior: true, outside: 'n', rooms: ['main', 'outside'], label: '180 / 120(+90)' },
+  { id: 'win-living-e', kind: 'window', style: 'sliding', axis: 'v', x: 1300, y: 225, w: 20, h: 180, width: 180, height: 120, sill: 90, exterior: true, outside: 'e', rooms: ['main', 'outside'], label: '180 / 120(+90)' },
+  { id: 'win-bedroom-1', kind: 'window', style: 'sliding', axis: 'v', x: 1515, y: 1140, w: 20, h: 140, width: 140, height: 100, sill: 110, exterior: true, outside: 'e', rooms: ['bedroom-1', 'outside'], label: '140 / 100(+110)' },
+  { id: 'win-bedroom-2', kind: 'window', style: 'sliding', axis: 'v', x: 1515, y: 830, w: 20, h: 140, width: 140, height: 100, sill: 110, exterior: true, outside: 'e', rooms: ['bedroom-2', 'outside'], label: '140 / 100(+110)' },
+  { id: 'win-wc', kind: 'window', style: 'tilt', axis: 'h', x: 1080, y: 730, w: 40, h: 20, width: 40, height: 60, sill: 150, exterior: true, outside: 'n', rooms: ['wc', 'entry-porch'], label: '40 (height not written)', assumed: ['height', 'sill'] },
 
   // ---- Doors ----
-  { id: 'door-entry',        kind: 'door', style: 'entry',    axis: 'v', x: 1050, y: 695, w: 20, h: 110, width: 110, height: 210, sill: 0, exterior: true, outside: 'e', hinge: 'n', swing: 'w', rooms: ['main', 'entry-porch'], label: '110 / 210' },
-  { id: 'door-service-ext',  kind: 'door', style: 'service',  axis: 'h', x: 1005, y: 0,   w: 90, h: 20,  width: 90,  height: 210, sill: 0, exterior: true, outside: 'n', hinge: 'e', swing: 'n', rooms: ['service', 'utility-yard'], label: '90 / 210' },
-  { id: 'door-terrace',      kind: 'sliding-door', style: 'glass-sliding', axis: 'v', x: 340, y: 710, w: 20, h: 280, width: 280, height: 210, sill: 0, exterior: true, outside: 'w', rooms: ['main', 'terrace'], label: '280 / 210' },
-  { id: 'door-parents',      kind: 'door', style: 'interior', axis: 'v', x: 340,  y: 490, w: 20, h: 90,  width: 90,  height: 210, sill: 0, hinge: 's', swing: 'w', rooms: ['main', 'parents-bedroom'], assumed: ['height'] },
-  { id: 'door-parents-bath', kind: 'door', style: 'interior', axis: 'h', x: 240,  y: 180, w: 90, h: 10,  width: 90,  height: 210, sill: 0, hinge: 'e', swing: 'n', rooms: ['parents-bedroom', 'parents-bath'], assumed: ['height'] },
-  { id: 'door-mamad',        kind: 'door', style: 'mamad',    axis: 'v', x: 660,  y: 365, w: 25, h: 80,  width: 80,  height: 200, sill: 0, hinge: 'n', swing: 'e', rooms: ['main', 'mamad'], assumed: ['height'] },
-  { id: 'door-bath',         kind: 'door', style: 'interior', axis: 'v', x: 905,  y: 220, w: 10, h: 90,  width: 90,  height: 210, sill: 0, hinge: 's', swing: 'w', rooms: ['main', 'bath'], assumed: ['height'] },
-  { id: 'door-service',      kind: 'door', style: 'interior', axis: 'h', x: 1005, y: 200, w: 90, h: 10,  width: 90,  height: 210, sill: 0, hinge: 'e', swing: 'n', rooms: ['main', 'service'], assumed: ['height'] },
-  { id: 'door-bedroom-1',    kind: 'door', style: 'interior', axis: 'v', x: 1145, y: 220, w: 10, h: 90,  width: 90,  height: 210, sill: 0, hinge: 's', swing: 'e', rooms: ['main', 'bedroom-1'], assumed: ['height'] },
-  { id: 'door-bedroom-2',    kind: 'door', style: 'interior', axis: 'v', x: 1145, y: 340, w: 10, h: 90,  width: 90,  height: 210, sill: 0, hinge: 'n', swing: 'e', rooms: ['main', 'bedroom-2'], assumed: ['height'] },
-  { id: 'door-wc',           kind: 'door', style: 'interior', axis: 'v', x: 950,  y: 530, w: 10, h: 90,  width: 90,  height: 210, sill: 0, hinge: 's', swing: 'e', rooms: ['main', 'wc'], assumed: ['height'] },
+  { id: 'door-entry', kind: 'door', style: 'entry', axis: 'v', x: 1050, y: 575, w: 20, h: 110, width: 110, height: 210, sill: 0, exterior: true, outside: 'e', hinge: 's', swing: 'w', rooms: ['main', 'entry-porch'], label: '110 / 210' },
+  { id: 'door-service-ext', kind: 'door', style: 'service', axis: 'h', x: 1005, y: 1360, w: 90, h: 20, width: 90, height: 210, sill: 0, exterior: true, outside: 's', hinge: 'e', swing: 's', rooms: ['service', 'utility-yard'], label: '90 / 210' },
+  { id: 'door-terrace', kind: 'sliding-door', style: 'glass-sliding', axis: 'v', x: 340, y: 390, w: 20, h: 280, width: 280, height: 210, sill: 0, exterior: true, outside: 'w', rooms: ['main', 'terrace'], label: '280 / 210' },
+  { id: 'door-parents', kind: 'door', style: 'interior', axis: 'v', x: 340, y: 800, w: 20, h: 90, width: 90, height: 210, sill: 0, hinge: 'n', swing: 'w', rooms: ['main', 'parents-bedroom'], assumed: ['height'] },
+  { id: 'door-parents-bath', kind: 'door', style: 'interior', axis: 'h', x: 240, y: 1190, w: 90, h: 10, width: 90, height: 210, sill: 0, hinge: 'e', swing: 's', rooms: ['parents-bedroom', 'parents-bath'], assumed: ['height'] },
+  { id: 'door-mamad', kind: 'door', style: 'mamad', axis: 'v', x: 660, y: 935, w: 25, h: 80, width: 80, height: 200, sill: 0, hinge: 's', swing: 'e', rooms: ['main', 'mamad'], assumed: ['height'] },
+  { id: 'door-bath', kind: 'door', style: 'interior', axis: 'v', x: 905, y: 1070, w: 10, h: 90, width: 90, height: 210, sill: 0, hinge: 'n', swing: 'w', rooms: ['main', 'bath'], assumed: ['height'] },
+  { id: 'door-service', kind: 'door', style: 'interior', axis: 'h', x: 1005, y: 1170, w: 90, h: 10, width: 90, height: 210, sill: 0, hinge: 'e', swing: 's', rooms: ['main', 'service'], assumed: ['height'] },
+  { id: 'door-bedroom-1', kind: 'door', style: 'interior', axis: 'v', x: 1145, y: 1070, w: 10, h: 90, width: 90, height: 210, sill: 0, hinge: 'n', swing: 'e', rooms: ['main', 'bedroom-1'], assumed: ['height'] },
+  { id: 'door-bedroom-2', kind: 'door', style: 'interior', axis: 'v', x: 1145, y: 950, w: 10, h: 90, width: 90, height: 210, sill: 0, hinge: 's', swing: 'e', rooms: ['main', 'bedroom-2'], assumed: ['height'] },
+  { id: 'door-wc', kind: 'door', style: 'interior', axis: 'v', x: 950, y: 760, w: 10, h: 90, width: 90, height: 210, sill: 0, hinge: 'n', swing: 'e', rooms: ['main', 'wc'], assumed: ['height'] },
 ];
 
 /**
@@ -132,73 +140,72 @@ export const OPENINGS = [
  */
 export const ROOMS = [
   { id: 'parents-bedroom', name: 'Master Bedroom', nameHe: 'ח. הורים', type: 'bedroom', drawnArea: 15,
-    polygon: [[20, 190], [340, 190], [340, 660], [20, 660]], label: [180, 400] },
+    polygon: [[20, 720], [340, 720], [340, 1190], [20, 1190]], label: [180, 980] },
   { id: 'parents-bath', name: 'Master Bathroom', nameHe: 'ח. רחצה הורים', type: 'bathroom', wet: true, drawnArea: 5,
-    polygon: [[20, 20], [340, 20], [340, 180], [20, 180]], label: [200, 120] },
+    polygon: [[20, 1200], [340, 1200], [340, 1360], [20, 1360]], label: [200, 1260] },
   { id: 'mamad', name: 'Safe Room (Mamad)', nameHe: 'ממ"ד', type: 'mamad', drawnArea: 10.5,
-    polygon: [[360, 110], [660, 110], [660, 460], [360, 460]], label: [510, 330] },
+    polygon: [[360, 920], [660, 920], [660, 1270], [360, 1270]], label: [510, 1050] },
   { id: 'bath', name: 'Bathroom', nameHe: 'ח. רחצה', type: 'bathroom', wet: true, drawnArea: 6.5,
-    polygon: [[685, 20], [905, 20], [905, 320], [685, 320]], label: [810, 230] },
+    polygon: [[685, 1060], [905, 1060], [905, 1360], [685, 1360]], label: [810, 1150] },
   { id: 'service', name: 'Laundry / Service Room', nameHe: 'ח. שירות', type: 'service', wet: true, drawnArea: 4,
-    polygon: [[915, 20], [1145, 20], [1145, 200], [915, 200]], label: [1040, 110] },
+    polygon: [[915, 1180], [1145, 1180], [1145, 1360], [915, 1360]], label: [1040, 1270] },
   { id: 'bedroom-1', name: 'Bedroom 1', nameHe: 'ח. שינה', type: 'bedroom', drawnArea: 10.8,
-    polygon: [[1155, 20], [1515, 20], [1515, 320], [1155, 320]], label: [1335, 185] },
+    polygon: [[1155, 1060], [1515, 1060], [1515, 1360], [1155, 1360]], label: [1335, 1195] },
   { id: 'bedroom-2', name: 'Bedroom 2', nameHe: 'ח. שינה', type: 'bedroom', drawnArea: 10.8,
-    polygon: [[1155, 330], [1515, 330], [1515, 630], [1155, 630]], label: [1335, 470] },
+    polygon: [[1155, 750], [1515, 750], [1515, 1050], [1155, 1050]], label: [1335, 910] },
   { id: 'wc', name: 'Guest WC', nameHe: 'שירותי אורחים', type: 'wc', wet: true,
-    polygon: [[960, 510], [1135, 510], [1135, 630], [960, 630]], label: [1045, 590] },
+    polygon: [[960, 750], [1135, 750], [1135, 870], [960, 870]], label: [1045, 790] },
   { id: 'main', name: 'Living · Dining · Kitchen', nameHe: 'סלון · פינת אוכל · מטבח', type: 'living',
-    // One continuous open space: bedroom corridor + central hall + foyer + dining + kitchen + living.
-    polygon: [
-      [360, 480], [685, 480], [685, 330], [915, 330], [915, 210], [1145, 210], [1145, 500], [960, 500],
-      [960, 450], [950, 450], [950, 670], [960, 670], [960, 640], [1050, 640], [1050, 850], [950, 850],
-      [950, 870], [1300, 870], [1300, 1260], [910, 1260], [910, 1360], [360, 1360], [360, 610], [685, 610],
-      [685, 590], [360, 590],
-    ],
-    label: [780, 960],
+    polygon: [[360, 790], [685, 790], [685, 770], [360, 770], [360, 20], [910, 20], [910, 120], [1300, 120], [1300, 510], [950, 510], [950, 530], [1050, 530], [1050, 740], [960, 740], [960, 710], [950, 710], [950, 930], [960, 930], [960, 880], [1145, 880], [1145, 1170], [915, 1170], [915, 1050], [685, 1050], [685, 900], [360, 900]], label: [780, 420],
     // Named zones inside the open space (labels only — not separate rooms).
     zones: [
-      { id: 'corridor', name: 'Corridor', label: [520, 535] },
-      { id: 'hall', name: 'Hall', label: [1030, 330] },
-      { id: 'foyer', name: 'Entry', label: [1000, 760] },
-      { id: 'dining', name: 'Dining', label: [640, 800] },
-      { id: 'kitchen', name: 'Kitchen', label: [640, 1240] },
-      { id: 'living', name: 'Living Room', label: [1125, 1060] },
+      { id: 'corridor', name: 'Corridor', label: [520, 845] },
+      { id: 'hall', name: 'Hall', label: [1030, 1050] },
+      { id: 'foyer', name: 'Entry', label: [1000, 620] },
+      { id: 'dining', name: 'Dining', label: [640, 580] },
+      { id: 'kitchen', name: 'Kitchen', label: [640, 140] },
+      { id: 'living', name: 'Living Room', label: [1125, 320] },
     ] },
 ];
 
 /** Paved / covered outdoor areas that belong to the house (thin lines on the drawing). */
 export const OUTDOOR_AREAS = [
   { id: 'terrace', name: 'Terrace', nameHe: 'מרפסת', type: 'terrace', drawnArea: 24,
-    polygon: [[0, 680], [340, 680], [340, 1380], [0, 1380]], label: [170, 1030] },
+    polygon: [[0, 0], [340, 0], [340, 700], [0, 700]], label: [170, 350] },
   { id: 'entry-porch', name: 'Entrance Porch', nameHe: 'מרפסת כניסה', type: 'porch', drawnArea: 9,
-    polygon: [[1070, 650], [1535, 650], [1535, 850], [1070, 850]], label: [1300, 750] },
+    polygon: [[1070, 530], [1535, 530], [1535, 730], [1070, 730]], label: [1300, 630] },
   { id: 'utility-yard', name: 'Utility Yard', nameHe: 'ח. משק', type: 'utility', drawnArea: 7,
-    polygon: [[795, -200], [1145, -200], [1145, 0], [795, 0]], label: [970, -100] },
+    polygon: [[795, 1380], [1145, 1380], [1145, 1580], [795, 1580]], label: [970, 1480] },
 ];
 
 /**
  * SITE — the lot. Same coordinate system as the house (origin = house NW corner), cm.
- * The lot is ~25.0 m (east-west) × ~20.0 m (north-south) ≈ 500 m², very slightly skewed
- * exactly as surveyed (corner points G29/G32/…31 on the drawing).
+ * Lot 98 is 25.00 m (east-west) × 20.00 m (north-south) ≈ 500 m², very slightly skewed exactly as surveyed.
  */
 export const SITE = {
-  // Property line (blue on the drawing), clockwise from the NW corner.
-  boundary: [[-661, -308], [1839, -310], [1877, 1692], [-623, 1692]],
-  // Building line / setback limit (red dash-dot on the drawing). The house must stay inside.
-  buildingLine: [[-255, -10], [1548, -10], [1572, 1390], [-232, 1390]],
-  // Two parking bays, 2.50 × 5.00 m each, in the SE corner, entered from the east street.
+  lot: 98,
+  // Property line (blue on the drawing, survey points G27 → G28 → G29 → G30), clockwise from the NW corner.
+  // Written side lengths: north 25.00 m, south 25.00 m, west 20.00 m, east 19.97 m.
+  boundary: [[-635, -310], [1865, -307], [1901, 1690], [-600, 1690]],
+  // Building line / setback limit (red dash-dot): 4.00 m from the west boundary, 3.00 m from north, east and south.
+  buildingLine: [[-230, -10], [1570, -10], [1595, 1390], [-205, 1390]],
+  setbacks: { w: 400, n: 300, e: 300, s: 300 },
+  // Two parking bays, 2.50 × 5.00 m each, in the NE corner, entered from the east street.
   parking: [
-    { id: 'parking-1', x: 1377, y: 1192, w: 500, h: 250, name: 'Parking 1' },
-    { id: 'parking-2', x: 1377, y: 1442, w: 500, h: 250, name: 'Parking 2' },
+    { id: 'parking-1', x: 1365, y: -307, w: 500, h: 250, name: 'Parking 1' },
+    { id: 'parking-2', x: 1365, y: -57, w: 500, h: 250, name: 'Parking 2' },
   ],
   // Paved access path (grey on the drawing) from the parking / street to the entrance porch.
   paths: [
-    { id: 'entry-path', name: 'Entry path', polygon: [[1415, 850], [1535, 850], [1535, 1070], [1877, 1070], [1877, 1192], [1415, 1192]] },
+    { id: 'entry-path', name: 'Entry path', polygon: [[1415, 193], [1865, 193], [1865, 315], [1535, 315], [1535, 530], [1415, 530]] },
   ],
-  // The public street runs along the EAST boundary.
+  // Survey features inside the lot worth keeping clear when planting / paving.
+  features: [
+    { id: 'water-connection', kind: 'water', x: 1790, y: 386, name: 'Water connection (per survey)' },
+  ],
+  // The public street (concrete pavement) runs along the EAST boundary.
   street: { side: 'e' },
-  bounds: { x: -661, y: -310, w: 2538, h: 2002 },
+  bounds: { x: -635, y: -310, w: 2536, h: 2000 },
 };
 
 /**

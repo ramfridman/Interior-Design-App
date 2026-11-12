@@ -1,7 +1,7 @@
-# E7 Interior Design App — Team Contract
+# House 98 (E7) Interior Design App — Team Contract
 
-One-page-app (static, **no build step**, ES modules, Three.js vendored) that lets the owner of house **E7
-(Kibbutz Afikim)** furnish and landscape their real house: exact 2D plan, real Israeli-market products with
+One-page-app (static, **no build step**, ES modules, Three.js vendored) that lets the owner of **house 98, Kibbutz Afikim
+(architect's model E7)** furnish and landscape their real house: exact 2D plan, real Israeli-market products with
 prices and purchase links, real-time 3D with walk-through, and full garden design inside the lot.
 
 Read this file fully before writing code. It is the only coordination channel between team members.
@@ -31,7 +31,13 @@ Read this file fully before writing code. It is the only coordination channel be
 
 **Plan space** (2D, everything in `core/`): centimetres; origin = outer NW corner of the house; `+x` east
 (right on the drawing), `+y` south (down). House spans x 0..1535, y 0..1380. Lot ≈ 25 × 20 m around it
-(`PLAN.site.boundary`, x −661..1877, y −310..1692). Street is on the **east** side.
+(`PLAN.site.boundary`, x −635..1901, y −310..1690). Street is on the **east** side; the two parking bays are in the
+**north-east** corner; kitchen/living are on the north side, bedrooms on the south side, terrace north-west.
+
+> **Plan update (lead):** the owner's real house is lot 98 — the exact north–south MIRROR of the first sketch.
+> `src/core/plan.js` and `src/core/initial-layout.js` were regenerated for lot 98. Never hard-code plan coordinates;
+> always read `PLAN`. The written dimension sheet (reference image `dim_full.png`) shows the un-mirrored twin: its
+> TOP dimension chain is this house's SOUTH side and vice versa. The lot-98 site plan is `work2/site98.png`.
 
 **World space** (3D): metres, Y up. `X = x/100`, `Z = y/100`. Finished floor of the house is at `Y = 0`;
 garden ground is at `Y = -PLAN.heights.floorAboveGround/100` (−0.15); terrace / porch slabs are at Y = 0 − 0.02.

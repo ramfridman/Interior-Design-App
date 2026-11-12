@@ -1,0 +1,174 @@
+/*
+ * Design tokens — "Drawing set": mineral drafting paper, graphite ink, one cyanotype accent.
+ *
+ * Token shape (required by the host theme): every token is declared on bare :root with its LIGHT value;
+ * the dark values live in the prefers-color-scheme block (unless the user forced light) and are repeated
+ * for the manual override  :root[data-theme="dark"].  No colour exists only inside a media / [data-theme] block.
+ */
+:root {
+  color-scheme: light;
+
+  /* ── Surfaces ── */
+  --bg: #e3e6e1;            /* app backdrop behind the viewports */
+  --panel: #f5f6f3;         /* docked chrome: bars and sidebars */
+  --raised: #ffffff;        /* cards, popovers, dialogs, inputs */
+  --sunken: #eceeea;        /* wells: thumbnails, tracks, quiet fills */
+  --hover: rgba(23, 32, 38, 0.055);
+  --press: rgba(23, 32, 38, 0.1);
+  --scrim: rgba(18, 26, 32, 0.38);
+
+  /* ── Ink ── */
+  --ink: #172026;
+  --ink-2: #4b5759;
+  --ink-3: #626e6e;
+  --ink-disabled: #9aa3a2;
+  --line: rgba(23, 32, 38, 0.12);
+  --line-strong: rgba(23, 32, 38, 0.24);
+
+  /* ── Accent (cyanotype blue) ── */
+  --accent: #1d4e89;
+  --accent-hover: #163f71;
+  --accent-ink: #ffffff;
+  --accent-soft: #dfe8f3;
+  --accent-line: rgba(29, 78, 137, 0.42);
+
+  /* ── Primary action = ink on paper ── */
+  --primary: #172026;
+  --primary-hover: #2a363d;
+  --primary-ink: #f5f6f3;
+
+  /* ── Status ── */
+  --pass: #256e43;
+  --pass-soft: #dcefe2;
+  --warn: #875100;
+  --warn-soft: #f6e8cd;
+  --fail: #a8322a;
+  --fail-soft: #f7dfdc;
+  --info: #1d4e89;
+  --info-soft: #dfe8f3;
+
+  /* ── Elevation ── */
+  --shadow-1: 0 1px 2px rgba(18, 26, 32, 0.08), 0 2px 6px rgba(18, 26, 32, 0.06);
+  --shadow-2: 0 2px 4px rgba(18, 26, 32, 0.06), 0 10px 28px rgba(18, 26, 32, 0.16);
+  --shadow-3: 0 4px 10px rgba(18, 26, 32, 0.08), 0 24px 64px rgba(18, 26, 32, 0.26);
+  --overlay-bg: rgba(250, 251, 249, 0.92);   /* floating controls over the viewports */
+
+  /* ── Type ── */
+  --font-ui: 'Hanken Grotesk Variable', 'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Jost Variable', 'Jost', 'Futura', 'Century Gothic', var(--font-ui);
+  --fs-11: 0.6875rem;
+  --fs-12: 0.75rem;
+  --fs-13: 0.8125rem;
+  --fs-14: 0.875rem;
+  --fs-16: 1rem;
+  --fs-19: 1.1875rem;
+  --fs-24: 1.5rem;
+  --fs-32: 2rem;
+
+  /* ── Space (4 px grid) ── */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+
+  /* ── Shape ── */
+  --r-1: 3px;     /* inputs, chips, small buttons */
+  --r-2: 6px;     /* cards, popovers, floating controls */
+  --r-3: 10px;    /* dialogs, sheets */
+
+  /* ── Motion ── */
+  --t-fast: 140ms;
+  --t-med: 220ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  /* ── Layout ── */
+  --topbar-h: 48px;
+  --status-h: 28px;
+  --left-w: 356px;
+  --right-w: 340px;
+  --rail-w: 48px;
+  --ctl: 32px;    /* control height; grows on coarse pointers */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0b1016;
+    --panel: #131a21;
+    --raised: #1b242d;
+    --sunken: #0f161c;
+    --hover: rgba(214, 228, 240, 0.07);
+    --press: rgba(214, 228, 240, 0.13);
+    --scrim: rgba(3, 6, 10, 0.6);
+    --ink: #e8ebea;
+    --ink-2: #aab5b9;
+    --ink-3: #87949c;
+    --ink-disabled: #56626a;
+    --line: rgba(214, 228, 240, 0.11);
+    --line-strong: rgba(214, 228, 240, 0.22);
+    --accent: #8dbbee;
+    --accent-hover: #a9cdf4;
+    --accent-ink: #0b1016;
+    --accent-soft: rgba(141, 187, 238, 0.15);
+    --accent-line: rgba(141, 187, 238, 0.45);
+    --primary: #e8ebea;
+    --primary-hover: #ffffff;
+    --primary-ink: #131a21;
+    --pass: #72c594;
+    --pass-soft: rgba(114, 197, 148, 0.14);
+    --warn: #e3a857;
+    --warn-soft: rgba(227, 168, 87, 0.14);
+    --fail: #f08a7e;
+    --fail-soft: rgba(240, 138, 126, 0.14);
+    --info: #8dbbee;
+    --info-soft: rgba(141, 187, 238, 0.15);
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
+    --shadow-2: 0 2px 4px rgba(0, 0, 0, 0.35), 0 10px 28px rgba(0, 0, 0, 0.5);
+    --shadow-3: 0 4px 10px rgba(0, 0, 0, 0.4), 0 24px 64px rgba(0, 0, 0, 0.6);
+    --overlay-bg: rgba(22, 30, 38, 0.9);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b1016;
+  --panel: #131a21;
+  --raised: #1b242d;
+  --sunken: #0f161c;
+  --hover: rgba(214, 228, 240, 0.07);
+  --press: rgba(214, 228, 240, 0.13);
+  --scrim: rgba(3, 6, 10, 0.6);
+  --ink: #e8ebea;
+  --ink-2: #aab5b9;
+  --ink-3: #87949c;
+  --ink-disabled: #56626a;
+  --line: rgba(214, 228, 240, 0.11);
+  --line-strong: rgba(214, 228, 240, 0.22);
+  --accent: #8dbbee;
+  --accent-hover: #a9cdf4;
+  --accent-ink: #0b1016;
+  --accent-soft: rgba(141, 187, 238, 0.15);
+  --accent-line: rgba(141, 187, 238, 0.45);
+  --primary: #e8ebea;
+  --primary-hover: #ffffff;
+  --primary-ink: #131a21;
+  --pass: #72c594;
+  --pass-soft: rgba(114, 197, 148, 0.14);
+  --warn: #e3a857;
+  --warn-soft: rgba(227, 168, 87, 0.14);
+  --fail: #f08a7e;
+  --fail-soft: rgba(240, 138, 126, 0.14);
+  --info: #8dbbee;
+  --info-soft: rgba(141, 187, 238, 0.15);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 2px 4px rgba(0, 0, 0, 0.35), 0 10px 28px rgba(0, 0, 0, 0.5);
+  --shadow-3: 0 4px 10px rgba(0, 0, 0, 0.4), 0 24px 64px rgba(0, 0, 0, 0.6);
+  --overlay-bg: rgba(22, 30, 38, 0.9);
+}
+
+@media (pointer: coarse) {
+  :root { --ctl: 40px; --topbar-h: 52px; }
+}

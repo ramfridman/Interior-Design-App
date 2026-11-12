@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Models · seating &amp; tables — contact sheet</title>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three/three.module.min.js", "three/addons/": "../vendor/three/addons/" } }
+</script>
+<style>
+  body { margin: 0; padding: 18px 22px 60px; font: 13px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif; background: #f4f2ef; color: #24262b; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 26px 0 8px; padding-top: 10px; border-top: 1px solid #d8d4cd; }
+  p.hint { margin: 0 0 6px; color: #6b6e75; }
+  .sec { display: flex; flex-direction: column; gap: 8px; }
+  .card { display: flex; gap: 6px; align-items: stretch; background: #fff; border: 1px solid #e0dcd5; border-radius: 6px; padding: 6px; width: max-content; }
+  .card .meta { width: 150px; flex: none; font-size: 12px; }
+  .card .meta b { display: block; font-size: 13px; }
+  .card .meta code { display: block; color: #6b6e75; font: 11px/1.3 ui-monospace, Menlo, monospace; word-break: break-word; white-space: pre-wrap; }
+  .card canvas { display: block; border-radius: 4px; }
+  .grid2d { display: flex; flex-wrap: wrap; gap: 8px; }
+  .grid2d .card { flex-direction: column; }
+  .grid2d .card .meta { width: auto; max-width: 430px; }
+  pre#test { background: #1f2227; color: #e8e6e1; padding: 12px; border-radius: 6px; white-space: pre-wrap; font: 12px/1.4 ui-monospace, Menlo, monospace; }
+</style>
+</head>
+<body>
+<h1>Seating &amp; tables — model contact sheet</h1>
+<p class="hint">Query: <code>?type=sofa,table</code> filter · <code>?view=3d|2d</code> · <code>?i=3</code> single variant · <code>?cell=420</code> cell width · <code>?test=1</code> run the bounding-box / robustness assertions.</p>
+<pre id="test" hidden></pre>
+<div id="sheet3d"></div>
+<div id="sheet2d"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { buildModel, drawSymbol, getModel } from '../src/models/registry.js';
+import { MODEL_TYPES } from '../src/models/types.js';
+import '../src/models/seating-tables.js';
+
+const q = new URLSearchParams(location.search);
+const V = (label, w, d, h, p = {}) => ({ label, w, d, h, p });
+
+/** Every type × representative size / param variants (cm). */
+const VARIANTS = {
+  'sofa': [
+    V('default 3-seat', 220, 95, 82),
+    V('2-seat velvet, metal legs', 150, 88, 80, { seats: 2, color: '#6f8272', material: 'velvet', legs: 'metal' }),
+    V('4-seat modern, plinth', 300, 100, 84, { color: '#cfc8ba', style: 'modern', legs: 'plinth' }),
+    V('chaise right', 280, 160, 84, { chaise: 'right', color: '#8b9097' }),
+    V('chaise left, armless', 250, 150, 78, { chaise: 'left', arms: 'none', legs: 'metal', color: '#b4a58f' }),
+    V('corner (L) right', 290, 290, 85, { corner: true, color: '#c4bdb0' }),
+    V('corner left 320×230', 320, 230, 80, { corner: true, chaise: 'left', color: '#59626b', color3: '#c98a5a' }),
+    V('leather tight, low back', 210, 92, 76, { material: 'leather', color: '#8a5a3b', cushions: 'tight', back: 'low', legs: 'metal' }),
+    V('armless, high back, no legs', 180, 95, 96, { arms: 'none', legs: 'none', back: 'high', color: '#a7a093' }),
+    V('1-seat', 105, 92, 84, { seats: 1, color: '#c9b79a' }),
+    V('arm left only, classic', 240, 100, 88, { arms: 'left', style: 'classic', color: '#7c6f8a', material: 'velvet' }),
+    V('6-seat 400', 400, 105, 86, { seats: 6 }),
+    V('outdoor rattan', 210, 85, 70, { material: 'rattan', color: '#5a5048', color2: '#e8e3d8' }),
+    V('outdoor aluminium', 200, 80, 72, { material: 'aluminium', color: '#34373c', color2: '#c9c6bd' }),
+    V('outdoor teak', 180, 82, 76, { material: 'teak' }),
+    V('outdoor alu corner', 260, 260, 70, { material: 'aluminium', corner: true, color: '#efeeeb', color2: '#8f9aa0' }),
+    V('outdoor teak chaise', 240, 150, 74, { material: 'teak', chaise: 'right' }),
+  ],
+  'armchair': [
+    V('club (default)', 80, 85, 85),
+    V('club leather swivel', 78, 78, 74, { material: 'leather', color: '#6d4a33', legs: 'swivel' }),
+    V('wing', 80, 88, 106, { variant: 'wing', color: '#5f7466', material: 'velvet' }),
+    V('shell / tub swivel', 78, 76, 78, { variant: 'shell', legs: 'swivel', color: '#c7a98b' }),
+    V('shell wood legs', 72, 70, 76, { variant: 'shell', color: '#39424d', material: 'velvet' }),
+    V('lounge wood frame', 70, 80, 78, { variant: 'lounge', color: '#d9d2c4' }),
+    V('lounge metal frame', 68, 76, 74, { variant: 'lounge', legs: 'metal', color: '#9b5b3a', material: 'leather' }),
+    V('rocking', 70, 95, 100, { variant: 'rocking', color: '#b9b2a5' }),
+    V('recliner', 90, 95, 105, { variant: 'recliner', color: '#6b6258', material: 'leather' }),
+    V('outdoor rattan club', 85, 85, 70, { material: 'rattan', color: '#8b7355' }),
+    V('outdoor teak', 75, 80, 76, { material: 'teak' }),
+    V('big club 110', 110, 100, 80, { color: '#b9b0a2', legs: 'metal' }),
+  ],
+  'pouf': [
+    V('round (default)', 60, 60, 40),
+    V('rect', 80, 60, 40, { shape: 'rect', color: '#8c9a8a' }),
+    V('small leather round', 45, 45, 45, { material: 'leather', color: '#8a5a3b' }),
+    V('rattan round', 55, 55, 38, { material: 'rattan' }),
+    V('big ottoman rect', 120, 80, 38, { shape: 'rect', color: '#b7a58c', material: 'velvet' }),
+    V('oval', 95, 55, 42, { color: '#d6cdbd' }),
+    V('wood cube', 45, 45, 45, { shape: 'rect', material: 'wood' }),
+  ],
+  'bench': [
+    V('wood (default)', 120, 40, 45),
+    V('upholstered', 140, 45, 48, { upholstered: true, color: '#b9b0a2' }),
+    V('storage', 110, 45, 50, { storage: true }),
+    V('storage upholstered', 120, 42, 48, { storage: true, upholstered: true, color: '#6f7f8c', material: 'velvet' }),
+    V('with back (garden teak)', 150, 62, 88, { back: true, material: 'teak' }),
+    V('back + upholstered', 160, 60, 86, { back: true, upholstered: true, color: '#c9b79a' }),
+    V('metal legs long', 220, 38, 45, { material2: 'metal', color: '#6b4a34' }),
+    V('metal garden bench', 130, 58, 82, { back: true, material: 'metal', color: '#2e3a34' }),
+  ],
+  'chair': [
+    V('dining (default)', 48, 52, 82),
+    V('dining + arms, walnut', 56, 55, 84, { arms: true, color: 'walnut' }),
+    V('upholstered', 50, 58, 86, { variant: 'upholstered', color: '#9aa79a' }),
+    V('upholstered arms, metal legs', 58, 60, 82, { variant: 'upholstered', arms: true, legs: 'metal', color: '#c9a98b', material: 'leather' }),
+    V('shell, wood legs', 47, 52, 82, { variant: 'shell', color: '#f1efe9' }),
+    V('shell arms, metal legs', 60, 58, 80, { variant: 'shell', arms: true, legs: 'metal', color: '#d9a441' }),
+    V('shell sled', 50, 54, 80, { variant: 'shell', legs: 'sled', color: '#3c5a6b' }),
+    V('folding', 45, 48, 80, { variant: 'folding', color: '#2e3136' }),
+    V('cross-back', 48, 54, 88, { variant: 'cross-back', color: 'walnut' }),
+    V('cantilever', 50, 58, 82, { variant: 'cantilever', color: '#2b2622', material: 'leather' }),
+    V('cantilever arms', 56, 60, 84, { variant: 'cantilever', arms: true, color: '#c9b08a', material: 'rattan' }),
+    V('stacking', 50, 52, 80, { variant: 'stacking', color: '#b5483a' }),
+    V('stacking arms', 56, 54, 80, { variant: 'stacking', arms: true, color: '#3f5b46' }),
+    V('director', 58, 48, 86, { variant: 'director', color: '#e6dfd0' }),
+    V('adirondack', 76, 92, 96, { variant: 'adirondack', color: 'teak' }),
+    V('outdoor alu dining + arms', 57, 60, 86, { material: 'aluminium', arms: true, color: '#3a3d42' }),
+    V('dining metal legs', 46, 50, 80, { legs: 'metal', color: '#2a2b2e' }),
+    V('dining sled', 46, 52, 82, { legs: 'sled', color: 'oak' }),
+  ],
+  'bar-stool': [
+    V('default (back, metal)', 42, 45, 95),
+    V('wood backless counter', 38, 38, 65, { back: false, legs: 'wood', color: 'oak' }),
+    V('pedestal + back, leather', 44, 46, 100, { legs: 'pedestal', back: true, color: '#2a2a2c', material: 'leather' }),
+    V('pedestal backless', 40, 40, 78, { legs: 'pedestal', back: false, color: '#b5483a' }),
+    V('wood with back, bar height', 44, 48, 105, { legs: 'wood', back: true, seatHeight: 75, color: 'walnut' }),
+    V('metal backless industrial', 32, 32, 76, { legs: 'metal', back: false, material: 'metal', color: '#5a6a6e' }),
+    V('upholstered velvet, seat 65', 48, 50, 92, { seatHeight: 65, color: '#6f8272', material: 'velvet', color2: 'brass' }),
+  ],
+  'office-chair': [
+    V('task (default)', 62, 62, 115),
+    V('executive + headrest', 68, 70, 128, { variant: 'executive', headrest: true, color: '#3a2c24', material: 'leather' }),
+    V('gaming', 68, 68, 130, { variant: 'gaming', color: '#1f2023', color2: '#c0392b' }),
+    V('mesh + headrest', 64, 64, 122, { variant: 'mesh', headrest: true }),
+    V('task no arms, light', 56, 58, 96, { arms: false, color: '#d7d3cb', color2: '#f1f1f1' }),
+    V('mesh no arms', 60, 60, 100, { variant: 'mesh', arms: false, color: '#4f6d8f' }),
+  ],
+  'table': [
+    V('dining rect (default)', 160, 90, 75),
+    V('round 110', 110, 110, 75, { shape: 'round' }),
+    V('oval 200, pedestal', 200, 105, 75, { shape: 'oval', base: 'pedestal', color: '#f1eee8', material: 'lacquer' }),
+    V('square 90, metal legs', 90, 90, 75, { shape: 'square', material2: 'metal', color: 'walnut' }),
+    V('coffee + shelf', 110, 60, 42, { shelf: true }),
+    V('side table 40', 40, 40, 50, { shape: 'round', material2: 'metal', color2: 'brass', top: 'stone', topColor: '#e9e6e0' }),
+    V('glass top, sled', 180, 90, 75, { top: 'glass', base: 'sled', color: '#2a2b2e', material: 'metal' }),
+    V('stone round pedestal', 120, 120, 75, { shape: 'round', top: 'stone', topColor: '#eceae6', base: 'pedestal', color2: '#1f2023' }),
+    V('trestle 220', 220, 95, 76, { base: 'trestle', color: 'light-oak' }),
+    V('X-base farmhouse 240', 240, 100, 77, { base: 'x', color: '#8a6a4a' }),
+    V('panel (waterfall) 180', 180, 90, 75, { base: 'panel', color: 'walnut' }),
+    V('hairpin coffee', 100, 50, 40, { base: 'hairpin', color: 'oak' }),
+    V('nest of 2 round', 85, 55, 45, { shape: 'round', nest: 2, material2: 'metal' }),
+    V('nest of 3 side', 60, 40, 55, { nest: 3, color: 'walnut' }),
+    V('dining 300 extendable', 300, 110, 76, { extendable: true }),
+    V('outdoor teak slatted', 180, 90, 75, { material: 'teak' }),
+    V('outdoor aluminium', 160, 90, 74, { material: 'aluminium', color: '#3a3d42' }),
+    V('ceramic top, metal base', 200, 100, 76, { top: 'ceramic', topColor: '#4a4a4c', material: 'metal', color: '#1f2023' }),
+    V('2 pedestals long 260', 260, 110, 75, { base: 'pedestal', color: 'walnut' }),
+    V('round glass coffee', 80, 80, 38, { shape: 'round', top: 'glass', material2: 'metal', color2: 'brass' }),
+    V('X-base metal + glass', 140, 80, 74, { base: 'x', top: 'glass', material: 'metal', color: '#b9b7b0' }),
+    V('round, trestle?, shelf', 70, 70, 45, { shape: 'round', shelf: true, color: '#2a2b2e', material: 'metal' }),
+    V('console 120×35×80', 120, 35, 80, { color: 'oak', material2: 'metal' }),
+  ],
+  'desk': [
+    V('default', 140, 65, 75),
+    V('drawers right, panel', 150, 70, 75, { drawers: 'right', base: 'panel', color: '#f2efe8', material: 'laminate' }),
+    V('drawers both (pedestal desk)', 160, 75, 76, { drawers: 'both', color: 'walnut' }),
+    V('trestle', 150, 70, 74, { base: 'trestle', color: '#f2efe8', color2: 'birch' }),
+    V('sit-stand (raised)', 160, 80, 118, { base: 'sit-stand', color: 'oak', color2: '#f1f1f1' }),
+    V('sit-stand (seated)', 140, 70, 72, { base: 'sit-stand', color: '#2a2b2e' }),
+    V('hutch', 120, 60, 145, { hutch: true, drawers: 'right' }),
+    V('corner L', 160, 140, 75, { corner: true }),
+    V('corner L + drawers, panel', 180, 160, 75, { corner: true, drawers: 'left', base: 'panel', color: '#f2efe8' }),
+    V('legs + drawers left', 120, 60, 76, { drawers: 'left', material2: 'metal', color: 'oak' }),
+    V('small 90', 90, 50, 74, { color: 'birch' }),
+  ],
+};
+window.VARIANTS = VARIANTS;
+
+const types = (q.get('type') ? q.get('type').split(',') : Object.keys(VARIANTS)).filter((t) => VARIANTS[t]);
+const only = q.get('i') != null ? Number(q.get('i')) : null;
+const view = q.get('view') || 'all';
+const itemOf = (type, v, k) => ({ id: `${type}-${k}`, type, w: v.w, d: v.d, h: v.h, params: v.p });
+const metaHTML = (type, v) => `<div class="meta"><b>${v.label}</b>${v.w}×${v.d}×${v.h} cm<code>${JSON.stringify(v.p).replace(/"/g, '').replace(/,/g, ', ')}</code><span class="stat"></span></div>`;
+
+// ───────────────────────── 3D contact sheet ─────────────────────────
+function render3D() {
+  const CW = Number(q.get('cell') || 400), CH = Math.round(CW * 0.74);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(1); renderer.setSize(CW, CH);
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+  const scene = new THREE.Scene(); scene.background = new THREE.Color('#eceae6');
+  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environmentIntensity = 0.5;
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: '#e2dfd9', roughness: 0.96 }));
+  floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+  const key = new THREE.DirectionalLight('#fff3e2', 2.5); key.position.set(-2.6, 5, 3.4); key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048); key.shadow.radius = 5; key.shadow.bias = -0.0004; key.shadow.normalBias = 0.015;
+  Object.assign(key.shadow.camera, { left: -3.2, right: 3.2, top: 3.2, bottom: -3.2, near: 0.5, far: 14 });
+  scene.add(key, key.target);
+  const back = new THREE.DirectionalLight('#dfe8ff', 0.7); back.position.set(3, 3, -4); scene.add(back);
+  scene.add(new THREE.HemisphereLight('#ffffff', '#b8b2a8', 0.85));
+  const cam = new THREE.PerspectiveCamera(26, CW / CH, 0.05, 80);
+  const VIEWS = [[32, 19, false], [212, 24, false], [0, 89.9, true]];
+  const host = document.getElementById('sheet3d');
+  for (const type of types) {
+    const sec = document.createElement('div'); sec.className = 'sec'; sec.id = `sec3d-${type}`;
+    sec.innerHTML = `<h2>${type} — 3D (front ¾ · back ¾ · top)</h2>`; host.appendChild(sec);
+    VARIANTS[type].forEach((v, k) => {
+      if (only != null && only !== k) return;
+      const card = document.createElement('div'); card.className = 'card'; card.id = `c3d-${type}-${k}`; card.innerHTML = metaHTML(type, v); sec.appendChild(card);
+      const obj = buildModel(itemOf(type, v, k)); scene.add(obj);
+      const box = new THREE.Box3().setFromObject(obj, true), c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
+      let tris = 0, meshes = 0;
+      obj.traverse((o) => { if (o.isMesh) { meshes++; tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3; } });
+      card.querySelector('.stat').textContent = `${meshes} meshes · ${Math.round(tris)} tris · bbox ${(s.x * 100).toFixed(1)}×${(s.z * 100).toFixed(1)}×${(s.y * 100).toFixed(1)}`;
+      const rad = 0.5 * s.length();
+      for (const [az, el, top] of VIEWS) {
+        const a = az * Math.PI / 180, e = el * Math.PI / 180, dist = (rad / Math.sin(cam.fov * Math.PI / 360)) * (top ? 0.86 : 0.9);
+        cam.up.set(0, top ? 0 : 1, top ? -1 : 0);
+        cam.position.set(c.x + Math.sin(a) * Math.cos(e) * dist, c.y + Math.sin(e) * dist, c.z + Math.cos(a) * Math.cos(e) * dist);
+        cam.lookAt(c);
+        renderer.render(scene, cam);
+        const cv = document.createElement('canvas'); cv.width = CW; cv.height = CH; cv.getContext('2d').drawImage(renderer.domElement, 0, 0); card.appendChild(cv);
+      }
+      scene.remove(obj);
+    });
+  }
+  renderer.dispose();
+}
+
+// ───────────────────────── 2D symbols ─────────────────────────
+function render2D() {
+  const host = document.getElementById('sheet2d');
+  const dpr = Number(q.get('dpr') || 1);
+  for (const type of types) {
+    const sec = document.createElement('div'); sec.id = `sec2d-${type}`;
+    sec.innerHTML = `<h2>${type} — 2D plan symbols (large · 0.5 px/cm · 0.2 px/cm; back of the item is at the top)</h2>`; host.appendChild(sec);
+    const grid = document.createElement('div'); grid.className = 'grid2d'; sec.appendChild(grid);
+    VARIANTS[type].forEach((v, k) => {
+      if (only != null && only !== k) return;
+      const card = document.createElement('div'); card.className = 'card'; card.id = `c2d-${type}-${k}`; grid.appendChild(card);
+      const big = Math.min(3.2, 300 / Math.max(v.w, v.d));
+      const scales = [big, 0.5, 0.2];
+      const pad = 14, W = scales.reduce((a, s) => a + v.w * s + pad * 2, 0), H = Math.max(v.d * big + pad * 2, 60);
+      const cv = document.createElement('canvas'); cv.width = Math.ceil(W * dpr); cv.height = Math.ceil(H * dpr); cv.style.width = `${Math.ceil(W)}px`; cv.style.height = `${Math.ceil(H)}px`;
+      const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+      let x = 0;
+      for (const s of scales) {
+        ctx.save(); ctx.translate(x + pad + v.w * s / 2, H / 2); ctx.scale(s, s);
+        drawSymbol(ctx, itemOf(type, v, k), 1 / (s * dpr));
+        ctx.restore(); x += v.w * s + pad * 2;
+      }
+      card.appendChild(cv);
+      card.insertAdjacentHTML('beforeend', metaHTML(type, v));
+    });
+  }
+}
+
+// ───────────────────────── assertions ─────────────────────────
+/** Bounding box == w×d×h (±1 cm), no throw with {} / junk params, for every type × variants × size sweep. */
+function runTests() {
+  const fails = [], notes = []; let n = 0, maxErr = 0, maxFit = 0, maxTris = 0, maxMeshes = 0;
+  const JUNK = [undefined, null, {}, 7, 'x', [], { color: 5, color2: '#zz', color3: {}, material: 'unobtainium', material2: 42, style: [] },
+    { seats: 'many', chaise: 3, arms: {}, legs: null, cushions: 0, back: 'banana', corner: 'yes', variant: {}, shape: [], upholstered: 'x', storage: null, seatHeight: 'tall', headrest: 2, base: 9, top: {}, topColor: 12, shelf: 'no', nest: -4, extendable: {}, drawers: 5, hutch: 'y' },
+    { seats: 99, seatHeight: 9999, nest: 50, color: '__proto__', material: 'constructor', variant: 'toString' }, { seats: 0, seatHeight: -5, nest: 0 }, { seats: NaN, seatHeight: Infinity, nest: 2.7 }];
+  const cv = document.createElement('canvas'); cv.width = 300; cv.height = 300; const ctx = cv.getContext('2d');
+  const check = (type, label, w, d, h, p, strict = true) => {
+    n++;
+    const def = getModel(type);
+    let obj;
+    try { obj = def.build({ w: w / 100, d: d / 100, h: h / 100, p, item: { id: 't', type } }); }
+    catch (e) { fails.push(`${type} [${label}] build threw: ${e.message}`); return; }
+    if (!obj || !obj.isObject3D) { fails.push(`${type} [${label}] build returned no object`); return; }
+    obj.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(obj, true);
+    const err = Math.max(Math.abs(b.min.x + w / 200), Math.abs(b.max.x - w / 200), Math.abs(b.min.y), Math.abs(b.max.y - h / 100), Math.abs(b.min.z + d / 200), Math.abs(b.max.z - d / 200));
+    if (!(err <= 0.01)) fails.push(`${type} [${label}] bbox off by ${(err * 100).toFixed(2)} cm: x ${b.min.x.toFixed(3)}..${b.max.x.toFixed(3)} y ${b.min.y.toFixed(3)}..${b.max.y.toFixed(3)} z ${b.min.z.toFixed(3)}..${b.max.z.toFixed(3)} (want ${w}×${d}×${h})`);
+    else maxErr = Math.max(maxErr, err);
+    let tris = 0, meshes = 0, bad = false;
+    obj.traverse((o) => { if (o.isMesh) { meshes++; tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3; const a = o.geometry.attributes.position.array; for (let i = 0; i < a.length; i++) if (!Number.isFinite(a[i])) { bad = true; break; } } });
+    if (bad) fails.push(`${type} [${label}] non-finite vertex positions`);
+    if (strict) { maxTris = Math.max(maxTris, tris); maxMeshes = Math.max(maxMeshes, meshes); if (tris > 6000 || meshes > 110) notes.push(`${type} [${label}] heavy: ${meshes} meshes / ${Math.round(tris)} tris`); }
+    const f = obj.userData.fit;
+    if (f && strict) { const dev = Math.max(...f.map((s) => Math.abs(s - 1))); maxFit = Math.max(maxFit, dev); if (dev > 0.035) notes.push(`${type} [${label}] fit correction ${f.map((s) => s.toFixed(3)).join(' / ')}`); }
+    for (const px of [0.3, 2, 12]) {
+      try { ctx.save(); ctx.translate(150, 150); def.draw2d(ctx, { w, d, h, p, px, item: { id: 't', type } }); ctx.restore(); }
+      catch (e) { ctx.restore(); fails.push(`${type} [${label}] draw2d threw (px ${px}): ${e.message}`); break; }
+    }
+  };
+  for (const type of types) {
+    const def = getModel(type);
+    if (!def) { fails.push(`${type}: not registered`); continue; }
+    const sz = MODEL_TYPES[type].size;
+    VARIANTS[type].forEach((v) => check(type, v.label, v.w, v.d, v.h, v.p));
+    JUNK.forEach((p, i) => check(type, `junk#${i}`, sz.w, sz.d, sz.h, p, false));
+    // size sweep: every variant's params at shrunken / stretched / odd boxes
+    const SWEEP = [[0.6, 0.7, 0.7], [1.5, 1.2, 1.15], [0.8, 1.4, 1], [2.2, 1, 0.8], [1, 1, 1.5], [0.35, 0.35, 0.4]];
+    VARIANTS[type].forEach((v) => SWEEP.forEach(([a, b, c], i) => check(type, `${v.label} ×sweep${i}`, Math.round(v.w * a), Math.round(v.d * b), Math.round(v.h * c), v.p, i < 5)));
+    [[1, 1, 1], [5, 5, 5], [1000, 20, 30], [30, 600, 300]].forEach(([w, d, h]) => check(type, `extreme ${w}×${d}×${h}`, w, d, h, {}, false));
+  }
+  // determinism: two builds of the same item give the same vertex count
+  for (const type of types) { const v = VARIANTS[type][0], a = buildModel(itemOf(type, v, 0)), b = buildModel(itemOf(type, v, 0)); let ca = 0, cb = 0; a.traverse((o) => { if (o.isMesh) ca += o.geometry.attributes.position.count; }); b.traverse((o) => { if (o.isMesh) cb += o.geometry.attributes.position.count; }); if (ca !== cb) fails.push(`${type}: non-deterministic build`); }
+  return { checks: n, fails, notes, maxErrCm: +(maxErr * 100).toFixed(3), maxFitCorrectionPct: +(maxFit * 100).toFixed(2), maxTris: Math.round(maxTris), maxMeshes };
+}
+window.runTests = runTests;
+
+try {
+  if (q.get('test')) {
+    const r = runTests(); window.__test = r;
+    const el = document.getElementById('test'); el.hidden = false;
+    el.textContent = `${r.fails.length ? 'FAILED' : 'PASSED'} — ${r.checks} checks, ${r.fails.length} failures · max bbox error ${r.maxErrCm} cm · max fit correction ${r.maxFitCorrectionPct}% · max ${r.maxTris} tris / ${r.maxMeshes} meshes\n` + r.fails.join('\n') + (r.notes.length ? `\n— notes —\n${r.notes.join('\n')}` : '');
+  } else {
+    if (view !== '2d') render3D();
+    if (view !== '3d') render2D();
+  }
+} catch (e) { window.__error = String(e && e.stack || e); document.body.insertAdjacentHTML('afterbegin', `<pre style="color:#b00">${window.__error}</pre>`); }
+window.__done = true;
+</script>
+</body>
+</html>
