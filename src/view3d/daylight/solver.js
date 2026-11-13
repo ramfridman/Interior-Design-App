@@ -168,11 +168,15 @@ export function buildScene(input, opts = {}) {
   for (const w of input.walls) cellsIn(w.x, w.y, w.x + w.w, w.y + w.h, (c) => { kind[c] = WALL; reg[c] = -1; });
   // the outdoor slabs (terrace, porch, utility yard) are 13 cm above the garden
   const slabAt = (xcm, ycm) => input.outdoorAreas.some((a) => pointInPolygon(xcm, ycm, a.polygon));
-  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const c = j * nx + i; if (kind[c] === OUT && slabAt(oxcm + (i + 0.5) * CELL_CM, ozcm + (j + 0.5) * CELL_CM)) gcls[c] = 1; }
+  for (const a of input.outdoorAreas) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of a.polygon) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    cellsIn(x0, y0, x1, y1, (c, i, j) => { if (kind[c] === OUT && pointInPolygon(oxcm + (i + 0.5) * CELL_CM, ozcm + (j + 0.5) * CELL_CM, a.polygon)) gcls[c] = 1; });
+  }
 
   // empty-space skipping: Chebyshev clearance (in cells) to the nearest cell of another class
   const clear = new Uint8Array(nc);
-  {
+  if (!O.layoutOnly) {                                                     // the page only needs the layout (UVs)
     const cls = new Uint8Array(nc);
     for (let c = 0; c < nc; c++) cls[c] = kind[c] === ROOM ? 1 : kind[c] === OUT ? 2 + gcls[c] : 0;
     const queue = new Int32Array(nc); let qh = 0, qt = 0;
@@ -220,7 +224,14 @@ export function buildScene(input, opts = {}) {
   const regionOf = (c) => (kind[c] === ROOM ? reg[c] : kind[c] === OPEN ? nR + reg[c] : -1);
   const contribH = [], contribV = [];                                      // collected first, laid out afterwards
   const floorChart = new Int32Array(nc).fill(-1), ceilChart = new Int32Array(nc).fill(-1), faceChart = new Int32Array(nc * 4).fill(-1);
-  const hChart = (surf, region, tile, y, normalY) => getChart(`h:${surf}:${region}`, () => ({ type: 'h', surf, region, tile, y, normal: [0, normalY, 0], i0: Infinity, j0: Infinity, i1: -Infinity, j1: -Infinity }));
+  const hCache = new Map();                                               // numeric keys on the hot path
+  const hChart = (surf, region, tile, y, normalY) => {
+    const nk = surf * 65536 + region;
+    let ch = hCache.get(nk);
+    if (!ch) { ch = getChart(`h:${surf}:${region}`, () => ({ type: 'h', surf, region, tile, y, normal: [0, normalY, 0], i0: Infinity, j0: Infinity, i1: -Infinity, j1: -Infinity })); hCache.set(nk, ch); }
+    return ch;
+  };
+  const vCache = new Map();
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
     const c = j * nx + i, k = kind[c];
     if (k === ROOM) {
@@ -243,12 +254,17 @@ export function buildScene(input, opts = {}) {
       const iv = nk === ROOM ? solid : subtract(solid, solidOf(n));
       if (!iv.length) continue;
       const region = regionOf(n), plane = s === 0 ? i + 1 : s === 1 ? i : s === 2 ? j + 1 : j, along = s < 2 ? j : i;
-      const ch = getChart(`v:${s}:${plane}:${region}`, () => ({
-        type: 'v', surf: SURF.WALL, region, side: s, plane, tile: region >= nR ? 2 : O.tile, a0: Infinity, a1: -Infinity,
-        normal: [s === 0 ? 1 : s === 1 ? -1 : 0, 0, s === 2 ? 1 : s === 3 ? -1 : 0],
-      }));
+      const vk = (s * 8192 + plane) * 65536 + region;
+      let ch = vCache.get(vk);
+      if (!ch) {
+        ch = getChart(`v:${s}:${plane}:${region}`, () => ({
+          type: 'v', surf: SURF.WALL, region, side: s, plane, tile: region >= nR ? 2 : O.tile, a0: Infinity, a1: -Infinity,
+          normal: [s === 0 ? 1 : s === 1 ? -1 : 0, 0, s === 2 ? 1 : s === 3 ? -1 : 0],
+        }));
+        vCache.set(vk, ch);
+      }
       faceChart[c * 4 + s] = ch.id;
-      for (const [y0, y1] of iv) contribV.push({ ch: ch.id, along, y0, y1 });
+      for (const [y0, y1] of iv) contribV.push(ch.id, along, y0, y1);
     }
   }
   // per-region average charts (1 texel) — fallback for odd faces (skirting ends …)
@@ -258,7 +274,7 @@ export function buildScene(input, opts = {}) {
     const c = contribH[q], ch = charts[contribH[q + 1]], i = c % nx, j = (c - i) / nx;
     ch.i0 = Math.min(ch.i0, i); ch.j0 = Math.min(ch.j0, j); ch.i1 = Math.max(ch.i1, i); ch.j1 = Math.max(ch.j1, j);
   }
-  for (const v of contribV) { const ch = charts[v.ch]; ch.a0 = Math.min(ch.a0, v.along); ch.a1 = Math.max(ch.a1, v.along); }
+  for (let q = 0; q < contribV.length; q += 4) { const ch = charts[contribV[q]], along = contribV[q + 1]; if (along < ch.a0) ch.a0 = along; if (along > ch.a1) ch.a1 = along; }
   for (const ch of charts) {
     if (ch.type === 'h') { ch.cols = Math.floor((ch.i1 - ch.i0) / ch.tile) + 1; ch.rows = Math.floor((ch.j1 - ch.j0) / ch.tile) + 1; }
     else if (ch.type === 'v') { ch.cols = Math.floor((ch.a1 - ch.a0) / ch.tile) + 1; ch.rows = nRows; }
@@ -278,13 +294,14 @@ export function buildScene(input, opts = {}) {
     const p = patchAt(ch, t, x, ch.y, z);
     P.area[p] += a; P.sx[p] += x * a; P.sy[p] += ch.y * a; P.sz[p] += z * a;
   }
-  for (const v of contribV) {
-    const ch = charts[v.ch], col = Math.floor((v.along - ch.a0) / ch.tile);
-    const planeM = ch.plane * CS, alongM = (v.along + 0.5) * CS;
-    for (let r = Math.max(0, Math.floor(v.y0 / rowH)); r < Math.min(nRows, Math.ceil(v.y1 / rowH - 1e-9)); r++) {
-      const ov = Math.min(v.y1, (r + 1) * rowH) - Math.max(v.y0, r * rowH);
+  for (let q = 0; q < contribV.length; q += 4) {
+    const ch = charts[contribV[q]], along = contribV[q + 1], y0 = contribV[q + 2], y1 = contribV[q + 3];
+    const col = Math.floor((along - ch.a0) / ch.tile);
+    const planeM = ch.plane * CS, alongM = (along + 0.5) * CS;
+    for (let r = Math.max(0, Math.floor(y0 / rowH)); r < Math.min(nRows, Math.ceil(y1 / rowH - 1e-9)); r++) {
+      const ov = Math.min(y1, (r + 1) * rowH) - Math.max(y0, r * rowH);
       if (ov <= 1e-6) continue;
-      const ym = (Math.min(v.y1, (r + 1) * rowH) + Math.max(v.y0, r * rowH)) / 2;
+      const ym = (Math.min(y1, (r + 1) * rowH) + Math.max(y0, r * rowH)) / 2;
       const x = ch.side < 2 ? ox + planeM : ox + alongM, z = ch.side < 2 ? oz + alongM : oz + planeM;
       const p = patchAt(ch, r * ch.cols + col, x, ym, z), a = CS * ov;
       P.area[p] += a; P.sx[p] += x * a; P.sy[p] += ym * a; P.sz[p] += z * a;
@@ -362,6 +379,12 @@ export function buildScene(input, opts = {}) {
 
   // ── probes: ≈ 1 m grid per room, two heights ──
   const probes = [];
+  const roomy = (c) => {                                                   // ≥ 10 cm of the same room all round
+    const i = c % nx, j = (c - i) / nx;
+    if (i < 2 || j < 2 || i >= nx - 2 || j >= ny - 2) return false;
+    for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) { const q = c + dj * nx + di; if (kind[q] !== ROOM || reg[q] !== reg[c]) return false; }
+    return true;
+  };
   rooms.forEach((r, ri) => {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const [px, py] of r.polygon) { x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py); }
@@ -373,7 +396,7 @@ export function buildScene(input, opts = {}) {
       let best = -1, bd = Infinity;
       for (let dj = -10; dj <= 10; dj++) for (let di = -10; di <= 10; di++) {
         const ii = ci + di, jj = cj + dj; if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue;
-        const c = jj * nx + ii; if (kind[c] !== ROOM || reg[c] !== ri || clear[c] < 3) continue;
+        const c = jj * nx + ii; if (kind[c] !== ROOM || reg[c] !== ri || !roomy(c)) continue;
         const d = di * di + dj * dj; if (d < bd) { bd = d; best = c; }
       }
       if (best < 0) continue;

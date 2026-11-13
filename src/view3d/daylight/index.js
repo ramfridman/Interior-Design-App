@@ -201,7 +201,7 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
   function rebuildScene() {
     const t0 = performance.now();
     const S0 = S;
-    S = buildScene(input());
+    S = buildScene(input(), { layoutOnly: true });                        // same layout as the worker's scene
     state.H = S.H; state.patches = S.patch.count;
     state.timings.scene = performance.now() - t0;
     const F = S.field;
@@ -318,7 +318,7 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
       ground: { garden: [0.24, 0.2, 0.14], slab: hexToLinear('#b3afa6'), paving: [0.36, 0.34, 0.3] },
     };
   }
-  let lightTimer = 0;
+  let lightTimer = 0, planTimer = 0;
   function relight() {
     if (!S || !env || state.failed) return;
     if (lightTimer) return;
@@ -468,7 +468,13 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
     /** Sun / sky / finishes changed. */
     relight,
     /** store 'plan': rebuild the layout (after house.rebuildPlan()), carry the old solution over, re-solve. */
-    onPlan() { if (state.failed) return; try { rebuildScene(); sendScene(); } catch (e) { fail(e); } },
+    onPlan(e) {
+      if (state.failed) return;
+      clearTimeout(planTimer);
+      // a wall / door being dragged sends a transient 'plan' per mouse move: re-solve once the drag pauses
+      const go = () => { planTimer = 0; try { rebuildScene(); sendScene(); } catch (err) { fail(err); } };
+      if (e && e.transient) planTimer = setTimeout(go, 250); else go();
+    },
     /** store 'project': a new ceiling height changes the geometry; colours only need a relight. */
     onProject() {
       if (state.failed) return;
@@ -483,6 +489,7 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
     isActive: () => state.on > 0.001,
     dispose() {
       if (lightTimer) cancelAnimationFrame(lightTimer);
+      clearTimeout(planTimer);
       if (worker) worker.terminate(); worker = null;
       if (local) local.dispose(); local = null;
       if (house && house.setDaylight) house.setDaylight(null);

@@ -137,13 +137,13 @@ export function createView3D(container, ctx) {
    * roof, openings, walk blockers, snap faces, fill-light anchors, item ground levels. Camera, mode, selection,
    * roof / cut-away / door / sun state are untouched. All synchronous: the next frame shows the finished house.
    */
-  function rebuildFromPlan() {
+  function rebuildFromPlan(e) {
     if (!house || destroyed) return;
     const t0 = performance.now();
     call(house, 'rebuildPlan');
     call(env, 'refreshPlan');
     walk.refreshPlan(); interaction.refreshPlan(); items.refreshPlan();
-    call(daylight, 'onPlan');
+    call(daylight, 'onPlan', e);
     if (mode === 'walk' && !fly) walk.syncCamera();
     planRebuildMs = performance.now() - t0; planRebuilds++;
     invalidate();

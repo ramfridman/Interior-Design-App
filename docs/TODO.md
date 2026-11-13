@@ -23,6 +23,25 @@ Last updated: 13 Nov 2026. Published preview: https://claude.ai/artifact/8ZvK3RL
 - [ ] **Public hosting, invite-only** — Cloudflare Pages + Cloudflare Access, free subdomain, hidden from search engines. Full plan and the owner's decisions: `docs/HOSTING-PLAN.md`.
 - [ ] Price refresh script for the catalogue (prices are a November 2026 snapshot).
 
+## Later — requested 13 Nov 2026
+
+### Import any 2D sketch and draw it exactly
+Today the app is built around one plan file (`src/core/plan.js`) that was measured from the architect's vector PDF by hand-written extraction. Goal: anyone imports their own sketch and gets the same exact plan.
+- [ ] *Vector sources (can be exact):* vector PDF and DXF import — detect scale, wall lines by line weight, openings from gaps, rooms by flood fill (the method used for house 98), then a review screen where the user confirms scale, walls, doors, windows and room names. DWG needs conversion to DXF first.
+- [ ] *Images and scans (cannot be exact automatically):* guided tracing — the user sets the scale from one known dimension, the app proposes walls and openings, the user corrects them. Accuracy then depends on the image and on the user's check.
+- [ ] *Engine limits to lift:* the plan engine currently assumes straight, right-angled walls on one floor. Angled or curved walls, several floors, stairs and split levels need engine work in the plan editor, 2D, 3D, daylight and regulations modules.
+- [ ] Per-project site data instead of constants: location (for the sun), north, lot boundary, ceiling heights, drawing assumptions.
+- Questions when we start: which file types matter most (PDF, DWG / DXF, photo)? Only orthogonal houses first? One floor first?
+
+### Online version with saving, where several people work on the same project
+Today a design lives in one browser (plus Save / Open file). Goal: sign in, projects saved online, invited people open and edit the same project.
+- [ ] Backend: accounts and sign-in, project storage, invitations and roles (owner / editor / viewer), version history.
+- [ ] Sync: either live editing together (changes appear for everyone within a second, presence indicators) or simpler shared saving with "someone else changed this" handling. Live editing is the bigger build.
+- [ ] Hosting changes from static-only to static + a small backend. Fits the chosen host: Cloudflare Pages + Workers + a database (D1) and Durable Objects for live sessions; Supabase or Firebase are alternatives. Free tiers cover a small group; check limits on the day.
+- [ ] Privacy and safety: access control per project, backups, export of all data, deleting a project.
+- Supersedes the browser-only saving described in `docs/HOSTING-PLAN.md` section 2; the invite-only decision still applies.
+- Questions when we start: must people edit at the same moment, or is taking turns enough? Sign-in by email code, Google, or both? How many people and projects?
+
 ## Carpentry studio — STARTED 13 Nov 2026 (owner: "important, must be done perfectly, a professional tool")
 
 Decisions: quotation PDF in **English and Hebrew** (chosen at export); **cost estimates** shown as sourced ranges; **carpenter directory sorted by distance from the house**.
