@@ -92,7 +92,8 @@ export async function docToPDF(doc, opts = {}) {
           const close = o.t === 'poly' && o.close, st = o.color && o.lw;
           page.drawSvgPath(pathOf(pts, close), { x: 0, y: H, color: close && o.fill ? hex(o.fill) : undefined,
             borderColor: st ? hex(o.color) : undefined, borderWidth: st ? o.lw * MM : 0, borderDashArray: st ? dashOf(o.dash) : undefined });
-        } else if (o.t === 'text') {
+        } else if (o.t === 'text' && o.parts) await draw(o.parts);
+        else if (o.t === 'text') {
           if (!o.vis) continue;
           const font = fonts[o.font] || fonts.regular, a = ((o.rot || 0) * Math.PI) / 180;
           const shift = o.align === 'right' ? o.w : o.align === 'center' ? o.w / 2 : 0;

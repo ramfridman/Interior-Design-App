@@ -372,6 +372,8 @@
 .brow__thumb--icon { display: grid; place-items: center; color: var(--accent); background: var(--accent-soft); }
 
 /* ───────── Narrow ───────── */
+/* very narrow phones: the Carpentry switch moves into the File menu so the top bar never overflows */
+@media (max-width: 429px) { .topbar .modebtn--carp { display: none; } }
 @media (max-width: 1279px) {
   .cwb__name { display: none; }
   .cwb__cell--wall { display: none; }

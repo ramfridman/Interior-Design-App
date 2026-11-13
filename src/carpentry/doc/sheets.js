@@ -4,7 +4,8 @@
  */
 import { flattenDrawing, textOp, r2 } from './prims.js';
 import { region, ST } from './kit.js';
-import { ellipsize } from './metrics.js';
+import { ellipsize, textWidth } from './metrics.js';
+import { textBox } from '../drawings.js';
 import { S, tr } from './strings.js';
 import { keyPlanOps, northArrow } from './keyplan.js';
 
@@ -39,7 +40,7 @@ function arrange(items, aw, ah) {
 
 /** Group a run's drawings into sheets: [{ items: [{ d, S, w, h }], layout }]. */
 export function packDrawings(drawings, area) {
-  const list = drawings.slice().sort((a, b) => (ORDER[a.kind] ?? 9) - (ORDER[b.kind] ?? 9)).map((d) => {
+  const list = drawings.map(withoutLegendOps).sort((a, b) => (ORDER[a.kind] ?? 9) - (ORDER[b.kind] ?? 9)).map((d) => {
     const s = fitScale(d, area.w, area.h);
     return { d, S: s, w: (d.bounds.w * 10) / s, h: (d.bounds.h * 10) / s };
   });
@@ -52,6 +53,24 @@ export function packDrawings(drawings, area) {
   }
   if (cur.length) sheets.push(cur);
   return sheets.map((items) => ({ items, layout: arrange(items, area.w, area.h) || { rows: items.map((it) => ({ items: [it], w: it.w, h: it.h + CAP })), h: area.h } }));
+}
+
+/**
+ * The legend is printed once, compactly on the view caption (from `drawing.legend`); the engine's own `role: 'legend'`
+ * text ops are dropped and the bounds recomputed so they do not cost drawing scale.
+ */
+function withoutLegendOps(d) {
+  if (!d.ops.some((o) => o.role === 'legend') || !Array.isArray(d.legend)) return d;
+  const ops = d.ops.filter((o) => o.role !== 'legend');
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const add = (x, y) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); };
+  for (const o of ops) {
+    if (o.t === 'line') { add(o.x1, o.y1); add(o.x2, o.y2); } else if (o.t === 'rect') { add(o.x, o.y); add(o.x + o.w, o.y + o.h); }
+    else if (o.t === 'poly') o.pts.forEach(([x, y]) => add(x, y)); else if (o.t === 'arc') { add(o.cx - o.r, o.cy - o.r); add(o.cx + o.r, o.cy + o.r); }
+    else if (o.t === 'text') { const b = textBox(o, d.scale); add(b.x0, b.y0); add(b.x1, b.y1); }
+  }
+  const m = (d.scale / 10) * 3;
+  return { ...d, ops, bounds: { x: x0 - m, y: y0 - m, w: x1 - x0 + 2 * m, h: y1 - y0 + 2 * m } };
 }
 
 /** Page vector of true north in a run's PLAN drawing (x along the run, wall at the top). */
@@ -93,7 +112,6 @@ export function drawSheet(ctx) {
       const fl = flattenDrawing(it.d, { lang, scale: it.S, box: [left, top, it.w, it.h] });
       page.ops.push({ t: 'drawing', id: it.d.id, kind: it.d.kind, runId: it.d.runId, scale: it.S, box: [r2(left), r2(top), r2(it.w), r2(it.h)], ops: fl.ops });
       caption(page, dir, lang, left, top + it.h + 2.2, Math.max(it.w, 62), it);
-      if (Array.isArray(it.d.legend) && it.d.legend.length) legend(page, dir, lang, left, top + it.h + 10.2, Math.max(it.w, 62), it.d.legend);
       if (it.d.kind === 'plan') { const [vx, vy] = northInPlan(run, plan); page.ops.push(...northArrow(left + it.w - 4, top + 5, 7, vx, vy, lang)); }
       x += it.w + GAP_X;
     }
@@ -111,14 +129,10 @@ function caption(page, dir, lang, x, y, w, it) {
   page.ops.push({ t: 'arc', cx: r2(R.X(2.4)), cy: r2(y + 2.1), r: 2.3, a0: 0, a1: 360, lw: 0.25, color: 'ink' });
   page.ops.push(textOp(R.X(2.4), y + 2.1 + 0.85, String(it.num), { size: 6.2, font: 'medium', color: 'ink', align: 'center', dir: 'ltr' }));
   R.text(6.4, y + 3.3, ellipsize(title, w - 22, st.size, st.font), st, 'start');
-  R.text(w, y + 3.3, `${tr(S.scale, lang)} 1:${it.S}`, { size: 6.6, font: 'regular', color: 'grey' }, 'end');
-}
-
-/** Symbol legend carried by a drawing (door operations, callouts): one wrapped line of "symbol  text" items. */
-function legend(page, dir, lang, x, y, w, items) {
-  const R = region(page, x, x + w, dir);
-  const s = items.map((e) => (typeof e === 'string' ? e : [e.symbol || e.code || e.key || '', tr(e.text || e.label || e.title || '', lang)].filter(Boolean).join(' '))).filter(Boolean).join('   ·   ');
-  R.text(0, y, ellipsize(s, w, 6, 'regular'), { size: 6, font: 'regular', color: 'ink2' }, 'start');
+  const scaleW = R.text(w, y + 3.3, `${tr(S.scale, lang)} 1:${it.S}`, { size: 6.6, font: 'regular', color: 'grey' }, 'end');
+  const legend = (Array.isArray(it.d.legend) ? it.d.legend : []).map((e) => `${e.key || ''} ${tr(e.label || '', lang)}`.trim()).filter(Boolean).join('   ');
+  const free = w - scaleW - 6 - (6.4 + Math.min(w - 22, textWidth(title, st.size, st.font)) + 8);
+  if (legend && free > 20) R.text(w - scaleW - 6, y + 3.3, ellipsize(legend, free, 6.2, 'regular'), { size: 6.2, font: 'regular', color: 'ink2' }, 'end', { role: 'legend' });
 }
 
 /** Title block along the bottom of the sheet. */

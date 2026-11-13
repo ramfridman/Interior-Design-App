@@ -8,13 +8,26 @@ import pricebook from '../src/carpentry/pricebook.js';
 import { buildQuotationPDF, buildQuotationPreview, composeQuotation, drawingToSVG, visualOrder, bidiLevels, autoDir } from '../src/carpentry/doc/index.js';
 import { textBounds } from '../src/carpentry/doc/prims.js';
 import { CHARS, ADVANCES, UPM } from '../src/carpentry/doc/metrics-data.js';
-import { wrap, textWidth, sanitize } from '../src/carpentry/doc/metrics.js';
+import { wrap, textWidth, sanitize, hasGlyph } from '../src/carpentry/doc/metrics.js';
+import { deflateSync } from 'node:zlib';
 import fontkit from '../vendor/pdf/fontkit.esm.js';
 import { PDFDocument } from '../vendor/pdf/pdf-lib.esm.min.js';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 store.persist = false;
+
+/** A small RGB PNG (gradient) as a data URL — a stand-in for the owner's reference photo. */
+function makePNG(w, h) {
+  const crcT = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (b) => { let c = 0xFFFFFFFF; for (const x of b) c = crcT[(c ^ x) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  const chunk = (type, data) => { const t = Buffer.from(type), len = Buffer.alloc(4), c = Buffer.alloc(4); len.writeUInt32BE(data.length); c.writeUInt32BE(crc(Buffer.concat([t, data]))); return Buffer.concat([len, t, data, c]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const o = y * (w * 3 + 1) + 1 + x * 3; raw[o] = 60 + x * 3; raw[o + 1] = 90 + y * 3; raw[o + 2] = 110; }
+  const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+  return 'data:image/png;base64,' + png.toString('base64');
+}
 let failed = 0, passed = 0;
 const group = (name) => console.log(`\n${name}`);
 const check = (name, ok, extra = '') => { if (ok) passed++; else failed++; console.log(`${ok ? '  ok ' : 'FAIL '} ${name}${extra !== '' ? ' — ' + extra : ''}`); };
@@ -80,16 +93,22 @@ const ad = C.adoptArchitectLayout();
 check('layout adopted', ad.ok);
 const runs = C.listRuns();
 check('runs exist', runs.length > 5, runs.map((r) => r.code).join(' '));
-const k1 = runs.find((r) => r.code === 'K1'), wr = runs.find((r) => r.kind === 'wardrobe');
-const pantry = C.getRun(k1.id).units.find((u) => u.carp.module === 'tall-pantry') || C.getRun(k1.id).units[0];
-const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
-// Special requirements: the engine's schedules().features when present, plus these fixtures (owner text in both scripts).
-const FEATURES = [
-  { runId: k1.id, unitId: pantry.id, title: 'Corner pantry with removable doors', text: 'הדלתות ניתנות להסרה ללא כלים (Blum CLIP top) — לאחסון מגשים גבוהים.', category: 'bespoke', priority: 'must', images: [{ dataUrl: PNG, w: 400, h: 300, name: 'reference.png' }] },
-  { runId: wr.id, title: 'מגירה נסתרת לתכשיטים', text: 'Hidden jewellery drawer behind the left door, 10 cm high.', category: 'bespoke', priority: 'nice' },
-];
+const k1 = runs.find((r) => r.code === 'K1');
+// The owner's example (as in tests/carpentry.test.mjs): the K1 dead corner becomes a tall L corner pantry 80 × 95 with
+// removable doors, one `must` feature in Hebrew free text with a small generated PNG, and one bespoke 'bar-niche' unit.
+const pantryId = C.getRun(k1.id).units[0].id;
+const up = C.updateUnit(pantryId, { module: 'tall-corner-pantry', width: 80, legB: 95, internals: { cornerPantry: 'l-doors', shelves: 5 }, fronts: { operation: 'removable' } });
+check('corner pantry with removable doors', up.ok, up.reason && up.reason.en);
+const OWNER_TEXT = 'דלתות שאפשר להרים ולהוריד בלי כלים, לניקוי המזווה (Blum CLIP top)';
+const PNG = makePNG(48, 32);
+const ft = C.addFeature({ unitId: pantryId }, { title: 'Removable doors without tools', text: OWNER_TEXT, category: 'doors', priority: 'must', images: [{ name: 'pantry-reference.png', w: 480, h: 320, dataUrl: PNG }] });
+check('must feature added', ft.ok && ft.n === 1);
+const cr = C.createRun({ kind: 'custom', anchor: { x: 940, y: 120, dir: 0 }, length: 80, name: 'Bar niche', nameHe: 'נישת בר', units: [C.customLayoutTemplate('bar-niche')] });
+check('bespoke bar-niche unit in the living room', cr.ok, cr.reason && cr.reason.en);
+const allRuns = C.listRuns();
+const nFeat = C.schedules('all').features.length;
 const project = { title: 'House 98 — Kibbutz Afikim', address: 'Kibbutz Afikim, Jordan Valley', ownerName: 'Owner', phone: '050-0000000', date: '2026-11-13', reference: 'H98-CARP-RFQ-01' };
-const opts = (lang, extra = {}) => ({ lang, runIds: 'all', paper: 'A4', project, src: { store, plan: PLAN }, features: FEATURES, pricebook, ...extra });
+const opts = (lang, extra = {}) => ({ lang, runIds: 'all', paper: 'A4', project, src: { store, plan: PLAN }, pricebook, ...extra });
 mkdirSync(new URL('../dist/carpentry/', import.meta.url), { recursive: true });
 const out = {};
 for (const lang of ['en', 'he']) {
@@ -118,17 +137,27 @@ for (const lang of ['en', 'he']) {
   let wide = 0;
   for (const p of doc.pages) for (const o of p.ops) if (o.t === 'text' && o.maxWidth && o.w > o.maxWidth + 0.05) wide++;
   check(`${lang}: wrapped texts stay within their max width`, wide === 0, `${wide}`);
-  check(`${lang}: every run has drawing sheets`, runs.every((r) => doc.pages.some((p) => p.kind === 'sheet' && p.runId === r.id)));
+  check(`${lang}: every run has drawing sheets`, allRuns.every((r) => doc.pages.some((p) => p.kind === 'sheet' && p.runId === r.id)));
   check(`${lang}: landscape sheets + portrait text pages`, doc.pages.every((p) => (p.kind === 'sheet') === (p.orientation === 'landscape')));
   check(`${lang}: every section has a page`, doc.meta.sections.every((s) => s.page > 0), doc.meta.sections.filter((s) => !s.page).map((s) => s.num).join(' '));
-  check(`${lang}: special requirements section + form lines`, doc.meta.sections.some((s) => s.title === (lang === 'he' ? 'דרישות מיוחדות' : 'Special requirements')) && doc.meta.tables.some((t) => t.id === 'form-features' && t.rows === FEATURES.length));
-  check(`${lang}: reference image embedded`, doc.pages.some((p) => p.ops.some((o) => o.t === 'image')));
+  check(`${lang}: special requirements section + form lines`, doc.meta.sections.some((s) => s.title === (lang === 'he' ? 'דרישות מיוחדות' : 'Special requirements')) && doc.meta.tables.some((t) => t.id === 'form-features' && t.rows === nFeat));
+  check(`${lang}: reference image embedded`, doc.pages.some((p) => p.ops.some((o) => o.t === 'image' && o.src === PNG)));
+  let missing = 0, symbols = 0;
+  const glyphs = (ops) => { for (const o of ops) { if (o.t === 'drawing') glyphs(o.ops); else if (o.t === 'text') { if (o.parts) { symbols++; glyphs(o.parts); continue; } for (const c of o.vis) if (!hasGlyph(c)) missing++; } } };
+  for (const p of doc.pages) glyphs(p.ops);
+  check(`${lang}: every drawn code point is in the font (${symbols} texts with vector symbols)`, missing === 0 && symbols > 0, `${missing} missing`);
+  check(`${lang}: callout balloons drawn; operation legend printed once (caption line)`, doc.pages.some((p) => p.ops.some((o) => o.t === 'drawing' && o.ops.some((x) => x.role === 'callout' && x.t === 'text')) && p.ops.some((o) => o.role === 'legend' && o.text.includes(lang === 'he' ? 'דלתות נשלפות' : 'Removable')) && !p.ops.some((o) => o.t === 'drawing' && o.ops.some((x) => x.role === 'legend'))));
+  check(`${lang}: unit codes have a knock-out halo`, doc.pages.some((p) => p.ops.some((o) => o.t === 'drawing' && o.ops.some((x) => x.role === 'halo'))));
+  check(`${lang}: bespoke unit's internal view on its own sheet`, doc.pages.filter((p) => p.kind === 'sheet' && p.runId === cr.runId).some((p) => { const d = p.ops.filter((o) => o.t === 'drawing'); return d.length === 1 && d[0].kind === 'internal' && d[0].ops.some((x) => x.role === 'cell'); }));
   check(`${lang}: no estimate by default`, !doc.meta.sections.some((s) => s.title.includes(lang === 'he' ? 'הערכת' : 'estimate')));
 }
 check('identical pagination in both editions', out.en.doc.pages.map((p) => p.kind + p.orientation).join() === out.he.doc.pages.map((p) => p.kind + p.orientation).join());
 {
   const own = composeQuotation(opts('en', { include: { estimate: true } }));
   check('owner\'s copy adds the estimate section', own.meta.sections.some((s) => /estimate/i.test(s.title)));
+  const est = C.estimate('all', { pricebook }), ownText = own.pages.flatMap((p) => p.ops.filter((o) => o.t === 'text').map((o) => o.text)).join('\n');
+  check(`owner's copy prints the market estimate totals (₪${est.total.low} / ${est.total.typical} / ${est.total.high})`, est.method === 'market' && [est.total.low, est.total.typical, est.total.high].every((v) => ownText.includes(v.toLocaleString('en-US'))));
+  check('owner\'s copy lists basis, sources and "priced by the carpenter" lines', /Basis/.test(ownText) && /Sources/.test(ownText) && /priced by the carpenter/i.test(ownText));
   const a3 = composeQuotation(opts('en', { paper: 'A3' }));
   check('A3 drawing sheets are 420 × 297 landscape, text pages stay A4', a3.pages.filter((p) => p.kind === 'sheet').every((p) => p.size[0] === 420 && p.size[1] === 297) && a3.pages.filter((p) => p.kind === 'text').every((p) => p.size[0] === 210));
   const one = composeQuotation(opts('he', { runIds: [k1.id] }));
@@ -147,16 +176,17 @@ if (has('pdffonts') && has('pdftotext')) {
   }
   const en = execFileSync('pdftotext', ['-enc', 'UTF-8', out.en.path, '-']).toString();
   const he = execFileSync('pdftotext', ['-enc', 'UTF-8', out.he.path, '-']).toString();
-  check('every run code appears in both editions', runs.every((r) => en.includes(r.code) && he.includes(r.code)));
+  check('every run code appears in both editions', allRuns.every((r) => en.includes(r.code) && he.includes(r.code)));
   check('EN: run names extractable', runs.every((r) => en.includes(r.name.split(' — ')[0])));
   check('EN: dimension numbers extractable', ['550', '254', '320'].every((d) => en.includes(d)));
+  check('EN: special requirement + form line extractable', (en.match(/Removable doors without tools/g) || []).length >= 3);
   check('EN: unit refs extractable', C.schedules('all').units.every((u) => en.includes(u.ref)), C.schedules('all').units.filter((u) => !en.includes(u.ref)).map((u) => u.ref).slice(0, 5).join(' '));
   check('EN: furniture', ['Request for quotation', 'Dimensions in cm', 'Quotation form', 'Questions for the carpenter', 'indicative'].every((s) => en.toLowerCase().includes(s.toLowerCase())));
-  check('EN: owner\'s Hebrew text kept as typed (logical order after extraction)', en.includes('מגירה נסתרת לתכשיטים') && en.includes('הדלתות ניתנות להסרה'));
+  check('EN: owner\'s Hebrew text kept as typed (logical order after extraction)', en.includes('דלתות שאפשר להרים ולהוריד בלי כלים'));
   const words = ['בקשה להצעת מחיר', 'מפרט טכני', 'טופס הצעת מחיר', 'דרישות מיוחדות', 'מידות בס״מ', 'תנאי תשלום', 'תוקף ההצעה', 'אחריות', 'קנ״מ', 'מטבח'];
   const miss = words.filter((w) => !he.includes(w));
   check('HE: Hebrew strings extract in logical order', miss.length === 0, miss.join(' | '));
-  check('HE: owner\'s English text kept as typed', he.includes('Hidden jewellery drawer'));
+  check('HE: owner\'s English title kept as typed', he.includes('Removable doors without tools'));
 } else console.log('  (poppler-utils not installed — pdffonts / pdftotext checks skipped)');
 
 group('Screen renderers');

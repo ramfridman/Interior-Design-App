@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Carpentry panels — harness</title>
+<!--
+  DEV ONLY. Mounts the four Carpentry panels (estimate, quantities, quotation, carpenters) standalone on the
+  architect's layout, without the Carpentry shell.   ?theme=light|dark  ?width=360|420  ?tab=estimate|takeoff|quotation|carpenters
+  saveFile is intercepted: files are kept in window.__saved ({ name, mime, bytes, text }) instead of being downloaded.
+-->
+<link rel="stylesheet" href="../src/styles/tokens.css">
+<link rel="stylesheet" href="../src/styles/base.css">
+<link rel="stylesheet" href="../src/styles/components.css">
+<link rel="stylesheet" href="../src/styles/layout.css">
+<link rel="stylesheet" href="../src/styles/panels.css">
+<link rel="stylesheet" href="../src/styles/carpentry.css">
+<link rel="stylesheet" href="../src/styles/carpentry-panels.css">
+<style>
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font-ui); }
+  #bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  #bar select, #bar button { height: 28px; }
+  #host { display: flex; justify-content: center; padding: 12px; }
+  #side { width: var(--w, 380px); max-width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; height: calc(100vh - 90px); overflow-y: auto; }
+  #side.wide { width: 100%; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <strong>Carpentry panels</strong>
+  <select id="tab" aria-label="Panel"><option value="estimate">Estimate</option><option value="takeoff">Quantities</option><option value="carpenters">Find a carpenter</option><option value="quotation">Quotation (inline)</option></select>
+  <select id="run" aria-label="Selected run"><option value="">All runs</option></select>
+  <button id="dialog" type="button">Open quotation dialog</button>
+  <button id="theme" type="button">Toggle theme</button>
+  <span id="budget" style="margin-left:auto;font-variant-numeric:tabular-nums"></span>
+</div>
+<div id="host"><div id="side"></div></div>
+<script type="module">
+import { store } from '../src/core/store.js';
+import { PLAN } from '../src/core/plan.js';
+import { initialLayout } from '../src/core/initial-layout.js';
+import * as Carp from '../src/carpentry/index.js';
+import { toast, confirmDialog, openDialog } from '../src/ui/dialogs.js';
+
+store.persist = false;
+store.load({ items: initialLayout() });
+Carp.adoptArchitectLayout();
+
+const q = new URLSearchParams(location.search);
+if (q.get('theme')) document.documentElement.dataset.theme = q.get('theme');
+document.getElementById('theme').onclick = () => { const d = document.documentElement; d.dataset.theme = d.dataset.theme === 'dark' ? 'light' : 'dark'; };
+const side = document.getElementById('side');
+if (q.get('width')) side.style.setProperty('--w', q.get('width') + 'px');
+
+window.__saved = [];
+async function saveFile({ name, mime, data }) {
+  const bytes = data instanceof Uint8Array ? data : null;
+  const text = typeof data === 'string' ? data : null;
+  window.__saved.push({ name, mime, bytes: bytes ? Array.from(bytes.slice(0, 8)) : null, length: bytes ? bytes.length : (text ? text.length : data.size), text, type: Object.prototype.toString.call(data) });
+  return { ok: true };
+}
+const ctx = { store, plan: PLAN, catalog: null, models: null, view2d: null, view3d: null, Carp,
+  ui: { toast, confirmDialog, openDialog, saveFile, setCarpentryBudget: (b) => { window.__budget = b; document.getElementById('budget').textContent = `budget ₪${b.low.toLocaleString()} / ${b.typical.toLocaleString()} / ${b.high.toLocaleString()}`; } } };
+
+const loaders = { estimate: () => import('../src/ui/carpentry/estimate-tab.js'), takeoff: () => import('../src/ui/carpentry/takeoff-tab.js'),
+  quotation: () => import('../src/ui/carpentry/quotation.js'), carpenters: () => import('../src/ui/carpentry/carpenters.js') };
+let current = null, dialog = null;
+const runSel = document.getElementById('run');
+for (const r of Carp.listRuns()) runSel.append(new Option(`${r.code} ${r.name}`, r.id));
+const selection = () => ({ runId: runSel.value || null, unitId: null });
+
+async function mount(name) {
+  if (current) current.destroy();
+  side.replaceChildren(); side.classList.toggle('wide', name === 'quotation');
+  const m = await loaders[name]();
+  current = m.default(ctx); side.append(current.el); current.update(selection());
+  window.__current = current;
+}
+document.getElementById('tab').onchange = (e) => mount(e.target.value);
+runSel.onchange = () => { store.setUI({ carpentrySel: selection().runId ? { runId: selection().runId } : null }); current && current.update(selection()); };
+document.getElementById('dialog').onclick = async () => {
+  const m = await loaders.quotation(); const inst = m.default(ctx); inst.update(selection());
+  dialog = openDialog({ title: 'Quotation package', size: 'xl', cls: 'dialog--flush', body: inst.el, onClose: () => inst.destroy() });
+  window.__dialogInst = inst;
+};
+window.__h = { store, Carp, mount, ctx };
+mount(q.get('tab') || 'estimate');
+</script>
+</body>
+</html>

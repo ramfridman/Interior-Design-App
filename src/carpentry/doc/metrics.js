@@ -9,6 +9,17 @@ export const PT = 25.4 / 72;                     // mm per point
 export const FONT_WEIGHTS = { light: 300, regular: 400, medium: 500, bold: 700 };
 
 const INDEX = new Map(Array.from(CHARS).map((c, i) => [c, i]));
+
+/**
+ * Symbols the font lacks that are drawn as small vector shapes (prims.js symbolOps): the engine's door-operation keys
+ * and legend marks, and circled numbers ①–⑳. Advance in em.
+ */
+export const VECTOR_SYMBOLS = '◁↔⇤⇥Λ≡△▽∿○';
+const CIRCLED = (c) => { const cp = c.codePointAt(0); return cp >= 0x2460 && cp <= 0x2473; };
+export const isVectorSymbol = (c) => VECTOR_SYMBOLS.includes(c) || CIRCLED(c);
+export const symbolAdvance = (c) => (CIRCLED(c) ? 0.95 : 0.8);
+/** True if the font has a glyph for the character. */
+export const hasGlyph = (c) => INDEX.has(c);
 const SUBST = {
   '→': '->', '←': '<-', '↔': '<->', '≈': '~', '≤': '<=', '≥': '>=', '✓': '+', '✔': '+', '☐': '[ ]', '□': '[ ]', '■': '#', '▪': '·',
   '″': '"', '′': "'", ' ': ' ', ' ': ' ', ' ': ' ', ' ': ' ', '​': '', '‎': '', '‏': '', '\t': ' ', '−': '-',
@@ -19,7 +30,7 @@ const SUBST = {
 export function sanitize(s) {
   let out = '';
   for (const c of String(s == null ? '' : s)) {
-    if (INDEX.has(c)) out += c;
+    if (INDEX.has(c) || isVectorSymbol(c)) out += c;
     else if (SUBST[c] !== undefined) out += SUBST[c];
     else if (/[֑-ׇ]/.test(c)) continue;
     else if (c === '\n') out += c;
@@ -34,7 +45,7 @@ const AVG = ADVANCES.regular[INDEX.get('n')];
 export function textWidth(s, size, weight = 'regular') {
   const adv = ADVANCES[weight] || ADVANCES.regular;
   let u = 0;
-  for (const c of String(s)) { const i = INDEX.get(c); u += i === undefined ? AVG : adv[i]; }
+  for (const c of String(s)) { const i = INDEX.get(c); u += i !== undefined ? adv[i] : isVectorSymbol(c) ? symbolAdvance(c) * UPM : AVG; }
   return (u / UPM) * size * PT;
 }
 

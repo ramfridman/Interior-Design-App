@@ -11,6 +11,7 @@ import { keyPlanOps } from './keyplan.js';
 
 const L = (en, he) => ({ en, he });
 const { vocab } = Carp;
+const TIERS = { suggested: L('suggested per run', 'מוצעת לפי קו'), basic: L('basic', 'בסיסית'), mid: L('mid', 'בינונית'), premium: L('premium', 'פרימיום') };
 
 /** Free-text spec values (colours, hardware names) the engine stores in English only. */
 const FREE_HE = {
@@ -94,7 +95,7 @@ export function composeQuotation(o = {}) {
   const findings = Carp.checkRun('all', esrc).filter((f) => runs.some((r) => r.id === f.runId));
   const takeoffs = new Map(runs.map((r) => [r.id, Carp.takeoff(r.id, esrc).runs[0]]));
   const runsX = runs.map((r) => ({ ...r, worktops: (takeoffs.get(r.id) || {}).worktops || [] }));
-  const features = collectFeatures([...(Array.isArray(sched.features) ? sched.features : []), ...(Array.isArray(o.features) ? o.features : [])], runs, unitRef);
+  const features = collectFeatures(sched.features, runs, esrc);
 
   // ── section numbering ──
   const sec = {}; let n = 0;
@@ -187,8 +188,8 @@ export function composeQuotation(o = {}) {
     B.para(S.specialNote, ST.body);
     B.table({
       id: 'features', title: S.special,
-      cols: [{ key: 'ref', title: S.code, w: 11, st: ST.tdb }, { key: 'unit', title: S.unit, w: 11 }, { key: 'req', title: S.requirement, w: 56, auto: true }, { key: 'cat', title: S.category, w: 12 }, { key: 'pri', title: S.priority, w: 10 }],
-      rows: features.map((f) => ({ cells: { ref: f.ref, unit: f.unitRef, req: f.full, cat: f.category, pri: f.priority } })),
+      cols: [{ key: 'label', title: L('No.', 'מס׳'), w: 7, align: 'center', st: ST.tdb }, { key: 'ref', title: S.code, w: 11, st: ST.tdb }, { key: 'req', title: S.requirement, w: 58, auto: true }, { key: 'cat', title: S.category, w: 14 }, { key: 'pri', title: S.priority, w: 10 }],
+      rows: features.map((f) => ({ cells: { label: f.label, ref: f.ref, req: f.full, cat: f.category, pri: f.priority } })),
     });
   }
 
@@ -234,8 +235,8 @@ export function composeQuotation(o = {}) {
         B.ensure(14);
         const R = B.R, yb = B.y + 3.4;
         B.page.ops.push({ t: 'arc', cx: R.X(2.6), cy: yb - 1.1, r: 2.5, a0: 0, a1: 360, lw: 0.3, color: 'accent' });
-        R.text(2.6, yb - 0.1, String(f.num), { size: 6.6, font: 'bold', color: 'accent' }, 'center', { dir: 'ltr' });
-        R.text(8, yb, `${f.ref}${f.unitRef ? ' · ' + f.unitRef : ''}${f.category ? ' · ' + T(f.category) : ''}${f.priority ? ' · ' + T(f.priority) : ''}`, { ...ST.label, color: 'accent' }, 'start');
+        R.text(2.6, yb - 0.1, String(f.n), { size: 6.6, font: 'bold', color: 'accent' }, 'center', { dir: 'ltr' });
+        R.text(8, yb, [f.ref, T(f.category), T(f.priority)].filter(Boolean).join('  ·  '), { ...ST.label, color: 'accent' }, 'start');
         B.y += 5;
         if (f.title) B.para(f.title, ST.h3, { indent: 8, gap: 0.8, auto: true });
         if (f.text) B.para(f.text, ST.body, { indent: 8, gap: 1.5, auto: true });
@@ -244,11 +245,14 @@ export function composeQuotation(o = {}) {
       }
     }
     B.heading('', S.units, { level: 3 });
-    const UW = { ref: 10, module: 16, size: 12, fronts: 13, internals: 13, hardware: 18, notes: 11 };
+    const UW = { ref: 10, module: 16, size: 12, fronts: 13, internals: 13, hardware: 18, notes: 11, operation: 10 };
+    const UH = [...(Carp.HEADERS.units || [])];
+    if (S1.units.some((u) => u.operation && u.operation.en && !/^hinged/i.test(u.operation.en)) && !UH.some(([k]) => k === 'operation')) UH.splice(4, 0, ['operation', L('Door operation', 'אופן פתיחה')]);
+    const notesOf = (u) => (u.corner ? cat(u.corner, u.notes && tr(u.notes, 'en') ? '; ' : '', u.notes || '') : u.notes);
     B.table({
       id: `units:${run.code}`, title: S.units,
-      cols: (Carp.HEADERS.units || []).map(([key, title]) => ({ key, title, w: UW[key] || 12, ...(key === 'ref' ? { st: ST.tdb } : {}), ...(key === 'notes' ? { auto: true } : {}) })),
-      rows: S1.units.map((u) => ({ cells: Object.fromEntries((Carp.HEADERS.units || []).map(([key]) => [key, cellOf(key === 'size' ? u.sizeText : u[key])])) })),
+      cols: UH.map(([key, title]) => ({ key, title, w: UW[key] || 12, ...(key === 'ref' ? { st: ST.tdb } : {}), ...(key === 'notes' ? { auto: true } : {}) })),
+      rows: S1.units.map((u) => ({ cells: Object.fromEntries(UH.map(([key]) => [key, cellOf(key === 'size' ? u.sizeText : key === 'notes' ? notesOf(u) : u[key])])) })),
     });
     B.heading('', S.materials, { level: 3 });
     const HM = Object.fromEntries(Carp.HEADERS.materials);
@@ -371,8 +375,8 @@ export function composeQuotation(o = {}) {
       B.heading('', S.special, { level: 3 });
       B.table({
         id: 'form-features', title: S.special, grid: true, rowMin: 9,
-        cols: [{ key: 'ref', title: S.code, w: 12, st: ST.tdb }, { key: 'req', title: S.requirement, w: 60, auto: true }, { key: 'p', title: L('Price ₪', 'מחיר ₪'), w: 28 }],
-        rows: features.map((f) => ({ cells: { ref: f.ref, req: f.title || f.text, p: '' } })),
+        cols: [{ key: 'label', title: L('No.', 'מס׳'), w: 7, align: 'center', st: ST.tdb }, { key: 'ref', title: S.code, w: 11, st: ST.tdb }, { key: 'req', title: S.requirement, w: 56, auto: true }, { key: 'p', title: L('Price ₪', 'מחיר ₪'), w: 26 }],
+        rows: features.map((f) => ({ cells: { label: f.label, ref: f.ref, req: f.title || f.text, p: '' } })),
       });
     }
     B.heading('', S.alternatives, { level: 3 });
@@ -410,14 +414,14 @@ export function composeQuotation(o = {}) {
   if (sec.estimate) {
     B.textPage();
     B.heading(sec.estimate, S.estimate, { key: 'estimate' });
-    const e = Carp.estimate(want ? [...want].length === 1 ? [...want][0] : 'all' : 'all', { tier: o.tier, pricebook: o.pricebook, src: esrc });
+    const e = Carp.estimate('all', { tier: o.tier, method: o.method, pricebook: o.pricebook, src: esrc });
     B.para(S.estimateNote, { ...ST.body, color: 'accent', font: 'medium' });
     B.para(e.label, ST.h3, { gap: 1 });
     B.para(e.disclaimer, ST.body);
     const er = e.runs.filter((r) => runs.some((x) => x.id === r.runId));
     const sum = { low: 0, typical: 0, high: 0 };
     for (const r of er) for (const k of Object.keys(sum)) sum[k] += r.total[k];
-    const money = (v) => `${fmtInt(v)}`;
+    const money = (v) => fmtInt(v);
     B.table({
       id: 'estimate', title: S.estimate,
       cols: [{ key: 'code', title: S.code, w: 9, st: ST.tdb }, { key: 'name', title: S.name, w: 37 }, { key: 'low', title: cat(S.low, ' ₪'), w: 18, align: 'end' }, { key: 'typ', title: cat(S.typical, ' ₪'), w: 18, align: 'end' }, { key: 'high', title: cat(S.high, ' ₪'), w: 18, align: 'end' }],
@@ -427,13 +431,22 @@ export function composeQuotation(o = {}) {
         { kind: 'total', cells: { code: '', name: cat(S.total, ' ', S.incVat, ` (${Math.round(e.vat * 100)}%)`), low: money(sum.low * (1 + e.vat)), typ: money(sum.typical * (1 + e.vat)), high: money(sum.high * (1 + e.vat)) } },
       ],
     });
-    const tierLabel = e.tier;
-    B.para(`${T(S.basis)}: ${T(S.tier)} ${tierLabel} · ${T(S.asOf)} ${e.asOf || '—'} · ${T(S.vat)} ${Math.round(e.vat * 100)}% · ${e.currency}`, ST.small);
+    B.para(`${T(S.basis)}: ${T(e.method === 'market' ? L('market rates per running metre / unit', 'מחירי שוק למטר רץ / ליחידה') : L('take-off quantities × material rates', 'כמויות × מחירי חומרים'))} · ${T(S.tier)}: ${T(TIERS[e.tier] || e.tier)} · ${T(S.asOf)} ${e.asOf || '—'} · ${T(S.vat)} ${Math.round(e.vat * 100)}% · ${e.currency}`, ST.small);
     if (e.pricebookMissing) B.para(L('No price book was supplied — the estimate is empty.', 'לא סופק מחירון — ההערכה ריקה.'), ST.small);
-    if (e.missingRates && e.missingRates.length) B.para(`${T(S.missingRates)}: ${e.missingRates.join(', ')}`, ST.small);
+    const comps = new Map();
+    for (const r of er) for (const c of r.components || []) if (c.basis && !comps.has(c.key)) comps.set(c.key, c);
+    if (comps.size) {
+      B.heading('', S.basis, { level: 3 });
+      B.keyValues([...comps.values()].map((c) => [c.label, c.basis]), { labelW: 0.26, id: 'estimate-basis' });
+    }
+    const noRate = (e.missingRates || []).map((m) => (m && typeof m === 'object' ? m.label || m.key : String(m)));
+    if (noRate.length) {
+      B.heading('', L('Priced by the carpenter (not in the estimate)', 'מתומחר על ידי הנגר (לא כלול בהערכה)'), { level: 3 });
+      B.bullets(noRate, ST.small, { gap: 0.4 });
+    }
     const src = new Map();
-    for (const r of er) for (const c of r.components || []) for (const l of c.lines || []) if (l.source && l.source.name) src.set(l.source.name + (l.source.url || ''), l.source);
-    if (src.size) { B.heading('', S.sources, { level: 3 }); B.bullets([...src.values()].map((s) => `${s.name}${s.url ? ' — ' + s.url : ''}`), ST.small, { gap: 0.4 }); }
+    for (const r of er) for (const c of r.components || []) for (const l of c.lines || []) for (const so of [...(Array.isArray(l.sources) ? l.sources : []), ...(l.source ? [l.source] : [])]) if (so && so.name) src.set(so.name + (so.url || ''), so);
+    if (src.size) { B.heading('', S.sources, { level: 3 }); B.bullets([...src.values()].map((so) => `${so.name}${so.url ? ' — ' + so.url : ''}`), ST.small, { gap: 0.4 }); }
     for (const nte of e.notes || []) B.para(typeof nte === 'object' ? nte : String(nte), ST.small, { gap: 0.6 });
   }
 
@@ -466,23 +479,24 @@ function cellOf(v) {
 }
 
 /**
- * Special requirements (schedules().features, feature-detected): normalised, numbered per run to match the drawing
- * callouts. The owner's text is never translated (strings are used as typed; bilingual objects pick the language).
+ * Special requirements = schedules().features rows ({ runId, unitId, featureId, n, label '①', ref, code, title, text,
+ * category { en, he }, priority { en, he } }) + their images from listFeatures (stored images via featureImage).
+ * The owner's title / text are printed exactly as typed (never translated).
  */
-function collectFeatures(list, runs, unitRef) {
-  const out = [], per = {};
-  for (const f of list) {
-    if (!f) continue;
-    const run = runs.find((r) => r.id === f.runId || r.code === f.run || r.code === f.runCode);
-    if (!run) continue;
-    per[run.id] = (per[run.id] || 0) + 1;
-    const num = f.num ?? f.n ?? f.callout ?? f.number ?? per[run.id];
-    const unitRefTxt = f.unitRef || (f.unitId && unitRef.get(f.unitId)) || (f.unitCode || f.code ? `${run.code}·${f.unitCode || f.code}` : '');
-    const title = f.title || '', text = f.text || f.description || '';
-    out.push({ runId: run.id, num, ref: f.ref || `${run.code}·${num}`, unitRef: unitRefTxt, title, text, category: f.category || '', priority: f.priority || '',
-      images: Array.isArray(f.images) ? f.images : [], full: title && text ? (typeof title === 'object' || typeof text === 'object' ? { en: `${tr(title, 'en')} — ${tr(text, 'en')}`, he: `${tr(title, 'he')} — ${tr(text, 'he')}` } : `${title} — ${text}`) : title || text });
-  }
-  return out;
+function collectFeatures(rows, runs, esrc) {
+  if (!Array.isArray(rows) || !rows.length) return [];
+  const full = new Map((typeof Carp.listFeatures === 'function' ? Carp.listFeatures('all', esrc) : []).map((f) => [f.id, f]));
+  const image = (im) => {
+    if (!im) return null;
+    let url = im.dataUrl;
+    if (!url && im.stored && typeof Carp.featureImage === 'function') { try { url = Carp.featureImage(im.id); } catch { url = null; } }
+    return url ? { ...im, dataUrl: url } : null;
+  };
+  return rows.filter((f) => runs.some((r) => r.id === f.runId)).map((f) => {
+    const imgs = (full.get(f.featureId) || {}).images || (Array.isArray(f.images) ? f.images : []);
+    const title = f.title || '', text = f.text || '';
+    return { ...f, images: imgs.map(image).filter(Boolean), full: title && text ? `${title} — ${text}` : title || text };
+  });
 }
 
 /** Thickness strings like '18 mm' / '10 cm' in the document language. */

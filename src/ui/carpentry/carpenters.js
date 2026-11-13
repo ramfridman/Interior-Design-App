@@ -142,11 +142,11 @@ function create(ctx) {
       const diff = typ ? Math.round(((exVat - typ) / typ) * 100) : null;
       return { c, exVat, pos, diff };
     }).sort((a, b) => a.exVat - b.exVat);
-    const tbl = h('div', { class: 'cp-scroll', tabindex: '0', role: 'region', 'aria-label': 'Quote comparison' }, h('table', { class: 'cp-table' },
-      h('thead', null, h('tr', null, h('th', { scope: 'col' }, 'Carpenter'), h('th', { scope: 'col', class: 'is-num' }, 'Quote before VAT'), h('th', { scope: 'col', class: 'is-num' }, 'vs typical'), h('th', { scope: 'col' }, 'vs range'))),
-      h('tbody', null, rows.map((r) => h('tr', null, h('td', null, r.c.name), h('td', { class: 'is-num num' }, money(r.exVat)), h('td', { class: 'is-num num' }, r.diff == null ? '—' : `${r.diff > 0 ? '+' : ''}${r.diff} %`),
-        h('td', null, r.pos ? h('span', { class: `cp-chip cp-chip--pos-${r.pos}` }, r.pos === 'within' ? 'Within range' : r.pos === 'below' ? 'Below range' : 'Above range') : '—')))),
-      estimate && h('tfoot', null, h('tr', null, h('th', { scope: 'row' }, 'Your estimate'), h('td', { class: 'is-num num', colspan: '3' }, `${money(estimate.low)} – ${money(estimate.high)} · typical ${money(estimate.typical)} (before VAT)`)))));
+    const tbl = h('div', { class: 'cp-scroll', tabindex: '0', role: 'region', 'aria-label': 'Quote comparison' }, h('table', { class: 'cp-table cp-table--cmp' },
+      h('thead', null, h('tr', null, h('th', { scope: 'col' }, 'Carpenter'), h('th', { scope: 'col', class: 'is-num' }, 'Quote, before VAT'), h('th', { scope: 'col' }, 'Against your estimate'))),
+      h('tbody', null, rows.map((r) => h('tr', null, h('td', { dir: 'auto' }, r.c.name), h('td', { class: 'is-num num' }, money(r.exVat)),
+        h('td', null, r.pos ? h('span', { class: `cp-chip cp-chip--pos-${r.pos}` }, r.pos === 'within' ? 'Within range' : r.pos === 'below' ? 'Below range' : 'Above range') : '—', r.diff != null && h('span', { class: 'cp-cmp__diff num faint' }, ` ${r.diff > 0 ? '+' : ''}${r.diff} % vs typical`))))),
+      estimate && h('tfoot', null, h('tr', null, h('th', { scope: 'row' }, 'Your estimate'), h('td', { class: 'is-num num', colspan: '2' }, `${money(estimate.low)} – ${money(estimate.high)}, typical ${money(estimate.typical)}`)))));
     cmpEl.replaceChildren(head, tbl, h('p', { class: 'faint cp-cmp__note' }, 'Compare like with like: a quote may leave out installation, worktops or appliances. Ask each carpenter what is included.'));
   }
 

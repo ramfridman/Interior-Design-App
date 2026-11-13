@@ -1,13 +1,15 @@
 /**
  * Mount points for the panels another team member writes (estimate, quantities, quotation package, carpenters).
  * Each module default-exports `create(ctx) → { el: HTMLElement, update({ runId, unitId }), destroy() }` with
- *   ctx = { store, plan, catalog, models, view2d, view3d, Carp, ui: { toast, confirmDialog, openDialog, saveFile } }.
+ *   ctx = { store, plan, catalog, models, view2d, view3d, Carp, ui: { toast, confirmDialog, openDialog, saveFile, setCarpentryBudget } }
+ * (setCarpentryBudget({ low, typical, high } | null) feeds the shopping list's "Custom carpentry" row; also app.ui.setCarpentryBudget).
  * Modules are loaded with a dynamic import() on first use; while a file is missing (or fails) a quiet placeholder shows.
  */
 import * as Carp from '../../carpentry/index.js';
 import { h } from '../dom.js';
 import { toast, confirmDialog, openDialog } from '../dialogs.js';
 import { saveFile } from '../exporter.js';
+import { setCarpentryBudget } from '../shopping.js';
 
 const LOADERS = {
   estimate: () => import('./estimate-tab.js'),
@@ -20,7 +22,7 @@ const cache = new Map();
 /** The context handed to every slot module. */
 export function slotContext(app) {
   const { store, plan, catalog, models, view2d, view3d } = app;
-  return { store, plan, catalog, models, view2d, view3d, Carp, ui: { toast, confirmDialog, openDialog, saveFile } };
+  return { store, plan, catalog, models, view2d, view3d, Carp, ui: { toast, confirmDialog, openDialog, saveFile, setCarpentryBudget } };
 }
 
 /** Load a slot module's `create` (null when it is not available yet). */

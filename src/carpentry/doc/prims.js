@@ -13,7 +13,7 @@
  * Any op may carry `role` and `unitId` (kept from the engine op) for styling / hit-testing.
  */
 import { visualOrder, autoDir } from './bidi.js';
-import { sanitize, textWidth, capHalf, PT } from './metrics.js';
+import { sanitize, textWidth, capHalf, PT, isVectorSymbol, symbolAdvance } from './metrics.js';
 import { tr } from './strings.js';
 
 /** Print palette: black / greys and one restrained accent. */
@@ -54,7 +54,59 @@ export function textOp(x, y, text, { size = 9, font = 'regular', color: c = 'ink
   if (maxWidth) op.maxWidth = r2(maxWidth);
   if (role) op.role = role;
   if (unitId) op.unitId = unitId;
+  if (Array.from(s).some(isVectorSymbol)) op.parts = symbolParts(op);
   return op;
+}
+
+/**
+ * A text op whose string contains glyphs the font lacks (door-operation keys, circled numbers) is drawn as `parts`:
+ * plain text segments + vector symbols at the exact advance positions. Renderers draw `parts` instead of the text.
+ */
+function symbolParts(op) {
+  const a = ((op.rot || 0) * Math.PI) / 180, ux = Math.cos(a), uy = -Math.sin(a), vx = Math.sin(a), vy = Math.cos(a);
+  const shift = op.align === 'right' ? op.w : op.align === 'center' ? op.w / 2 : 0;
+  const x0 = op.x - ux * shift, y0 = op.y - uy * shift, em = op.size * PT;
+  const P = (d, v) => [r2(x0 + ux * d + vx * v), r2(y0 + uy * d + vy * v)];
+  const parts = [];
+  let d = 0, seg = '', segD = 0;
+  const flush = () => {
+    if (seg.trim()) { const [px, py] = P(segD, 0); parts.push({ t: 'text', x: px, y: py, text: seg, vis: seg, size: op.size, font: op.font, color: op.color, align: 'left', w: r2(textWidth(seg, op.size, op.font)), dir: 'ltr', ...(op.rot ? { rot: op.rot } : {}) }); }
+    seg = '';
+  };
+  for (const c of Array.from(op.vis)) {
+    if (!isVectorSymbol(c)) { if (!seg) segD = d; seg += c; d += textWidth(c, op.size, op.font); continue; }
+    flush();
+    const w = symbolAdvance(c) * em;
+    parts.push(...symbolOps(c, d, w, em, P, op));
+    d += w;
+  }
+  flush();
+  return parts;
+}
+
+/** Vector drawing of one symbol: local d (along the baseline) / v (down) in mm, through P(d, v) → page point. */
+function symbolOps(c, d, w, em, P, op) {
+  const h = 0.66 * em, mid = -0.36 * em, lw = r2(Math.max(0.1, em * 0.075)), col = op.color || 'ink';
+  const L = (pts, close = false, fill) => ({ t: 'poly', pts: pts.map(([dd, v]) => P(d + dd * w, v)), close, lw, color: col, ...(fill ? { fill } : {}) });
+  const circle = (r, cv) => { const pts = []; for (let i = 0; i <= 24; i++) { const t = (i / 24) * Math.PI * 2; pts.push([0.5 + (Math.cos(t) * r) / w, cv + Math.sin(t) * r]); } return L(pts); };
+  const head = (tip, dirx) => L([[tip - dirx * 0.22, mid - 0.16 * em], [tip, mid], [tip - dirx * 0.22, mid + 0.16 * em]]);
+  switch (c) {
+    case '◁': return [L([[0.18, mid], [0.86, mid - h / 2], [0.86, mid + h / 2]], true)];
+    case '△': return [L([[0.5, -h], [0.14, 0], [0.86, 0]], true)];
+    case '▽': return [L([[0.14, -h], [0.86, -h], [0.5, 0]], true)];
+    case '↔': return [L([[0.1, mid], [0.9, mid]]), head(0.1, -1), head(0.9, 1)];
+    case '⇤': return [L([[0.1, mid - h / 2], [0.1, mid + h / 2]]), L([[0.14, mid], [0.9, mid]]), head(0.14, -1)];
+    case '⇥': return [L([[0.9, mid - h / 2], [0.9, mid + h / 2]]), L([[0.1, mid], [0.86, mid]]), head(0.86, 1)];
+    case 'Λ': return [L([[0.14, 0], [0.5, -h], [0.86, 0]])];
+    case '≡': return [-0.16, -0.36, -0.56].map((k) => L([[0.12, k * em], [0.88, k * em]]));
+    case '∿': { const pts = []; for (let i = 0; i <= 16; i++) pts.push([0.1 + (0.8 * i) / 16, mid - Math.sin((i / 16) * Math.PI * 2) * 0.18 * em]); return [L(pts)]; }
+    case '○': return [circle(0.3 * em, mid)];
+    default: {                                                       // circled number: circle + the plain digits
+      const n = String(c.codePointAt(0) - 0x2460 + 1), size = op.size * (n.length > 1 ? 0.5 : 0.6);
+      const [tx, ty] = P(d + w / 2, mid + (size * PT * 0.7) / 2);
+      return [circle(0.43 * em, mid), { t: 'text', x: tx, y: ty, text: n, vis: n, size: r2(size), font: 'medium', color: col, align: 'center', w: r2(textWidth(n, size, 'medium')), dir: 'ltr', ...(op.rot ? { rot: op.rot } : {}) }];
+    }
+  }
 }
 export const r2 = (v) => Math.round(v * 100) / 100;
 
@@ -78,6 +130,8 @@ export function hatchLines(x, y, w, h, gap, lw, c = 'hatch', extra = {}) {
   return out;
 }
 
+/** Colours of the engine's special roles (callout balloons accent; reserved zones / cells / legends quieter). */
+const ROLE_INK = { callout: 'accent', reserved: 'grey', 'op-symbol': 'ink2', legend: 'ink2', cell: 'ink2' };
 /** Font weight of an engine text op. */
 const FONT_OF = (op) => (op.weight === 'bold' ? 'bold' : op.role === 'code' ? 'medium' : 'regular');
 
@@ -97,7 +151,7 @@ export function flattenDrawing(d, { lang = 'en', box, scale, align = 'center' } 
   const ops = [];
   const meta = (o) => { const m = {}; if (o.role) m.role = o.role; if (o.unitId) m.unitId = o.unitId; return m; };
   for (const o of d.ops) {
-    const m = meta(o), dash = o.dash && DASH[o.dash] ? o.dash : undefined, ink = o.role === 'callout' ? 'accent' : 'ink';
+    const m = meta(o), dash = o.dash && DASH[o.dash] ? o.dash : undefined, ink = ROLE_INK[o.role] || 'ink';
     if (o.t === 'line') ops.push({ t: 'line', x1: X(o.x1), y1: Y(o.y1), x2: X(o.x2), y2: Y(o.y2), lw: o.lw, color: ink, ...(dash ? { dash } : {}), ...m });
     else if (o.t === 'rect') {
       const x = X(o.x), y = Y(o.y + o.h), w = r2(o.w * k), h = r2(o.h * k), F = FILLS[o.fill] || null, H = FILLS[o.hatch] || null;
@@ -114,9 +168,14 @@ export function flattenDrawing(d, { lang = 'en', box, scale, align = 'center' } 
       const size = (o.size * tscale) / PT, rot = o.rot || 0, a = (rot * Math.PI) / 180, ch2 = capHalf(size);
       const x = X(o.x) + Math.sin(a) * ch2, y = Y(o.y) + Math.cos(a) * ch2;     // vertical centre → baseline
       const align = o.anchor === 'start' ? 'left' : o.anchor === 'end' ? 'right' : 'center';
-      const col = o.role === 'callout' ? 'accent' : o.role === 'label' || o.role === 'note' ? 'ink2' : 'ink';
+      const col = ROLE_INK[o.role] || (o.role === 'label' || o.role === 'note' || o.role === 'legend' ? 'ink2' : 'ink');
       const s = tr(o.text, lang);
-      ops.push(textOp(x, y, s, { size: r2(size), font: o.role === 'callout' ? 'bold' : FONT_OF(o), color: col, align, dir: o.role === 'note' || o.role === 'callout' ? autoDir(s, dir) : dir, rot: rot || undefined, ...m }));
+      if ((o.role === 'code' || o.role === 'callout') && !rot) {                                      // knock-out box so codes read over door symbols
+        const t = textOp(x, y, s, { size: r2(size), font: FONT_OF(o), align, dir });
+        const b = textBounds(t), p = 0.35;
+        ops.push({ t: 'rect', x: r2(b.x0 - p), y: r2(y - capHalf(size) * 2 - p), w: r2(b.x1 - b.x0 + 2 * p), h: r2(capHalf(size) * 2 + 2 * p), fill: 'paper', role: 'halo' });
+      }
+      ops.push(textOp(x, y, s, { size: r2(size), font: o.role === 'callout' ? 'bold' : o.role === 'op-symbol' ? 'bold' : FONT_OF(o), color: col, align, dir: o.role === 'note' || o.role === 'callout' ? autoDir(s, dir) : dir, rot: rot || undefined, ...m }));
     }
   }
   return { ops, k, origin: (x, y) => [X(x), Y(y)], size: [cw, ch], offset: [ox, oy] };

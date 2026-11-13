@@ -60,7 +60,7 @@ export function initTopbar(root, app) {
   const editBadge = h('span', { class: 'badge', hidden: true });
   const editBtn = iconBtn('wall', 'Structure: change walls, doors and windows', { kbd: 'B', pressed: structure.isActive(), class: 'only-compact modebtn', onClick: () => structure.toggle() });
   editBtn.append(editBadge);
-  const carpBtn = iconBtn('carpentry', 'Carpentry: made-to-measure kitchen, wardrobes and vanities', { kbd: 'C', pressed: carpentry.isActive(), class: 'only-compact modebtn', onClick: () => carpentry.toggle() });
+  const carpBtn = iconBtn('carpentry', 'Carpentry: made-to-measure kitchen, wardrobes and vanities', { kbd: 'C', pressed: carpentry.isActive(), class: 'only-compact modebtn modebtn--carp', onClick: () => carpentry.toggle() });
   const tools = segmented({ options: TOOLS, value: store.ui.tool, iconOnly: true, label: 'Tool', cls: 'seg--tools', onChange: (tool) => store.setUI({ tool }) });
 
   const sTools = segmented({ options: STRUCTURE_TOOL_LIST.map((t) => ({ value: t.value, label: t.long, icon: t.icon, kbd: t.kbd })), value: store.ui.tool, iconOnly: true, iconSize: 18,
@@ -135,6 +135,7 @@ export function initTopbar(root, app) {
         ? { label: 'Print shopping list', icon: 'print', onSelect: actions.printShoppingList }
         : { label: 'Copy shopping list', icon: 'copy', onSelect: actions.copyShoppingList },
       compact && { separator: true },
+      compact && { label: 'Carpentry: kitchen, wardrobes, vanities', icon: 'carpentry', kbd: 'C', checked: carpentry.isActive(), onSelect: () => carpentry.toggle() },
       compact && { label: 'Settings', icon: 'settings', onSelect: () => app.openSettings() },
       compact && { label: 'Keyboard shortcuts', icon: 'keyboard', onSelect: () => app.openShortcuts() },
       compact && { label: 'Welcome and house facts', icon: 'home', onSelect: () => app.openWelcome() },

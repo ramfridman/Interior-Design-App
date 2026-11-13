@@ -41,6 +41,8 @@ export function opsToSVG(ops, opts = {}) {
     } else if (o.t === 'arc') {
       const pts = arcPoints(o.cx, o.cy, o.r, o.a0, o.a1).map(([x, y]) => `${n(x)},${n(y)}`).join(' ');
       out += `<polyline points="${pts}" fill="none"${strokeAttrs(o, pal)}${hooks(o, opts)}/>`;
+    } else if (o.t === 'text' && o.parts) {              // text with vector symbols (glyphs the font lacks)
+      out += `<g${hooks(o, opts)}>${opsToSVG(o.parts, { ...opts, classes: false })}</g>`;
     } else if (o.t === 'text') {
       const fs = o.size * PT, rot = o.rot ? ` transform="rotate(${n(-o.rot)} ${n(o.x)} ${n(o.y)})"` : '';
       let anchor = ANCHOR[o.align] || 'start', body = o.vis, style = 'unicode-bidi:bidi-override;direction:ltr';

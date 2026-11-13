@@ -218,10 +218,10 @@ function create(ctx) {
   // ───────────── downloads ─────────────
   const hint = h('div', { class: 'cq-hint', hidden: true, role: 'status' });
   const errBox = h('div', { class: 'cq-err', hidden: true, role: 'alert' });
-  const mkBtn = (label, iconName, variant, fn) => { const b = btn(label, { icon: iconName, variant, onClick: () => fn(b) }); return b; };
+  const mkBtn = (label, iconName, variant, fn, small) => { const b = btn(label, { icon: iconName, variant, small, onClick: () => fn(b) }); return b; };
   const dl = mkBtn('Download PDF', 'download', 'primary', (b) => downloadPDF([S.lang], b));
-  const dlBoth = mkBtn('Download both languages', 'download', 'default', (b) => downloadPDF(['en', 'he'], b));
-  const schBtn = mkBtn('Schedules CSV', 'table', 'quiet', () => scheduleCsv());
+  const dlBoth = mkBtn('Download both languages', 'download', 'default', (b) => downloadPDF(['en', 'he'], b), true);
+  const schBtn = mkBtn('Schedules CSV', 'table', 'quiet', () => scheduleCsv(), true);
   function updateButtons() { const none = !S.runs.size || !docApi; for (const b of [dl, dlBoth, schBtn]) b.disabled = none || busy; }
   let busy = false;
   function setBusy(b, label, on) { busy = on; const l = b.querySelector('.btn__label'); if (on) { b.dataset.label = l.textContent; l.textContent = label; b.setAttribute('aria-busy', 'true'); } else { l.textContent = b.dataset.label || l.textContent; b.removeAttribute('aria-busy'); } updateButtons(); }
@@ -279,7 +279,7 @@ function create(ctx) {
   // ───────────── assemble ─────────────
   const actions = h('div', { class: 'cq-actions' }, dl, dlBoth, schBtn);
   const left = h('div', { class: 'cq-left' }, settings, h('div', { class: 'cq-dock' }, errBox, hint, actions));
-  root.append(left, preview);
+  root.append(h('div', { class: 'cq-grid' }, left, preview));
   root.dataset.lang = 'en';
   zoom(0);
   scanRuns(); renderRuns();
