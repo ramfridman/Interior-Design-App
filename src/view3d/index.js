@@ -201,7 +201,11 @@ export function createView3D(container, ctx) {
   // ───────────── modes ─────────────
   function enterWalk(opts = {}) {
     if (destroyed) return;
-    if (mode === 'walk') { finishFly(); walk.start(opts); invalidate(); return; }
+    if (mode === 'walk') {
+      // Already walking: a bare repeat call (UI + store both asking) is a no-op; explicit coordinates teleport.
+      if (opts.x == null && opts.y == null && opts.heading == null) return;
+      finishFly(); walk.start(opts); invalidate(); return;
+    }
     finishFly();
     saved = { pose: rig.getPose(), near: camera.near };
     const from = { p: camera.position.clone(), q: camera.quaternion.clone(), fov: camera.fov };
