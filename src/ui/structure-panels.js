@@ -55,7 +55,7 @@ export function initStructureGuide(root, app) {
       h('ul', { class: 'guide__notes' },
         h('li', null, kbd('Delete'), ' removes the selected wall or opening. ', kbd('Esc'), ' puts the tool down, then leaves Structure.'),
         h('li', null, 'Every edit snaps to 5 cm and can be undone. Furniture is not moved for you: look at the rooms after changing a wall.')),
-      btn('Back to furnishing', { variant: 'default', block: true, icon: 'sofa', kbd: 'B', onClick: () => structure.exit() })));
+      btn('Back to furnishing', { block: true, icon: 'sofa', tip: 'Leave Structure mode', kbd: 'B', onClick: () => structure.exit() })));
   root.append(el);
 
   const sync = () => { for (const [tool, row] of toolRows) row.setAttribute('aria-pressed', String(store.ui.tool === tool)); };

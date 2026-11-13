@@ -211,8 +211,7 @@ export function exteriorDimLayout(plan, ui, scale) {
       // the property line and the side length written just outside it
       const [pa, pb] = boundaryEdge(site.boundary, side);
       const k = horiz ? 1 : 0;
-      const m = sign > 0 ? [4, 21] : [21, 4];
-      span(-Infinity, Infinity, Math.min(pa[k], pb[k]), Math.max(pa[k], pb[k]), sign > 0 ? m[0] : m[1], sign > 0 ? m[1] : m[0]);
+      span(-Infinity, Infinity, Math.min(pa[k], pb[k]), Math.max(pa[k], pb[k]), 4, 21);
       blocks.sort((p, q) => p[0] - q[0]);
     }
     let start = 0, lead = NEAR_LEAD, fit = place(start, lead);

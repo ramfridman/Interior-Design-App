@@ -6,7 +6,7 @@
  * While a wall or opening is dragged in the plan, or nudged from here, the panel is patched in place (same "shape"
  * → only the numbers change), so nothing jumps and a focused field keeps its focus.
  */
-import { flipDoor, updateOpening } from '../core/plan-edit.js';
+import { flipDoor, updateOpening, openingPolicy } from '../core/plan-edit.js';
 import { h } from './dom.js';
 import { icon } from './icons.js';
 import { btn, iconBtn, numField, section, emptyState } from './components.js';
@@ -100,15 +100,14 @@ export function createStructureInspector(app) {
         h('div', { class: 'moverow' }, nudge(-1), field, nudge(1)),
         locked ? null : h('p', { class: 'sec__note' }, `Sideways in ${STEP} cm steps. Doors in the wall travel with it; walls that meet it follow.`),
         moveError),
-      section(openings.length ? `Openings in this wall` : 'Openings', openings.length
+      section(openings.length ? 'Openings in this wall' : 'Openings', openings.length
         ? h('ul', { class: 'oplist' }, openings.map((o) => h('li', null, h('button', { type: 'button', class: 'oprow', onClick: () => structure.select('opening', o.id) },
           h('span', { class: 'oprow__icon' }, icon(openingIcon(o), { size: 18 })),
           h('span', { class: 'oprow__text' }, h('span', { class: 'oprow__name truncate' }, openingTitle(o)), h('span', { class: 'oprow__meta num' }, dims(o))),
-          levelTag(structure.selected() && plan.openings.includes(o) ? policyLevel(o) : 'free'), icon('chevron-right', { size: 14 })))))
+          levelTag(openingPolicy(o.id).level), icon('chevron-right', { size: 14 })))))
         : h('p', { class: 'sec__empty' }, seg.cls === 'exterior' ? 'None. Use the Door or Window tool to add one (permit needed).' : locked ? 'None.' : 'None. Use the Door or Passage tool to add one.')),
     ];
   }
-  const policyLevel = (o) => { const cur = { ...structure.selected() }; void cur; return levelForOpening(o); };
 
   /* ───────── Opening ───────── */
   function renderOpening(cur) {
@@ -134,7 +133,7 @@ export function createStructureInspector(app) {
     };
     const styles = STYLE_OPTIONS[o.kind];
     const style = styles && !locked && styles.some(([v]) => v === o.style)
-      ? h('select', { class: 'select', 'aria-label': `${openingKind(o)} style`, onChange: () => { if (!run(hangError, () => updateOpening(o.id, { style: style.value }))) style.value = live().opening.style; } },
+      ? h('select', { class: 'select', 'data-fk': 'style', 'aria-label': `${openingKind(o)} style`, onChange: () => { if (!run(hangError, () => updateOpening(o.id, { style: style.value }))) style.value = live().opening.style; } },
         styles.map(([v, l]) => h('option', { value: v, selected: v === o.style }, l)))
       : null;
     const flip = (how, label, glyph) => btn(label, { small: true, icon: glyph, disabled: locked, onClick: () => run(hangError, () => flipDoor(o.id, how)) });
@@ -146,7 +145,7 @@ export function createStructureInspector(app) {
 
     patch = (now) => {
       const x = now.opening;
-      meta.textContent = [x.rooms && x.rooms.length === 2 ? `${spaceName(x.rooms[0], plan)} ↔ ${spaceName(x.rooms[1], plan)}` : '', dims(x)].filter(Boolean).join(', ');
+      meta.textContent = [x.rooms && x.rooms.length === 2 ? `${spaceName(x.rooms[0], plan)} / ${spaceName(x.rooms[1], plan)}` : '', dims(x)].filter(Boolean).join(', ');
       fields.width.set(x.width); fields.height.set(x.height); fields.sill && fields.sill.set(x.sill);
       fields.offset.set(openingOffset(x, now.seg));
       if (x.kind === 'door' && x.hinge && x.swing) hung.textContent = `Hinged on the ${SIDE[x.hinge]} jamb, opens into ${into(now)}.`;
@@ -181,11 +180,6 @@ export function createStructureInspector(app) {
         sizeError),
       hang,
     ];
-  }
-
-  function levelForOpening(o) {
-    if (o.style === 'mamad') return 'locked';
-    return o.exterior ? 'permit' : 'free';
   }
 
   return {
