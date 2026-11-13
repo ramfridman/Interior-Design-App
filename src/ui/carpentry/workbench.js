@@ -10,13 +10,17 @@
  *   drop a palette module ....... Carp.addUnit(runId, moduleId, { index })        at the drop position
  *   wheel / pinch / drag empty .. zoom / pan (vector SVG, re-rasterised at every zoom → crisp)
  *
+ * The 3D tab shows the run in the app's own 3D view (the stage switches to Split while it is open, and back): the camera
+ * frames the run, a section cut removes the room in front of it, "Open fronts" swings doors / pulls drawers, and units with
+ * fit problems are outlined with their Checks message (view3d.showCarpentry). Clicking a unit in 3D selects it here.
+ *
  * The view keeps its scale and the screen position of the run's origin while the drawing changes, so nothing jumps
  * during a gesture. Unit rectangles for hit-testing come from the engine geometry (positions + geometryOf), not from
  * the SVG, so the renderer stays a dumb painter. Findings are marked on the units they concern.
  */
 import * as Carp from '../../carpentry/index.js';
 import { drawingToSVG as fallbackSVG } from './svg-fallback.js';
-import { h, setKids, rafThrottle, clamp } from '../dom.js';
+import { h, setKids, rafThrottle, clamp, call } from '../dom.js';
 import { icon } from '../icons.js';
 import { iconBtn } from '../components.js';
 import { openMenu } from '../dialogs.js';
@@ -28,7 +32,7 @@ import { num } from './vocab.js';
 
 export const WB_TABS = [
   { id: 'elevation', label: 'Elevation' }, { id: 'plan', label: 'Plan' }, { id: 'internal', label: 'Internal' },
-  { id: 'worktop', label: 'Worktop' }, { id: 'section', label: 'Section' },
+  { id: 'worktop', label: 'Worktop' }, { id: 'section', label: 'Section' }, { id: '3d', label: '3D' },
 ];
 const EDITABLE = new Set(['elevation', 'plan']);
 const SLOP = 5;
@@ -45,7 +49,7 @@ const rendererReady = import('../../carpentry/doc/svg.js')
 export function initWorkbench(app, C) {
   const { store } = app;
   const stage = document.getElementById('stage');
-  const S = { runId: null, tab: getPref('carpWbTab') || 'elevation', drawings: [], drawing: null, scale: 1, ox: 0, oy: 0, fitted: '', userView: false,
+  const S = { runId: null, tab: getPref('carpWbTab') === '3d' ? 'elevation' : getPref('carpWbTab') || 'elevation', drawings: [], drawing: null, scale: 1, ox: 0, oy: 0, fitted: '', userView: false,
     rects: [], hover: null, gesture: null, drop: null, paletteModule: null, tip: null, svgEl: null };
 
   /* ───────── DOM ───────── */
@@ -85,7 +89,8 @@ export function initWorkbench(app, C) {
   ov.setAttribute('aria-hidden', 'true');
   const tip = h('div', { class: 'cwb__tip', hidden: true, role: 'status' });
   const empty = h('div', { class: 'cwb__empty' });
-  const view = h('div', { class: 'cwb__view', tabindex: '0', 'aria-label': 'Drawing of the selected run. Click a unit to select it; drag it to reorder; drag its edge to change its width.' }, sheet, ov, tip, empty);
+  const p3d = h('div', { class: 'c3d', hidden: true });
+  const view = h('div', { class: 'cwb__view', tabindex: '0', 'aria-label': 'Drawing of the selected run. Click a unit to select it; drag it to reorder; drag its edge to change its width.' }, sheet, ov, tip, empty, p3d);
   const title = h('div', { class: 'cwb__title' });
   const el = h('section', { class: 'cwb', 'aria-label': 'Carpentry drawings' },
     grip,
@@ -141,7 +146,7 @@ export function initWorkbench(app, C) {
   function setTab(id) {
     if (S.tab === id) return;
     S.tab = id;
-    setPref('carpWbTab', id);
+    if (id !== '3d') { leave3d(); setPref('carpWbTab', id); }
     S.userView = false;
     render(true);
   }
@@ -218,6 +223,7 @@ export function initWorkbench(app, C) {
       setKids(empty, h('p', { class: 'cwb__emptytitle' }, any ? 'Select a run to see its drawings' : 'No carpentry yet'),
         h('p', { class: 'cwb__emptytext' }, any ? 'Click a unit in the plan, or a run in the list on the left. Its elevation, plan, internal view, worktop and section appear here, and you can edit the units right in the drawing.' : 'Start from the architect’s layout or add a run from the panel on the left.'));
       tabBtns.forEach((b) => { b.disabled = true; b.setAttribute('aria-selected', 'false'); });
+      leave3d();
       drawOverlay();
       return;
     }
@@ -227,13 +233,17 @@ export function initWorkbench(app, C) {
     const kinds = new Set(S.drawings.map((d) => d.kind));
     for (const t of WB_TABS) {
       const b = tabBtns.get(t.id);
-      b.disabled = !kinds.has(t.id);
+      b.disabled = t.id === '3d' ? !app.view3d : !kinds.has(t.id);
     }
-    if (!kinds.has(S.tab)) S.tab = kinds.has('elevation') ? 'elevation' : (S.drawings[0] && S.drawings[0].kind) || 'elevation';
+    if (S.tab === '3d' && !app.view3d) S.tab = 'elevation';
+    if (!kinds.has(S.tab) && S.tab !== '3d') S.tab = kinds.has('elevation') ? 'elevation' : (S.drawings[0] && S.drawings[0].kind) || 'elevation';
     for (const t of WB_TABS) { const b = tabBtns.get(t.id), on = t.id === S.tab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; }
-    S.drawing = S.drawings.find((d) => d.kind === S.tab) || null;
+    S.drawing = S.tab === '3d' ? null : S.drawings.find((d) => d.kind === S.tab) || null;
     title.replaceChildren(h('span', { class: 'cwb__code num' }, cur.run.code), h('span', { class: 'cwb__name truncate' }, cur.run.name));
     renderStrip(cur);
+    el.classList.toggle('is-3d', S.tab === '3d');
+    p3d.hidden = S.tab !== '3d';
+    if (S.tab === '3d') { sheet.replaceChildren(); S.svgEl = null; S.rects = []; render3d(cur, changedRun); drawOverlay(); return; }
     if (S.drawing) {
       let markup = '';
       try { markup = renderSVG(S.drawing, { lang: 'en', interactive: true, padding: 0, className: `cdraw--${S.drawing.kind}` }); } catch (err) { console.error('[carpentry] drawing render failed', err); }
@@ -576,6 +586,51 @@ export function initWorkbench(app, C) {
     drawOverlay();
   });
 
+  /* ───────── 3D tab ───────── */
+  const stageEl = () => document.getElementById('viewport');
+  const T3 = { on: false, runId: null, prevMode: null, open: !!getPref('carp3dOpen'), cut: getPref('carp3dCut') !== false };
+  const toggle = (label, tipText, key) => h('button', { type: 'button', class: 'chip c3d__toggle', 'aria-pressed': String(!!T3[key]), 'data-tip': tipText, onClick: (e) => {
+    T3[key] = !T3[key]; setPref(key === 'open' ? 'carp3dOpen' : 'carp3dCut', T3[key]);
+    e.currentTarget.setAttribute('aria-pressed', String(T3[key]));
+    call(app.view3d, 'showCarpentry', { [key]: T3[key] });
+  } }, label);
+  const openFrontsBtn = toggle('Open fronts', 'Swing the doors open and pull the drawers out to see the internal layout', 'open');
+  const cutBtn = toggle('Cut away the room in front', 'Remove the facing wall and everything between the camera and the run', 'cut');
+  const frameBtn = h('button', { type: 'button', class: 'btn btn--sm', 'data-tip': 'Bring the camera back onto the run', onClick: () => call(app.view3d, 'showCarpentry', { frame: true }) }, icon('target', { size: 15 }), h('span', null, 'Frame the run'));
+  const c3dList = h('div', { class: 'c3d__checks', role: 'list', 'aria-label': 'Fit problems shown in 3D' });
+  p3d.append(h('div', { class: 'c3d__bar' }, openFrontsBtn, cutBtn, frameBtn), c3dList,
+    h('p', { class: 'c3d__hint' }, 'The run is shown in the 3D view above, beside a small key plan. Click a unit there to select it; drag to orbit, scroll to zoom. Units outlined in orange or red have a fit problem — the message is pinned on the unit and listed here. Units are made to measure: change them in the Elevation or Plan tab or in the inspector.'));
+  /** Show the run in 3D (the stage switches to the 3D view while the tab is open), list its fit problems. */
+  function render3d(cur, changedRun) {
+    const runId = cur.run.id;
+    if (!T3.on) {
+      T3.on = true;
+      // Carpentry lives in Plan and Split: show the 3D view beside a narrow key plan while the tab is open, then give the plan back.
+      if (store.ui.mode === '2d') { T3.prevMode = '2d'; store.setUI({ mode: 'split' }); }
+      stageEl()?.classList.add('is-carp3d');
+    }
+    const first = T3.runId !== runId;
+    T3.runId = runId;
+    if (first || changedRun) requestAnimationFrame(() => call(app.view3d, 'showCarpentry', { runId, open: T3.open, cut: T3.cut, frame: true }));
+    const codes = Carp.unitCodes(cur.run, cur.units), list = C.findings(runId).filter((f) => f.severity !== 'info');
+    setKids(c3dList, list.length ? list.map((f) => h('button', { type: 'button', role: 'listitem', class: `c3d__check c3d__check--${f.severity}`, onClick: () => { const id = (f.unitIds || [])[0]; if (id) { C.select(runId, id); C.flash(f.unitIds); } } },
+      icon(f.severity === 'error' ? 'fail' : 'warn', { size: 14 }),
+      h('span', { class: 'c3d__codes num' }, (f.unitIds || []).map((id) => codes.get(id)).filter(Boolean).join(' ') || cur.run.code),
+      h('span', { class: 'c3d__text' }, (f.text && f.text.en) || f.code)))
+      : [h('p', { class: 'c3d__ok' }, icon('check', { size: 14 }), h('span', null, 'No fit problems: the run fits the room.'))]);
+  }
+  /** Leave the 3D tab state: clear the 3D overlays and go back to the view the user had before the tab opened. */
+  function leave3d() {
+    if (!T3.on) return;
+    T3.on = false; T3.runId = null;
+    el.classList.remove('is-3d');
+    p3d.hidden = true;
+    call(app.view3d, 'showCarpentry', { runId: null });
+    stageEl()?.classList.remove('is-carp3d');
+    if (T3.prevMode && store.ui.mode === 'split') store.setUI({ mode: T3.prevMode });
+    T3.prevMode = null;
+  }
+
   /* ───────── store wiring ───────── */
   const schedule = rafThrottle((refit) => render(refit));
   store.on('carpentry', () => { if (C.isActive()) schedule(false); });
@@ -584,7 +639,7 @@ export function initWorkbench(app, C) {
   store.on('ui', (e) => {
     if (e.keys.includes('tool')) {
       if (C.isActive()) requestAnimationFrame(() => render(true));
-      else { el.classList.remove('is-open'); cancelGesture(); }
+      else { el.classList.remove('is-open'); cancelGesture(); leave3d(); }
     } else if (e.keys.includes('carpentrySel')) {
       const sel = store.ui.carpentrySel;
       if ((sel ? sel.runId : null) !== S.runId) schedule(true);

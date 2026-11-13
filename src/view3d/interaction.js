@@ -177,7 +177,7 @@ function createOutline(accent) {
  *           structures: () => THREE.Object3D[], cutHeight: () => number|null,
  *           invalidate: () => void, emit: (event: string, payload: object) => void }} o
  */
-export function createInteraction({ dom, camera, scene, ctx, items, rig, structures, cutHeight, invalidate, emit }) {
+export function createInteraction({ dom, camera, scene, ctx, items, rig, structures, cutHeight, invalidate, emit, clipped = null }) {
   const { store, plan, models } = ctx;
   const host = dom.parentElement || dom;
   const raycaster = new THREE.Raycaster();
@@ -205,7 +205,7 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
     const cut = cutHeight();
     for (const h of raycaster.intersectObjects(structures(), true)) {
       const o = h.object;
-      if (!o.isMesh || !visibleDeep(o)) continue;
+      if (!o.isMesh || !visibleDeep(o) || (clipped && clipped(h.point))) continue;
       const m = Array.isArray(o.material) ? o.material[0] : o.material;
       if (m && m.transparent && m.opacity < 0.5) continue;
       let spaceId = null;
@@ -240,7 +240,7 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
    */
   function pick(clientX, clientY) {
     setRay(clientX, clientY);
-    const it = items.raycast(raycaster);
+    const it = items.raycast(raycaster, { clipped });
     const st = structureHit();
     if (it && (!st || it.distance <= st.distance + 0.01)) return { kind: 'item', id: it.id, point: it.point, normal: it.normal };
     if (st) {

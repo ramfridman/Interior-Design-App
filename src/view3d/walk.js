@@ -45,11 +45,19 @@ export function defaultWalkStart(plan) {
 
 const rectBlocker = (r) => ({ cx: (r.x + r.w / 2) / 100, cy: (r.y + r.h / 2) / 100, hw: r.w / 200, hh: r.h / 200, cos: 1, sin: 0, wall: true });
 
-function furnitureBlockers(items) {
+function furnitureBlockers(items, models) {
   const out = [];
+  const carp = models && typeof models.getModel === 'function' ? models.getModel('carpentry-unit') : null;
   for (const it of items) {
     if (it.hidden || it.placement !== 'floor' || !(it.h > 45) || (it.elev || 0) > 120 || PASSABLE.has(it.type)) continue;
     const a = ((it.rot || 0) * Math.PI) / 180;
+    // a corner pantry blocks its two arms, not the open floor inside its L
+    const fp = it.carp && carp && carp.footprint ? carp.footprint(it) : null;
+    if (fp && fp.rects) {
+      const c = Math.cos(a), s = Math.sin(a);
+      for (const r of fp.rects) { const lx = r.x + r.w / 2, ly = r.y + r.h / 2; out.push({ cx: (it.x + lx * c - ly * s) / 100, cy: (it.y + lx * s + ly * c) / 100, hw: r.w / 200, hh: r.h / 200, cos: c, sin: s, id: it.id }); }
+      continue;
+    }
     if (it.type === 'tree') { const t = clamp(Math.min(it.w, it.d) * 0.0008, 0.1, 0.3); out.push({ cx: it.x / 100, cy: it.y / 100, hw: t, hh: t, cos: 1, sin: 0 }); continue; }
     out.push({ cx: it.x / 100, cy: it.y / 100, hw: it.w / 200, hh: it.d / 200, cos: Math.cos(a), sin: Math.sin(a), id: it.id });
   }
@@ -146,7 +154,7 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
 
   // ───────────── blockers ─────────────
   function rebuildBlockers() {
-    blockers = walls.concat(furnitureBlockers(store.items));
+    blockers = walls.concat(furnitureBlockers(store.items, ctx.models));
     blockersDirty = false;
     for (const b of [...ignore]) if (!b.wall) ignore.delete(b);
     adoptContaining();

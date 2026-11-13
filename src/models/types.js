@@ -109,12 +109,16 @@ export const MODEL_TYPES = {
   'water-feature': T('garden', 'Fountain / Pond / Bird bath', 'floor', 'outdoor', [100, 100, 100], { variant: "'fountain-tier'|'fountain-wall'|'fountain-sphere'|'pond'|'bird-bath'|'stream'|'bubbler'" }),
   'garden-decor':  T('garden', 'Garden décor / Rocks / Edging', 'floor', 'outdoor', [60, 60, 40], { variant: "'boulder'|'rocks'|'statue'|'bird-feeder'|'arch'|'obelisk'|'stepping-stone'|'edging'|'sundial'|'gnome'|'sign'|'bridge'|'wind-chime'" }),
 
+  // ───────── made-to-measure carpentry (src/models/carpentry.js) — never a catalogue product: registry.js routes every
+  //           item with `carp` to it (the item keeps its generic type); params come from the unit's run spec ─────────
+  'carpentry-unit':T('carpentry', 'Made-to-measure carpentry unit', 'floor', 'indoor', [60, 60, 90], {}),
+
   // ───────── room finishes (handled by the 3D house renderer, not a model module) ─────────
   'floor-finish':  T('finishes', 'Flooring', 'floor', 'both', [0, 0, 0], { pattern: "'tile'|'plank'|'herringbone'|'chevron'|'terrazzo'|'concrete'|'marble'|'mosaic'|'checker'|'hex'|'deck'|'stone'", tileW: 'cm', tileH: 'cm', color: '#hex', color2: '#hex grout / secondary tone', gloss: '0..1' }),
   'wall-finish':   T('finishes', 'Wall paint / Wall tile / Wallpaper / Cladding', 'wall', 'both', [0, 0, 0], { kind: "'paint'|'tile'|'wallpaper'|'wood-panel'|'stone'|'brick'|'plaster'|'microcement'", color: '#hex', color2: '#hex', tileW: 'cm', tileH: 'cm', pattern: "'plain'|'subway'|'grid'|'stripes'|'slats'|'herringbone'", gloss: '0..1' }),
 };
 
-export const MODEL_FILES = ['seating-tables', 'storage-beds', 'kitchen-bath', 'lighting-decor', 'outdoor', 'garden'];
+export const MODEL_FILES = ['seating-tables', 'storage-beds', 'kitchen-bath', 'lighting-decor', 'outdoor', 'garden', 'carpentry'];
 
 /** UI catalogue tree. Every product has { zone, category, subcategory } from this tree. */
 export const CATEGORIES = {

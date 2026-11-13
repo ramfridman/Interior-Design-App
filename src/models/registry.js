@@ -27,6 +27,8 @@ export function registerModel(type, def) {
 }
 
 export const hasModel = (type) => REGISTRY.has(type);
+/** Made-to-measure carpentry units (items with `carp`) are drawn by 'carpentry-unit' from their run (models/carpentry.js). */
+const defFor = (item) => (item && item.carp && REGISTRY.get('carpentry-unit')) || REGISTRY.get(item.type);
 export const getModel = (type) => REGISTRY.get(type) || null;
 export const registeredTypes = () => [...REGISTRY.keys()];
 
@@ -45,7 +47,7 @@ function fallbackBox(w, d, h, color = '#b9b4aa') {
  */
 export function buildModel(item) {
   const w = Math.max(0.01, (item.w || 1) / 100), d = Math.max(0.01, (item.d || 1) / 100), h = Math.max(0.005, (item.h || 1) / 100);
-  const def = REGISTRY.get(item.type);
+  const def = defFor(item);
   let obj;
   if (def && def.build) {
     try { obj = def.build({ w, d, h, p: item.params || {}, item }); }
@@ -60,7 +62,7 @@ export function buildModel(item) {
 
 /** Draw the 2D plan symbol of an item at the current transform (see contract in the header). */
 export function drawSymbol(ctx, item, px = 1) {
-  const def = REGISTRY.get(item.type);
+  const def = defFor(item);
   const { w, d, h } = item;
   ctx.save();
   try {

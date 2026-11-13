@@ -624,6 +624,27 @@ listFeatures(runId | 'all', src?) // → [{ …feature, runId, run, unitId, code
   featureId, label 'Special requirement ① … — priced by the carpenter' }`, also listed in `missingRates`.
 * `checkRun`: an info finding `feature` per requirement ("no automatic rule checks — the carpenter confirms it").
 
+### 3D (additive) — `src/models/carpentry.js`, `src/view3d/carpentry.js`
+* **Model type `carpentry-unit`** (`types.js`, file `carpentry`). `registry.buildModel` / `drawSymbol` route EVERY item with `carp`
+  to it; the item keeps its generic `type` / `params` (the table above is unchanged, saved designs load as before). The model reads
+  the unit's run from the bound store and builds from `geometryOf()` (carcass heights / depths, `fronts` with their `operation`,
+  `inner`, `corner` + `trueFronts`) and `run.worktops` (each worktop-carrying unit draws its slice; the first / last unit of a piece
+  also draws the overhangs / waterfall ends; sink / hob / basin cut-outs with bowl, tap, hob glass). Corner modules
+  (`tall-corner-pantry`, diagonal base / wall corners) are drawn with their true L / diagonal shape on both arms — the 2D plan
+  symbol too; everything else keeps the generic 2D symbol. Without a run it falls back to the generic model of `item.type`.
+  Def extra: `getModel('carpentry-unit').footprint(item)` → `{ poly, rects }` (item-local cm) for corner units, else null —
+  walk mode collides with the two arms, not the open floor inside the L.
+* View-only build state `item.view = { open: true }` (never stored): doors swing ~95° (pocket: pushed in; bifold: folded;
+  lift-off: set aside), drawers pulled ~30 cm, flaps up / down, sliding doors slid, tambours rolled up, curtains gathered.
+* `view3d.showCarpentry({ runId | null, open, cut, frame, animate })` → state: frames the run from its front (island: working
+  side), a vertical section plane removes everything between the camera and the run (+ items standing in that corridor are
+  hidden in the view only; picking ignores what is cut; walk mode never cuts), open fronts for that run, units flagged by
+  `checkRun` (errors / warnings) outlined + pinned with the Checks text. The carpentry selection gets the selection outline.
+  Unit models rebuild when their `carp` or their run's spec / worktops / reservations change (items-layer `setVariant`).
+* UI: Carpentry workbench tab **3D** (switches Plan → Split while open, back on leaving): "Open fronts", "Cut away the room in
+  front", "Frame the run", and the run's fit problems (click → selects the unit).
+* Test: `node tests/carpentry-3d.test.mjs` (bounds, every module closed / open, corner pantry on both arms, worktop cut-outs).
+
 ### Drawings — `drawings(runId)` → `Drawing[]` (plan, elevation, section, worktop if any, internal if tall / full units)
 `Drawing = { id, kind: 'plan'|'elevation'|'section'|'worktop'|'internal', runId, title { en, he }, scale (1:scale, from 10/20/25/50/100 to
 fit A3 landscape), bounds { x, y, w, h } (real cm incl. dimensions), yUp: true, ops: Op[], dims: DimChain[] }`.

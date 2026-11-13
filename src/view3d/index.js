@@ -12,6 +12,7 @@ import { createOrbitRig, STALL_MS } from './camera.js';
 import { createItemsLayer } from './items.js';
 import { createInteraction } from './interaction.js';
 import { createWalk, walkFov } from './walk.js';
+import { createCarpentryLayer } from './carpentry.js';
 import { sunPosition, sunTimes, sunDirectionWorld, compassPoint, todayAt } from './sun.js';
 
 const CUTAWAY_CM = 120;
@@ -83,7 +84,10 @@ export function createView3D(container, ctx) {
     dom: canvas, camera, scene, ctx, items, rig, invalidate, emit,
     structures: () => [house && house.group, site && site.group].filter(Boolean),
     cutHeight: () => (mode === 'orbit' && store.ui.wallsCutaway ? CUTAWAY_CM / 100 : null),
+    clipped: (p) => !!(carpentry && carpentry.clipped(p)),
   });
+  // carpentry: models follow their run, the workbench's 3D tab (section cut, open fronts, fit problems)
+  const carpentry = createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay, invalidate, isWalking: () => mode === 'walk' });
   const walk = createWalk({
     camera, dom: canvas, overlay, ctx, emit,
     pickTarget: (x, y) => interaction.walkTarget(x, y),
@@ -102,6 +106,7 @@ export function createView3D(container, ctx) {
     call(house, 'setSunStudy', study);
     call(env, 'setSunStudy', study && !walking && (!store.ui.showRoof || !!store.ui.wallsCutaway));
     call(env, 'setInteriorMode', mode === 'walk');
+    carpentry.syncClip();
     call(daylight, 'setDoorsOpen', true);                              // daylight always treats interior doors as open, so door-lit rooms (baths, WC, laundry) are not black in the dollhouse
     invalidate();
   }
@@ -190,6 +195,7 @@ export function createView3D(container, ctx) {
     renderer.render(scene, camera);
     if (dlBusy) { dirty = true; schedule(); }
     interaction.renderOverlay(renderer);
+    carpentry.update(camera, canvas);
     dirty = false;
     stats.renderMs += (performance.now() - t0 - stats.renderMs) * 0.1;
     stats.frames++;
@@ -373,6 +379,16 @@ export function createView3D(container, ctx) {
       rig.frameBox(box, opts);
       return true;
     },
+    /**
+     * Carpentry workbench 3D tab: { runId (null = off), open (fronts open), cut (section cut in front of the run), frame
+     * (move the camera onto the run), animate }. Omitted keys keep their value. Returns the current carpentry 3D state.
+     */
+    showCarpentry(opts = {}) {
+      if (opts.frame && mode === 'walk') exitWalk({ animate: false });
+      if (opts.frame) framing = null;
+      carpentry.show(opts);
+      return carpentry.state();
+    },
     startPlacing(partial, opts) { if (mode === 'walk') exitWalk({ animate: false }); interaction.startPlacing(partial, opts); },
     cancelPlacing: () => interaction.cancelPlacing(),
     dropAt: (clientX, clientY, partial) => interaction.dropAt(clientX, clientY, partial),
@@ -434,7 +450,7 @@ export function createView3D(container, ctx) {
       canvas.removeEventListener('webglcontextlost', onContextLost);
       canvas.removeEventListener('webglcontextrestored', onContextRestored);
       call(daylight, 'dispose'); daylight = null;
-      walk.dispose(); interaction.dispose(); items.dispose(); rig.dispose();
+      carpentry.dispose(); walk.dispose(); interaction.dispose(); items.dispose(); rig.dispose();
       call(house, 'dispose'); call(site, 'dispose'); call(env, 'dispose');
       renderer.dispose();
       canvas.remove(); overlay.remove();
@@ -442,7 +458,7 @@ export function createView3D(container, ctx) {
     },
     /** Test / debug hooks (not part of the contract). */
     debug: {
-      renderer, scene, camera, rig, items, interaction, walk,
+      renderer, scene, camera, rig, items, interaction, walk, carpentry,
       standIns,
       isReady: () => ready,
       isFlying: () => !!fly,
@@ -483,6 +499,16 @@ function unavailableView(container, handlers) {
   return {
     resize: noop, setActive: noop, setMode: noop, getMode: () => 'orbit', setCameraPreset: () => false,
     enterWalk: noop, exitWalk: noop, focusItem: () => false,
+    /**
+     * Carpentry workbench 3D tab: { runId (null = off), open (fronts open), cut (section cut in front of the run), frame
+     * (move the camera onto the run), animate }. Omitted keys keep their value. Returns the current carpentry 3D state.
+     */
+    showCarpentry(opts = {}) {
+      if (opts.frame && mode === 'walk') exitWalk({ animate: false });
+      if (opts.frame) framing = null;
+      carpentry.show(opts);
+      return carpentry.state();
+    },
     startPlacing(partial, opts) { if (opts && opts.onDone) opts.onDone(null); }, cancelPlacing: noop, dropAt: () => null,
     snapshot: async () => '', itemScreenRect: () => null,
     on(event, fn) { if (!handlers.has(event)) handlers.set(event, new Set()); handlers.get(event).add(fn); return () => handlers.get(event)?.delete(fn); },

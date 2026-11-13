@@ -24,7 +24,7 @@ export function groundY(x, y, plan) {
   return -plan.heights.floorAboveGround / 100;
 }
 
-const signature = (it) => [it.type, it.w, it.d, it.h, it.productId || '', JSON.stringify(it.params || {})].join('|');
+const signature = (it, extra) => [it.type, it.w, it.d, it.h, it.productId || '', JSON.stringify(it.params || {}), extra || ''].join('|');
 
 /** True if the object and all its ancestors are visible. */
 export function visibleDeep(o) {
@@ -115,6 +115,9 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
   const marks = { [LAYER_SELECTED]: new Set(), [LAYER_HOVER]: new Set() };
   const listeners = new Set();
   let materialHook = null;                                             // daylight: patches item materials for the probe field
+  let viewHidden = new Set();                                          // hidden by the view only (carpentry section cut)
+  let variant = null;                                                  // (item) => { key, view? } | null: extra build state (carpentry)
+  const variantOf = (item) => { try { return variant ? variant(item) : null; } catch (e) { return null; } };
   const notify = () => listeners.forEach((fn) => fn());
 
   // ───────────── lamp light pool ─────────────
@@ -137,21 +140,22 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
   function build(item) {
     const root = new THREE.Group();
     root.userData.itemId = item.id;
-    const model = bakeModel(models.buildModel(item));
+    const v = variantOf(item);
+    const model = bakeModel(models.buildModel(v && v.view ? { ...item, view: v.view } : item));
     const lamps = [];
     model.traverse((o) => {
       if (o.isLight && o.userData.isLampLight) { lamps.push({ light: o, intensity: o.intensity }); o.visible = false; }
     });
     root.add(model);
     if (materialHook) root.traverse((o) => { if (o.isMesh && o.material) materialHook(o.material); });
-    return { id: item.id, root, sig: signature(item), lamps, box: new THREE.Box3() };
+    return { id: item.id, root, sig: signature(item, v && v.key), lamps, box: new THREE.Box3() };
   }
 
   function pose(entry, item) {
     const base = groundY(item.x, item.y, plan);
     entry.root.position.set(item.x / 100, base + (item.elev || 0) / 100, item.y / 100);
     entry.root.rotation.y = (-(item.rot || 0) * Math.PI) / 180;
-    entry.root.visible = !item.hidden;
+    entry.root.visible = !item.hidden && !viewHidden.has(item.id);
     entry.root.updateMatrixWorld(true);
     const b = entry.box.makeEmpty();
     for (const [cx, cy] of itemCorners(item)) {
@@ -177,7 +181,8 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
   function refresh(item) {
     const entry = entries.get(item.id);
     if (!entry) return add(item);
-    if (entry.sig !== signature(item)) { remove(item.id); return add(item); }
+    const v = variantOf(item);
+    if (entry.sig !== signature(item, v && v.key)) { remove(item.id); return add(item); }
     pose(entry, item);
   }
   function syncAll() {
@@ -215,6 +220,21 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
     /** The plan was edited: items stand on the house floor or on garden level depending on where the walls now are. */
     refreshPlan() { for (const item of store.items) { const entry = entries.get(item.id); if (entry) pose(entry, item); } },
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    /**
+     * Extra build state per item: `fn(item)` → { key, view? } | null. `key` joins the rebuild signature; `view` is passed to
+     * the model as `item.view` (never stored). Used by the carpentry view (run spec / worktops, open fronts).
+     */
+    setVariant(fn) { variant = typeof fn === 'function' ? fn : null; },
+    /** Hide these item ids in the view only (the store is untouched); [] shows them again. */
+    setViewHidden(ids) {
+      const next = new Set(ids || []);
+      if (next.size === viewHidden.size && [...next].every((id) => viewHidden.has(id))) return;
+      viewHidden = next;
+      for (const item of store.items) { const entry = entries.get(item.id); if (entry) pose(entry, item); }
+      notify(); invalidate();
+    },
+    /** Re-check every item against its signature (rebuilds only what changed). */
+    resync() { syncAll(); notify(); invalidate(); },
     /** Put exactly these item ids on an outline layer (LAYER_SELECTED / LAYER_HOVER). */
     setMarked(layer, ids) {
       const next = new Set(ids), prev = marks[layer];
@@ -228,7 +248,7 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
      * Nearest item under a ray. Cheap: tests each item's box first, then only the meshes of candidates.
      * @returns {{ id: string, point: THREE.Vector3, distance: number, normal: THREE.Vector3|null }|null}
      */
-    raycast(raycaster, { skip } = {}) {
+    raycast(raycaster, { skip, clipped } = {}) {
       if (!group.visible) return null;
       let best = null;
       const hits = [];
@@ -237,7 +257,7 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
         if (!raycaster.ray.intersectsBox(entry.box)) continue;
         hits.length = 0;
         raycaster.intersectObject(entry.root, true, hits);
-        const h = hits.find((x) => x.object.isMesh);
+        const h = hits.find((x) => x.object.isMesh && !(clipped && clipped(x.point)));
         if (h && (!best || h.distance < best.distance)) {
           best = { id: entry.id, point: h.point.clone(), distance: h.distance, normal: h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : null };
         }

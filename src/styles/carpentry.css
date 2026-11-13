@@ -402,3 +402,22 @@
   .cinsp__headacts .btn { flex: 1 1 auto; }
   .popover--kinds .ckinds__grid { grid-template-columns: 1fr; }
 }
+
+/* ───────── workbench 3D tab (the run is shown in the 3D view; this pane holds its controls + fit problems) ───────── */
+.cwb.is-3d .cwb__zoom { display: none; }
+.c3d { position: absolute; inset: 0; overflow: auto; padding: var(--s-3); display: flex; flex-direction: column; gap: var(--s-3); background: var(--panel); }
+.c3d[hidden] { display: none; }
+.c3d__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.c3d__checks { display: flex; flex-direction: column; gap: 4px; max-width: 760px; }
+.c3d__check { display: flex; align-items: flex-start; gap: 8px; text-align: left; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--paper, transparent); font-size: var(--fs-13); line-height: 1.35; }
+.c3d__check:hover { border-color: var(--line-strong); }
+.c3d__check--warning svg { color: var(--warn); flex: none; margin-top: 2px; }
+.c3d__check--error svg { color: var(--fail); flex: none; margin-top: 2px; }
+.c3d__codes { flex: none; font-weight: 600; min-width: 2.5em; }
+.c3d__text { color: var(--ink-2); }
+.c3d__ok { display: flex; align-items: center; gap: 6px; color: var(--pass); font-size: var(--fs-13); margin: 0; }
+.c3d__hint { margin: 0; color: var(--ink-3); font-size: var(--fs-12); max-width: 760px; }
+
+/* 3D tab: the 3D view takes most of the stage, the plan stays as a narrow key plan. */
+.viewport.is-carp3d[data-mode='split'] .pane-2d { flex: 0 0 26%; }
+.viewport.is-carp3d .split-handle { pointer-events: none; }
