@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 7): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 8): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -13,10 +13,21 @@ Last updated: 13 Nov 2026. Published preview (version 7): https://claude.ai/arti
 ## In progress
 - [x] **Realistic interior daylight** — published in version 4 (13 Nov). Follow-ups: furniture does not block bounced light; low-sun brightness and glass transmittance of the direct beam are not physically matched; lamps are not light sources at night; add a daylight on / off and clear / overcast toggle in the UI.
 
+## Done in version 8 (13 Nov 2026, night)
+- [x] Carpentry 3D polish: studio light, corner pantry checked by eye, lift-off door detail, splashback / upstand, sliding doors follow the run split, phone layout of the 3D tab.
+- [x] Carpentry on the plan: move / rotate islands with live clearances, no furniture handles on made-to-measure units, wider quotation dialog, Hebrew spec vocabulary in the Hebrew PDF (a native speaker should check the terms listed in the hand-over note below).
+- [x] UX fixes: finishes drop onto the 3D view, tablet drawer scrim, wall Length field, the Bedroom 1 / 2 partition drags north with its doors, clearer removed-wall ghost.
+- [x] Narrow phones: one mode button (Furnish / Structure / Carpentry).
+- [x] Hosting build: `node dev/build-site.mjs` writes `dist/site` (robots.txt, noindex, security headers); booted locally under the production Content-Security-Policy without errors.
+
+Hebrew terms to have checked by a native speaker: לבן בוהק, גרייג׳, קשמיר, ירוק מרווה, כחול נייבי, קלקטה, נירוסטה (worktop), ציר קליפס 110°, מגירת קופסה על מסילות טלסקופיות (שליפה מלאה), נשלף לפחי אשפה, ידית חריץ עליונה, מנגנון הרמה (סטיי-ליפט).
+
+Small follow-ups noted: island stools do not travel with the island; overlap of an island with ordinary furniture is only a warning; studio light leaves the room backdrop dim; 3D finish-drop highlight and phone studio / open-fronts not checked by eye; at 320 px wide the File menu button is cut off.
+
 ## Next
 - [x] **Stretched display on a phone** — fixed in version 6 (13 Nov): off-screen sheets made the page itself scrollable, so the app could slide up and out of view. The root and the app shell are now clipped and page scroll is reset; the top bar fits down to 360 px wide (at 320 px the File menu is still cut off).
 - [x] **Carpentry in 3D** — published in version 7 (13 Nov): every unit is built in 3D from the same data as the drawings (fronts, handles, worktops with cut-outs, corner pantry in its true L shape); 3D tab in the carpentry workbench with section cut, Open fronts, fit warnings pinned on the units. Follow-ups: the interior is dim at some hours (add a neutral studio-light option for inspecting carpentry); splashbacks / upstands not modelled; lift-off doors look like hinged doors while closed; sliding wardrobe doors do not follow the run's door split; corner pantry shape checked by numeric tests only, not by eye; phone layout of the 3D tab unchecked.
-- [ ] Lead's UX review pass (known: finishes cannot be dropped onto the 3D view; tablet side panels have no scrim; wall length has no inspector field; the Bedroom 1 / Bedroom 2 partition cannot be dragged until a bedroom door is moved away from its end; the removed-wall ghost is faint in dark theme; touch gestures for structure tools untested).
+- [ ] Touch gestures for the structure tools are untested on a real device.
 - [ ] Performance check on a real graphics card (only a software renderer has been measured).
 - [ ] Catalogue gaps: long linear pendants, fountains / bird baths, composite decking, concrete pavers, date palms, heat-pump water heaters, clotheslines / composters.
 - [ ] Merge branch `ccr-70c095fe-io3e41` into the default branch (pull request).
