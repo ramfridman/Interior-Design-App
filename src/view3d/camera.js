@@ -133,7 +133,7 @@ export function createOrbitRig({ camera, dom, plan, onChange }) {
     const diag = streetDiagonal(1);
     const dx = Math.abs(c.x - houseC.x) > 0.5 ? Math.sign(c.x - houseC.x) : Math.sign(diag[0]) || 1;
     const dz = Math.abs(c.z - houseC.z) > 0.5 ? Math.sign(c.z - houseC.z) : Math.sign(diag[1]) || 1;
-    return framed(boxCorners(box), Math.atan2(dx, dz * 1.25), THREE.MathUtils.degToRad(33), 45, 1.16);
+    return framed(boxCorners(box), Math.atan2(dx, dz * 1.25), THREE.MathUtils.degToRad(27), 45, 1.3);
   }
 
   /** Pose for a named preset or a room id; null when unknown. */
