@@ -74,7 +74,7 @@ const _corner = new THREE.Vector3();
 function frame(camera, box, theta, phi, margin) {
   const target = box.getCenter(new THREE.Vector3());
   let radius = fitRadius(box, target, theta, phi, camera.fov, 1, 1);
-  for (let pass = 0; pass < 3; pass++) {
+  for (let pass = 0; pass < 6; pass++) {
     camera.position.setFromSphericalCoords(radius, phi, theta).add(target);
     camera.lookAt(target);
     camera.updateMatrixWorld(true);
@@ -86,8 +86,9 @@ function frame(camera, box, theta, phi, margin) {
     const half = radius * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
     const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0), up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
     target.addScaledVector(right, ((x0 + x1) / 2) * half).addScaledVector(up, ((y0 + y1) / 2) * half);
-    radius *= Math.max(0.2, Math.max(x1 - x0, y1 - y0) / 2) * (pass === 2 ? margin : 1);
+    radius *= Math.max(0.2, Math.max(x1 - x0, y1 - y0) / 2);
   }
+  radius *= margin;
   camera.position.setFromSphericalCoords(radius, phi, theta).add(target);
   camera.lookAt(target);
 }
@@ -127,6 +128,8 @@ function renderFinish(s, src, px) {
   shape.moveTo(r, 0); shape.lineTo(S - r, 0); shape.quadraticCurveTo(S, 0, S, r); shape.lineTo(S, S - r); shape.quadraticCurveTo(S, S, S - r, S);
   shape.lineTo(r, S); shape.quadraticCurveTo(0, S, 0, S - r); shape.lineTo(0, r); shape.quadraticCurveTo(0, 0, r, 0);
   const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.05, bevelEnabled: false, curveSegments: 6 });   // UVs = metres, as textures.js expects
+  // textures.js wall materials multiply by vertex colours (house.js bakes soft shading there): plain white here.
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count * 3).fill(1), 3));
   if (floor) geo.rotateX(-Math.PI / 2);
   const tile = new THREE.Mesh(geo, material);
   const box = new THREE.Box3().setFromObject(tile);

@@ -5,6 +5,7 @@
  *   --plan-paper  --plan-ink  --plan-wall  --plan-accent  --plan-guide  --plan-danger  --plan-garden
  *   --plan-street --plan-property  --plan-building  --plan-dim  --plan-glass  --plan-font
  *   --plan-inset-top|right|bottom|left   (px kept clear of floating UI: used by fit() and the scale bar / north arrow)
+ *   --plan-hud: off                       (hide the built-in scale bar + north arrow, e.g. when the UI shows its own)
  */
 import { parseColor, mix, css, luminance } from './color.js';
 
@@ -69,7 +70,7 @@ export const exportPalette = () => buildPalette({ ...LIGHT, paper: '#ffffff' }, 
  * @returns {{ palette: object, font: string, insets: {top:number,right:number,bottom:number,left:number}, refresh(): void, destroy(): void }}
  */
 export function createTheme(container, onChange) {
-  const theme = { palette: null, font: 'system-ui, sans-serif', insets: { top: 0, right: 0, bottom: 0, left: 0 }, version: 0 };
+  const theme = { palette: null, font: 'system-ui, sans-serif', insets: { top: 0, right: 0, bottom: 0, left: 0 }, hud: true, version: 0 };
   let signature = '';
 
   theme.refresh = () => {
@@ -85,12 +86,14 @@ export function createTheme(container, onChange) {
     const font = cs.getPropertyValue('--plan-font').trim() || cs.fontFamily || 'system-ui, sans-serif';
     const inset = (side) => parseFloat(cs.getPropertyValue(`--plan-inset-${side}`)) || 0;
     const insets = { top: inset('top'), right: inset('right'), bottom: inset('bottom'), left: inset('left') };
-    const sig = JSON.stringify([dark, base, font, insets]);
+    const hud = cs.getPropertyValue('--plan-hud').trim() !== 'off';
+    const sig = JSON.stringify([dark, base, font, insets, hud]);
     if (sig === signature) return;
     signature = sig;
     theme.palette = buildPalette(base, dark);
     theme.font = font;
     theme.insets = insets;
+    theme.hud = hud;
     theme.version++;
     if (onChange) onChange(theme);
   };

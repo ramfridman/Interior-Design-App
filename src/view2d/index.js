@@ -38,6 +38,14 @@ export function createView2D(container, ctx) {
 
   let raf = 0, lastTime = 0, lastScale = NaN, fitted = false, destroyed = false;
 
+  // The built-in scale bar / north arrow step aside when the host UI overlays its own on this pane.
+  let hudChecked = 0, hudFree = true;
+  V.showHud = () => {
+    if (!V.theme.hud) return false;
+    const now = performance.now();
+    if (now - hudChecked > 1000) { hudChecked = now; hudFree = !container.parentElement?.querySelector('.scalebar, .compass'); }
+    return hudFree;
+  };
   V.emit = (name, payload) => {
     listeners.get(name)?.forEach((fn) => { try { fn(payload); } catch (err) { console.error(`[view2d] "${name}" listener failed`, err); } });
   };

@@ -11,7 +11,7 @@ import { drawSiteGround, drawSiteLines, drawSiteLabels } from './site.js';
 import { drawOutdoorAreas, drawRoomFloors, drawGrid } from './floors.js';
 import { drawWalls } from './walls.js';
 import { drawOpenings } from './openings.js';
-import { drawItems, drawItemSprite, pruneSprites, spriteClock } from './items.js';
+import { drawItems, drawItem } from './items.js';
 import { drawRoomLabels, drawExteriorDims, drawInteriorDims } from './annotations.js';
 
 const MARGIN = 192;   // device px of slack around the view in the caches
@@ -27,8 +27,8 @@ function profiler(G, env) {
   };
 }
 
-/** Everything below the annotations. `skip` = ids of items drawn live by the caller; `clock` → items via sprites. */
-export function paintUnder(G, env, skip = null, clock = null) {
+/** Everything below the annotations. `skip` = ids of items drawn live by the caller */
+export function paintUnder(G, env, skip = null) {
   const { ctx } = G, { ui, pal } = env;
   const step = profiler(G, env);
   G.deviceSpace();
@@ -38,10 +38,10 @@ export function paintUnder(G, env, skip = null, clock = null) {
   step('floors', () => { drawOutdoorAreas(G, env); drawRoomFloors(G, env); });
   if (ui.showGrid && !env.exporting) step('grid', () => drawGrid(G, env));
   if (ui.showSite) step('siteLines', () => drawSiteLines(G, env));
-  if (ui.showItems) step('itemsBelow', () => drawItems(G, env, 'below', skip, clock));
+  if (ui.showItems) step('itemsBelow', () => drawItems(G, env, 'below', skip));
   step('walls', () => drawWalls(G, env));
   step('openings', () => drawOpenings(G, env));
-  if (ui.showItems) step('items', () => drawItems(G, env, 'above', skip, clock));
+  if (ui.showItems) step('items', () => drawItems(G, env, 'above', skip));
 }
 
 /** Labels and dimensions. */
@@ -85,10 +85,9 @@ export function createRenderer(canvas, env) {
       const G = gfx(ctx, cam, dpr, ox, oy, W, H);
       const liveItems = live && live.size ? env.store.items.filter((it) => live.has(it.id) && !it.hidden) : [];
 
-      const clock = spriteClock();
       if (frame.direct) {
-        paintUnder(G, env, live, clock);
-        if (env.ui.showItems) for (const it of liveItems) drawItemSprite(G, env, it, clock);
+        paintUnder(G, env, live);
+        if (env.ui.showItems) for (const it of liveItems) drawItem(G, env, it);
         paintOver(G, env);
         cache.underOk = cache.overOk = false;
         stats.mode = 'direct';
@@ -101,7 +100,6 @@ export function createRenderer(canvas, env) {
         stats.mode = 'cached';
         if (!cache.underOk) {
           if (under.width !== cw || under.height !== ch) { under.width = cw; under.height = ch; }
-          pruneSprites(env.store);
           paintUnder(gfx(uctx, cam, dpr, cache.ox + MARGIN, cache.oy + MARGIN, cw, ch), env, live);
           cache.underOk = true; stats.mode = 'rebuild'; stats.rebuilds++;
         }
@@ -113,13 +111,13 @@ export function createRenderer(canvas, env) {
         }
         const dx = ox - cache.ox - MARGIN, dy = oy - cache.oy - MARGIN;
         ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
-        const a = performance.now(); ctx.drawImage(under, dx, dy); const b = performance.now();
-        if (env.ui.showItems) for (const it of liveItems) drawItemSprite(G, env, it, clock, true);
-        G.deviceSpace(); const c = performance.now();
-        ctx.drawImage(over, dx, dy); const e = performance.now(); stats.parts = [b - a, c - b, e - c];
+        ctx.drawImage(under, dx, dy);
+        if (env.ui.showItems) for (const it of liveItems) drawItem(G, env, it);
+        G.deviceSpace();
+        ctx.drawImage(over, dx, dy);
       }
       G.deviceSpace();
-      const o0 = performance.now(); if (frame.overlay) frame.overlay(G); if (stats.parts) stats.parts[3] = performance.now() - o0;
+      if (frame.overlay) frame.overlay(G);
       stats.ms = performance.now() - t0;
       stats.frames++;
     },

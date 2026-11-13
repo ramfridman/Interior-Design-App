@@ -3,12 +3,14 @@
  *
  * Every thumbnail starts as an instant placeholder drawn here (the item's architectural plan symbol, or a swatch for
  * floor / wall finishes). When the 3D team's renderer (src/view3d/thumbs.js → getThumbnail) is available the rendered
- * picture fades in over it. Requests are lazy (IntersectionObserver), queued (two at a time) and cancellable, so a
+ * picture fades in over it. Requests are lazy (IntersectionObserver), queued (one at a time, with a pause between renders) and cancellable, so a
  * 600-product grid never stalls scrolling.
  */
 import { h } from './dom.js';
 
-const MAX_PARALLEL = 2;
+const MAX_PARALLEL = 1;
+/** Pause between renders so 3D thumbnail work never starves scrolling, dragging or animations. */
+const BREATHE_MS = 48;
 
 /** Stable cache key: products by id; generic items by their look. */
 function keyOf(subject) {
@@ -129,7 +131,7 @@ export function createThumbs(ctx) {
         .then((fn) => (fn ? fn(job.subject, job.size) : null))
         .then((url) => { if (typeof url === 'string' && url) { urls.set(job.key, url); job.els.forEach((el) => show(el, url)); } })
         .catch(() => { /* keep the placeholder */ })
-        .finally(() => { running--; setTimeout(pump, 0); });
+        .finally(() => { running--; setTimeout(pump, BREATHE_MS); });
     }
   }
 

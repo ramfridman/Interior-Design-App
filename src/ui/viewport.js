@@ -3,7 +3,7 @@
  * catalogue, and the quiet controls that float over each view (zoom, compass, scale bar, camera, sun, walk HUD).
  */
 import { spaceAt } from '../core/geometry.js';
-import { h, call, listen, clamp, rafThrottle, setKids } from './dom.js';
+import { h, append, call, listen, clamp, rafThrottle, setKids } from './dom.js';
 import { icon } from './icons.js';
 import { btn, iconBtn, kbd } from './components.js';
 import { openMenu, toast } from './dialogs.js';
@@ -142,7 +142,7 @@ export function initViewport(app) {
     // Drawing scale on a 96 dpi screen: 1 CSS px is 2.54/96 cm of glass and shows 1/pxPerCm cm of house.
     const ratio = (96 / 2.54) / pxPerCm;
     scaleRatio.textContent = `1:${ratio >= 10 ? Math.round(ratio) : ratio.toFixed(1)}`;
-    app.onZoom && app.onZoom(pxPerCm);
+    app.onZoom && app.onZoom(pxPerCm, scaleRatio.textContent);
   }
   listen(view2d, 'zoom', syncScale);
 
@@ -155,7 +155,10 @@ export function initViewport(app) {
     iconBtn('minus', 'Zoom out', { kbd: '−', onClick: () => call(view2d, 'zoomBy', 0.8) }),
     iconBtn('fit', 'Fit the house', { kbd: 'F', onClick: () => call(view2d, 'fit', 'house', { animate: true }) }),
     iconBtn('site', 'Fit the whole lot', { onClick: () => call(view2d, 'fit', 'lot', { animate: true }) }));
-  ov2d.append(h('div', { class: 'ov__tr' }, compass), h('div', { class: 'ov__br' }, zoom), h('div', { class: 'ov__bl' }, scale));
+  // The real plan view draws its own scale bar and north arrow on the canvas; ours appear only for views that ask
+  // for them (view2d.needsHud === true, e.g. the dev stub), so the two never show twice.
+  const ownHud = !view2d || view2d.needsHud === true;
+  append(ov2d, [ownHud && h('div', { class: 'ov__tr' }, compass), h('div', { class: 'ov__br' }, zoom), ownHud && h('div', { class: 'ov__bl' }, scale)]);
 
   /* ───────── 3D overlay: camera, roof, cutaway, sun, walk ───────── */
   const cameraBtn = btn('Views', { icon: 'camera', iconRight: 'chevron-down', small: true, attrs: { 'aria-haspopup': 'menu' }, onClick: () => openMenu(cameraBtn, [

@@ -58,10 +58,10 @@ function cushionGeo(w, t, l, r, rp, crown) {
   r = clamp(r, 0.001, Math.min(T, w, l) / 2 - 0.0002);
   rp = clamp(rp, r, Math.min(w, l) / 2 - 0.0001);
   return memo(`cu|${mm(w)}|${mm(t)}|${mm(l)}|${mm(r)}|${mm(rp)}|${mm(crown)}`, () => {
-    const dome = crown > 0.0005, CS = clamp(Math.ceil(rp / 0.028), 2, 6), ES = dome ? 2 : 0, AS = 2, M = 4 * (CS + 1 + ES), rings = [];
+    const dome = crown > 0.0005, CS = clamp(Math.ceil(rp / 0.03), 2, 6), ES = dome ? 2 : 0, AS = 2, M = 4 * (CS + 1 + ES), rings = [];
     for (let j = 0; j <= 1; j++) rings.push([r * (1 - j) * 0.6, -t / 2 + r * j * 0.6 + (j ? r * 0.4 : 0), 1]);      // chamfered underside
     for (let j = AS; j >= 0; j--) { if (j === AS && T - 2 * r < 2e-4) continue; const f = (j / AS) * PI / 2; rings.push([r * (1 - Math.sin(f)), -t / 2 + T - r * (1 - Math.cos(f)), 1]); }
-    if (dome) for (const s of [0.8, 0.55, 0.28]) rings.push([r, -t / 2 + T, s]);
+    if (dome) for (const s of [0.74, 0.4]) rings.push([r, -t / 2 + T, s]);
     const pos = [], uv = [], idx = [], hw = w / 2, hl = l / 2, X = Math.max(hw - r, 1e-4), Z = Math.max(hl - r, 1e-4);
     for (const [inset, y, s] of rings) for (let c = 0; c < 4; c++) {
       const arc = [];
@@ -118,9 +118,17 @@ function plateGeo(shape, w, d, t, cr = 0.004) {
       s.lineTo(-hw, -hd + r); s.absarc(-hw + r, -hd + r, r, PI, PI * 1.5, false);
     }
     const g = new THREE.ExtrudeGeometry(s, { depth: t - 2 * b, bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelSegments: 1, curveSegments: shape === 'round' ? 22 : 3 });
-    g.rotateX(-PI / 2); g.center();
+    normU(g, -w / 2, w / 2); g.rotateX(-PI / 2); g.center();
     return g;
   });
+}
+/** Stretch U over [x0, x1] so the (non-tileable) wood grain never shows a wrap seam on a top. */
+function normU(geo, x0, x1) { const uv = geo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setX(i, (uv.getX(i) - x0) / Math.max(x1 - x0, 1e-4)); }
+/** Flat polygonal slab from plan points [[x, z]…], thickness t, bottom at y0 (L-shaped tops). */
+function slab(points, t, material, y0) {
+  const geo = new THREE.ExtrudeGeometry(new THREE.Shape(points.map(([x, z]) => new THREE.Vector2(x, -z))), { depth: t, bevelEnabled: false });
+  const xs = points.map((q) => q[0]); normU(geo, Math.min(...xs), Math.max(...xs)); geo.rotateX(-PI / 2);
+  return at(geo, material, 0, y0, 0);
 }
 const plate = (shape, w, d, t, material, x = 0, y = 0, z = 0, cr = 0.004) => at(plateGeo(shape, w, d, t, cr), material, x, y, z);
 
@@ -257,6 +265,9 @@ function shellWall(o) {
   for (const [deg, k] of nose) add(pts[0][0], pts[0][1] + t * k, Math.cos(deg * PI / 180), topFront - (1 - Math.cos(deg * PI / 180)) * Math.min(0.02, t));
   for (const [x, z] of pts) add(x, z, 1, topAt(z));
   for (const [deg, k] of nose.slice().reverse()) add(pts[pts.length - 1][0], pts[pts.length - 1][1] + t * k, Math.cos(deg * PI / 180), topFront - (1 - Math.cos(deg * PI / 180)) * Math.min(0.02, t));
+  let maxX = 0;
+  st.forEach((q, i) => { const a = st[Math.max(0, i - 1)], b = st[Math.min(st.length - 1, i + 1)], l = Math.hypot(b.x - a.x, b.z - a.z) || 1; maxX = Math.max(maxX, Math.abs(q.x) + Math.abs(b.z - a.z) / l * (t / 2 + flare * (tops[i] - y0)) * q.su); });
+  if (maxX > 1e-3) { const k = 1 - (maxX - o.hw) / Math.max(rx, 0.02); st.forEach((q) => { q.x *= k; }); }
   const r = o.r ?? t * 0.45;
   return sweep(st, (i) => rrSection(t, y0, Math.max(tops[i], y0 + 2.2 * r), r, flare, 2), o.material);
 }
@@ -379,9 +390,9 @@ function runCushions(g, L, r) {
   const mods = L.loose ? n : 1, cw = (xR - xL) / mods;
   for (let k = 0; k < mods; k++) {
     const isCh = ch && L.loose && (ch.side < 0 ? k === 0 : k === mods - 1), z1 = zF + (isCh ? ch.extra : 0);
-    g.add(cush(cw - gap, L.cushT, z1 - zS, M.seat, xL + cw * (k + 0.5), sy, (zS + z1) / 2, er, er * 1.5, crown));
+    g.add(cush(cw - gap, L.cushT, z1 - zS, M.seat, xL + cw * (k + 0.5), sy, (zS + z1) / 2, er, er * 1.3, crown));
   }
-  if (ch && !L.loose) g.add(cush(mw - gap, L.cushT, ch.extra - gap, M.seat, ch.side < 0 ? xL + mw / 2 : xR - mw / 2, sy, zF + ch.extra / 2, er, er * 1.5, crown));
+  if (ch && !L.loose) g.add(cush(mw - gap, L.cushT, ch.extra - gap, M.seat, ch.side < 0 ? xL + mw / 2 : xR - mw / 2, sy, zF + ch.extra / 2, er, er * 1.3, crown));
   const [b0, b1] = r.bcZone || [xL, xR], nb = Math.max(1, Math.round((b1 - b0) / mw)), bw = (b1 - b0) / nb;
   const cy = bc.top - bc.ey, cz = zA - 0.004 + bc.ez, cl = Math.cos(bc.lean), sl = Math.sin(bc.lean);
   const tiers = bc.tiers === 2 ? [[-0.5, 0.62], [0.12, 0.38]] : bc.tiers === 3 ? [[-0.5, 0.34], [-0.16, 0.33], [0.17, 0.33]] : [[-0.5, 1]];
@@ -426,7 +437,7 @@ function sofaRun(L, r) {
   const bx0 = xL - (endL ? 0.01 : 0), bx1 = xR + (endR ? 0.01 : 0), bz0 = zA - 0.01, bz1 = zF - (L.footrest ? 0.03 : 0.015), by = L.footrest ? Math.max(lh, 0.02) : lh;
   g.add(K.rbox(bx1 - bx0, baseTop - by, bz1 - bz0, M.body, (bx0 + bx1) / 2, (by + baseTop) / 2, (bz0 + bz1) / 2, R * 0.5, 1));
   if (ch) g.add(K.rbox(mw, baseTop - lh, ch.extra + 0.04, M.body, ch.side < 0 ? xL + mw / 2 : xR - mw / 2, (lh + baseTop) / 2, zF + ch.extra / 2 - 0.035, R * 0.5, 1));
-  g.add(K.rbox(len, L.backTop - lh, L.backT, M.body, 0, (lh + L.backTop) / 2, zB + L.backT / 2, Math.min(R * 0.8, L.backT * 0.45), 2));
+  g.add(K.rbox(len, L.backTop - lh, L.backT, M.body, 0, (lh + L.backTop) / 2, zB + L.backT / 2, Math.min(R * 0.8, L.backT * 0.45), 1));
   for (const [e, s] of [[endL, -1], [endR, 1]]) if (e) g.add(K.rbox(e.w, e.top - lh, zF - zA + 0.008, M.body, s * (len / 2 - e.w / 2), (lh + e.top) / 2, (zA - 0.008 + zF) / 2, Math.min(L.style === 'classic' ? 0.09 : R, e.w * 0.45), 2));
   if (L.footrest) g.add(leaned(xR - xL - 0.012, 0.06, baseTop - by - 0.015, M.seat, (xL + xR) / 2, (by + baseTop) / 2, zF - 0.03, 0, 0.02, 0.03, 0.014));
   runCushions(g, L, rr);
@@ -718,6 +729,18 @@ function backRail(hw, z, sag, tu, y0, y1, material, hard = true, r = 0.004) {
   return sweep(st, rrSection(tu, y0, y1, r, 0, hard ? 1 : 2), material, { hard });
 }
 
+/** Curved back pad / panel with rounded corners in elevation: x ∈ ±hw, y ∈ [0, H], bowed towards −Z by sag (rear centre at z = −sag − tu/2). */
+function backPad(hw, sag, tu, H, material, r, rc) {
+  rc = Math.max(0.002, Math.min(rc, hw * 0.6, H * 0.45));
+  const xs = [];
+  for (let i = 0; i <= 4; i++) xs.push(-hw + rc * (1 - Math.sin((i / 4) * PI / 2)));
+  for (let i = 1; i < 6; i++) xs.push(lerp(-hw + rc, hw - rc, i / 6));
+  for (let i = 4; i >= 0; i--) xs.push(hw - rc * (1 - Math.sin((i / 4) * PI / 2)));
+  xs.sort((a, b) => a - b);
+  const cut = xs.map((x) => { const e = Math.abs(x) - (hw - rc); return e > 0 ? rc - Math.sqrt(Math.max(rc * rc - e * e, 0)) : 0; });
+  return sweep(xs.map((x) => ({ x, z: -sag * (1 - (x / hw) ** 2) })), (i) => rrSection(tu, cut[i], Math.max(H - cut[i], cut[i] + 0.004), r, 0, 2), material);
+}
+
 function chairTimber(g, w, d, h, L) {                          // classic four-leg frame chair (timber or square metal tube)
   const metalF = L.hard === 'metal' || L.hard === 'aluminium', lt = metalF ? 0.022 : clamp(w * 0.07, 0.024, 0.036), sh = L.sh, zB = -d / 2, zF = d / 2;
   const xo = w / 2 - lt / 2 - (L.arms ? 0.004 : 0), sag = clamp(w * 0.05, 0.008, 0.028), rake = clamp((h - sh) * 0.14, 0.008, 0.055), zp = zB + lt / 2 + rake, zt = zB + lt / 2 + sag * 0.75;
@@ -740,11 +763,12 @@ function chairPanels(g, w, d, h, L) {                          // thin seat + cu
   const sh = L.sh, zB = -d / 2, zF = d / 2, r = 0.009, sw = w - (L.arms ? 0.05 : 0.012), z0 = zB + clamp(d * 0.12, 0.02, 0.07), st = 0.014, wood = L.main.map != null;
   g.add(cush(sw, st, zF - z0, L.main, 0, sh - st / 2, (z0 + zF) / 2, wood ? 0.004 : 0.006, Math.min(0.07, sw * 0.16), 0));
   const bh = clamp((h - sh) * 0.48, 0.06, 0.24), sag = clamp(w * 0.07, 0.01, 0.035), bw = sw / 2 - 0.012;
-  g.add(backRail(bw, zB + 0.006 + sag, sag, 0.012, h - bh, h, L.main, false, 0.0055));
+  const bp = backPad(bw, sag, 0.012, bh, L.main, 0.0055, 0.03); bp.position.set(0, h - bh, zB + 0.006 + sag); g.add(bp);
+  const zsup = zB + 0.024 + sag * 0.85;
   const xs = sw / 2 - 0.045, y1 = sh - st, xb = w / 2 - r, zs0 = z0 + 0.04, zs1 = zF - 0.05;
   if (L.legs === 'sled') sledLegs(g, xs, y1, zB + 0.02, zF, r, L.frame);
-  else for (const s of [-1, 1]) g.add(strut([s * xb, r * 0.25, zF - r], [s * xs, y1, zs1], r, r, L.frame), tube(roundPath([[s * xb, r, zB + r + 0.01], [s * xs, y1 - 0.01, zs0], [s * (bw - 0.03), h - bh * 0.55, zB + 0.012 + sag * 0.4]], 0.05, 3), r, L.frame));
-  if (L.legs === 'sled') for (const s of [-1, 1]) g.add(strut([s * xs, y1 - 0.01, zs0], [s * (bw - 0.03), h - bh * 0.55, zB + 0.012 + sag * 0.4], r, r, L.frame));
+  else for (const s of [-1, 1]) g.add(strut([s * xb, r * 0.25, zF - r], [s * xs, y1, zs1], r, r, L.frame), tube(roundPath([[s * xb, r, zB + r + 0.01], [s * xs, y1 - 0.01, zs0], [s * (bw - 0.03), h - bh * 0.55, zsup]], 0.05, 3), r, L.frame));
+  if (L.legs === 'sled') for (const s of [-1, 1]) g.add(strut([s * xs, y1 - 0.01, zs0], [s * (bw - 0.03), h - bh * 0.55, zsup], r, r, L.frame));
   for (const s of [-1, 1]) g.add(strut([s * xs, y1 - r, zs0], [s * xs, y1 - r, zs1], r * 0.9, r * 0.9, L.frame, 8));
   if (L.arms) { const ay = Math.min(h - 0.04, sh + clamp((h - sh) * 0.5, 0.04, 0.2)); for (const s of [-1, 1]) g.add(tube(roundPath([[s * (bw - 0.01), ay, zB + 0.03 + sag * 0.5], [s * xb, ay, zB + 0.1], [s * xb, ay, zF - 0.1], [s * xb, y1 - 0.02, zF - 0.06], [s * xs, y1 - 0.008, zF - 0.07]], 0.04, 3), r, L.frame)); }
 }
@@ -759,7 +783,7 @@ function chairShell(g, w, d, h, L) {                           // moulded shell 
   if (L.legs === 'sled') { sledLegs(g, sw / 2 - 0.03, y1, zB + 0.04, zF - 0.01, 0.009, L.frame); g.add(strut([-(sw / 2 - 0.03), y1 - 0.009, 0], [sw / 2 - 0.03, y1 - 0.009, 0], 0.008, 0.008, L.frame, 8)); }
   else {
     const metal = L.legs === 'metal', rb = metal ? 0.008 : 0.011, rt = metal ? 0.009 : 0.017;
-    splayLegs(g, { x: xt, z: zt }, { x: w / 2 - rb - 0.004, z: [zB + rb + 0.03, zF - rb - 0.004] }, y1, rt, rb, L.frame);
+    splayLegs(g, { x: xt, z: zt }, { x: lerp(xt, w / 2 - rb - 0.004, 0.7), z: [zB + Math.max(rb + 0.03, d * 0.1), zF - rb - 0.004] }, y1, rt, rb, L.frame);
     if (!metal) { const m = K.metal('#26272b'), yb = y1 * 0.72, k = 1 - yb / y1; for (const s of [-1, 1]) g.add(strut([-lerp(xt, w / 2, k * 0.9), yb, lerp(zt[0], zB + 0.04, k * 0.9) * 1], [lerp(xt, w / 2, k * 0.9) * 1, yb, lerp(zt[1], zF, k * 0.9)], 0.003, 0.003, m, 6).translateX(0)); }
     g.add(K.box(xt * 2 + 0.03, 0.012, zt[1] - zt[0] + 0.03, metal ? L.frame : K.metal('#26272b'), 0, y1 - 0.006, (zt[0] + zt[1]) / 2));
   }
@@ -874,7 +898,7 @@ registerModel('chair', {
       for (const s of [-1, 1]) q.rr(Math.min(s * w / 2, s * (w / 2 - aw)), zB + d * 0.2, Math.max(s * w / 2, s * (w / 2 - aw)), zF, 0.015, tone(mh, 0.3), INK, 0.8);
       return;
     }
-    const shell = v === 'shell' || (v === 'upholstered' && L.arms), a = L.arms ? (shell ? 0.04 : 0.035) : 0, bz = zB + clamp(d * 0.16, 0.03, 0.09);
+    const shell = v === 'shell' || (v === 'upholstered' && L.arms), a = L.arms ? (shell ? 0.04 : 0.035) : 0, bz = zB + clamp(d * 0.08, 0.02, 0.045);
     if (shell) {                                               // wrap-around shell
       const zc = zB + Math.min(w / 2, d * 0.5), zE = L.arms ? zF - d * 0.22 : zc;
       q.rr(-w / 2 + 0.03, bz - 0.02, w / 2 - 0.03, zF, Math.min(w, d) * 0.28, seatF);
@@ -926,7 +950,7 @@ registerModel('bar-stool', {
     }
     if (L.back) {
       const bh = clamp((h - seatH) * 0.55, 0.04, 0.2), sag = clamp(sw * 0.1, 0.01, 0.04), hw = sw / 2 - 0.02, zr = zB + sag + 0.008, soft = !L.woodSeat;
-      g.add(backRail(hw, zr, sag, soft ? 0.035 : 0.014, h - bh, h, L.seat, false, soft ? 0.015 : 0.006));
+      const bp = backPad(hw, sag, soft ? 0.035 : 0.014, bh, L.seat, soft ? 0.015 : 0.006, 0.03); bp.position.set(0, h - bh, zr); g.add(bp);
       const postM = L.legs === 'wood' ? frame : frame, zs = zc - sd / 2 + 0.03;
       for (const s of [-1, 1]) g.add(strut([s * (hw - 0.03), y1 + 0.004, zs], [s * (hw - 0.025), h - bh * 0.5, zr - sag * 0.2 + 0.004], L.legs === 'wood' ? 0.011 : 0.008, L.legs === 'wood' ? 0.011 : 0.008, postM, 8));
     }
@@ -945,8 +969,8 @@ registerModel('bar-stool', {
 // ═════════════════════════ OFFICE CHAIR ═════════════════════════
 function officeLayout(w, d, h, p) {
   const variant = pick(p.variant, ['task', 'executive', 'gaming', 'mesh'], 'task'), arms = flag(p.arms, true), headrest = flag(p.headrest, variant === 'gaming');
-  const R = Math.max(0.05, Math.min(d / 2 - 0.03, (w / 2 - 0.035) / 0.951)), zc = Math.max(0, d / 2 - 0.03 - R) * 0.5;
-  const sh = clamp(h * 0.42, 0.1, 0.52), sw = Math.min(w - (arms ? 0.1 : 0.02), 0.54), sd = Math.min(d * 0.76, 0.5);
+  const R = Math.max(0.05, Math.min(d / 2 - 0.03, (w / 2 - 0.03) / 0.951)), zc = Math.max(0, d / 2 - 0.03 - R);
+  const sh = clamp(h * 0.42, 0.1, 0.52), sw = Math.min(w - (arms ? 0.13 : 0.03), 0.5), sd = Math.min(d * 0.74, 0.47);
   const up = softMat(p.material, C(p.color, '#2f3237')), dark = K.plastic(C(p.color2 && variant !== 'gaming' ? p.color2 : null, '#202124'));
   const accent = K.byMaterial(softOf(p.material) || 'fabric', C(p.color2, variant === 'gaming' ? '#b93a32' : K.shade(matHex(up), 0.15)));
   return { variant, arms, headrest, R, zc, sh, sw, sd, up, dark, accent };
@@ -972,19 +996,19 @@ registerModel('office-chair', {
     if (v === 'gaming') for (const s of [-1, 1]) g.add(cush(0.07, st * 0.9, sd * 0.86, L.accent, s * (sw / 2 - 0.03), sh - st * 0.3, zs, 0.028, 0.03, 0.01));
     // back
     const by0 = sh + clamp((h - sh) * 0.12, 0.02, 0.1), top = L.headrest && v !== 'gaming' && v !== 'executive' ? h - clamp((h - sh) * 0.26, 0.05, 0.2) : h, bw = sw * (v === 'executive' || v === 'gaming' ? 0.98 : 0.9);
-    const zs0 = zs - sd / 2, lean = 0.1, zAt = (y) => lerp(zs0 + 0.02, zB + 0.03, (y - sh) / Math.max(h - sh, 0.01));
+    const zs0 = zs - sd / 2, z0 = zs0 + 0.03, lean = clamp(Math.atan2(z0 - zB, Math.max(h - by0, 0.05)), 0.03, 0.45), zAt = (y) => z0 - (y - by0) * Math.tan(lean);   // rear face of the back
     g.add(beam([0, seatB - 0.02, zc - sd * 0.25], [0, by0 + (top - by0) * 0.3, zAt(by0 + (top - by0) * 0.3) - 0.012], 0.06, 0.02, dark));
     const sag = clamp(bw * 0.09, 0.01, 0.045);
-    const panel = (y0, y1, tu, m, r, hw = bw / 2) => { const mesh = backRail(hw, 0, sag, tu, 0, y1 - y0, m, false, r); mesh.rotation.x = -lean; mesh.position.set(0, y0, zAt(y0) + sag + tu / 2 - 0.004); return mesh; };
+    const panel = (y0, y1, tu, m, r, hw = bw / 2, rc = 0.06) => { const mesh = backPad(hw, sag, tu, (y1 - y0 - tu * 0.5 * Math.sin(lean)) / Math.cos(lean), m, r, rc); mesh.rotation.x = -lean; mesh.position.set(0, y0, zAt(y0) + sag + tu / 2); return mesh; };
     if (v === 'mesh') {
       const meshM = K.mat(matHex(up), { opacity: 0.62, roughness: 0.9 }), fr = 0.011, H = top - by0, hw = bw / 2;
-      g.add(noShadow(panel(by0, top, 0.006, meshM, 0.0025)));
+      g.add(noShadow(panel(by0, top, 0.006, meshM, 0.0025, bw / 2, 0.04)));
       const loop = (y) => Array.from({ length: 9 }, (_, i) => { const x = lerp(-hw, hw, i / 8); return [x, y, -sag * (1 - (x / hw) ** 2)]; });
       const frame = new THREE.Group(); frame.add(tube(roundPath([...loop(0), ...loop(H).reverse()], 0.04, 3, true), fr, dark, { closed: true }), tube(loop(H * 0.3).map(([x, y, z]) => [x, y, z - 0.012]), 0.012, dark));
-      frame.rotation.x = -lean; frame.position.set(0, by0, zAt(by0) + sag + 0.003); g.add(frame);
+      frame.rotation.x = -lean; frame.position.set(0, by0, zAt(by0) + sag + 0.006); g.add(frame);
     } else if (v === 'executive') {
       const n = clamp(Math.round((top - by0) / 0.17), 2, 5), H = (top - by0) / n;
-      for (let i = 0; i < n; i++) g.add(panel(by0 + H * i + 0.003, by0 + H * (i + 1) - 0.003, 0.085, up, 0.036));
+      for (let i = 0; i < n; i++) g.add(panel(by0 + H * i + 0.003, by0 + H * (i + 1) - 0.003, 0.085, up, 0.036, bw / 2, 0.035));
     } else if (v === 'gaming') {
       g.add(panel(by0, top, 0.07, up, 0.03, bw / 2 - 0.05));
       for (const s of [-1, 1]) { const y = by0 + (top - by0) * 0.5, m = cush(0.085, 0.09, (top - by0) * 0.96, L.accent, s * (bw / 2 - 0.035), y, zAt(y) + 0.045, 0.035, 0.04, 0.012); m.rotation.set(PI / 2 - lean, 0, -s * 0.5); m.rotation.order = 'XYZ'; g.add(m); }
@@ -994,7 +1018,7 @@ registerModel('office-chair', {
     if (L.headrest && v !== 'gaming' && v !== 'executive') {
       const hy0 = top + clamp((h - top) * 0.2, 0.005, 0.04);
       g.add(beam([0, top - 0.06, zAt(top - 0.06) - 0.01], [0, hy0 + 0.03, zAt(hy0) - 0.006], 0.035, 0.012, dark));
-      const hr = backRail(bw * 0.3, 0, sag * 0.4, 0.05, 0, h - hy0, v === 'mesh' ? dark : up, false, 0.022); hr.rotation.x = -lean * 0.5; hr.position.set(0, hy0, zB + 0.028 + sag * 0.4 + (h - hy0) * Math.sin(lean * 0.5)); g.add(hr);
+      const hr = backPad(bw * 0.3, sag * 0.4, 0.05, (h - hy0) / Math.cos(lean), v === 'mesh' ? dark : up, 0.022, 0.035); hr.rotation.x = -lean; hr.position.set(0, hy0, zAt(hy0) + sag * 0.4 + 0.025); g.add(hr);
     }
     // arms
     if (L.arms) {
@@ -1221,7 +1245,7 @@ registerModel('desk', {
     const g = new THREE.Group(), L = deskLayout(w, d, h, p), { deskH: H, tt, lt, mainD, topM, baseM, side: s } = L, zB = -d / 2, zM = zB + mainD, zF = d / 2, yT = H - tt;
     const handleM = L.metalBase ? baseM : K.metal('#2b2d31'), zPed = zM - 0.03;
     // top
-    if (L.corner) { const xi = s * (w / 2 - L.retW), pts = s > 0 ? [[-w / 2, zB], [w / 2, zB], [w / 2, zF], [xi, zF], [xi, zM], [-w / 2, zM]] : [[-w / 2, zB], [w / 2, zB], [w / 2, zM], [xi, zM], [xi, zF], [-w / 2, zF]]; g.add(K.slab(pts, tt, topM, yT)); }
+    if (L.corner) { const xi = s * (w / 2 - L.retW), pts = s > 0 ? [[-w / 2, zB], [w / 2, zB], [w / 2, zF], [xi, zF], [xi, zM], [-w / 2, zM]] : [[-w / 2, zB], [w / 2, zB], [w / 2, zM], [xi, zM], [xi, zF], [-w / 2, zF]]; g.add(slab(pts, tt, topM, yT)); }
     else g.add(plate('rect', w, d, tt, topM, 0, H - tt / 2, 0, 0.006));
     // drawer pedestals (on the main wing)
     const pedSide = (sx) => L.drawers === 'both' || (L.drawers === 'left' && sx < 0) || (L.drawers === 'right' && sx > 0);
@@ -1235,7 +1259,7 @@ registerModel('desk', {
     }
     // supports
     const sup = [];                                             // [x, z0, z1] support lines (legs pair / panel / trestle / column)
-    for (const sx of [-1, 1]) { if (full && pedSide(sx)) continue; const x = sx * (w / 2 - lt / 2 - (L.base === 'legs' ? 0.012 : L.base === 'panel' ? 0 : clamp(w * 0.1, 0.03, 0.2))); if (L.corner && sx === s) sup.push([x, zB, zF]); else sup.push([x, zB, zM]); }
+    for (const sx of [-1, 1]) { if (full && pedSide(sx)) continue; const x = sx * (w / 2 - lt / 2 - (L.base === 'legs' ? 0.012 : L.base === 'panel' ? 0 : clamp(w * 0.1, 0.03, 0.2))); sup.push([x, zB, L.corner && sx === s && L.base === 'legs' ? zF : zM]); }
     for (const [x, z0, z1] of sup) {
       const zc = (z0 + z1) / 2, len = z1 - z0;
       if (L.base === 'panel') g.add(K.boxOn(0.022, yT, len - 0.004, baseM, x + Math.sign(x) * (lt / 2 - 0.013), 0, zc));
@@ -1244,6 +1268,11 @@ registerModel('desk', {
       else for (const z of len > 1.25 ? [z0, zc, z1] : [z0, z1]) g.add(K.boxOn(lt, yT, lt, baseM, x, 0, z + (z === z0 ? lt / 2 + 0.012 : z === z1 ? -lt / 2 - 0.012 : 0)));
     }
     if (L.corner && L.base !== 'sit-stand') { const xi = s * (w / 2 - L.retW + lt / 2 + 0.012); if (L.base === 'legs') g.add(K.boxOn(lt, yT, lt, baseM, xi, 0, zF - lt / 2 - 0.012)); else if (L.base === 'panel') g.add(K.boxOn(L.retW - 0.03, yT, 0.022, baseM, s * (w / 2 - L.retW / 2), 0, zF - 0.02)); }
+    if (L.corner) {
+      const xm = s * (w / 2 - L.retW / 2);
+      if (L.base === 'trestle') for (const k of [-1, 1]) g.add(K.boxOn(0.035, yT, 0.035, baseM, xm + k * (L.retW / 2 - 0.06), 0, zF - 0.06));
+      if (L.base === 'sit-stand') g.add(K.rbox(Math.min(L.retW - 0.04, 0.6), 0.025, 0.075, baseM, xm, 0.0125, zF - 0.12, 0.008, 1), K.boxOn(0.05, yT * 0.55, 0.08, baseM, xm, 0.02, zF - 0.12), K.boxOn(0.038, yT * 0.5, 0.065, baseM, xm, yT * 0.5 - 0.03, zF - 0.12));
+    }
     const xs = sup.map((q) => q[0]), xa = Math.min(...xs, pedSide(-1) && full ? pedX(-1) + L.pw / 2 : Infinity), xb = Math.max(...xs, pedSide(1) && full ? pedX(1) - L.pw / 2 : -Infinity), span = xb - xa;
     if (span > 0.1) {
       if (L.base === 'legs') { const ah = Math.min(0.06, yT * 0.12); g.add(K.box(span - lt, ah, 0.018, baseM, (xa + xb) / 2, yT - ah / 2, zB + lt / 2 + 0.012), K.box(span - lt, ah * 0.7, 0.018, baseM, (xa + xb) / 2, yT - ah * 0.35, zM - lt / 2 - 0.012)); }

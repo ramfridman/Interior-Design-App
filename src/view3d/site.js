@@ -12,7 +12,7 @@ import { finishParams, prism } from './house.js';
 
 const SLAB_TOP = -0.02;
 const KERB_W = 0.1, KERB_H = 0.06;
-const SIDEWALK_W = 1.8, STREET_W = 6.5, STREET_RUN = 60;      // context beyond the street-side boundary (m)
+const SIDEWALK_W = 1.8, STREET_W = 6.5, STREET_RUN = 380;      // context beyond the street-side boundary (m)
 
 /** Smooth value noise in 0..1 (bilinear over a hashed lattice). */
 function valueNoise(x, y) {

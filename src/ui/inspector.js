@@ -11,7 +11,7 @@ import { btn, iconBtn, numField, section, swatch, extLink, emptyState } from './
 import { fmtPrice, fmtDims, fmtArea, fmtUnitPrice, toUnit, fromUnit, unitDigits, RESIZABLE_TYPES } from './format.js';
 import { shoppingTotal } from './shopping.js';
 
-const PALETTE = ['#f3f1ec', '#d9d2c5', '#b9b2a6', '#8c8a84', '#3a3d42', '#1f2226', '#c8a476', '#8a5a3b', '#5c6b5a', '#3e5c76', '#b4543a', '#d8b65c'];
+const PALETTE = ['#f3f1ec', '#d9d2c5', '#b9b2a6', '#3a3d42', '#c8a476', '#8a5a3b', '#5c6b5a', '#3e5c76', '#b4543a'];
 const STRUCTURAL = ['productId', 'type', 'generic', 'placement', 'locked', 'hidden', 'params', 'price', 'url', 'retailer', 'priceUnit'];
 
 /** @param {HTMLElement} root  @param {object} app */

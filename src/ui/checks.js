@@ -5,7 +5,7 @@
  */
 import { h, setKids, debounce } from './dom.js';
 import { icon } from './icons.js';
-import { section, emptyState } from './components.js';
+import { btn, section, emptyState } from './components.js';
 
 const ORDER = ['fail', 'warn', 'info', 'pass'];
 const LABEL = { fail: 'Problems', warn: 'Warnings', info: 'Notes', pass: 'Passed' };
@@ -38,6 +38,7 @@ export function initChecks(root, app, onCounts) {
   }
 
   async function run() {
+    if (runner === null) { if (active) render(); return; }   // module missing: tried once, wait for the user
     if (running) { stale = true; return; }
     running = true;
     stale = false;
@@ -69,7 +70,8 @@ export function initChecks(root, app, onCounts) {
   function render(counts) {
     if (unavailable) {
       setKids(summary);
-      setKids(list, emptyState({ icon: 'checks', title: 'Checks are not available yet', text: 'Clearance, setback and safe-room checks appear here once the regulations module is installed.' }));
+      setKids(list, emptyState({ icon: 'checks', title: 'Checks are being prepared', text: 'Clearance, setback and safe-room checks will appear here. The assumptions below already apply.',
+        action: btn('Check again', { small: true, onClick: () => { runner = undefined; unavailable = false; results = null; run(); } }) }));
       return;
     }
     if (!counts) { counts = { fail: 0, warn: 0, info: 0, pass: 0 }; for (const r of results || []) if (counts[r.severity] != null) counts[r.severity]++; }

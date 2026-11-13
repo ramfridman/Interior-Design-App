@@ -4,7 +4,6 @@
  */
 import { DEG } from '../core/geometry.js';
 import { css } from './color.js';
-import { createGfx } from './gfx.js';
 
 const BELOW_WALLS = new Set(['surface', 'rug']);
 const ROUND = new Set(['tree', 'shrub', 'plant', 'planter', 'parasol', 'fire-pit', 'floor-lamp', 'table-lamp', 'pendant', 'ceiling-fan', 'vase', 'water-feature', 'spa']);
@@ -73,77 +72,16 @@ export function drawItem(G, env, it, opts = {}) {
   ctx.restore();
 }
 
-// ───────────── sprite cache ─────────────
-// While the camera zooms every frame is a full repaint; re-running 150 detailed symbols would dominate it.
-// Each item is therefore kept as a small bitmap (symbol + shadow, already rotated) that is blitted pixel-exact
-// at its own zoom level and stretched for the few frames in between; stale sprites are refreshed within a
-// per-frame time budget, and the resting image is always redrawn from vectors.
-const sprites = new Map();
-const MAX_SPRITE = 1500, PIXEL_BUDGET = 48e6, REFRESH_MS = 2.5;
-let spritePixels = 0;
-
-const signature = (it, pal) => `${it.type}|${it.w}|${it.d}|${it.h}|${it.rot || 0}|${it.placement}|${it.elev}|${pal.dark ? 1 : 0}|${JSON.stringify(it.params || {})}`;
-
-function renderSprite(sp, G, env, it) {
-  const r = (it.rot || 0) * DEG, c = Math.abs(Math.cos(r)), s = Math.abs(Math.sin(r));
-  const pad = 14 * G.k + 4 * G.dpr;
-  const w = 2 * Math.ceil((c * it.w + s * it.d) / 2 * G.k + pad), h = 2 * Math.ceil((s * it.w + c * it.d) / 2 * G.k + pad);
-  sp.k = G.k; sp.ok = w <= MAX_SPRITE && h <= MAX_SPRITE;
-  if (!sp.ok) return;
-  if (!sp.canvas) { sp.canvas = document.createElement('canvas'); sp.ctx = sp.canvas.getContext('2d'); }
-  spritePixels += w * h - sp.canvas.width * sp.canvas.height * (sp.sized ? 1 : 0);
-  sp.canvas.width = w; sp.canvas.height = h; sp.sized = true;
-  const g = createGfx(sp.ctx, { scale: G.scale, dpr: G.dpr, ox: w / 2 - it.x * G.k, oy: h / 2 - it.y * G.k, width: w, height: h, font: G.font });
-  drawItem(g, env, it);
-}
-
-/**
- * Draw an item through its sprite. `clock()` returns the ms left for refreshing stale sprites this frame;
- * with `exact` the sprite is always brought to the current zoom first (used for the few items being dragged).
- */
-export function drawItemSprite(G, env, it, clock, exact = false) {
-  const reach = Math.hypot(it.w, it.d) / 2 + 12;
-  if (!G.visible(it.x - reach, it.y - reach, it.x + reach, it.y + reach)) return;
-  if (Math.max(it.w, it.d) * G.scale < 5) { drawItem(G, env, it); return; }
-  const sig = signature(it, env.pal);
-  let sp = sprites.get(it.id);
-  const usable = sp && sp.sig === sig;
-  const ratio = usable ? G.k / sp.k : 0;
-  if (!usable || (exact ? ratio !== 1 : ratio > 1.45 || ratio < 0.62)) {
-    if (exact || clock() > 0) {
-      if (!sp) { sp = {}; sprites.set(it.id, sp); }
-      sp.sig = sig;
-      renderSprite(sp, G, env, it);
-    } else if (!usable) { drawItem(G, env, it); return; }
-  }
-  if (!sp.ok) { drawItem(G, env, it); return; }
-  const { ctx } = G, f = G.k / sp.k, w = sp.canvas.width, h = sp.canvas.height;
-  if (f === 1) ctx.drawImage(sp.canvas, Math.round(G.X(it.x)) - w / 2, Math.round(G.Y(it.y)) - h / 2);
-  else ctx.drawImage(sp.canvas, G.X(it.x) - (w * f) / 2, G.Y(it.y) - (h * f) / 2, w * f, h * f);
-}
-
-/** Drop sprites of items that no longer exist (or everything, when the memory budget is exceeded). */
-export function pruneSprites(store) {
-  if (spritePixels > PIXEL_BUDGET) { sprites.clear(); spritePixels = 0; return; }
-  if (sprites.size <= store.items.length + 24) return;
-  const alive = new Set(store.items.map((it) => it.id));
-  for (const [id, sp] of sprites) if (!alive.has(id)) { if (sp.canvas) spritePixels -= sp.canvas.width * sp.canvas.height; sprites.delete(id); }
-}
-
-/** A per-frame stopwatch for sprite refreshes. */
-export const spriteClock = () => { const t0 = performance.now(); return () => REFRESH_MS - (performance.now() - t0); };
-
 /**
  * Draw a pass of the item list in array order.
  * @param {'below'|'above'} pass  below = ground surfaces + rugs (under the walls); above = everything else
  * @param {Set<string>|null} skip  ids drawn live by the caller (being dragged)
- * @param {Function|null} clock    when given, items are drawn through the sprite cache (zoom frames)
  */
-export function drawItems(G, env, pass, skip, clock = null) {
+export function drawItems(G, env, pass, skip) {
   for (const it of env.store.items) {
     if (it.hidden || isBelowWalls(it) !== (pass === 'below')) continue;
     if (skip && skip.has(it.id)) continue;
-    if (clock) drawItemSprite(G, env, it, clock); else drawItem(G, env, it);
+    drawItem(G, env, it);
   }
   G.deviceSpace();
 }

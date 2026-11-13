@@ -118,6 +118,7 @@ export function createStubView2D(container, { store, plan, models }) {
   setTimeout(() => fit('house'), 0);
 
   return {
+    needsHud: true,
     resize() { if (active) { if (!canvas.width) fit('house'); request(); } },
     setActive(b) { active = b; if (b) request(); },
     fit, zoomBy(f) { const r = canvas.getBoundingClientRect(); zoomAt(f, r.left + r.width / 2, r.top + r.height / 2); },

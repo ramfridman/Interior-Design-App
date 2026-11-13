@@ -12,19 +12,29 @@ import { applyTheme, getPref, setPref } from './prefs.js';
 
 const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
 
-/** Verified facts about the house, all read from PLAN (nothing typed in by hand). */
+/**
+ * Verified facts about the house, all read from PLAN (nothing typed in by hand).
+ * @returns {Array<[label: string, value: string, sub?: string]>}
+ */
 export function houseFacts(plan, store) {
   const m = plan.meta || {};
-  const facts = [['Footprint', `${(plan.bounds.w / 100).toFixed(2)} × ${(plan.bounds.h / 100).toFixed(2)} m`]];
-  if (m.grossFloorArea) facts.push(['Floor area', `${m.grossFloorArea} m²`]);
+  const facts = [['Footprint', `${(plan.bounds.w / 100).toFixed(2)} × ${(plan.bounds.h / 100).toFixed(2)} m`, 'outer walls']];
+  if (m.grossFloorArea) facts.push(['Floor area', `${m.grossFloorArea} m²`, 'ground floor, as drawn']);
   const lot = plan.site && plan.site.boundary;
   if (lot && lot.length >= 4) {
     const ew = Math.round(dist(lot[0], lot[1]) / 100), ns = Math.round(dist(lot[3], lot[0]) / 100);
-    facts.push(['Lot', `≈ ${Math.round(areaM2(lot) / 10) * 10} m² (${ew} × ${ns} m)`]);
+    facts.push(['Lot', `≈ ${Math.round(areaM2(lot) / 10) * 10} m²`, `${ew} × ${ns} m`]);
   }
-  facts.push(['Ceiling', `${((store ? store.project.ceilingHeight : plan.heights.ceiling) / 100).toFixed(2)} m`]);
+  facts.push(['Ceiling', `${((store ? store.project.ceilingHeight : plan.heights.ceiling) / 100).toFixed(2)} m`, 'floor to ceiling']);
+  const rooms = plan.rooms || [];
+  const count = (...types) => rooms.filter((r) => types.includes(r.type)).length;
+  const beds = count('bedroom', 'mamad'), baths = count('bathroom'), wcs = count('wc');
+  if (beds) {
+    const sub = [count('mamad') ? 'incl. safe room' : '', baths ? `${baths} ${baths === 1 ? 'bath' : 'baths'}${wcs ? ' + WC' : ''}` : ''].filter(Boolean).join(', ');
+    facts.push(['Rooms', `${beds} bedrooms`, sub]);
+  }
   const bays = plan.site && plan.site.parking ? plan.site.parking.length : 0;
-  if (bays) facts.push(['Parking', `${bays} ${bays === 1 ? 'bay' : 'bays'}`]);
+  if (bays) facts.push(['Parking', `${bays} ${bays === 1 ? 'bay' : 'bays'}`, 'on the lot']);
   return facts;
 }
 
@@ -40,13 +50,13 @@ export function openWelcome(app) {
       h('p', { class: 'welcome__caption' }, [m.architect ? `Drawn from ${m.architect}` : 'Drawn from the architect’s plan', m.drawingScale ? `, ${m.drawingScale}` : ''])),
     h('div', { class: 'welcome__text' },
       h('p', { class: 'welcome__lead' }, 'Furnish and landscape your real house. The plan is measured from the architect’s drawing, every product is on sale in Israel with its price and shop link, and you can walk through the result in 3D.'),
-      h('dl', { class: 'titleblock' }, houseFacts(plan, store).map(([k, v]) => h('div', { class: 'titleblock__cell' }, h('dt', null, k), h('dd', { class: 'num' }, v)))),
+      h('dl', { class: 'titleblock' }, houseFacts(plan, store).map(([k, v, sub]) => h('div', { class: 'titleblock__cell' }, h('dt', null, k), h('dd', { class: 'num' }, v, sub ? h('small', null, sub) : null)))),
       h('ul', { class: 'tips' },
         tip('sofa', 'Drag products onto the plan', 'Or press the + on a product card, then click where it goes. Floors and wall finishes apply to the room you click.'),
         tip('swap', 'Swap the architect’s placeholders', 'The furniture already on the plan has no product yet. Select a piece and pick a real one in the Inspector.'),
         tip('walk', 'Walk through and keep an eye on the budget', 'Press 3 to walk the house. The shopping list adds up prices as you place things.')),
       open.length ? h('details', { class: 'welcome__assume' },
-        h('summary', null, `${open.length} assumptions to confirm with the architect`),
+        h('summary', null, `${open.length} ${open.length === 1 ? 'assumption' : 'assumptions'} to confirm with the architect`),
         h('ul', null, open.map((a) => h('li', null, a.text)))) : null));
   const dlg = openDialog({
     title, size: 'xl', cls: 'dialog--welcome', body,

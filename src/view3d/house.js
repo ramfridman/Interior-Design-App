@@ -48,6 +48,13 @@ class ShadeStrips {
 }
 const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3();
 
+/** Baked brightness of an interior wall at height y: a little darker at the floor and under the ceiling. */
+function wallShade(y, ceiling) {
+  if (y < WALL_FADE) return 0.8 + 0.2 * (y / WALL_FADE);
+  if (y > ceiling - WALL_FADE) return 1 - 0.12 * Math.min(1, (y - (ceiling - WALL_FADE)) / WALL_FADE);
+  return 1;
+}
+
 /**
  * Look of a space's floor or walls: catalogue product → store overrides (`wallColor`, `floorParams`) → defaults.
  * Shared with site.js. Never throws.
@@ -198,11 +205,9 @@ function buildShellSoups(grid, plan, sides, top, ceiling, plinthDepth, dryRooms)
       if (!f.mat.startsWith('room:')) { band(f.y0, f.y1, 1, 1); continue; }
 
       // interior wall: gentle darkening towards floor and ceiling + contact strips on floor / ceiling (cheap fake GI)
-      const atFloor = f.y0 === 0, atCeiling = f.y1 >= ceiling - 1e-6, tall = f.y1 - f.y0 > 2.2 * WALL_FADE;
-      let lo = f.y0, hi = f.y1;
-      if (atFloor && tall) { band(lo, lo + WALL_FADE, 0.8, 1); lo += WALL_FADE; }
-      if (atCeiling && tall) { band(hi - WALL_FADE, hi, 1, 0.88); hi -= WALL_FADE; }
-      band(lo, hi, 1, 1);
+      const atFloor = f.y0 === 0, atCeiling = f.y1 >= ceiling - 1e-6;
+      const cuts = [f.y0, WALL_FADE, ceiling - WALL_FADE, f.y1].filter((y) => y >= f.y0 && y <= f.y1).sort((p, q) => p - q);
+      for (let q = 0; q < cuts.length - 1; q++) if (cuts[q + 1] - cuts[q] > 1e-6) band(cuts[q], cuts[q + 1], wallShade(cuts[q], ceiling), wallShade(cuts[q + 1], ceiling));
       const ends = [a0, a1].map((e, q) => {                             // what happens past each end of the run
         const along = e + (q ? 1 : -1), wallPt = f.c - f.s, roomPt = f.c + f.s;
         const W = f.axis === 'x' ? [wallPt, along] : [along, wallPt], R = f.axis === 'x' ? [roomPt, along] : [along, roomPt];

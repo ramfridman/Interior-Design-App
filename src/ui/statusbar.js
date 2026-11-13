@@ -16,6 +16,7 @@ export function initStatusbar(root, app) {
   const room = h('span', { class: 'sb__room truncate' }, '');
   const selection = h('span', { class: 'sb__sel truncate' }, '');
   const zoom = h('span', { class: 'sb__val num' }, '');
+  const ratio = h('span', { class: 'sb__val num' }, '');
   const units = segmented({ options: [{ value: 'm', label: 'm' }, { value: 'cm', label: 'cm' }], value: store.ui.units, label: 'Units', cls: 'seg--mini', onChange: (v) => store.setUI({ units: v }) });
   const saved = h('span', { class: 'sb__saved' }, '');
 
@@ -23,6 +24,7 @@ export function initStatusbar(root, app) {
     h('div', { class: 'sb__cell sb__coords hide-phone', 'aria-hidden': 'true' }, h('span', { class: 'sb__key' }, 'X'), x, h('span', { class: 'sb__key' }, 'Y'), y),
     h('div', { class: 'sb__cell sb__cell--room hide-phone' }, room),
     h('div', { class: 'sb__cell sb__cell--grow', role: 'status', 'aria-live': 'polite' }, selection),
+    h('div', { class: 'sb__cell hide-compact', 'data-tip': 'Drawing scale on a 96 dpi screen', 'data-tip-side': 'top' }, h('span', { class: 'sb__key' }, 'Scale'), ratio),
     h('div', { class: 'sb__cell hide-phone', 'data-tip': 'Zoom (100% = 1 px per cm)', 'data-tip-side': 'top' }, h('span', { class: 'sb__key' }, 'Zoom'), zoom),
     h('div', { class: 'sb__cell' }, units),
     h('div', { class: 'sb__cell sb__cell--saved', role: 'status', 'aria-live': 'polite' }, saved),
@@ -45,7 +47,7 @@ export function initStatusbar(root, app) {
   });
 
   /* Zoom */
-  app.onZoom = (pxPerCm) => { zoom.textContent = `${Math.round(pxPerCm * 100)}%`; };
+  app.onZoom = (pxPerCm, scaleText) => { zoom.textContent = `${Math.round(pxPerCm * 100)}%`; ratio.textContent = scaleText || ''; };
 
   /* Selection */
   function paintSelection() {

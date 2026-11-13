@@ -182,6 +182,7 @@ export function drawOverlay(G, V) {
   }
 
   // scale bar + north arrow, kept clear of floating UI via --plan-inset-*
+  if (!V.showHud()) return;
   const ins = V.theme.insets;
   const bx = (ins.left + 18) * d, by = G.height - (ins.bottom + 20) * d;
   const bw = drawScaleBar(G, pal, bx, by, units);

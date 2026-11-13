@@ -193,7 +193,8 @@ export function initUI(ctx) {
   /* ───────── Context menu on the views ───────── */
   listen(ctx.view2d, 'contextmenu', (p) => {
     if (!p) return;
-    if (p.itemId && !store.selection.includes(p.itemId)) store.select([p.itemId]);
+    const id = p.itemId || (p.item && p.item.id);
+    if (id && !store.selection.includes(id)) store.select([id]);
     const x = p.clientX ?? p.x, y = p.clientY ?? p.y;
     if (typeof x === 'number' && typeof y === 'number') openItemMenu(app, { x, y });
   });
