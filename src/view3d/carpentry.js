@@ -54,11 +54,19 @@ export function createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay
     if (!runKeys.has(run)) runKeys.set(run, JSON.stringify([run.spec, run.worktops, run.reserved || null, run.length, run.ends, run.kind]));
     return runKeys.get(run);
   };
+  // the sibling units also shape a unit (splashback stops under the wall units, sliding doors span the run's carcasses):
+  // their position / size / module joins the key, computed once per resync pass
+  let sibs = null;
+  const sibKey = (run) => {
+    if (!sibs) { sibs = new Map(); queueMicrotask(() => { sibs = null; }); }
+    if (!sibs.has(run.id)) sibs.set(run.id, (run.unitIds || []).map((id) => { const u = store.getItem(id); return u && u.carp ? `${u.carp.module},${u.carp.at},${u.carp.width},${u.carp.level || ''},${u.carp.elev ?? ''},${u.hidden ? 1 : 0}` : ''; }).join(';'));
+    return sibs.get(run.id);
+  };
   items.setVariant((item) => {
     if (!item.carp) return null;
     const run = store.carpentry && store.carpentry.runs && store.carpentry.runs[item.carp.runId];
     const open = state.open && state.runId === item.carp.runId;
-    return { key: `${run ? runKey(run) : ''}|${JSON.stringify(item.carp)}${open ? '|open' : ''}`, view: open ? { open: true } : null };
+    return { key: `${run ? runKey(run) + '|' + sibKey(run) : ''}|${JSON.stringify(item.carp)}${open ? '|open' : ''}`, view: open ? { open: true } : null };
   });
 
   // ───────── section cut ─────────
@@ -178,7 +186,7 @@ export function createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay
   // eye adaptation and exposure are untouched the moment the tab is left or the toggle is off. The two lights are
   // created on first use and then stay in the scene at intensity 0 outside the studio render (a constant light count
   // avoids recompiling every material on each toggle).
-  const STUDIO = { key: 2.3, fill: 1.0, sun: 0.2, env: 0.35, exposure: 1.1, gain: 1.2 };
+  const STUDIO = { key: 2.4, fill: 1.0, sun: 0.35, env: 0.3, exposure: 1.0 };
   let studioLights = null;
   const _cd = new THREE.Vector3(), _cr = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
   function ensureStudio() {
@@ -190,11 +198,12 @@ export function createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay
   const studioActive = () => !!(state.studio && state.runId && !isWalking());
   /**
    * Called right before the main render. Returns an undo function (call it right after the render), or null when the
-   * studio light is not active. `parts` = { env, daylight } (either may be missing).
+   * studio light is not active. `parts` = { env } (may be missing). The solved daylight (lightmaps / probe field, its
+   * display gain) is left as it is: it stays the soft room backdrop and the neutral key light dominates the fronts.
    */
   function beginFrame(camera, parts = {}) {
     if (!studioActive() || !camera) return null;
-    const L = ensureStudio(), env = parts.env, dl = parts.daylight, sun = env && env.sun, gainU = dl && dl.uniforms && dl.uniforms.dlGain;
+    const L = ensureStudio(), env = parts.env, sun = env && env.sun;
     camera.getWorldDirection(_cd).negate();                        // towards the camera
     _cr.crossVectors(_up, _cd).normalize();                        // camera's right (seen from the run)
     if (!Number.isFinite(_cr.x) || _cr.lengthSq() < 1e-6) _cr.set(1, 0, 0);
@@ -202,17 +211,15 @@ export function createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay
     L.fill.position.copy(_cd).addScaledVector(_cr, 0.8).addScaledVector(_up, 0.15).normalize();
     L.key.updateMatrixWorld(); L.fill.updateMatrixWorld();
     L.key.intensity = STUDIO.key; L.fill.intensity = STUDIO.fill;
-    const saved = { tm: renderer.toneMapping, ex: renderer.toneMappingExposure, envI: scene.environmentIntensity, sun: sun ? sun.intensity : null, gain: gainU ? gainU.value : null };
+    const saved = { tm: renderer.toneMapping, ex: renderer.toneMappingExposure, envI: scene.environmentIntensity, sun: sun ? sun.intensity : null };
     renderer.toneMapping = THREE.NeutralToneMapping;
     renderer.toneMappingExposure = STUDIO.exposure;
     scene.environmentIntensity = Math.max(saved.envI ?? 0, STUDIO.env);
     if (sun) sun.intensity = saved.sun * STUDIO.sun;
-    if (gainU) gainU.value = Math.min(saved.gain, STUDIO.gain);      // the solved indirect light stays as the room's soft backdrop, capped
     return () => {
       L.key.intensity = 0; L.fill.intensity = 0;
       renderer.toneMapping = saved.tm; renderer.toneMappingExposure = saved.ex; scene.environmentIntensity = saved.envI;
       if (sun) sun.intensity = saved.sun;
-      if (gainU) gainU.value = saved.gain;
     };
   }
 

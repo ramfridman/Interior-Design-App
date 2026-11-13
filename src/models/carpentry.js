@@ -15,7 +15,8 @@
 import * as THREE from 'three';
 import { registerModel, getModel } from './registry.js';
 import * as K from './kit.js';
-import { geometryOf, unitsOf, levelOf } from '../carpentry/layout.js';
+import { geometryOf, unitsOf, levelOf, positions } from '../carpentry/layout.js';
+import { spanOfRun } from '../carpentry/walls.js';
 import { view } from '../carpentry/state.js';
 import { MODULES } from '../carpentry/modules.js';
 
@@ -159,6 +160,7 @@ function leaf(B, parent, f, track = 0) {
   }
   const px = flap ? 0 : hinge === 'L' ? x0 : x1, py = flap ? (hinge === 'T' ? y1 : y0) : 0;
   const { piv, inner } = pivot(parent, px, py);
+  if (op === 'removable') { liftOff(B, parent, inner, f, flap ? null : hinge); return liftOffPose(B, piv, hinge); }
   leafBody(B, inner, f, x0, x1, y0, y1);
   if (f.handle !== false && op !== 'push-open' && op !== 'curtain') handleOn(B, inner, x0, x1, y0, y1, hinge);
   if (op === 'sliding') {                                          // two tracks; the front track slides over its neighbour
@@ -167,11 +169,41 @@ function leaf(B, parent, f, track = 0) {
     return;
   }
   if (!open) return;
-  if (op === 'removable') { piv.position.z += 32 * CM; piv.position.y += 3 * CM; piv.rotation.y = (hinge === 'L' ? 1 : -1) * 6 * DEG; return; }
   if (flap) { piv.rotation.x = hinge === 'T' ? -100 * DEG : 88 * DEG; return; }
   const s = hinge === 'L' ? -1 : 1;
   if (op === 'pocket') { piv.rotation.y = s * 90 * DEG; piv.position.z -= (fw + 0.5) * CM; return; }
   piv.rotation.y = s * 95 * DEG;
+}
+/**
+ * Lift-off (removable) door, recognisable while closed: the leaf is set in by a 6 mm shadow gap all round, with a dark
+ * rebate behind the gap (it stays on the carcass), and two to four exposed lift-off hinges (flag / pin hinges) on the
+ * hinge edge — the pin half with its pin on the carcass side, the knuckle half on the door, so with the door lifted
+ * off the pins remain. Flaps get the shadow gap only. `hinge` = 'L' | 'R' | null.
+ */
+const LIFT_GAP = 0.6;
+function liftOff(B, parent, inner, f, hinge) {
+  const x0 = f.x, x1 = f.x + f.w, y0 = f.y, y1 = f.y + f.h, g = LIFT_GAP, t = B.f, dark = B.m.dark;
+  const a0 = x0 + g, a1 = x1 - g, b0 = y0 + g, b1 = y1 - g;
+  leafBody(B, inner, f, a0, a1, b0, b1);
+  if (f.handle !== false) handleOn(B, inner, a0, a1, b0, b1, hinge || (f.hinge === 'B' ? 'B' : 'T'));
+  // the rebate seen through the gap (just behind the door plane: never in front of a neighbouring leaf)
+  const z0 = -t - 0.4, z1 = -t + 0.2;
+  fbox(parent, x0, x1, y0, b0, z0, z1, dark); fbox(parent, x0, x1, b1, y1, z0, z1, dark);
+  fbox(parent, x0, a0, b0, b1, z0, z1, dark); fbox(parent, a1, x1, b0, b1, z0, z1, dark);
+  if (!hinge) return;
+  const H = b1 - b0, n = H > 180 ? 4 : H > 100 ? 3 : 2, ex = hinge === 'L' ? x0 + g / 2 : x1 - g / 2, r = 0.55, len = 4.2;
+  for (let i = 0; i < n; i++) {
+    const cy = b0 + 11 + ((H - 22) * i) / (n - 1);
+    const pin = K.cyl(r * CM, r * CM, len * CM, B.m.handle, ex * CM, (cy - len / 2) * CM, 0.25 * CM, 12);       // carcass half
+    const knuckle = K.cyl(r * CM, r * CM, len * CM, B.m.handle, ex * CM, (cy + len / 2 + 0.15) * CM, 0.25 * CM, 12); // door half
+    const shaft = K.cyl(0.2 * CM, 0.2 * CM, len * CM, B.m.handle, ex * CM, (cy + len / 2 + 0.15) * CM, 0.25 * CM, 8); // the pin (inside the knuckle while closed)
+    parent.add(pin, shaft); inner.add(knuckle);
+  }
+}
+/** Lift-off door pose: closed in place; open = lifted off its pins and leaned aside in front of the opening. */
+function liftOffPose(B, piv, hinge) {
+  if (!B.open) return;
+  piv.position.z += 32 * CM; piv.position.y += 3 * CM; piv.rotation.y = (hinge === 'R' ? -1 : 1) * 6 * DEG;
 }
 /** Tambour roller shutter (slats; rolled up when open) or a curtain (folds; gathered at the hinge side when open). */
 function shutter(B, parent, f, op) {
@@ -307,6 +339,49 @@ function worktop(B, ctx) {
     mesh.position.y = B.Y(wtop - th);
     B.root.add(mesh);
     for (const c of cuts) fixture(B, c, X, wtop, th);
+    backOfTop(B, ctx, p, a, b, at, wtop, th);
+  }
+}
+/**
+ * Splashback (run.spec.splashback: material, height) and worktop upstand (run.spec.worktop.upstand, cm) over this unit's
+ * slice a..b (run cm) of worktop piece p — against the wall only (not on islands). The splashback follows the elevation
+ * drawing exactly: from the worktop up to its height, stopped under the wall units above the piece, cut at windows whose
+ * sill is below its top. The upstand is a strip of the worktop material standing on the worktop in front of it.
+ */
+const SPLASH = { 'same-as-worktop': 1.2, glass: 0.6, tiles: 0.9 };
+function backOfTop(B, ctx, p, a, b, at, wtop, th) {
+  const { run, v } = ctx, S = run.spec, sb = S.splashback, up = Number(S.worktop.upstand) || 0;
+  if (run.kind === 'island' || B.level === 'island') return;
+  const X = (xr) => xr - at;                                         // run x → unit x (cm)
+  let T = 0;
+  if (sb && sb.material && sb.material !== 'none' && sb.height > 0) {
+    T = SPLASH[sb.material] || 1;
+    const all = unitsOf(run, v), pos = positions(run, all);
+    let y1 = wtop + sb.height;
+    const above = all.filter((u) => levelOf(u) === 'wall' && !(MODULES[u.carp.module] || {}).virtual && !u.hidden).map((u) => ({ u, at: pos.get(u.id) ? pos.get(u.id).at : u.carp.at }))
+      .filter((x) => x.at < p.e && x.at + x.u.carp.width > p.s);
+    for (const x of above) { try { y1 = Math.min(y1, geometryOf(run, x.u).elev); } catch (e) { /* keep */ } }
+    let segs = [[a, b]];
+    const span = spanOfRun(run);
+    if (span) for (const o of span.openings.filter((q) => q.kind === 'window')) {
+      const oa = o.from - span.runFrom, ob = o.to - span.runFrom;
+      if (o.sill < y1) segs = segs.flatMap(([s, e]) => (ob <= s || oa >= e ? [[s, e]] : [[s, oa], [ob, e]].filter(([q, w]) => w - q > 1)));
+    }
+    const mat = sb.material === 'same-as-worktop' ? B.m.worktop : sb.material === 'glass' ? K.mat('#eef0ee', { roughness: 0.06 }) : K.mat('#eeebe5', { roughness: 0.32 });
+    if (y1 - wtop > 0.5) for (const [s, e] of segs) {
+      ubox(B, X(s), X(e), wtop, y1, 0, T, mat);
+      if (sb.material === 'tiles') tileJoints(B, s, e, at, wtop, y1, T);
+    }
+  }
+  if (up > 0) ubox(B, X(a), X(b), wtop, wtop + up, T, T + th, B.m.worktop);
+}
+/** Metro tiles 15 × 7.5 cm, half-bond, set out from the run's left end (joints line up across units): thin grout joints. */
+function tileJoints(B, s, e, at, y0, y1, T) {
+  const grout = B.m.grout || (B.m.grout = K.mat('#cfcac2', { roughness: 0.8 })), TW = 15, TH = 7.5, j = 0.15;
+  for (let y = y0 + TH; y < y1 - 0.5; y += TH) ubox(B, s - at, e - at, y - j, y + j, T, T + 0.05, grout);
+  for (let r = 0, y = y0; y < y1 - 0.5; r++, y += TH) {
+    const top = Math.min(y1, y + TH), off = r % 2 ? TW / 2 : 0;
+    for (let x = Math.ceil((s - off) / TW) * TW + off; x < e - 0.5; x += TW) if (x > s + 0.5) ubox(B, x - j - at, x + j - at, y, top, T, T + 0.05, grout);
   }
 }
 /** Sink bowl + tap, hob glass, or a basin under / in a worktop cut-out (run x → local X via `X`). */
@@ -424,21 +499,36 @@ function buildUnit(item, ctx, open) {
   }
   plinthBox(B, 0, w, 0, Math.max(1, front - g.spec.plinth.setback));
   if (g.spec.fronts.style === 'gola' && g.level === 'base' && kind !== 'filler') ubox(B, 0, w, g.zone.y1 - 2.5, g.zone.y1, B.dc - 1, B.dc + 0.4, B.m.dark);
-  if (mod.sliding) slidingDoors(B, front);
+  if (mod.sliding) slidingDoors(B, ctx, front);
   buildFace(B, faceGroup(B, 0, front, 0, 1), g.fronts);
   worktop(B, ctx);
   return B.root;
 }
-/** Sliding wardrobe doors on two tracks in the front zone (the run's sliding doors, shown per carcass). */
-function slidingDoors(B, front) {
-  const z = B.g.zone, n = B.w > 80 ? 2 : 1, dw = B.w / n, mirror = B.item.carp.fronts && B.item.carp.fronts.mirror;
+/**
+ * Sliding wardrobe doors: the RUN's door split, exactly as the elevation drawing derives it (drawings.js "sliding doors"):
+ * over the run's sliding carcasses (from the leftmost, total width len) n = spec.sliding.doors or max(2, ⌈len / 100⌉)
+ * doors of (len + 3 (n − 1)) / n, overlapping 3 cm, alternately on the front / rear track. Each carcass draws the part of
+ * every door that lies over it (the pieces of one door line up and move together), so a door spans carcasses as built.
+ * Open: the front-track doors slide over their neighbour.
+ */
+function slidingDoors(B, ctx, front) {
+  const { run, v } = ctx, z = B.g.zone, mirror = B.item.carp.fronts && B.item.carp.fronts.mirror;
+  const all = unitsOf(run, v), pos = positions(run, all), at0 = (u) => (pos.get(u.id) ? pos.get(u.id).at : u.carp.at || 0);
+  const sl = all.filter((u) => (MODULES[u.carp.module] || {}).sliding);
+  if (!sl.some((u) => u.id === B.item.id)) sl.push(B.item);
+  const a = Math.min(...sl.map(at0)), len = sl.reduce((s, u) => s + u.carp.width, 0), me = at0(B.item);
+  const n = (run.spec.sliding && run.spec.sliding.doors) || Math.max(2, Math.ceil(len / 100)), dw = (len + (n - 1) * 3) / n;
   const fg = faceGroup(B, 0, B.d, 0, 1);
   for (let i = 0; i < n; i++) {
-    const rear = (i + Math.round((B.item.carp.at || 0) / 10)) % 2, x0 = i * dw + 0.2, x1 = (i + 1) * dw - 0.2, zz = rear ? -B.f - 4.2 : -1;
-    const grp = new THREE.Group(); fg.add(grp);
-    fbox(grp, x0, x1, z.y0, z.y1, zz - B.f, zz, B.m.front);
-    if (mirror) fbox(grp, x0 + 2, x1 - 2, z.y0 + 2, z.y1 - 2, zz, zz + 0.4, B.m.mirror);
-    if (B.open && !rear) grp.position.x = (i === n - 1 ? -1 : 1) * dw * 0.9 * CM;
+    const d0 = a + i * (dw - 3), d1 = d0 + dw, rear = i % 2 === 1, x0 = Math.max(d0, me) - me, x1 = Math.min(d1, me + B.w) - me;
+    if (x1 - x0 < 0.05) continue;
+    const zz = rear ? -B.f - 4.2 : -1, grp = new THREE.Group(); fg.add(grp);
+    fbox(grp, x0 + (d0 >= me ? 0.1 : 0), x1 - (d1 <= me + B.w ? 0.1 : 0), z.y0, z.y1, zz - B.f, zz, B.m.front);
+    if (mirror) fbox(grp, Math.max(x0, d0 - me + 2), Math.min(x1, d1 - me - 2), z.y0 + 2, z.y1 - 2, zz, zz + 0.4, B.m.mirror);
+    // a slim pull on the door's leading edge (the dashed line in the elevation)
+    const pullX = rear ? d1 - 5 : d0 + 5;
+    if (B.handle !== 'none' && pullX - me > x0 + 0.6 && pullX - me < x1 - 0.6) fbox(grp, pullX - me - 0.6, pullX - me + 0.6, z.y0 + 20, z.y1 - 20, zz, zz + 1.2, B.m.handle);
+    if (B.open && !rear && n > 1) grp.position.x = (i === n - 1 ? -1 : 1) * (dw - 3) * 0.95 * CM;
   }
   fbox(fg, 0, B.w, z.y1, z.y1 + 1.5, -B.d + front, 0, B.m.steel);    // top track
 }

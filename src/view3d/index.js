@@ -199,7 +199,7 @@ export function createView3D(container, ctx) {
     // lamps: on at dusk / night; walking they used to stay on all day — with the solved daylight they follow the sun too
     const dayLit = daylight && daylight.isActive();
     items.updateLamps(camera, (mode === 'walk' && !dayLit) || !sunInfo || sunInfo.elevation < LAMPS_ON_BELOW);
-    const undoStudio = carpentry.beginFrame(camera, { env, daylight });   // carpentry 3D tab "Studio light": this render only
+    const undoStudio = carpentry.beginFrame(camera, { env });   // carpentry 3D tab "Studio light": this render only
     renderer.render(scene, camera);
     if (undoStudio) undoStudio();
     if (dlBusy) { dirty = true; schedule(); }

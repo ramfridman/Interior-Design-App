@@ -51,8 +51,9 @@ for (const u of units) {
   if (u.hidden) continue;
   const g = C.geometryOf(C.runOfItem(u), u);
   if (g.corner) continue;
-  const tap = C.MODULES[u.carp.module] && C.MODULES[u.carp.module].cutout && C.MODULES[u.carp.module].cutout !== 'hob' ? 30 : 4.5;   // a tap stands above the worktop
-  const island = g.level === 'island';                                                             // island fronts (and handles) face −Z
+  const island = g.level === 'island', sb = g.spec.splashback, wtop = g.H && g.H.worktop;
+  let tap = C.MODULES[u.carp.module] && C.MODULES[u.carp.module].cutout && C.MODULES[u.carp.module].cutout !== 'hob' ? 30 : 4.5;   // a tap stands above the worktop
+  if (!island && sb && sb.material !== 'none' && b.y1 > u.h + tap && wtop && near(u.h, wtop, 1)) tap = Math.max(tap, sb.height + (g.spec.worktop.upstand || 0) + 0.5);   // the splashback stands on the worktop                                                             // island fronts (and handles) face −Z
   const ok = n > 0 && near(b.x0, -u.w / 2, 1) && near(b.x1, u.w / 2, 1) && b.y0 > -0.6 && b.y1 > u.h - 0.6 && b.y1 <= u.h + tap
     && (island ? b.z0 >= -u.d / 2 - 4.5 && near(b.z1, u.d / 2, 1) : near(b.z0, -u.d / 2, 1) && b.z1 <= u.d / 2 + 4.5);
   if (!ok) bad.push(`${u.carp.module} ${u.w}×${u.d}×${u.h} → x ${b.x0.toFixed(1)}..${b.x1.toFixed(1)} y ${b.y0.toFixed(1)}..${b.y1.toFixed(1)} z ${b.z0.toFixed(1)}..${b.z1.toFixed(1)}`);
@@ -135,6 +136,127 @@ if (sink) {
   const rc = new THREE.Raycaster(new THREE.Vector3(0, 2, 0.02), new THREE.Vector3(0, -1, 0));
   const hits = rc.intersectObject(m, true).map((h) => h.point.y * 100);
   check('sink cut-out: a ray down the bowl centre passes the worktop level', hits.length && hits[0] < sink.h - 4, hits.map((y) => y.toFixed(0)).join(', '));
+}
+
+
+// first hit of a ray (local metres) → { z | y (cm), material colour hex } or null
+const firstHit = (obj, from, dir) => { obj.updateMatrixWorld(true); const h = new THREE.Raycaster(new THREE.Vector3(...from), new THREE.Vector3(...dir).normalize()).intersectObject(obj, true)[0]; return h ? { x: h.point.x * 100, y: h.point.y * 100, z: h.point.z * 100, hex: h.object.material.color ? '#' + h.object.material.color.getHexString() : '' } : null; };
+
+group('Splashback and worktop upstand (run spec)');
+{
+  const north = C.listRuns().find((r) => r.kind === 'kitchen' && C.getRun(r.id).units.some((u) => u.carp.module === 'base-door'));
+  const nr = C.getRun(north.id), door = nr.units.find((u) => u.carp.module === 'base-door'), g = C.geometryOf(nr.run, door), wt = g.H.worktop;
+  const back = (it, y) => firstHit(models.buildModel(it), [0, y / 100, 1], [0, 0, -1]);     // from the room towards the wall at height y
+  const sb0 = nr.run.spec.splashback;
+  check('kitchen spec has a splashback (default stone, 55 cm)', sb0 && sb0.material !== 'none' && sb0.height > 0, JSON.stringify(sb0));
+  // the elevation drawing is the reference: where it draws splashback, the 3D has a panel; under the window it is cut
+  const dr = C.drawings(north.id).find((d) => d.kind === 'elevation');
+  const sbOps = dr.ops.filter((o) => o.role === 'splashback');
+  const pos = new Map(nr.units.map((u) => [u.id, u.carp.at]));
+  const covered = (x) => sbOps.some((o) => x > o.x + 0.5 && x < o.x + o.w - 0.5);
+  let agree = 0, total = 0, yes = 0, mism = [];
+  for (const u of nr.units.filter((q) => C.levelOf(q) === 'base' && C.MODULES[q.carp.module] && C.MODULES[q.carp.module].worktop)) {
+    const x = pos.get(u.id) + u.carp.width / 2, hit = back(store.getItem(u.id), wt + 8);
+    const has = !!(hit && hit.z < -u.d / 2 + 2);
+    total++; if (has) yes++; if (has === covered(x)) agree++; else mism.push(`${u.carp.module}@${x}: 3D ${has} / drawing ${covered(x)}`);
+  }
+  check('3D splashback matches the elevation drawing over every base unit (window cut-outs included)', total > 2 && yes > 0 && agree === total, mism.join(' | ') || `${yes} of ${total} units carry splashback`);
+  const sbu = nr.units.find((u) => C.levelOf(u) === 'base' && covered(pos.get(u.id) + u.carp.width / 2) && C.MODULES[u.carp.module].worktop) || door;
+  let h = back(store.getItem(sbu.id), wt + 20);
+  check('a splashback panel stands on the worktop against the wall', h && h.z < -sbu.d / 2 + 2 && h.z > -sbu.d / 2, h ? `${h.z.toFixed(1)} cm (wall at ${(-sbu.d / 2).toFixed(1)})` : 'no hit');
+  const top = Math.max(...sbOps.map((o) => o.y + o.h));
+  h = back(store.getItem(sbu.id), top + 3);
+  check('…up to the height the drawing shows (55 cm or under the wall units)', near(top, wt + sb0.height, 0.6) || top < wt + sb0.height, `top ${top}`);
+  check('…and no higher', !h || h.y > top + 1 || h.z < -sbu.d / 2 + 0.01, h ? `${h.y.toFixed(0)} ${h.z.toFixed(1)}` : 'no hit');
+  C.updateRun(north.id, { spec: { worktop: { upstand: 10 } } });
+  h = back(store.getItem(door.id), wt + 5);
+  check('upstand 10 cm: a worktop strip stands in front of the splashback', h && h.z > -door.d / 2 + 1.5 && h.z < -door.d / 2 + 5, h ? `${h.z.toFixed(1)}` : 'no hit');
+  for (const material of ['glass', 'tiles']) {
+    C.updateRun(north.id, { spec: { splashback: { material } } });
+    errors.length = 0;
+    const m = models.buildModel(store.getItem(door.id));
+    check(`splashback ${material} builds`, !errors.length && meshes(m) > 0, errors[0] || '');
+  }
+  C.updateRun(north.id, { spec: { splashback: { material: 'none' }, worktop: { upstand: 0 } } });
+  h = back(store.getItem(door.id), wt + 20);
+  check('splashback "none" and no upstand: nothing above the worktop at the wall', !h || h.z < -door.d / 2 + 0.01 || h.y > wt + 40, h ? `${h.y.toFixed(0)} ${h.z.toFixed(1)}` : '');
+  C.updateRun(north.id, { spec: { splashback: sb0 } });
+  const isl = C.listRuns().find((r) => r.kind === 'island');
+  if (isl) { const iu = C.getRun(isl.id).units[0], b = boundsOf(models.buildModel(store.getItem(iu.id))); check('islands get no splashback', b.y1 < iu.h + 31, b.y1.toFixed(1)); }
+}
+
+group('Lift-off (removable) doors read as such while closed');
+{
+  const r = C.addUnit(host.runId, 'base-door', { width: 60, fronts: { operation: 'hinged' } });
+  const it = () => store.getItem(r.unitId), g = C.geometryOf(C.getRun(host.runId).run, it()), f = g.fronts.find((q) => q.kind === 'door');
+  const hinged = models.buildModel(it()), nH = meshes(hinged), bH = boundsOf(hinged);
+  C.updateUnit(r.unitId, { fronts: { operation: 'removable' } });
+  const rem = models.buildModel(it()), bR = boundsOf(rem);
+  check('closed lift-off door has extra detail (hinges, shadow-gap rebate)', meshes(rem) > nH, `${nH} → ${meshes(rem)}`);
+  const X = (x) => (x - g.w / 2) / 100, y = (f.y + f.h / 2 - g.elev) / 100, face = firstHit(rem, [X(f.x + f.w / 2), y, 1], [0, 0, -1]);
+  const ex = f.hinge === 'R' ? f.x + f.w - 0.3 : f.x + 0.3, hy = (f.y + 0.6 + 11 - 2 - g.elev) / 100;
+  const knuckle = firstHit(rem, [X(ex), hy, 1], [0, 0, -1]), noKnuckle = firstHit(hinged, [X(ex), hy, 1], [0, 0, -1]);
+  check('exposed lift-off hinges on the hinge edge, standing proud of the door face', knuckle && face && knuckle.z > face.z + 0.3 && (!noKnuckle || noKnuckle.z <= face.z + 0.01), knuckle ? `hinge ${knuckle.z.toFixed(2)} vs face ${face.z.toFixed(2)}` : 'no hit');
+  const gap = firstHit(rem, [X(f.x + 0.3), y, 1], [0, 0, -1]), mid = firstHit(rem, [X(f.x + f.w / 2), y, 1], [0, 0, -1]);
+  check('a dark shadow gap all round the leaf (rebate seen through it)', gap && mid && gap.z < mid.z - 1 && gap.hex === '#1b1c1f', gap ? `${gap.z.toFixed(1)} ${gap.hex} vs door ${mid && mid.z.toFixed(1)}` : 'no hit');
+  const open = boundsOf(models.buildModel({ ...it(), view: { open: true } }));
+  check('open: the door is lifted off and set aside in front', open.z1 > bR.z1 + 20, `${open.z1.toFixed(1)}`);
+  C.removeUnit(r.unitId);
+}
+
+group('Sliding wardrobe doors follow the run\'s door split (as the elevation)');
+{
+  const wr = C.createRun({ kind: 'wardrobe', anchor: { x: 2000, y: 3400, dir: 0 }, length: 250, freeStanding: true });
+  check('a free wardrobe run', wr.ok, wr.reason && wr.reason.en);
+  const a = C.addUnit(wr.runId, 'wardrobe-sliding', { width: 100 }), b = C.addUnit(wr.runId, 'wardrobe-sliding', { width: 120 });
+  check('two sliding carcasses 100 + 120', a.ok && b.ok, ((a.reason || b.reason) || {}).en);
+  if (a.ok && b.ok) {
+    const el = C.drawings(wr.runId).find((d) => d.kind === 'elevation');
+    const label = el.ops.find((o) => o.t === 'text' && /sliding doors/.test(o.text.en || o.text));
+    const n = label ? parseInt((label.text.en || label.text), 10) : 0;
+    check('elevation: 3 sliding doors over 220 cm', n === 3, label && (label.text.en || label.text));
+    const units = C.getRun(wr.runId).units, at = new Map(units.map((u) => [u.id, u.carp.at]));
+    const depthAt = (xr) => { const u = units.find((q) => xr > at.get(q.id) && xr < at.get(q.id) + q.carp.width), gg = C.geometryOf(C.getRun(wr.runId).run, u); const hh = firstHit(models.buildModel(store.getItem(u.id)), [(xr - at.get(u.id) - u.carp.width / 2) / 100, (gg.zone.y0 + gg.zone.y1) / 200 - gg.elev / 100, 2], [0, 0, -1]); return hh ? hh.z - u.d / 2 : null; };
+    const track = (xr) => { const d = depthAt(xr); return d == null ? 'none' : d > -3 ? 'front' : 'rear'; };
+    // 220 cm, 3 doors of 75.3 overlapping 3 cm: door 0 = 0..75.3 (front) · door 1 = 72.3..147.7 (rear) · door 2 = 144.7..220 (front)
+    const probes = [[40, 'front'], [80, 'rear'], [120, 'rear'], [160, 'front'], [210, 'front']];
+    const got = probes.map(([x]) => track(x));
+    check('door tracks along the run match the 3-door split (front / rear / front, across the carcass joint at 100)', probes.every(([, t], i) => got[i] === t), probes.map(([x], i) => `${x.toFixed(0)}:${got[i]}`).join(' '));
+    errors.length = 0;
+    for (const u of units) models.buildModel({ ...store.getItem(u.id), view: { open: true } });
+    check('sliding wardrobes build open', !errors.length, errors[0] || '');
+  }
+}
+
+group('Studio light (view3d/carpentry.js)');
+{
+  const el = () => ({ style: {}, className: '', append() {}, remove() {}, replaceChildren() {}, addEventListener() {} });
+  globalThis.document ??= { createElement: el, documentElement: {} };
+  const { createCarpentryLayer } = await import('../src/view3d/carpentry.js');
+  const scene = new THREE.Scene(), renderer = { clippingPlanes: [], toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.37 };
+  scene.environmentIntensity = 0.14;
+  const fakeItems = { setVariant() {}, setViewHidden() {}, setMarked() {}, resync() {}, boxOf: () => null };
+  let walking = false;
+  const layer = createCarpentryLayer({ scene, renderer, ctx: { store, plan: { walls: [] } }, items: fakeItems, rig: { frameBox() {} }, overlay: el(), invalidate() {}, isWalking: () => walking });
+  const sun = new THREE.DirectionalLight(0xffffff, 2.2), env = { sun }, cam = new THREE.PerspectiveCamera();
+  cam.position.set(3, 1.6, 4); cam.lookAt(0, 1, 0); cam.updateMatrixWorld();
+  const kRun = C.listRuns().find((r) => r.kind === 'kitchen');
+  check('off until a run is shown', layer.beginFrame(cam, { env }) === null);
+  layer.show({ runId: kRun.id, studio: true });
+  const undo = layer.beginFrame(cam, { env });
+  const lights = scene.children.filter((o) => o.isDirectionalLight);
+  check('studio on: neutral tone mapping, fixed exposure, sun eased, two white lights', undo && renderer.toneMapping === THREE.NeutralToneMapping && renderer.toneMappingExposure === 1 && sun.intensity < 2.2 && lights.length === 2 && lights.every((l) => l.intensity > 0 && l.color.getHex() === 0xffffff && !l.castShadow));
+  undo();
+  check('after the render everything is back exactly', renderer.toneMapping === THREE.ACESFilmicToneMapping && renderer.toneMappingExposure === 1.37 && sun.intensity === 2.2 && scene.environmentIntensity === 0.14 && lights.every((l) => l.intensity === 0));
+  walking = true;
+  check('walk mode: never', layer.beginFrame(cam, { env }) === null);
+  walking = false;
+  layer.show({ studio: false });
+  check('toggle off: never', layer.beginFrame(cam, { env }) === null);
+  layer.show({ studio: true, runId: null });
+  check('tab left (no run): never', layer.beginFrame(cam, { env }) === null && layer.state().studioLit === false);
+  layer.dispose();
+  check('dispose removes the studio lights', !scene.children.some((o) => o.isDirectionalLight));
 }
 
 console.error = origError;
