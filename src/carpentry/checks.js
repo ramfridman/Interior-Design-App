@@ -10,6 +10,8 @@ import { RULES } from './spec.js';
 import { unitsOf, positions, geometryOf, unitCodes, isFloorLevel } from './layout.js';
 import { spanOfRun, openingConflicts, toPlan, frame } from './walls.js';
 import { computeWorktops } from './worktop.js';
+import { validateCustomLayout } from './bespoke.js';
+import { circled } from './features.js';
 
 const L = (en, he) => ({ en, he });
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -36,9 +38,9 @@ function findingsFor(run, v) {
   for (const row of [['floor', floor], ['wall', wall]]) {
     const [name, items] = row;
     if (!items.length) continue;
-    const ext = Math.max(...items.map((x) => x.end));
-    if (ext > run.length + 0.05) add('error', 'overflow', `${name === 'floor' ? 'Base / tall' : 'Wall'} units run ${r1(ext - run.length)} cm past the end of the run (${run.length} cm).`, `${name === 'floor' ? 'הארונות התחתונים / הגבוהים' : 'הארונות העליונים'} חורגים ב-${r1(ext - run.length)} ס״מ מאורך הקו (${run.length} ס״מ).`, items.filter((x) => x.end > run.length + 0.05));
-    if (name === 'floor' && ext < run.length - 0.5) add('warning', 'underfill', `${r1(run.length - ext)} cm of the run are not filled — fit the run (fillers or wider units).`, `${r1(run.length - ext)} ס״מ בקו לא מנוצלים — יש להתאים (פילרים או הרחבת ארונות).`);
+    const ext = Math.max(...items.map((x) => x.end)), lim = name === 'floor' ? run.length - ((run.reserved && run.reserved.right) || 0) : run.length;
+    if (ext > lim + 0.05) add('error', 'overflow', `${name === 'floor' ? 'Base / tall' : 'Wall'} units run ${r1(ext - lim)} cm past the end of the run (${r1(lim)} cm${lim < run.length ? ' before the corner unit of the other arm' : ''}).`, `${name === 'floor' ? 'הארונות התחתונים / הגבוהים' : 'הארונות העליונים'} חורגים ב-${r1(ext - lim)} ס״מ מאורך הקו (${r1(lim)} ס״מ${lim < run.length ? ' עד ארון הפינה של הזרוע השנייה' : ''}).`, items.filter((x) => x.end > lim + 0.05));
+    if (name === 'floor' && ext < lim - 0.5) add('warning', 'underfill', `${r1(lim - ext)} cm of the run are not filled — fit the run (fillers or wider units).`, `${r1(run.length - ext)} ס״מ בקו לא מנוצלים — יש להתאים (פילרים או הרחבת ארונות).`);
   }
   for (const x of list) {
     if (x.w < x.mod.w.min - 0.01 || x.w > x.mod.w.max + 0.01) add('error', 'width-range', `${C(x)}: ${x.w} cm is outside the ${x.mod.name.en.toLowerCase()} range ${x.mod.w.min}–${x.mod.w.max} cm.`, `${C(x)}: רוחב ${x.w} ס״מ מחוץ לטווח ${x.mod.w.min}–${x.mod.w.max} ס״מ (${x.mod.name.he}).`, [x]);
@@ -88,6 +90,40 @@ function findingsFor(run, v) {
     if (x.mod.id === 'base-corner-blind' && blindDoor < 30) add('warning', 'corner-dead', `${C(x)} is a ${x.w} cm corner box with no usable door (dead corner). Widen it into the next unit to 100–120 cm (blind 60 + door 40–55) with a LeMans / magic-corner pull-out, or use an L-corner carousel unit.`,
       `${C(x)} הוא ארון פינה ברוחב ${x.w} ס״מ ללא דלת שמישה (פינה מתה). יש להרחיב לתוך הארון הסמוך ל-100–120 ס״מ (60 עיוור + דלת 40–55) עם מנגנון לה-מאן / מג׳יק קורנר, או ארון פינה L עם קרוסלה.`, [x]);
     else if (k === 'none' || k === 'shelf') add('info', 'corner-access', `${C(x)}: a corner fitting (LeMans / magic corner) makes the blind corner usable.`, `${C(x)}: מנגנון פינה (לה-מאן / מג׳יק קורנר) הופך את הפינה העיוורת לשמישה.`, [x]);
+  }
+
+  // ── corner modules spanning both arms ──
+  for (const x of list.filter((y) => y.g.corner)) {
+    const k = x.g.corner, op = (x.u.carp.fronts && x.u.carp.fronts.operation) || 'hinged', side = k.side === 'L' ? 'left' : 'right';
+    const atEnd = k.side === 'L' ? x.at < (run.reserved ? run.reserved.left : 0) + 0.5 : x.end > run.length - 0.5;
+    const e = run.ends && run.ends[side];
+    if (!atEnd || !e || e.type === 'open') add('warning', 'corner-placement', `${C(x)} is a corner unit but is not at a corner end of the run (set cornerSide and put it first / last at a wall or linked end).`, `${C(x)} הוא ארון פינה אך אינו בקצה פינתי של הקו (יש לקבוע צד פינה ולמקם ראשון / אחרון ליד קיר או קו מחובר).`, [x]);
+    if (e && e.type === 'run') add('warning', 'corner-owner', `${C(x)} sits on the run that butts into ${(v.run(e.runId) || {}).code || 'the other run'} — put corner units on the run that goes through the corner.`, `${C(x)} נמצא בקו שנצמד ל-${(v.run(e.runId) || {}).code || 'קו אחר'} — יש למקם ארונות פינה בקו העובר דרך הפינה.`, [x]);
+    if (k.variant === 'l-doors' && op === 'hinged') add('warning', 'corner-pantry-doors', `${C(x)}: hinged doors meeting at the inside corner without a post clash when opened — use removable, bi-fold or sliding doors, or add a corner post.`, `${C(x)}: דלתות ציר הנפגשות בפינה הפנימית ללא עמוד מתנגשות בפתיחה — להשתמש בדלתות נשלפות, אקורדיון או הזזה, או להוסיף עמוד פינה.`, [x]);
+    for (const f of k.faces) {
+      const need = k.variant === 'l-doors' ? RULES.cornerPantryAccess : RULES.diagonalDoorMin;
+      if (f.len < need) add('warning', 'corner-pantry-access', `${C(x)}: the ${f.id === 'diag' ? 'diagonal' : f.id === 'A' ? 'front' : 'return'} opening is only ${r1(f.len)} cm — at least ${need} cm for access; lengthen the legs.`, `${C(x)}: הפתח ${f.id === 'diag' ? 'האלכסוני' : f.id === 'A' ? 'הקדמי' : 'הצדדי'} רק ${r1(f.len)} ס״מ — נדרש לפחות ${need} ס״מ לגישה; יש להאריך את הזרועות.`, [x]);
+    }
+    if (k.variant === 'walk-in' && Math.min(k.legA, k.legB) < RULES.walkInLegMin) add('warning', 'corner-pantry-access', `${C(x)}: a walk-in corner pantry needs legs ≥ ${RULES.walkInLegMin} cm to step in (here ${k.legA} × ${k.legB}).`, `${C(x)}: מזווה פינתי נכנס דורש זרועות ≥ ${RULES.walkInLegMin} ס״מ כדי להיכנס (כאן ${k.legA} × ${k.legB}).`, [x]);
+  }
+  if (run.reserved) for (const side of ['left', 'right']) {
+    const b = run.reserved.by[side];
+    if (!b) continue;
+    const owner = v.run(b.runId), cu = v.item(b.unitId);
+    if (!owner || !cu) continue;
+    const bb = itemAABB(cu);
+    const hits = list.filter((x) => { if (x.virtual) return false; const a = itemAABB(x.u); return a.x < bb.x + bb.w - 0.5 && bb.x < a.x + a.w - 0.5 && a.y < bb.y + bb.h - 0.5 && bb.y < a.y + a.h - 0.5 && (x.level !== 'wall' || b.level !== 'base'); });
+    if (hits.length) add('error', 'corner-overlap', `${hits.map(C).join(', ')} overlap the corner unit of ${owner.code} — fit the run.`, `${hits.map(C).join(', ')} חופפים לארון הפינה של ${owner.code} — יש להתאים את הקו.`, hits);
+  }
+  // ── bespoke units and special requirements ──
+  for (const x of list.filter((y) => y.mod.id === 'custom')) {
+    const lay = x.u.carp.internals && x.u.carp.internals.layout;
+    const errs = lay ? validateCustomLayout(lay, x.w, x.g.zone.y1 - x.g.zone.y0) : [];
+    for (const e of errs) add('error', 'custom-layout', `${C(x)}: ${e.en}`, `${C(x)}: ${e.he}`, [x]);
+    add('info', 'bespoke', `${C(x)} is a bespoke unit — only sizes and openings are checked automatically; review its construction with the carpenter.`, `${C(x)} היא יחידה בהתאמה אישית — נבדקים אוטומטית רק מידות ופתחים; יש לעבור על אופן הבנייה עם הנגר.`, [x]);
+  }
+  for (const f of [...(run.features || []).map((q) => ({ f: q, x: null })), ...list.flatMap((x) => (x.u.carp.features || []).map((q) => ({ f: q, x })))]) {
+    add('info', 'feature', `Special requirement ${circled(f.f.n)} "${f.f.title}"${f.x ? ` on ${C(f.x)}` : ''} has no automatic rule checks — the carpenter confirms it.`, `דרישה מיוחדת ${circled(f.f.n)} "${f.f.title}"${f.x ? ` ב-${C(f.x)}` : ''} אינה נבדקת אוטומטית — הנגר מאשר אותה.`, f.x ? [f.x] : []);
   }
 
   // ── kitchen working rules ──
