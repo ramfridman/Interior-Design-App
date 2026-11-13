@@ -7,6 +7,13 @@
  *   Z = across the wall (0 = wall centre), +Z = the opening's FRONT:
  *       hinged doors → the side the leaf swings into;   windows / sliding door → outdoors.
  * All parts of all openings are merged into one mesh per material (≈ 8 draw calls for the whole house).
+ *
+ * A doorway may carry a second leaf (`innerDoor`, e.g. the safe room: blast door on the hall face + ordinary door on
+ * the room face). The two doors then share the wall thickness: each frame keeps to its own half, each leaf is hung
+ * flush with its own wall face and swings away from the other.
+ *
+ * Sunlight: glass never casts a shadow, every other part does. With `shadowFull` (sun study + cut-away walls) the
+ * visible, cut parts stop casting and one invisible full-height copy casts instead, so the sun patches stay true.
  */
 import * as THREE from 'three';
 
@@ -99,6 +106,33 @@ export class Soup {
     g.computeBoundingSphere();
     return g;
   }
+}
+
+/** One position-only geometry from several soups — used for invisible shadow casters. */
+export function mergeSoups(soups) {
+  const pos = [], idx = [];
+  for (const soup of soups) {
+    if (!soup || soup.empty) continue;
+    const base = pos.length / 3;
+    for (let i = 0; i < soup.pos.length; i++) pos.push(soup.pos[i]);
+    for (let i = 0; i < soup.idx.length; i++) idx.push(soup.idx[i] + base);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeBoundingSphere();
+  return g;
+}
+
+/** Material of a shadow-only mesh: draws nothing in the colour pass, still renders into the sun's shadow map. */
+export const casterMaterial = () => new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+
+/** Mesh that only casts a shadow: invisible, not pickable. */
+export function casterMesh(name, geometry, material) {
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = name; mesh.castShadow = true; mesh.receiveShadow = false;
+  mesh.raycast = () => {}; mesh.userData.shadowOnly = true; mesh.userData.noShadow = false;
+  return mesh;
 }
 
 // ───────────────────────── plan → canonical frame ─────────────────────────
@@ -242,29 +276,44 @@ function lever(P, m, x, y, zFace, side, dirX) {
   P.box('handle', m, x - (dirX < 0 ? 0.125 : 0.01), x + (dirX < 0 ? 0.01 : 0.125), y - 0.009, y + 0.009, zFace + side * 0.045, zFace + side * 0.062);
 }
 
+/**
+ * A hinged door in its canonical frame (+Z = the side the leaf swings into).
+ * `G.half` — the doorway is shared with a second door on the other wall face: the frame keeps to the front part of
+ * the wall thickness (z ≥ `G.zMin`) and trims only the front face.
+ * `G.openW` / `G.openH` — size of the wall opening when the door itself is smaller (the frame is packed out).
+ */
 function buildHingedDoor(P, o, m, G, open) {
-  const { w, y1, t, front } = G;
+  const { w, y1, t, front, half } = G;
   const hingeSign = o.hinge === LOCAL_X[front] ? 1 : -1;
   const out = o.exterior && o.outside ? (o.outside === front ? 1 : -1) : 0;
   const st = o.style;
+  const zMin = half ? Math.max(G.zMin || 0, -t / 2) : -t / 2;         // back limit of everything fixed to the wall
+  const zc = half && (st === 'entry' || st === 'service') ? (zMin + t / 2) / 2 : 0;                     // centre plane of a centred frame
   const S = {                                                         // per-style proportions (m)
     interior: { jamb: 0.035, leafT: 0.04, pivot: t / 2, frame: 'door', leaf: 'door' },
-    entry: { jamb: 0.06, leafT: 0.065, pivot: 0.07, frame: 'frame', leaf: 'entry' },
-    service: { jamb: 0.05, leafT: 0.045, pivot: 0.04, frame: 'frame', leaf: 'frame' },
+    entry: { jamb: 0.06, leafT: 0.065, pivot: zc + 0.07, frame: 'frame', leaf: 'entry' },
+    service: { jamb: 0.05, leafT: 0.045, pivot: zc + 0.04, frame: 'frame', leaf: 'frame' },
     mamad: { jamb: 0.05, leafT: 0.055, pivot: t / 2 + 0.012, frame: 'steel', leaf: 'steel' },
   }[st] || { jamb: 0.035, leafT: 0.04, pivot: t / 2, frame: 'door', leaf: 'door' };
   const j = S.jamb, head = y1 - j;
 
+  // ── packing between a smaller door and the wall opening ──
+  const ow = Math.max(G.openW || w, w), oh = Math.max(G.openH || y1, y1);
+  const fillMat = S.frame === 'door' || !S.frame ? 'door' : S.frame, fillZ0 = Math.max(zMin, t / 2 - 0.1);
+  if (ow - w > 1e-4) for (const s of [-1, 1]) P.box(fillMat, m, s * w / 2, s * ow / 2, 0, oh, fillZ0, t / 2);
+  if (oh - y1 > 1e-4) P.box(fillMat, m, -w / 2, w / 2, y1, oh, fillZ0, t / 2);
+
   // ── frame ──
   if (st === 'interior' || !S.frame || S.frame === 'door') {
-    for (const s of [-1, 1]) P.box('door', m, s * (w / 2 - j), s * w / 2, 0, y1, -t / 2, t / 2);          // lining
-    P.box('door', m, -w / 2 + j, w / 2 - j, head, y1, -t / 2, t / 2);
-    for (const z of [t / 2, -t / 2 - 0.016]) {                                                           // architrave on both faces
+    const zBack = half ? Math.max(zMin, t / 2 - 0.1) : -t / 2;
+    for (const s of [-1, 1]) P.box('door', m, s * (w / 2 - j), s * w / 2, 0, y1, zBack, t / 2);          // lining
+    P.box('door', m, -w / 2 + j, w / 2 - j, head, y1, zBack, t / 2);
+    for (const z of half ? [t / 2] : [t / 2, -t / 2 - 0.016]) {                                          // architrave on the free face(s)
       for (const s of [-1, 1]) P.box('door', m, s * (w / 2 - j), s * (w / 2 + 0.05), 0, y1 + 0.05, z, z + 0.016);
       P.box('door', m, -w / 2 + j, w / 2 - j, head, y1 + 0.05, z, z + 0.016);
     }
   } else if (st === 'mamad') {
-    const z0 = t / 2 - 0.11, z1 = t / 2 + 0.012;
+    const z0 = Math.max(t / 2 - 0.11, zMin), z1 = t / 2 + 0.012;
     for (const s of [-1, 1]) {
       P.box('steel', m, s * (w / 2 - j), s * w / 2, 0, y1, z0, z1);
       P.box('steel', m, s * w / 2, s * (w / 2 + 0.07), 0, y1 + 0.07, t / 2, z1);                        // face flange on the wall
@@ -273,10 +322,10 @@ function buildHingedDoor(P, o, m, G, open) {
     P.box('steel', m, -w / 2, w / 2, y1, y1 + 0.07, t / 2, z1);
     P.box('steel', m, -w / 2 + j, w / 2 - j, 0, 0.012, z0, z1);                                         // steel threshold
   } else {
-    const d = st === 'entry' ? 0.07 : 0.04;
-    for (const s of [-1, 1]) P.box('frame', m, s * (w / 2 - j), s * w / 2, 0, y1, -d, d);
-    P.box('frame', m, -w / 2 + j, w / 2 - j, head, y1, -d, d);
-    P.box('handle', m, -w / 2 + j, w / 2 - j, 0, 0.014, -d, d);                                         // threshold strip
+    const d = Math.min(st === 'entry' ? 0.07 : 0.04, half ? Math.max(0.02, (t / 2 - zMin) / 2) : Infinity);
+    for (const s of [-1, 1]) P.box('frame', m, s * (w / 2 - j), s * w / 2, 0, y1, zc - d, zc + d);
+    P.box('frame', m, -w / 2 + j, w / 2 - j, head, y1, zc - d, zc + d);
+    P.box('handle', m, -w / 2 + j, w / 2 - j, 0, 0.014, zc - d, zc + d);                                 // threshold strip
   }
 
   // ── leaf (leaf frame: x' from the hinge edge, z' = 0 on the pivot plane) ──
@@ -343,13 +392,14 @@ function makeMaterials(frameColor) {
     handle: std('#b9bbbd', 0.38, 0.6),
     stone: std('#d8d2c6', 0.75),
     glass: std('#6f8b96', 0.05, 0, { transparent: true, opacity: 0.3, depthWrite: false, envMapIntensity: 3 }),
+    caster: casterMaterial(),
   };
 }
 
 /**
  * Build every window and door of the plan.
  * @param {object} plan PLAN
- * @param {{ ceilingH: number, cutH: number|null, doorsOpen: boolean, frameColor: string }} opts heights in METRES
+ * @param {{ ceilingH: number, cutH: number|null, doorsOpen: boolean, frameColor: string, shadowFull?: boolean }} opts heights in METRES
  * @returns {{ group: THREE.Group, rebuild(opts): void, setFrameColor(hex: string): void, dispose(): void }}
  */
 export function buildOpenings(plan, opts) {
@@ -357,34 +407,64 @@ export function buildOpenings(plan, opts) {
   const materials = makeMaterials(opts.frameColor || '#2b2d31');
   const meshes = new Map();
 
-  function rebuild(o2) {
-    const cut = o2.cutH == null ? Infinity : o2.cutH;
+  /** All parts of all openings of the CURRENT plan (re-read on every call), clipped at `cut` metres. */
+  function collect(cut, doorsOpen) {
     const P = new Parts(cut);
     for (const o of plan.openings || []) {
       try {
         const F = openingFrame(o), front = F.front;
         const along = (o.axis === 'h' ? o.x + o.w / 2 : o.y + o.h / 2) / 100;
-        const m = new THREE.Matrix4().makeRotationY(YAW[front]);
-        m.setPosition(o.axis === 'h' ? along : F.mid / 100, 0, o.axis === 'h' ? F.mid / 100 : along);
+        const place = (side) => {
+          const m = new THREE.Matrix4().makeRotationY(YAW[side]);
+          return m.setPosition(o.axis === 'h' ? along : F.mid / 100, 0, o.axis === 'h' ? F.mid / 100 : along);
+        };
         const G = {
           plan, front, w: o.width / 100, t: F.t / 100, y0: (o.sill || 0) / 100, y1: ((o.sill || 0) + o.height) / 100,
           zf: framePlaneOffset(o, F.t, front) / 100, out: o.exterior && o.outside ? (o.outside === front ? 1 : -1) : 1,
         };
-        if (o.kind === 'window') buildWindow(P, o, m, G);
-        else if (o.kind === 'sliding-door') buildSlidingDoor(P, o, m, G, !!o2.doorsOpen);
-        else buildHingedDoor(P, o, m, G, !!o2.doorsOpen);
+        if (o.kind === 'window') buildWindow(P, o, place(front), G);
+        else if (o.kind === 'sliding-door') buildSlidingDoor(P, o, place(front), G, doorsOpen);
+        else {
+          const inner = o.innerDoor && typeof o.innerDoor === 'object' ? o.innerDoor : null;
+          // two doors in one doorway: the main frame keeps to the front 0.5 cm+ of the wall centre, the inner one to the back
+          buildHingedDoor(P, o, place(front), inner ? { ...G, half: true, zMin: 0.005 } : G, doorsOpen);
+          if (inner) {
+            const back = OPPOSITE[front];                               // hung on the other wall face, swings away from the main leaf
+            const w = Math.min(Number(inner.width) || o.width, o.width) / 100, h = Math.min(Number(inner.height) || o.height, o.height) / 100;
+            const second = { id: o.id + ':inner', kind: 'door', style: inner.style || 'interior', axis: o.axis, hinge: inner.hinge || o.hinge, swing: back };
+            buildHingedDoor(P, second, place(back), { plan, front: back, w, t: G.t, y0: 0, y1: h, zf: 0, out: 0, half: true, zMin: 0.005, openW: G.w, openH: G.y1 }, doorsOpen);
+          }
+        }
       } catch (e) { console.error(`[view3d] opening "${o && o.id}" could not be built`, e); }
     }
-    for (const [key, mesh] of meshes) { mesh.geometry.dispose(); group.remove(mesh); meshes.delete(key); }
+    return P;
+  }
+
+  /**
+   * (Re)build from the current plan. `o2.shadowFull` (with a cut height): the visible parts stop casting shadows and
+   * an invisible full-height copy of every opaque part casts instead.
+   */
+  function rebuild(o2) {
+    const cut = o2.cutH == null ? Infinity : o2.cutH, open = !!o2.doorsOpen;
+    const P = collect(cut, open);
+    const proxy = o2.shadowFull && cut !== Infinity ? collect(Infinity, open) : null;
+    const next = new Map();                                             // build everything first, swap afterwards
     for (const [key, soup] of P.soups) {
       if (soup.empty) continue;
       const mesh = new THREE.Mesh(soup.toGeometry(), materials[key] || materials.frame);
       mesh.name = 'openings:' + key;
       const isGlass = key === 'glass';
-      mesh.castShadow = !isGlass; mesh.receiveShadow = !isGlass;
+      mesh.castShadow = !isGlass && !proxy; mesh.receiveShadow = !isGlass;
       if (isGlass) { mesh.userData.noShadow = true; mesh.renderOrder = 2; }
-      meshes.set(key, mesh); group.add(mesh);
+      next.set(key, mesh);
     }
+    if (proxy) {
+      const opaque = [...proxy.soups].filter(([key]) => key !== 'glass').map(([, soup]) => soup);
+      next.set('caster', casterMesh('openings:caster', mergeSoups(opaque), materials.caster));
+    }
+    for (const mesh of meshes.values()) { mesh.geometry.dispose(); group.remove(mesh); }
+    meshes.clear();
+    for (const [key, mesh] of next) { meshes.set(key, mesh); group.add(mesh); }
   }
   rebuild(opts);
 

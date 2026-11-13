@@ -258,7 +258,6 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
     } else {
       lightDir.copy(moonDir); sun.color.copy(MOON.color); sun.intensity = MOON.intensity * smooth(-4.5, -10, altitude);
     }
-    sun.castShadow = sun.intensity > 0;
     fitShadow(lightDir);
 
     // two looks, blended per frame by how far inside the house the camera is (see update()):
