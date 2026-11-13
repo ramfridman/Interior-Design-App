@@ -69,7 +69,7 @@ function paintY(g, lo, hi, y0, y1) {
  * Foliage shading for a NON-indexed geometry: per-face tone that is darker underneath and lighter on top
  * (cheap ambient occlusion + sun), with a little random sparkle per face.
  */
-function paintFoliage(g, hex, rnd, { lo = -0.34, hi = 0.12, ao = 1, sparkle = 0.1 } = {}) {
+function paintFoliage(g, hex, rnd, { lo = -0.34, hi = 0.12, ao = 1, sparkle = 0.07 } = {}) {
   const a = colorAttr(g).array, p = g.attributes.position, c = C(hex);
   g.computeBoundingBox();
   const y0 = g.boundingBox.min.y, dy = Math.max(1e-6, g.boundingBox.max.y - y0);
@@ -201,14 +201,21 @@ function blobG(rx, ry, rz, x, y, z, rnd, o = {}) {
   const s1 = rnd() * 9, s2 = rnd() * 9, s3 = rnd() * 9, yaw = rnd() * TAU, ca = Math.cos(yaw), sa = Math.sin(yaw);
   for (let i = 0; i < n; i++) {
     const ax = src[i * 3], ay = src[i * 3 + 1], az = src[i * 3 + 2];
-    const k = 1 + amp * (Math.sin(ax * 3.3 + s1) * Math.sin(ay * 3.1 + s2) + 0.7 * Math.sin(az * 3.9 + s3) * Math.sin(ax * 2.3 + s2));
+    const k = 1 + amp * (Math.sin(ax * 3.3 + s1) * Math.sin(ay * 3.1 + s2) + 0.7 * Math.sin(az * 3.9 + s3) * Math.sin(ax * 2.3 + s2) + 0.4 * Math.sin(ax * 7.1 + s3) * Math.sin(ay * 6.3 + s1) * Math.sin(az * 6.7 + s2));
     const px = (ax * ca - az * sa) * k, pz = (ax * sa + az * ca) * k;
     let py = ay * k;
     if (o.squash && py < 0) py *= o.squash;
     let wy = y + py * ry;
     if (o.floor != null && wy < o.floor) wy = o.floor;
     pos[i * 3] = x + px * rx; pos[i * 3 + 1] = wy; pos[i * 3 + 2] = z + pz * rz;
-    nor[i * 3] = px; nor[i * 3 + 1] = py; nor[i * 3 + 2] = pz;
+    nor[i * 3] = px / k; nor[i * 3 + 1] = ay; nor[i * 3 + 2] = pz / k;
+  }
+  const fc = o.facet ?? 0.45;                         // blend the round normal with each face's own → soft facets
+  for (let i = 0; i < n; i += 3) {
+    const a = i * 3, ux = pos[a + 3] - pos[a], uy = pos[a + 4] - pos[a + 1], uz = pos[a + 5] - pos[a + 2], vx = pos[a + 6] - pos[a], vy = pos[a + 7] - pos[a + 1], vz = pos[a + 8] - pos[a + 2];
+    let fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
+    const fl = Math.hypot(fx, fy, fz) || 1; fx /= fl; fy /= fl; fz /= fl;
+    for (let q = 0; q < 3; q++) { const j = a + q * 3, nx = lerp(nor[j], fx, fc), ny = lerp(nor[j + 1], fy, fc), nz = lerp(nor[j + 2], fz, fc), l = Math.hypot(nx, ny, nz) || 1; nor[j] = nx / l; nor[j + 1] = ny / l; nor[j + 2] = nz / l; }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -273,12 +280,12 @@ const taper = (r0, r1, n) => Array.from({ length: n + 1 }, (_, i) => lerp(r0, r1
  * o: { aspect width/length, hang 0..1 (leaves point down), colors: [hex…], up: keep to the upper part }
  */
 function leafCloudG(c, r, n, size, rnd, o = {}) {
-  const pos = new Float32Array(n * 18), col = new Float32Array(n * 18), aspect = o.aspect ?? 0.45, colors = o.colors || ['#5c8a45'];
+  const pos = new Float32Array(n * 18), col = new Float32Array(n * 18), nrm = new Float32Array(n * 18), aspect = o.aspect ?? 0.45, colors = o.colors || ['#5c8a45'];
   const d = new THREE.Vector3(), u = new THREE.Vector3(), v = new THREE.Vector3(), q = new THREE.Vector3();
   for (let i = 0; i < n; i++) {
     const cy = o.up ? rnd() * 1.2 - 0.2 : rnd() * 1.7 - 0.7, a = rnd() * TAU, sr = Math.sqrt(Math.max(0, 1 - Math.min(1, cy * cy)));
     d.set(Math.cos(a) * sr, clamp(cy, -1, 1), Math.sin(a) * sr);
-    const k = (o.shell ?? 0.92) + rnd() * (o.spread ?? 0.3);
+    const k = (o.shell ?? 0.98) + rnd() * (o.spread ?? 0.28);
     const px = c[0] + d.x * r[0] * k, py = c[1] + d.y * r[1] * k, pz = c[2] + d.z * r[2] * k;
     u.set(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).addScaledVector(d, 0.6);
     if (o.hang) u.lerp(q.set(d.x * 0.25, -1, d.z * 0.25), o.hang);
@@ -289,12 +296,13 @@ function leafCloudG(c, r, n, size, rnd, o = {}) {
     const m = -0.15 * L, Lf = [px + u.x * m + v.x * Wd, py + u.y * m + v.y * Wd, pz + u.z * m + v.z * Wd], Rt = [px + u.x * m - v.x * Wd, py + u.y * m - v.y * Wd, pz + u.z * m - v.z * Wd];
     pos.set([...A, ...Lf, ...Bp, ...A, ...Bp, ...Rt], i * 18);
     const cc = C(colors[Math.floor(rnd() * colors.length) % colors.length]), f = 0.82 + rnd() * 0.3 + 0.1 * d.y;
-    for (let k2 = 0; k2 < 6; k2++) { col[i * 18 + k2 * 3] = cc.r * f; col[i * 18 + k2 * 3 + 1] = cc.g * f; col[i * 18 + k2 * 3 + 2] = cc.b * f; }
+    const ny = Math.max(d.y, -0.2) + 0.25, nl = Math.hypot(d.x, ny, d.z) || 1;
+    for (let k2 = 0; k2 < 6; k2++) { const j = i * 18 + k2 * 3; col[j] = cc.r * f; col[j + 1] = cc.g * f; col[j + 2] = cc.b * f; nrm[j] = d.x / nl; nrm[j + 1] = ny / nl; nrm[j + 2] = d.z / nl; }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  g.computeVertexNormals();
+  g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
   return g;
 }
 
@@ -383,12 +391,12 @@ function wallG(pts, y0, y1, inward = false, su = 1) {
 const _vm = new Map();
 /**
  * Shared vertex-coloured materials (white base — the colour comes from the geometry):
- * 'leaf' flat + two-sided foliage · 'flat' faceted (rocks) · 'bark' / 'matte' / 'satin' / 'gloss' smooth with falling roughness.
+ * 'leaf' soft two-sided foliage · 'frond' faceted two-sided blades · 'flat' faceted (rocks) · 'bark' / 'matte' / 'satin' / 'gloss' smooth with falling roughness.
  */
 function vmat(kind = 'matte') {
   let m = _vm.get(kind);
   if (m) return m;
-  const def = { leaf: [0.86, true, THREE.DoubleSide], flat: [0.92, true, THREE.FrontSide], bark: [0.95, false, THREE.FrontSide], matte: [0.85, false, THREE.FrontSide],
+  const def = { leaf: [0.86, false, THREE.DoubleSide], frond: [0.86, true, THREE.DoubleSide], flat: [0.92, true, THREE.FrontSide], bark: [0.95, false, THREE.FrontSide], matte: [0.85, false, THREE.FrontSide],
     satin: [0.5, false, THREE.FrontSide], gloss: [0.16, false, THREE.FrontSide], two: [0.8, false, THREE.DoubleSide], metal: [0.38, false, THREE.FrontSide] }[kind] || [0.85, false, THREE.FrontSide];
   m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: def[0], metalness: kind === 'metal' ? 0.85 : 0, flatShading: def[1], side: def[2] });
   m.name = 'garden-' + kind;
@@ -875,31 +883,31 @@ const ENV = {
  * fork height (share of the bare trunk) · leaf cards { n per blob, s size m, a aspect, c colours, hang } · bloom · fruit · kind = special builder.
  */
 const TREES = {
-  olive: { f: ['#7c8d68', '#93a283', '#687a59'], bark: '#6d6052', tr: 0.19, clear: 0.36, shape: 'round', k: 9, nb: 3, bs: 0.3, gnarl: 0.24, fork: 0.7, leaf: { n: 30, s: 0.1, a: 0.25, c: ['#a9b698', '#8c9c7c', '#c2cbb3'] }, fruit: { c: '#3b3442', r: 0.014, n: 40 } },
-  lemon: { f: ['#3f7a35', '#4c8a3e', '#33682c'], bark: '#6f6048', tr: 0.075, clear: 0.27, shape: 'round', k: 10, nb: 4, bs: 0.4, leaf: { n: 9, s: 0.09, a: 0.5, c: ['#5a9a48', '#4c8a3e'] }, fruit: { c: '#f3d63a', r: 0.036, n: 30, el: 1.25, def: true } },
-  orange: { f: ['#2f6b2e', '#3c7a38', '#25551f'], bark: '#6a5a45', tr: 0.08, clear: 0.27, shape: 'round', k: 10, nb: 4, bs: 0.4, leaf: { n: 9, s: 0.09, a: 0.5, c: ['#4a8a42', '#3c7a38'] }, fruit: { c: '#f28c1e', r: 0.04, n: 30, def: true } },
-  pomegranate: { f: ['#5d8f3a', '#73a046', '#4b7a30'], bark: '#8c7862', tr: 0.065, clear: 0.3, shape: 'vase', k: 8, nb: 3, bs: 0.33, fork: 0.12, limbs: 5, leaf: { n: 18, s: 0.07, a: 0.3, c: ['#86b04e', '#b0623a', '#6f9a40'] }, bloom: { c: ['#e8502a'], dots: 14 }, fruit: { c: '#b5282d', r: 0.05, n: 14, def: true } },
-  fig: { f: ['#4f8a3a', '#5f9a45', '#3f7630'], bark: '#a59c8e', tr: 0.12, clear: 0.2, shape: 'umbrella', k: 8, nb: 3, bs: 0.4, fork: 0.45, leaf: { n: 16, s: 0.26, a: 0.8, c: ['#6aa54a', '#588f3e'] }, fruit: { c: '#5a3a5c', r: 0.028, n: 20 } },
+  olive: { f: ['#7f9368', '#93a57f', '#6b7f58'], bark: '#6d6052', tr: 0.19, clear: 0.36, shape: 'round', k: 9, nb: 3, bs: 0.3, gnarl: 0.24, fork: 0.7, leaf: { n: 30, s: 0.1, a: 0.25, c: ['#a9b698', '#8c9c7c', '#c2cbb3'] }, fruit: { c: '#3b3442', r: 0.02, n: 40 } },
+  lemon: { f: ['#3f7a35', '#4c8a3e', '#33682c'], bark: '#6f6048', tr: 0.075, clear: 0.27, shape: 'round', k: 10, nb: 3, bs: 0.42, leaf: { n: 9, s: 0.09, a: 0.5, c: ['#5a9a48', '#4c8a3e'] }, fruit: { c: '#f3d63a', r: 0.05, n: 30, el: 1.25, def: true } },
+  orange: { f: ['#2f6b2e', '#3c7a38', '#25551f'], bark: '#6a5a45', tr: 0.08, clear: 0.27, shape: 'round', k: 10, nb: 3, bs: 0.42, leaf: { n: 9, s: 0.09, a: 0.5, c: ['#4a8a42', '#3c7a38'] }, fruit: { c: '#f28c1e', r: 0.055, n: 30, def: true } },
+  pomegranate: { f: ['#5d8f3a', '#73a046', '#4b7a30'], bark: '#8c7862', tr: 0.065, clear: 0.3, shape: 'vase', k: 8, nb: 3, bs: 0.33, fork: 0.12, limbs: 5, leaf: { n: 18, s: 0.07, a: 0.3, c: ['#86b04e', '#b0623a', '#6f9a40'] }, bloom: { c: ['#e8502a'], dots: 14 }, fruit: { c: '#b5282d', r: 0.062, n: 16, def: true } },
+  fig: { f: ['#4f8a3a', '#5f9a45', '#3f7630'], bark: '#a59c8e', tr: 0.12, clear: 0.2, shape: 'umbrella', k: 8, nb: 3, bs: 0.42, fork: 0.45, leaf: { n: 16, s: 0.26, a: 0.8, c: ['#6aa54a', '#588f3e'] }, fruit: { c: '#5a3a5c', r: 0.028, n: 20 } },
   'date-palm': { kind: 'palm', f: ['#6f8f5a', '#7f9c64', '#5d7d4e'], bark: '#7d6c56', fruit: { c: '#c9782c' } },
   'washingtonia-palm': { kind: 'palm', fan: true, f: ['#5f8a48', '#6c9a50', '#4f7a3e'], bark: '#8c8273' },
-  ficus: { f: ['#2d5f2a', '#386b30', '#244f23'], bark: '#9c968a', tr: 0.2, clear: 0.36, shape: 'umbrella', k: 12, nb: 4, bs: 0.4, gnarl: 0.12, leaf: { n: 8, s: 0.08, a: 0.5, c: ['#3f7a36', '#2f6a2c'] } },
+  ficus: { f: ['#2d5f2a', '#386b30', '#244f23'], bark: '#9c968a', tr: 0.2, clear: 0.36, shape: 'umbrella', k: 12, nb: 3, bs: 0.42, gnarl: 0.12, leaf: { n: 8, s: 0.08, a: 0.5, c: ['#3f7a36', '#2f6a2c'] } },
   jacaranda: { f: ['#6b9650', '#7ea55e'], bark: '#70675a', tr: 0.11, clear: 0.4, shape: 'vase', k: 10, nb: 3, bs: 0.33, leaf: { n: 22, s: 0.12, a: 0.35, c: ['#8fb86a', '#7ea55e'] }, bloom: { c: ['#8d72d8', '#a188e8', '#7a5fc8'], cover: 0.72 } },
-  poinciana: { f: ['#4f8f3a', '#62a046'], bark: '#8c8274', tr: 0.14, clear: 0.5, shape: 'flat', k: 11, nb: 3, bs: 0.34, leaf: { n: 18, s: 0.12, a: 0.35, c: ['#74b050', '#62a046'] }, bloom: { c: ['#e23a1c', '#f05a24', '#d42a18'], cover: 0.75, top: true } },
+  poinciana: { f: ['#4f8f3a', '#62a046'], bark: '#8c8274', tr: 0.14, clear: 0.5, shape: 'flat', k: 11, nb: 3, bs: 0.34, leaf: { n: 18, s: 0.12, a: 0.35, c: ['#74b050', '#62a046'] }, bloom: { c: ['#e23a1c', '#f05a24', '#d42a18'], caps: 0.8 } },
   cypress: { kind: 'column', f: ['#2f4f33', '#3a5c3b', '#263f2a'], bark: '#5a4a3c' },
-  carob: { f: ['#34582c', '#41672f', '#2a4a26'], bark: '#5c4c3e', tr: 0.17, clear: 0.28, shape: 'umbrella', k: 12, nb: 4, bs: 0.4, gnarl: 0.15, leaf: { n: 8, s: 0.09, a: 0.7, c: ['#4a7436', '#3a6430'] }, fruit: { c: '#4a3020', r: 0.02, n: 22, pods: true } },
-  mango: { f: ['#2f5a2a', '#3d6b30', '#254a22'], bark: '#5f5245', tr: 0.14, clear: 0.3, shape: 'round', k: 11, nb: 4, bs: 0.4, leaf: { n: 14, s: 0.18, a: 0.25, c: ['#4a7a36', '#9a5a3c', '#b06a40', '#3d6b30'], hang: 0.5 }, fruit: { c: '#e8a03a', r: 0.05, n: 14, el: 1.4 } },
-  avocado: { f: ['#4a7a34', '#5a8a3d', '#3a672c'], bark: '#6a5c4c', tr: 0.11, clear: 0.28, shape: 'oval', k: 10, nb: 4, bs: 0.37, leader: true, leaf: { n: 12, s: 0.14, a: 0.45, c: ['#6a9a48', '#5a8a3d'] }, fruit: { c: '#2f4a26', r: 0.045, n: 12, el: 1.45 } },
-  almond: { f: ['#5f8a45', '#6f9a52'], bark: '#4f4238', tr: 0.09, clear: 0.33, shape: 'vase', k: 9, nb: 3, bs: 0.31, leaf: { n: 22, s: 0.07, a: 0.6, c: ['#7aa858', '#6f9a52'] }, bloom: { c: ['#f7e3ea', '#f1cfdc', '#fdf6f8'], cover: 0.82 }, fruit: { c: '#9aa870', r: 0.018, n: 24, el: 1.3 } },
-  'bougainvillea-tree': { f: ['#4a7a38', '#5a8a42'], bark: '#7a6a58', tr: 0.08, clear: 0.42, shape: 'round', k: 9, nb: 4, bs: 0.38, gnarl: 0.2, leaf: { n: 24, s: 0.09, a: 0.7, c: ['#5a8a42', '#6a9a4c'] }, bloom: { c: ['#c8287f', '#d6409a', '#b81f70'], cover: 0.8 } },
+  carob: { f: ['#34582c', '#41672f', '#2a4a26'], bark: '#5c4c3e', tr: 0.17, clear: 0.28, shape: 'umbrella', k: 12, nb: 3, bs: 0.42, gnarl: 0.15, leaf: { n: 8, s: 0.09, a: 0.7, c: ['#4a7436', '#3a6430'] }, fruit: { c: '#4a3020', r: 0.02, n: 22, pods: true } },
+  mango: { f: ['#2f5a2a', '#3d6b30', '#254a22'], bark: '#5f5245', tr: 0.14, clear: 0.3, shape: 'round', k: 11, nb: 3, bs: 0.42, leaf: { n: 14, s: 0.18, a: 0.25, c: ['#4a7a36', '#9a5a3c', '#b06a40', '#3d6b30'], hang: 0.5 }, fruit: { c: '#e8a03a', r: 0.065, n: 14, el: 1.4 } },
+  avocado: { f: ['#4a7a34', '#5a8a3d', '#3a672c'], bark: '#6a5c4c', tr: 0.11, clear: 0.28, shape: 'oval', k: 10, nb: 3, bs: 0.37, leader: true, leaf: { n: 12, s: 0.14, a: 0.45, c: ['#6a9a48', '#5a8a3d'] }, fruit: { c: '#2f4a26', r: 0.045, n: 12, el: 1.45 } },
+  almond: { f: ['#5f8a45', '#6f9a52'], bark: '#4f4238', tr: 0.09, clear: 0.33, shape: 'vase', k: 10, nb: 3, bs: 0.27, leaf: { n: 34, s: 0.1, a: 0.7, c: ['#7aa858', '#6f9a52'] }, bloom: { c: ['#f7e3ea', '#f1cfdc', '#fdf6f8'], cover: 0.82 }, fruit: { c: '#9aa870', r: 0.018, n: 24, el: 1.3 } },
+  'bougainvillea-tree': { f: ['#4a7a38', '#5a8a42'], bark: '#7a6a58', tr: 0.08, clear: 0.42, shape: 'round', k: 9, nb: 3, bs: 0.4, gnarl: 0.2, leaf: { n: 24, s: 0.09, a: 0.7, c: ['#5a8a42', '#6a9a4c'] }, bloom: { c: ['#c8287f', '#d6409a', '#b81f70'], cover: 0.8 } },
   plumeria: { kind: 'plumeria', f: ['#4f8a3a', '#5c9644', '#437a32'], bark: '#9a958a', bloom: { c: ['#fbf7ea'] } },
   moringa: { f: ['#6f9a4a', '#82aa5a'], bark: '#b5aa98', tr: 0.07, clear: 0.42, shape: 'vase', k: 9, nb: 2, bs: 0.24, leaf: { n: 46, s: 0.06, a: 0.6, c: ['#8fba62', '#7aa850', '#a3c878'] }, fruit: { c: '#7a8a4a', r: 0.012, n: 16, pods: true } },
   banana: { kind: 'banana', f: ['#5f9a3a', '#6fa844', '#4f8a32'], bark: '#8a9248', fruit: { c: '#d9c945' } },
-  oak: { f: ['#4a6b35', '#587a3e', '#3b5a2c'], bark: '#5a4a3c', tr: 0.2, clear: 0.3, shape: 'round', k: 12, nb: 4, bs: 0.38, gnarl: 0.1, leaf: { n: 10, s: 0.09, a: 0.6, c: ['#6a8a48', '#587a3e'] }, fruit: { c: '#9a7a4a', r: 0.012, n: 24, el: 1.4 } },
+  oak: { f: ['#4a6b35', '#587a3e', '#3b5a2c'], bark: '#5a4a3c', tr: 0.2, clear: 0.3, shape: 'round', k: 12, nb: 3, bs: 0.4, gnarl: 0.1, leaf: { n: 10, s: 0.09, a: 0.6, c: ['#6a8a48', '#587a3e'] }, fruit: { c: '#9a7a4a', r: 0.012, n: 24, el: 1.4 } },
   eucalyptus: { f: ['#6b8a68', '#7c9a78', '#5a7a5c'], bark: '#cfc7b6', bark2: '#a08c74', tr: 0.13, clear: 0.45, shape: 'oval', leader: true, k: 10, nb: 3, bs: 0.3, leaf: { n: 30, s: 0.13, a: 0.16, c: ['#8faa8a', '#9db898', '#7c9a78'], hang: 0.8 } },
-  mulberry: { f: ['#4f8a34', '#5c9a3d', '#3f752b'], bark: '#6a5a48', tr: 0.13, clear: 0.3, shape: 'umbrella', k: 11, nb: 4, bs: 0.4, leaf: { n: 10, s: 0.14, a: 0.8, c: ['#6aa844', '#5c9a3d'] }, fruit: { c: '#3a1f3a', r: 0.015, n: 30, el: 1.5 } },
+  mulberry: { f: ['#4f8a34', '#5c9a3d', '#3f752b'], bark: '#6a5a48', tr: 0.13, clear: 0.3, shape: 'umbrella', k: 11, nb: 3, bs: 0.42, leaf: { n: 10, s: 0.14, a: 0.8, c: ['#6aa844', '#5c9a3d'] }, fruit: { c: '#3a1f3a', r: 0.015, n: 30, el: 1.5 } },
   guava: { f: ['#5a8a45', '#6a9a50', '#4a7838'], bark: '#b89474', bark2: '#8a6a50', tr: 0.07, clear: 0.32, shape: 'round', k: 8, nb: 3, bs: 0.34, leaf: { n: 16, s: 0.11, a: 0.5, c: ['#7aa858', '#6a9a50'] }, fruit: { c: '#c9d46a', r: 0.035, n: 14 } },
-  loquat: { f: ['#3d6b33', '#4c7a3a', '#2f5829'], bark: '#5f5044', tr: 0.08, clear: 0.3, shape: 'round', k: 9, nb: 4, bs: 0.4, leaf: { n: 18, s: 0.2, a: 0.3, c: ['#5a8a45', '#8a9a6a', '#4c7a3a'] }, fruit: { c: '#f0b030', r: 0.022, n: 36 } },
-  generic: { f: ['#4f7f3c', '#5f8f48', '#40702f'], bark: '#6a5a4a', tr: 0.11, clear: 0.33, shape: 'round', k: 10, nb: 4, bs: 0.38, leaf: { n: 12, s: 0.1, a: 0.5, c: ['#6a9a50', '#5f8f48'] } },
+  loquat: { f: ['#3d6b33', '#4c7a3a', '#2f5829'], bark: '#5f5044', tr: 0.08, clear: 0.3, shape: 'round', k: 9, nb: 3, bs: 0.42, leaf: { n: 18, s: 0.2, a: 0.3, c: ['#5a8a45', '#8a9a6a', '#4c7a3a'] }, fruit: { c: '#f0b030', r: 0.032, n: 36 } },
+  generic: { f: ['#4f7f3c', '#5f8f48', '#40702f'], bark: '#6a5a4a', tr: 0.11, clear: 0.33, shape: 'round', k: 10, nb: 3, bs: 0.4, leaf: { n: 12, s: 0.1, a: 0.5, c: ['#6a9a50', '#5f8f48'] } },
 };
 /** Per-vertex mottled bark (call on the indexed tube, before it goes into a batch). */
 function paintBark(g, bark, rnd, y1 = 1, bark2) {
@@ -972,18 +980,23 @@ function broadleaf(b, S, W, D, H, rnd, o) {
     for (let j = 0; j < S.nb; j++) {
       const k = j === 0 ? 1 : 0.62 + rnd() * 0.3, a = rnd() * TAU, off = j === 0 ? 0 : 0.78;
       const x = c[0] + Math.cos(a) * off * bs * rx, z = c[2] + Math.sin(a) * off * bs * rz, y = c[1] + (j === 0 ? 0 : (rnd() - 0.4) * vr * 0.9);
-      const tt = (y - cb) / CH, isBloom = !!(bloom && bloom.cover && (!bloom.top || tt > 0.45) && rnd() < bloom.cover);
+      const tt = (y - cb) / CH, isBloom = !!(bloom && bloom.cover && rnd() < bloom.cover);
       const col = isBloom ? bloom.c[Math.floor(rnd() * bloom.c.length)] : look.f[Math.floor(rnd() * look.f.length)];
       const bl = { x, y, z, bx: bs * rx * k, by: vr * k, bz: bs * rz * k, isBloom };
-      b.add(leafM, paintFoliage(blobG(bl.bx, bl.by, bl.bz, x, y, z, rnd, { amp: 0.22 }), col, rnd, { ao: lerp(0.8, 1.06, clamp(tt, 0, 1)), lo: isBloom ? -0.2 : -0.34 }));
+      b.add(leafM, paintFoliage(blobG(bl.bx, bl.by, bl.bz, x, y, z, rnd, { amp: j === 0 ? 0.17 : 0.2, detail: j === 0 ? 2 : 1 }), col, rnd, { ao: lerp(0.8, 1.06, clamp(tt, 0, 1)), lo: isBloom ? -0.2 : -0.34 }));
       blobs.push(bl);
+      if (bloom && bloom.caps && tt > 0.42 && rnd() < bloom.caps) {            // flowers carried on top of the foliage (poinciana)
+        const bc = bloom.c[Math.floor(rnd() * bloom.c.length)];
+        b.add(leafM, paintFoliage(blobG(bl.bx * 0.86, bl.by * 0.42, bl.bz * 0.86, x, y + bl.by * 0.66, z, rnd, { amp: 0.25 }), bc, rnd, { lo: -0.15 }));
+        b.add(leafM, leafCloudG([x, y + bl.by * 0.7, z], [bl.bx, bl.by * 0.5, bl.bz], 14, 0.14 * sizeK, rnd, { aspect: 0.7, colors: [bc, K.shade(bc, 0.2)], up: true }));
+      }
       if (S.leaf) {
         const colors = isBloom ? [K.shade(col, 0.15), col, K.shade(col, 0.3)] : (o.P.color ? [K.shade(o.P.color, 0.2), o.P.color] : S.leaf.c);
-        b.add(leafM, leafCloudG([x, y, z], [bl.bx, bl.by, bl.bz], Math.round(S.leaf.n * (young ? 0.8 : 1)), S.leaf.s * sizeK, rnd, { aspect: S.leaf.a, hang: S.leaf.hang, colors }));
+        b.add(leafM, leafCloudG([x, y, z], [bl.bx, bl.by, bl.bz], Math.round(S.leaf.n * (young ? 0.8 : 1) * (j === 0 ? 1.3 : 0.8)), S.leaf.s * sizeK * 1.45, rnd, { aspect: S.leaf.a, hang: S.leaf.hang, colors }));
       }
     }
   });
-  const onBlob = (lowBias) => { const bl = blobs[Math.floor(rnd() * blobs.length)], a = rnd() * TAU, dy = lowBias ? -0.55 + rnd() * 0.9 : rnd() * 0.9, sr = Math.sqrt(1 - dy * dy); return [bl.x + Math.cos(a) * sr * bl.bx * 0.97, bl.y + dy * bl.by * 0.97, bl.z + Math.sin(a) * sr * bl.bz * 0.97]; };
+  const onBlob = (lowBias) => { const bl = blobs[Math.floor(rnd() * blobs.length)], a = rnd() * TAU, dy = lowBias ? -0.55 + rnd() * 0.9 : rnd() * 0.9, sr = Math.sqrt(1 - dy * dy); return [bl.x + Math.cos(a) * sr * bl.bx * 1.05, bl.y + dy * bl.by * 1.05, bl.z + Math.sin(a) * sr * bl.bz * 1.05]; };
   const areaK = clamp(Math.sqrt(W * D) / 3, 0.5, 2) * (young ? 0.6 : 1);
   if (bloom && bloom.dots) for (let i = 0; i < bloom.dots * areaK; i++) { const q = onBlob(false); b.add(leafM, paintFoliage(blobG(0.045 * sizeK, 0.04 * sizeK, 0.045 * sizeK, q[0], q[1], q[2], rnd, { detail: 0, amp: 0.1 }), bloom.c[0], rnd, { lo: -0.1 })); }
   if (o.fruit && look.fruit) {
@@ -991,7 +1004,7 @@ function broadleaf(b, S, W, D, H, rnd, o) {
     for (let i = 0; i < Math.round(F.n * areaK); i++) {
       const q = onBlob(true), r = F.r * (0.85 + rnd() * 0.3) * sizeK;
       if (F.pods) b.add(fm, placed(boxG(r * 0.6, r * 9, r * 1.6, 0, -r * 4.5, 0), q[0], q[1], q[2], rnd() * TAU), K.shade(F.c, (rnd() - 0.5) * 0.2));
-      else b.add(fm, blobG(r, r * (F.el || 1), r, q[0], q[1] - r * 0.3, q[2], rnd, { detail: F.r > 0.03 ? 1 : 0, amp: 0.04 }), K.shade(F.c, (rnd() - 0.5) * 0.16));
+      else b.add(fm, blobG(r, r * (F.el || 1), r, q[0], q[1] - r * 0.3, q[2], rnd, { detail: 0, amp: 0.04, facet: 0 }), K.shade(F.c, (rnd() - 0.5) * 0.16));
     }
   }
 }
@@ -1014,7 +1027,7 @@ function columnTree(b, S, W, D, H, rnd, o) {
 
 /** Date palm (feather fronds, diamond-patterned trunk) and Washingtonia (fan fronds, slim ringed trunk, dry skirt). */
 function palmTree(b, S, W, D, H, rnd, o) {
-  const leafM = vmat('leaf'), fan = !!S.fan, R = Math.min(W, D) / 2, L = R * 1.1, look = o.look;
+  const leafM = vmat('frond'), fan = !!S.fan, R = Math.min(W, D) / 2, L = R * 1.1, look = o.look;
   const yT = Math.max(H * 0.2, H - L * (fan ? 0.6 : 0.75));
   const tr = (fan ? 0.15 : 0.23) * Math.sqrt(clamp(H, 2, 16) / 8) * (o.young ? 0.85 : 1), seg = 10;
   const n = clamp(Math.round(yT / (fan ? 0.16 : 0.2)), 4, 44), lean = (rnd() - 0.5) * 0.06 * H, la = rnd() * TAU;
@@ -1050,7 +1063,7 @@ function palmTree(b, S, W, D, H, rnd, o) {
         }
       }
     } else {
-      const c = rp[m], q = rp[m - 2], nS = 9, rf = L * 0.5 * (0.9 + rnd() * 0.2), rim = [];
+      const c = rp[m], q = rp[m - 2], nS = 9, rf = L * 0.62 * (0.9 + rnd() * 0.2), rim = [];
       T.set(c[0] - q[0], c[1] - q[1], c[2] - q[2]).normalize(); Sd.crossVectors(T, Up).normalize();
       const U2 = new THREE.Vector3().crossVectors(Sd, T);
       for (let s = 0; s <= nS * 2; s++) {
@@ -1070,7 +1083,7 @@ function palmTree(b, S, W, D, H, rnd, o) {
 
 /** Banana clump: fat green pseudostems and huge arching paddle leaves (some torn by the wind). */
 function bananaTree(b, S, W, D, H, rnd, o) {
-  const leafM = vmat('leaf'), R = Math.min(W, D) / 2, stems = o.young ? 1 : 3, look = o.look;
+  const leafM = vmat('frond'), R = Math.min(W, D) / 2, stems = o.young ? 1 : 3, look = o.look;
   const paddle = (t) => (t < 0.1 ? 0.14 : Math.pow(Math.sin(Math.PI * Math.pow((t - 0.1) / 0.9, 0.72)), 0.55));
   for (let s = 0; s < stems; s++) {
     const k = s === 0 ? 1 : 0.62 + rnd() * 0.2, a0 = rnd() * TAU, off = s === 0 ? 0 : R * 0.28;
@@ -1095,7 +1108,7 @@ function bananaTree(b, S, W, D, H, rnd, o) {
 
 /** Plumeria (frangipani): thick grey candelabra branches, leaf rosettes and flower clusters at the tips. */
 function plumeriaTree(b, S, W, D, H, rnd, o) {
-  const leafM = vmat('leaf'), barkM = vmat('bark'), R = Math.min(W, D) / 2, look = o.look, levels = o.young ? 2 : 3;
+  const leafM = vmat('frond'), barkM = vmat('bark'), R = Math.min(W, D) / 2, look = o.look, levels = o.young ? 2 : 3;
   const r0 = 0.075 * Math.pow(H / 3, 0.8) * (o.young ? 0.7 : 1), flower = look.bloom ? look.bloom.c[0] : '#fbf7ea';
   const grow = (p, dir, len, r, depth) => {
     const e = [p[0] + dir[0] * len, p[1] + dir[1] * len, p[2] + dir[2] * len], mid = [lerp(p[0], e[0], 0.5) + dir[0] * 0.02, lerp(p[1], e[1], 0.5) - len * 0.06, lerp(p[2], e[2], 0.5)];

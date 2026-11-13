@@ -182,9 +182,27 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
   };
 
   const S = { zenith: new THREE.Color(), horizon: new THREE.Color(), sun: new THREE.Color() };
-  const state = { hours: 13, interior: false, night: 0, day: 1, exposure: 1 };
+  const state = { hours: 13, interior: false, night: 0, day: 1, exposure: 1, k: 0, fillColor: new THREE.Color(), fillIntensity: 0 };
+  const hb = plan.bounds, houseBox = { x0: hb.x / 100, x1: (hb.x + hb.w) / 100, z0: hb.y / 100, z1: (hb.y + hb.h) / 100 };
   const sunDir = new THREE.Vector3(), moonDir = direction(MOON.azimuth, MOON.altitude, new THREE.Vector3()), lightDir = new THREE.Vector3();
   const interiorBounce = new THREE.Color('#fff1df'), warm = new THREE.Color('#ffd7a3'), dayFill = new THREE.Color('#fff3e4'), white = new THREE.Color('#ffffff');
+
+  const OUTSIDE = { sky: new THREE.Color(), ground: new THREE.Color(), ambient: new THREE.Color(), hemi: 1, amb: 0, env: 0, exposure: 1 };
+  const INSIDE = { sky: new THREE.Color(), ground: new THREE.Color(), ambient: new THREE.Color(), hemi: 1, amb: 0, env: 0, exposure: 1 };
+  /** Mix the outdoor (k = 0) and indoor (k = 1) fill-light looks. */
+  function blend(k) {
+    state.k = k;
+    const mix = (a, b) => a + (b - a) * k;
+    hemisphere.color.copy(OUTSIDE.sky).lerp(INSIDE.sky, k);
+    hemisphere.groundColor.copy(OUTSIDE.ground).lerp(INSIDE.ground, k);
+    hemisphere.intensity = mix(OUTSIDE.hemi, INSIDE.hemi);
+    ambient.color.copy(OUTSIDE.ambient).lerp(INSIDE.ambient, k);
+    ambient.intensity = mix(OUTSIDE.amb, INSIDE.amb);
+    scene.environmentIntensity = mix(OUTSIDE.env, INSIDE.env);
+    state.exposure = mix(OUTSIDE.exposure, INSIDE.exposure);
+    if (renderer) renderer.toneMappingExposure = state.exposure;
+    fills.visible = k > 0.001;
+  }
 
   function apply() {
     const { altitude, azimuth } = sunPosition(state.hours);
@@ -202,27 +220,21 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
     }
     fitShadow(lightDir);
 
-    const interior = state.interior;
-    // outdoors: blue sky above, warm earth bounce below; indoors: near-white bounce from ceiling and floor
-    if (interior) {                                                    // floors get little from above, ceilings a bright floor bounce
-      hemisphere.color.copy(interiorBounce).lerp(S.zenith, 0.12).multiplyScalar(0.5);
-      hemisphere.groundColor.copy(interiorBounce).lerp(S.sun, 0.25 * day);
-    } else {
-      hemisphere.color.copy(S.zenith).lerp(white, 0.55);
-      hemisphere.groundColor.set('#b9a385').lerp(S.horizon, 0.25).multiplyScalar(0.55 + 0.45 * day);
-    }
-    hemisphere.intensity = S.hemiI * (interior ? 1.9 : 1);
-    ambient.color.copy(S.horizon).lerp(white, interior ? 0.8 : 0.5);
-    ambient.intensity = S.ambI * (interior ? 2 : 1);
-    scene.environmentIntensity = S.envI * (interior ? 1.15 : 1);
-
+    // two looks, blended per frame by how far inside the house the camera is (see update()):
+    // outdoors — blue sky from above, warm earth bounce from below;
+    // indoors  — little light from above, a bright warm floor bounce on ceilings, lifted exposure (eye adaptation)
+    OUTSIDE.sky.copy(S.zenith).lerp(white, 0.55);
+    OUTSIDE.ground.set('#b9a385').lerp(S.horizon, 0.25).multiplyScalar(0.55 + 0.45 * day);
+    OUTSIDE.hemi = S.hemiI; OUTSIDE.amb = S.ambI; OUTSIDE.env = S.envI; OUTSIDE.exposure = S.exposure;
+    OUTSIDE.ambient.copy(S.horizon).lerp(white, 0.5);
+    INSIDE.sky.copy(interiorBounce).lerp(S.zenith, 0.12).multiplyScalar(0.5);
+    INSIDE.ground.copy(interiorBounce).lerp(S.sun, 0.25 * day);
+    INSIDE.hemi = S.hemiI * 1.9; INSIDE.amb = S.ambI * 2; INSIDE.env = S.envI * 1.15; INSIDE.exposure = S.exposure * 1.5;
+    INSIDE.ambient.copy(S.horizon).lerp(white, 0.8);
     // interior fill: neutral bounce by day, warm "lights on" glow after dark
-    fills.visible = interior;
-    state.fillColor = dayFill.clone().lerp(warm, 1 - day);
+    state.fillColor.copy(dayFill).lerp(warm, 1 - day);
     state.fillIntensity = 2.1 * day + 5.5 * (1 - day);
-
-    state.exposure = S.exposure * (interior ? 1.5 : 1);
-    if (renderer) renderer.toneMappingExposure = state.exposure;
+    blend(state.k);
 
     const u = skyMaterial.uniforms;
     u.uZenith.value.copy(S.zenith); u.uHorizon.value.copy(S.horizon); u.uSunColor.value.copy(S.sun);
@@ -242,11 +254,14 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
       state.hours = Number.isFinite(h) ? ((h % 24) + 24) % 24 : 13;
       apply();
     },
-    /** true while the roof / ceilings are shown (walk-through): adds soft per-room fill so interiors are inviting. */
+    /**
+     * true while the roof / ceilings are shown (walk-through). Rooms then get a soft bounce / fill look and a lifted
+     * exposure — applied only while the camera is actually inside the house, so exterior views keep true daylight.
+     */
     setInteriorMode(on) {
       if (state.interior === !!on) return;
       state.interior = !!on;
-      apply();
+      if (!state.interior) blend(0);
     },
     /** Per-frame hook: keeps the sky centred on the camera and moves the fill lights to the rooms around it. */
     update(camera) {
@@ -254,8 +269,14 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
       camera.getWorldPosition(_v);
       sky.position.copy(_v);
       if (camera.far) { sky.scale.setScalar(camera.far * 0.95); scene.fog.far = Math.min(330, camera.far * 0.9); }
-      if (!state.interior || !anchors.length) return;
-      const y = ceilingH() * 0.6;
+      if (!state.interior) return;
+      // indoor look only while the camera is under the roof; fades out within 2.5 m of the facade
+      const H = ceilingH();
+      const away = Math.max(houseBox.x0 - _v.x, _v.x - houseBox.x1, houseBox.z0 - _v.z, _v.z - houseBox.z1, _v.y - H, 0);
+      const k = 1 - smooth(0, 2.5, away);
+      if (Math.abs(k - state.k) > 0.002) blend(k);
+      if (k <= 0.001 || !anchors.length) return;
+      const y = H * 0.6;
       for (let i = 0; i < anchors.length; i++) dist[i] = Math.hypot(anchors[i].x - _v.x, anchors[i].z - _v.z);
       order.sort((a, b) => dist[a] - dist[b]);
       const cutoff = anchors.length > FILL_COUNT ? dist[order[FILL_COUNT]] : Infinity;
@@ -264,7 +285,7 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
         if (a === undefined) { light.intensity = 0; continue; }
         light.position.set(anchors[a].x, y, anchors[a].z);
         light.color.copy(state.fillColor);
-        light.intensity = state.fillIntensity * (cutoff === Infinity ? 1 : smooth(0, 2.5, cutoff - dist[a]));
+        light.intensity = state.fillIntensity * k * (cutoff === Infinity ? 1 : smooth(0, 2.5, cutoff - dist[a]));
       }
     },
     dispose() {
