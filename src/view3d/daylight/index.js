@@ -163,7 +163,7 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
   };
   const lm = new FadePair(U.dlMapA, U.dlMapB, U.dlMix), fieldTex = new FadePair(U.dlFieldA, U.dlFieldB, U.dlFieldMix);
   const state = {
-    enabled: store.ui.daylight !== false, failed: false, ready: false, doorsOpen: false,
+    enabled: store.ui.daylight !== false, failed: false, ready: false, doorsOpen: true,
     on: 0, exposure: 1, adapted: null, fakeShading: true, dollGain: 1, lastT: 0, H: 0, serial: 0, layoutSerial: 0,
     lastLightmap: null, probes: null, fieldProbe: null, fieldWeight: null, fieldAlpha: null,
     timings: { scene: 0, uv: 0, coarse: null, fine: null, relight: null, relights: 0, upload: 0, firstResultMs: null },

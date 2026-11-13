@@ -102,7 +102,7 @@ export function createView3D(container, ctx) {
     call(house, 'setSunStudy', study);
     call(env, 'setSunStudy', study && !walking && (!store.ui.showRoof || !!store.ui.wallsCutaway));
     call(env, 'setInteriorMode', mode === 'walk');
-    call(daylight, 'setDoorsOpen', mode === 'walk');                   // walking: interior doors are drawn open
+    call(daylight, 'setDoorsOpen', true);                              // daylight always treats interior doors as open, so door-lit rooms (baths, WC, laundry) are not black in the dollhouse
     invalidate();
   }
   /** How the daylight solution is shown: walk (eye adaptation), roofless dollhouse (display gain), or not at all. */
