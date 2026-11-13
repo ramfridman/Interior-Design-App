@@ -272,5 +272,7 @@ export function initUI(ctx) {
     refreshCatalog: () => catalogPanel.refresh(),
     /** The Carpentry estimate's total for the shopping list / budget ({ low, typical, high } in ILS, or null). */
     setCarpentryBudget,
+    /** Carpentry mode controller (see src/ui/carpentry/index.js) — for tests and the colleague's panels. */
+    carpentry: app.carpentry,
   };
 }

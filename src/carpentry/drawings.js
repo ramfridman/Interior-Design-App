@@ -16,6 +16,10 @@
 import { PLAN } from '../core/plan.js';
 import { view, ceilingOf } from './state.js';
 import { islandBays } from './modules.js';
+import { VOCAB } from './spec.js';
+import { layoutGrid } from './bespoke.js';
+import { listFeatures } from './features.js';
+import { unitCodes as codesOf, unitsOf as unitsOfRun } from './layout.js';
 import { unitsOf, positions, geometryOf, unitCodes, isFloorLevel } from './layout.js';
 import { spanOfRun, toLocal } from './walls.js';
 import { computeWorktops } from './worktop.js';
@@ -133,10 +137,60 @@ function gather(run, v) {
   const list = units.map((u) => { const g = geometryOf(run, u), p = pos.get(u.id); return { u, g, id: u.id, code: codes.get(u.id), at: p.at, level: p.level, w: u.carp.width, end: p.at + u.carp.width }; });
   const butts = [];
   for (const r of v.runs()) for (const s of ['left', 'right']) { const e = r.ends && r.ends[s]; if (e && e.type === 'run' && e.runId === run.id) butts.push({ side: e.at || 'left', depth: r.spec.worktop.depth }); }
-  return { units, list, butts, span: spanOfRun(run), worktops: computeWorktops(run, units, butts), H: list.length ? list[0].g.H : null };
+  const features = listFeatures(run.id, { carpentry: v.carpentry, items: v.items });
+  const reserved = [];
+  if (run.reserved) for (const side of ['left', 'right']) {
+    const b = run.reserved.by[side], o = b && v.run(b.runId);
+    if (!o) continue;
+    const cu = v.item(b.unitId), code = cu ? codesOf(o, unitsOfRun(o, v)).get(cu.id) : '';
+    reserved.push({ side, cm: b.cm, level: b.level, ref: `${o.code}·${code}`, g: cu ? geometryOf(o, cu) : null });
+  }
+  return { units, list, butts, features, reserved, span: spanOfRun(run), worktops: computeWorktops(run, units, butts), H: list.length ? list[0].g.H : null };
 }
 
 // ───────────────────────── elevation ─────────────────────────
+/** Legend keys of the door-operation symbols. */
+export const OP_KEY = { hinged: '◁', removable: 'R', sliding: '↔', pocket: '⇤⇥', bifold: 'Λ', tambour: '≡', 'lift-up': '△', 'drop-down': '▽', 'push-open': 'P', curtain: '∿', none: '○' };
+/** The elevation symbol of a door operation over the front x, y, w, h (role 'op-symbol', op). */
+function opSymbol(D, op, x, y, w, h, hinge) {
+  (D.opsUsed = D.opsUsed || new Set()).add(op);
+  const k = D.k, S = { role: 'op-symbol', op }, d = { dash: 'dash', ...S }, a = Math.min(4, w / 6, h / 6);
+  const arrow = (x1, y1, x2, y2) => { D.line(x1, y1, x2, y2, LW.hair, S); const ang = Math.atan2(y2 - y1, x2 - x1); for (const s2 of [1, -1]) D.line(x2, y2, x2 - a * Math.cos(ang + s2 * 0.5), y2 - a * Math.sin(ang + s2 * 0.5), LW.hair, S); };
+  const tri = () => { const hx = hinge === 'R' ? x + w : x, ox = hinge === 'R' ? x : x + w; D.poly([[ox, y], [hx, y + h / 2], [ox, y + h]], false, LW.hair, d); };
+  if (op === 'hinged') tri();
+  else if (op === 'push-open') { tri(); D.text(x + w / 2, y + h - 3 * k, 'P', TEXT.small, { ...S, weight: 'bold' }); }
+  else if (op === 'removable') { arrow(x + 3, y + h - 3 - 2 * a, x + 3, y + h - 2); arrow(x + w - 3, y + h - 3 - 2 * a, x + w - 3, y + h - 2); D.text(x + w / 2, y + h - 3 * k, 'R', TEXT.label, { ...S, weight: 'bold' }); }
+  else if (op === 'sliding') arrow(x + w * 0.2, y + h / 2, x + w * 0.8, y + h / 2), arrow(x + w * 0.8, y + h / 2, x + w * 0.2, y + h / 2);
+  else if (op === 'pocket') { arrow(x + w / 2, y + h / 2, x + 2, y + h / 2); arrow(x + w / 2, y + h / 2, x + w - 2, y + h / 2); D.line(x + 1, y, x + 1, y + h, LW.hair, d); D.line(x + w - 1, y, x + w - 1, y + h, LW.hair, d); }
+  else if (op === 'bifold') { D.line(x + w / 2, y, x + w / 2, y + h, LW.thin, d); D.poly([[x, y + h], [x + w / 2, y + h - Math.min(8, h / 4)], [x + w, y + h]], false, LW.hair, d); }
+  else if (op === 'tambour') { const n = Math.min(40, Math.floor(h / 4)); for (let i = 1; i < n; i++) D.line(x + 1, y + (i * h) / n, x + w - 1, y + (i * h) / n, LW.hair, S); }
+  else if (op === 'curtain') { const pts = []; for (let i = 0; i <= 8; i++) pts.push([x + (i * w) / 8, y + h - 3 - (i % 2 ? 3 : 0)]); D.poly(pts, false, LW.thin, S); for (const q of [0.33, 0.66]) D.line(x + w * q, y + 2, x + w * q, y + h - 6, LW.hair, d); }
+  else if (op === 'lift-up' || op === 'drop-down') { const top = op === 'lift-up'; D.poly([[x, top ? y : y + h], [x + w / 2, top ? y + h : y], [x + w, top ? y : y + h]], false, LW.hair, d); }
+}
+/** Legend of the operations drawn (metadata + text ops below the drawing, role 'legend'). */
+function addLegend(D) {
+  const used = [...(D.opsUsed || [])].filter((op) => VOCAB.doorOperation[op]);
+  if (!used.length) return [];
+  const legend = used.map((op) => ({ op, key: OP_KEY[op], label: VOCAB.doorOperation[op] }));
+  const b = bboxOf(D.ops, D.scale), k = D.k;
+  D.text(b.x + 2 * k, b.y - 2 * k, L('Door operation:', 'אופן פתיחה:'), TEXT.small, { anchor: 'start', role: 'legend', weight: 'bold' });
+  legend.forEach((e, i) => D.text(b.x + 2 * k, b.y - (6 + 4 * i) * k, { en: `${e.key}  ${e.label.en}`, he: `${e.key}  ${e.label.he}` }, TEXT.small, { anchor: 'start', role: 'legend', op: e.op }));
+  return legend;
+}
+/** Numbered balloons for special requirements (role 'callout'). pos(feature) → [x, y] anchor, or null. */
+function addCallouts(D, feats, pos) {
+  const k = D.k, r = 2.6 * k, seen = {};
+  for (const f of feats) {
+    const p = pos(f);
+    if (!p) continue;
+    const key = f.unitId || 'run', i = (seen[key] = (seen[key] || 0) + 1) - 1;
+    const cx = p[0] + i * 2.4 * r, cy = p[1] + 4 * k + r;
+    D.line(p[0], p[1], cx, cy - r, LW.hair, { role: 'callout', featureId: f.id });
+    D.arc(cx, cy, r, 0, 360, LW.thin, { role: 'callout', featureId: f.id });
+    D.text(cx, cy, String(f.n), TEXT.label, { role: 'callout', featureId: f.id, label: f.label, weight: 'bold' });
+  }
+}
+
 function frontSymbol(D, f, x0, g) {
   const x = x0 + f.x, y = f.y, w = f.w, h = f.h;
   if (f.kind === 'appliance') {
@@ -145,17 +199,13 @@ function frontSymbol(D, f, x0, g) {
     return;
   }
   if (f.kind === 'blind') { D.rect(x, y, w, h, LW.hair, { hatch: 'blind', dash: 'dash', role: 'front' }); return; }
-  if (f.kind === 'open') { D.rect(x, y, w, h, LW.thin, { fill: 'void', role: 'front' }); return; }
+  if (f.kind === 'open') { D.rect(x, y, w, h, LW.thin, { fill: 'void', role: 'front' }); if (f.operation === 'none') (D.opsUsed = D.opsUsed || new Set()).add('none'); return; }
+  if (f.kind === 'void') { D.rect(x, y, w, h, LW.hair, { dash: 'dash', fill: 'void', role: 'front' }); if (f.label) D.text(x + w / 2, y + h / 2, f.label, TEXT.small, { role: 'label' }); return; }
   D.rect(x, y, w, h, LW.thin, { role: 'front', ...(f.kind === 'glass' ? { fill: 'glass' } : {}), ...(f.kind === 'mirror' ? { fill: 'glass' } : {}) });
   if (f.kind === 'glass') D.rect(x + 6, y + 6, Math.max(1, w - 12), Math.max(1, h - 12), LW.hair, { role: 'front' });
-  // opening symbol (dashed lines meeting at the handle side)
-  if (f.kind === 'door' || f.kind === 'glass' || f.kind === 'mirror') {
-    const hx = f.hinge === 'R' ? x + w : x, ox = f.hinge === 'R' ? x : x + w;
-    D.poly([[ox, y], [hx, y + h / 2], [ox, y + h]], false, LW.hair, { dash: 'dash', role: 'front' });
-  } else if (f.kind === 'flap') {
-    const top = f.hinge !== 'B';
-    D.poly([[x, top ? y : y + h], [x + w / 2, top ? y + h : y], [x + w, top ? y : y + h]], false, LW.hair, { dash: 'dash', role: 'front' });
-  }
+  // opening symbol per door operation (see OP_KEY / the drawing legend)
+  if (f.kind === 'door' || f.kind === 'glass' || f.kind === 'mirror') opSymbol(D, f.operation || 'hinged', x, y, w, h, f.hinge);
+  else if (f.kind === 'flap') opSymbol(D, f.operation || (f.hinge === 'B' ? 'drop-down' : 'lift-up'), x, y, w, h, f.hinge);
   // handles
   const ht = g.spec.handles.type, hl = Math.min(g.spec.handles.length || 16, w - 6);
   if (f.handle && (ht === 'bar' || ht === 'edge-pull' || ht === 'knob') && !(f.kind === 'appliance')) {
@@ -237,6 +287,18 @@ function elevation(run, G, v, opts = {}) {
     for (let i = 0; i < n; i++) { const x0 = a + i * (dw - 3); D.rect(x0, z.y0, dw, z.y1 - z.y0, LW.thin, { role: 'front' }); D.line(x0 + (i % 2 ? dw - 5 : 5), z.y0 + 20, x0 + (i % 2 ? dw - 5 : 5), z.y1 - 20, LW.hair, { dash: 'dash', role: 'front' }); }
     D.text(a + len / 2, z.y0 + 12, L(`${n} sliding doors`, `${n} דלתות הזזה`), TEXT.small, { role: 'label' });
   }
+  // corner footprint of the other arm reserved at this end
+  for (const rz of G.reserved) {
+    const a = rz.side === 'left' ? 0 : Lr - rz.cm, top = rz.g ? rz.g.elev + rz.g.h : 90;
+    D.rect(a, 0, rz.cm, top, LW.thin, { dash: 'dash', hatch: 'blind', role: 'reserved' });
+    if (rz.g && rz.g.corner && !internal) for (const f of rz.g.trueFronts.filter((q) => q.face === 'B')) frontSymbol(D, { ...f, x: 0, w: Math.min(f.w, rz.cm) }, a, rz.g);
+    D.text(a + rz.cm / 2, top + 4 * k, rz.ref, TEXT.small, { role: 'label', ...(rz.cm < textWidthMm(rz.ref, TEXT.small) * k ? { rot: 90 } : {}) });
+  }
+  if (!internal) addCallouts(D, G.features, (f) => {
+    if (!f.unitId) return [4 * k, ceiling - 14 * k];
+    const x = G.list.find((y) => y.id === f.unitId);
+    return x ? [x.at + x.w * 0.75, x.g.elev + x.g.h] : null;
+  });
   // ── dimension chains ──
   const floor = G.list.filter((x) => isFloorLevel(x.level)), wall = G.list.filter((x) => !isFloorLevel(x.level) && !(x.g.mod.virtual && x.g.mod.id === 'wall-void'));
   let yb = -6 * k;
@@ -265,7 +327,8 @@ function elevation(run, G, v, opts = {}) {
     D.chain('ceiling', 'y', [0, ceiling], xr + 2 * k, Lr, +1);
   }
   const title = run.kind === 'island' ? L(`${run.code} — elevation from the working side`, `${run.code} — חזית מצד העבודה`) : internal ? L(`${run.code} — internal elevation`, `${run.code} — חתך פנימי (ללא חזיתות)`) : L(`${run.code} — front elevation`, `${run.code} — חזית`);
-  const res = { id: `${run.id}:${internal ? 'internal' : 'elevation'}`, kind: internal ? 'internal' : 'elevation', runId: run.id, title, scale, yUp: true, ops: D.ops, dims: D.dims, bounds: bboxOf(D.ops, scale) };
+  const legend = addLegend(D);
+  const res = { id: `${run.id}:${internal ? 'internal' : 'elevation'}`, kind: internal ? 'internal' : 'elevation', runId: run.id, title, scale, yUp: true, ops: D.ops, dims: D.dims, legend, bounds: bboxOf(D.ops, scale) };
   return run.kind === 'island' ? mirrorX(res, Lr) : res;
 }
 
@@ -288,7 +351,19 @@ function internalElevation(run, G, v) {
   const d = elevation(run, G, v, { internal: true });
   // per-unit height chains inside each carcass (left inner side)
   const D = Ops(d.scale); D.ops.push(...d.ops); D.dims.push(...d.dims);
-  for (const x of G.list.filter((y) => (y.level === 'full' || y.level === 'tall') && y.g.inner.length && !y.g.mod.virtual)) {
+  for (const x of G.list.filter((y) => y.g.mod.id === 'custom' && y.u.carp.internals && y.u.carp.internals.layout)) {
+    let grid;
+    try { grid = layoutGrid(x.u.carp.internals.layout, x.w, x.g.zone.y0, x.g.zone.y1); } catch (e) { continue; }
+    if (grid.some((c) => !c.cells || c.cells.some((q) => !Number.isFinite(q.ya)))) continue;
+    for (const col of grid) for (const cl of col.cells) {
+      D.rect(x.at + col.x0, cl.ya, col.x1 - col.x0, cl.yb - cl.ya, LW.thin, { role: 'cell', cellId: cl.id, unitId: x.id });
+      const lab = cl.cell.label ? (typeof cl.cell.label === 'string' ? cl.cell.label : cl.cell.label) : VOCAB.cellKind[cl.cell.kind];
+      D.text(x.at + (col.x0 + col.x1) / 2, (cl.ya + cl.yb) / 2, lab || cl.cell.kind, TEXT.small, { role: 'label', cellId: cl.id });
+    }
+    D.chain(`cols-${x.code}`, 'x', [0, x.w, ...grid.flatMap((c) => [c.x0, c.x1])].map((p) => x.at + p), x.g.carcassY[1] + 4 * D.k, x.g.carcassY[1], +1, { size: TEXT.small });
+    grid.forEach((col, i) => D.chain(`cells-${x.code}-${i + 1}`, 'y', [x.g.zone.y0, x.g.zone.y1, ...col.cells.flatMap((c) => [c.ya, c.yb])], x.at + col.x0 + x.g.t + 3 * D.k, x.at + col.x0, +1, { size: TEXT.small }));
+  }
+  for (const x of G.list.filter((y) => (y.level === 'full' || y.level === 'tall') && y.g.inner.length && !y.g.mod.virtual && y.g.mod.id !== 'custom')) {
     const pts = [x.g.carcassY[0] + x.g.t, ...x.g.inner.flatMap((c) => (c.kind === 'drawer' ? [c.y, c.y + (c.h || 18)] : c.kind === 'divider' ? [] : [c.y])), x.g.carcassY[1] - x.g.t];
     D.chain(`inner-${x.code}`, 'y', pts.filter((p) => p >= x.g.carcassY[0] && p <= x.g.carcassY[1]), x.at + x.g.t + 3 * D.k, x.at + x.g.t, +1, { size: TEXT.small });
     for (const c of x.g.inner) {
@@ -345,6 +420,7 @@ function plan(run, G, v) {
     const g = x.g;
     if (g.mod.virtual && g.mod.id !== 'base-space') continue;
     const isWall = x.level === 'wall';
+    if (g.corner) { planCorner(D, x, g, isWall); continue; }
     D.rect(x.at, -g.d, x.w, g.d, isWall ? LW.thin : LW.medium, { role: 'unit', unitId: x.id, ...(isWall ? { dash: 'dash' } : {}), ...(g.mod.virtual ? { dash: 'dot' } : {}) });
     if (!isWall && !g.mod.virtual) {
       const fy = -(g.dc + g.frontD);
@@ -363,6 +439,17 @@ function plan(run, G, v) {
     for (const c of p.cutouts) D.rect(p.s + c.x, -p.depth + c.fromFront, c.w, c.d, LW.thin, { role: 'cutout', ...(c.kind === 'hob' ? { dash: 'dash' } : {}) });
   }
   if (run.kind === 'island' && run.spec.worktop.overhangSeat) D.line(0, -(run.spec.worktop.depth - run.spec.worktop.overhangSeat), run.length, -(run.spec.worktop.depth - run.spec.worktop.overhangSeat), LW.hair, { dash: 'dash', role: 'overhang' });
+  for (const rz of G.reserved) {
+    const a = rz.side === 'left' ? 0 : run.length - rz.cm, dd = rz.g ? Math.max(rz.g.corner ? rz.g.corner.dB : rz.g.d, 60) : 60;
+    D.rect(a, -dd, rz.cm, dd, LW.thin, { dash: 'dash', hatch: 'blind', role: 'reserved' });
+    D.text(a + rz.cm / 2, -dd / 2, rz.ref, TEXT.small, { role: 'label', ...(rz.cm < textWidthMm(rz.ref, TEXT.small) * k ? { rot: 90 } : {}) });
+  }
+  addCallouts(D, G.features, (f) => {
+    if (!f.unitId) return [-12 * k, -depth / 2];
+    const x = G.list.find((y) => y.id === f.unitId);
+    return x ? [x.at + x.w * 0.75, -Math.min(x.g.d, 60)] : null;
+  });
+  const planLegend = addLegend(D);
   // dims
   const floor = G.list.filter((x) => isFloorLevel(x.level)), fpts = [0, run.length, ...floor.flatMap((x) => [x.at, x.end])];
   if (run.kind === 'island') {
@@ -376,7 +463,30 @@ function plan(run, G, v) {
   const dp = [0, -Math.max(...G.list.filter((x) => isFloorLevel(x.level)).map((x) => x.g.d), 0)];
   const wd = G.list.filter((x) => x.level === 'wall' && !x.g.mod.virtual).map((x) => -x.g.d);
   D.chain('depth', 'y', [...dp, ...wd.slice(0, 1)], run.length + 8 * k + (run.ends.right && run.ends.right.type === 'wall' ? 20 : 0), run.length, +1);
-  return { id: `${run.id}:plan`, kind: 'plan', runId: run.id, title: L(`${run.code} — plan`, `${run.code} — תכנית`), scale, yUp: true, ops: D.ops, dims: D.dims, bounds: bboxOf(D.ops, scale) };
+  return { id: `${run.id}:plan`, kind: 'plan', runId: run.id, title: L(`${run.code} — plan`, `${run.code} — תכנית`), scale, yUp: true, ops: D.ops, dims: D.dims, legend: planLegend, bounds: bboxOf(D.ops, scale) };
+}
+
+/** A corner unit in plan: its true footprint, front faces with their operation, shelves dashed. */
+function planCorner(D, x, g, isWall) {
+  const k = g.corner, P = ([u, v]) => [x.at + k.X(u), -v];
+  D.poly(k.poly.map(P), true, isWall ? LW.thin : LW.medium, { role: 'unit', unitId: x.id, ...(isWall ? { dash: 'dash' } : {}), corner: true });
+  const shelf = k.poly.map(([u, v]) => [Math.min(u, Math.max(2, u - 25)), Math.min(v, Math.max(2, v - 25))]);
+  if (g.inner.some((c) => c.shaped)) D.poly(shelf.map(P), true, LW.hair, { dash: 'dot', role: 'internal' });
+  const op = (g.trueFronts[0] && g.trueFronts[0].operation) || 'hinged';
+  for (const f of k.faces) {
+    const a = P(f.a), b = P(f.b);
+    D.line(a[0], a[1], b[0], b[1], LW.medium, { role: 'front', face: f.id });
+    if (!isWall && op === 'hinged') {
+      const ang = Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI, r = f.len;
+      D.arc(a[0], a[1], r, r1(ang - 90), r1(ang), LW.hair, { dash: 'dash', role: 'swing' });
+    } else if (op !== 'hinged') {
+      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+      D.text(mx, my - 3 * D.k, OP_KEY[op] || op, TEXT.label, { role: 'op-symbol', op, weight: 'bold' });
+      (D.opsUsed = D.opsUsed || new Set()).add(op);
+    }
+  }
+  const c = P([k.legA / 2 + (k.dB / 2), Math.min(k.dA, k.legB) / 2]);
+  D.text(c[0], c[1], x.code, TEXT.code, { weight: 'bold', role: 'code', unitId: x.id });
 }
 
 // ───────────────────────── worktop ─────────────────────────
@@ -516,6 +626,6 @@ export function drawings(runId, src) {
   const out = [plan(run, G, v), elevation(run, G, v), section(run, G)];
   const wt = worktopDrawing(run, G);
   if (wt) out.push(wt);
-  if (G.list.some((x) => (x.level === 'full' || x.level === 'tall') && x.g.inner.length && !x.g.mod.virtual)) out.push(internalElevation(run, G, v));
+  if (G.list.some((x) => ((x.level === 'full' || x.level === 'tall') && x.g.inner.length && !x.g.mod.virtual) || (x.g.mod.id === 'custom' && x.u.carp.internals && x.u.carp.internals.layout))) out.push(internalElevation(run, G, v));
   return out;
 }
