@@ -6,8 +6,15 @@
  *   1  alignment       — edges / centres of other items, centre of a wall run, centre of a window or door
  *   2  grid            — `store.ui.gridStep` applied to the item's leading edge
  * Everything works in plan cm; the pixel thresholds are converted with the current zoom.
+ *
+ * The snap targets (wall runs, solids, corners) are rebuilt whenever the plan engine replaced `plan.walls` /
+ * `plan.openings` — they are never kept across plan revisions. Drawing a new wall has its own snapping:
+ * the centre line goes flush with / in line with existing walls, the ends go to wall faces, the rest to the 5 cm grid.
  */
 import { wallFaces, itemAABB, itemCorners, pointInPolygon, snapTo, clamp, normDeg, DEG, wallsHitByItem } from '../core/geometry.js';
+import { wallSegments } from '../core/plan-edit.js';
+
+const PLAN_GRID = 5;   // cm — the plan engine's grid for walls and openings
 
 /** Types whose footprint may be resized freely (contract § 2); generic placeholders are resizable too. */
 export const RESIZABLE = new Set(['surface', 'pool', 'fence', 'hedge', 'flower-bed', 'rug', 'pergola']);
@@ -60,9 +67,15 @@ export function buildRuns(plan) {
 const boxOf = (b) => ({ lo: [b.x, b.y], hi: [b.x + b.w, b.y + b.h] });
 
 export function createSnapper({ plan, store }) {
-  const runs = buildRuns(plan);
-  const solids = [...plan.walls, ...plan.openings];
-  const corners = [...new Map(plan.wallOutline.flatMap(([x1, y1, x2, y2]) => [[`${x1},${y1}`, [x1, y1]], [`${x2},${y2}`, [x2, y2]]])).values()];
+  let runs = [], solids = [], corners = [], rev = null;
+  /** Rebuild the snap targets if the plan was edited since they were built. */
+  function sync() {
+    if (rev && rev.walls === plan.walls && rev.openings === plan.openings && rev.outline === plan.wallOutline) return;
+    rev = { walls: plan.walls, openings: plan.openings, outline: plan.wallOutline };
+    runs = buildRuns(plan);
+    solids = [...plan.walls, ...plan.openings];
+    corners = [...new Map(plan.wallOutline.flatMap(([x1, y1, x2, y2]) => [[`${x1},${y1}`, [x1, y1]], [`${x2},${y2}`, [x2, y2]]])).values()];
+  }
   const threshold = (scale, px = 12) => clamp(px / scale, 1.5, 40);
 
   const others = (exclude) => store.items.filter((it) => !it.hidden && !(exclude && exclude.has(it.id)));
@@ -132,6 +145,7 @@ export function createSnapper({ plan, store }) {
    * @returns {{ dx:number, dy:number, guides:object[] }}
    */
   function snapBox(b, opts) {
+    sync();
     const thr = threshold(opts.scale), step = store.ui.gridStep || 0;
     const box = boxOf(b);
     const res = { dx: 0, dy: 0, guides: [] };
@@ -217,6 +231,7 @@ export function createSnapper({ plan, store }) {
    * @returns {{ x, y, rot, guides, attached }}
    */
   function snapItem(it, opts) {
+    sync();
     const res = { x: it.x, y: it.y, rot: it.rot || 0, guides: [], attached: null };
     if (!opts.enabled) return res;
     const thr = threshold(opts.scale);
@@ -246,6 +261,7 @@ export function createSnapper({ plan, store }) {
 
   /** Snap a single coordinate (a resize edge) on axis i; p0..p1 is the edge's extent on the other axis. */
   function snapCoord(i, value, p0, p1, opts) {
+    sync();
     if (!opts.enabled) return { value, guides: [] };
     const thr = threshold(opts.scale), j = 1 - i;
     const line = (v, q0, q1, kind) => (i === 0 ? { x1: v, y1: q0, x2: v, y2: q1, kind } : { x1: q0, y1: v, x2: q1, y2: v, kind });
@@ -272,6 +288,7 @@ export function createSnapper({ plan, store }) {
 
   /** Snap a free point (measure tool): wall corners → item corners / centres → wall faces → grid. */
   function snapPoint(p, opts) {
+    sync();
     if (!opts.enabled) return { x: p.x, y: p.y, kind: null };
     const thr = threshold(opts.scale, 10);
     let best = null;
@@ -302,6 +319,7 @@ export function createSnapper({ plan, store }) {
    * @returns {{ x1, y1, x2, y2, dist }[]}
    */
   function clearances(b, maxDist = 900) {
+    sync();
     const cx = b.x + b.w / 2, cy = b.y + b.h / 2, out = [];
     const boundary = plan.site.boundary;
     const cast = (i, dir) => {
@@ -339,5 +357,87 @@ export function createSnapper({ plan, store }) {
     return { wall, outside, any: wall || outside, hint: outside ? 'Outside the lot' : wall ? 'Overlaps a wall' : '' };
   }
 
-  return { runs, threshold, snapBox, snapItem, snapCoord, snapPoint, clearances, problems };
+  // ───────────── drawing a wall ─────────────
+  const wallThr = (opts) => threshold(opts.scale, 8);
+  const gapBetween = (a0, a1, b0, b1) => Math.max(b0 - a1, a0 - b1);       // < 0 when the ranges overlap
+
+  /**
+   * Snap the centre line of a wall being drawn. `axis` = the way the wall runs ('h' | 'v'), `value` = wanted
+   * centre-line coordinate (y for 'h', x for 'v'), a0..a1 = its extent along the axis, t = thickness.
+   * Tries: a face flush with a face of a wall further along, in line with a parallel wall, then the 5 cm grid
+   * (the wall's faces land on the grid, like the engine does).
+   * @returns {{ value:number, guide:object|null }}
+   */
+  function snapWallLine(axis, value, a0, a1, t, opts) {
+    const grid = snapTo(value - t / 2, PLAN_GRID) + t / 2;
+    if (!opts.enabled) return { value: grid, guide: null };
+    sync();
+    const horiz = axis === 'h', thr = wallThr(opts);
+    const lo = Math.min(a0, a1), hi = Math.max(a0, a1);
+    const line = (c, q0, q1, kind) => (horiz ? { x1: q0, y1: c, x2: q1, y2: c, kind } : { x1: c, y1: q0, x2: c, y2: q1, kind });
+    let best = null;
+    const offer = (v, guide) => { const d = Math.abs(v - value); if (d <= thr && (!best || d < best.d - 0.01)) best = { v, d, guide }; };
+    for (const r of runs) {
+      if (r.horiz !== horiz) continue;
+      const gap = gapBetween(lo, hi, r.a0, r.a1);
+      if (gap < -1 || gap > 400) continue;
+      const g = line(r.c, Math.min(lo, r.a0), Math.max(hi, r.a1), 'align');
+      offer(r.c + t / 2, g); offer(r.c - t / 2, g);
+    }
+    for (const sg of wallSegments(plan)) {
+      if (sg.axis !== axis || sg.id.startsWith('seg:j')) continue;
+      const b0 = horiz ? sg.core.x : sg.core.y, b1 = b0 + (horiz ? sg.core.w : sg.core.h);
+      const gap = gapBetween(lo, hi, b0, b1);
+      if (gap < -1 || gap > 400) continue;
+      const c = horiz ? sg.core.y + sg.core.h / 2 : sg.core.x + sg.core.w / 2;
+      offer(c, line(c, Math.min(lo, b0), Math.max(hi, b1), 'center'));
+    }
+    return best ? { value: best.v, guide: best.guide } : { value: grid, guide: null };
+  }
+
+  /**
+   * Snap one end of a wall being drawn along its axis: to the face of a wall it runs into, else the 5 cm grid.
+   * `c` = the wall's centre-line coordinate, t = thickness.
+   * @returns {{ value:number, guide:object|null }}
+   */
+  function snapWallEnd(axis, value, c, t, opts) {
+    const grid = snapTo(value, PLAN_GRID);
+    if (!opts.enabled) return { value: grid, guide: null };
+    sync();
+    const horiz = axis === 'h', thr = wallThr(opts);
+    let best = null;
+    for (const r of runs) {
+      if (r.horiz === horiz || Math.min(r.a1, c + t / 2) - Math.max(r.a0, c - t / 2) <= 0) continue;
+      const d = Math.abs(r.c - value);
+      if (d <= thr && (!best || d < best.d)) best = { v: r.c, d, r };
+    }
+    if (!best) return { value: grid, guide: null };
+    const q0 = Math.max(best.r.a0, c - t / 2 - 20), q1 = Math.min(best.r.a1, c + t / 2 + 20);
+    return { value: best.v, guide: horiz ? { x1: best.v, y1: q0, x2: best.v, y2: q1, kind: 'wall' } : { x1: q0, y1: best.v, x2: q1, y2: best.v, kind: 'wall' } };
+  }
+
+  /** Snap a free point for the wall tool before the direction is known: corners → wall faces (per axis) → 5 cm grid. */
+  function snapWallPoint(p, opts) {
+    const out = { x: snapTo(p.x, PLAN_GRID), y: snapTo(p.y, PLAN_GRID), kind: null };
+    if (!opts.enabled) return out;
+    sync();
+    const thr = wallThr(opts);
+    let corner = null;
+    for (const [x, y] of corners) { const d = Math.hypot(x - p.x, y - p.y); if (d <= thr * 0.8 && (!corner || d < corner.d)) corner = { x, y, d }; }
+    if (corner) return { x: corner.x, y: corner.y, kind: 'corner' };
+    let bx = null, by = null;
+    for (const r of runs) {
+      const a = r.horiz ? p.x : p.y, d = Math.abs((r.horiz ? p.y : p.x) - r.c);
+      if (d > thr || a < r.a0 - 2 || a > r.a1 + 2) continue;
+      if (r.horiz) { if (!by || d < by.d) by = { v: r.c, d }; } else if (!bx || d < bx.d) bx = { v: r.c, d };
+    }
+    if (bx) { out.x = bx.v; out.kind = 'face'; }
+    if (by) { out.y = by.v; out.kind = 'face'; }
+    return out;
+  }
+
+  return {
+    get runs() { sync(); return runs; },
+    threshold, snapBox, snapItem, snapCoord, snapPoint, clearances, problems, snapWallLine, snapWallEnd, snapWallPoint,
+  };
 }

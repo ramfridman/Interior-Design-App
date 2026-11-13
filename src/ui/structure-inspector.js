@@ -28,6 +28,8 @@ export function createStructureInspector(app) {
   let patch = null;      // (cur) => void — updates the live values of the rendered DOM
 
   const units = () => store.ui.units;
+  /** Set a number field even while it has the focus (the engine may have snapped what was typed). */
+  const force = (field, value, digits = 0) => { field.set(value); field.input.value = Number(value).toFixed(digits); };
   const errorLine = () => h('p', { class: 'form__error', role: 'alert', hidden: true });
   const show = (line, text) => { line.textContent = text || ''; line.hidden = !text; };
   /** Run an engine call and put its refusal (if any) on `line`. */
@@ -70,7 +72,7 @@ export function createStructureInspector(app) {
     const field = numField({
       label: vertical ? 'X' : 'Y', value: toUnit(pos(seg), u), digits: unitDigits(u), step: u === 'cm' ? STEP : STEP / 100, suffix: u, disabled: locked,
       title: vertical ? 'Position of the wall’s west face, from the house west face' : 'Position of the wall’s north face, from the house north face',
-      onCommit: (v) => { const s = live(); if (!move(Math.round(fromUnit(v, u) - pos(s)))) field.set(toUnit(pos(s), u)); },
+      onCommit: (v) => { const s = live(); if (!move(Math.round(fromUnit(v, u) - pos(s)))) force(field, toUnit(pos(s), u), unitDigits(u)); },
     });
     const nudge = (dir) => iconBtn(vertical ? (dir < 0 ? 'chevron-left' : 'chevron-right') : (dir < 0 ? 'chevron-up' : 'chevron-down'),
       `Move ${STEP} cm ${vertical ? (dir < 0 ? 'west' : 'east') : (dir < 0 ? 'north' : 'south')}`, { variant: 'outlined', disabled: locked, kbd: vertical ? (dir < 0 ? '←' : '→') : (dir < 0 ? '↑' : '↓'), onClick: () => move(dir * STEP) });
@@ -81,7 +83,7 @@ export function createStructureInspector(app) {
       meta.textContent = `${fmtLen(s.length, units())} long, ${s.thickness} cm thick`;
       length.textContent = fmtLen(s.length, units());
       sides.textContent = segmentSides(s, plan);
-      field.set(toUnit(pos(s), units()));
+      force(field, toUnit(pos(s), units()), unitDigits(units()));
     };
     return [
       head(seg.policy.level, 'wall', segmentTitle(seg), meta, seg.isNew ? h('span', { class: 'tag tag--new' }, 'Added by you') : null),
@@ -119,7 +121,7 @@ export function createStructureInspector(app) {
     const hung = h('p', { class: 'sec__note sinsp__hung' });
     const cmField = (label, key, title) => numField({
       label, value: o[key], digits: 0, step: STEP, suffix: 'cm', disabled: locked, title,
-      onCommit: (v) => { if (!run(sizeError, () => updateOpening(o.id, { [key]: v }))) fields[key].set(live().opening[key]); },
+      onCommit: (v) => { if (!run(sizeError, () => updateOpening(o.id, { [key]: v }))) force(fields[key], live().opening[key]); },
     });
     const fields = {
       width: cmField('Width', 'width', 'Clear width of the opening'),
@@ -128,7 +130,7 @@ export function createStructureInspector(app) {
       offset: numField({
         label: horizontal ? 'From west end' : 'From north end', value: openingOffset(o, seg), digits: 0, step: STEP, suffix: 'cm', disabled: locked || !seg,
         title: `Distance from the ${horizontal ? 'west' : 'north'} end of the wall to the opening`,
-        onCommit: (v) => { if (!run(sizeError, () => updateOpening(o.id, { offset: v }))) { const now = live(); fields.offset.set(openingOffset(now.opening, now.seg)); } },
+        onCommit: (v) => { if (!run(sizeError, () => updateOpening(o.id, { offset: v }))) { const now = live(); force(fields.offset, openingOffset(now.opening, now.seg)); } },
       }),
     };
     const styles = STYLE_OPTIONS[o.kind];
@@ -146,8 +148,9 @@ export function createStructureInspector(app) {
     patch = (now) => {
       const x = now.opening;
       meta.textContent = [x.rooms && x.rooms.length === 2 ? `${spaceName(x.rooms[0], plan)} / ${spaceName(x.rooms[1], plan)}` : '', dims(x)].filter(Boolean).join(', ');
-      fields.width.set(x.width); fields.height.set(x.height); fields.sill && fields.sill.set(x.sill);
-      fields.offset.set(openingOffset(x, now.seg));
+      force(fields.width, x.width); force(fields.height, x.height);
+      if (fields.sill) force(fields.sill, x.sill);
+      force(fields.offset, openingOffset(x, now.seg));
       if (x.kind === 'door' && x.hinge && x.swing) hung.textContent = `Hinged on the ${SIDE[x.hinge]} jamb, opens into ${into(now)}.`;
     };
 

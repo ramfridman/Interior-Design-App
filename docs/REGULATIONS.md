@@ -27,6 +27,7 @@ official gazette (קובץ התקנות) with all amendments and links every ame
 | Key | Regulation (Hebrew — English) | Consolidated text | Gazette |
 | --- | --- | --- | --- |
 | **PBR** | תקנות התכנון והבניה (בקשה להיתר, תנאיו ואגרות), תש"ל-1970 — Planning & Building Regulations (Permit Application, Conditions and Fees), Second Schedule (התוספת השנייה) | <https://he.wikisource.org/wiki/תקנות_התכנון_והבניה_(בקשה_להיתר,_תנאיו_ואגרות)> | ק"ת תש"ל 1841 — <https://olaw.org.il/takanot/takanot-2581.pdf> |
+| **LAW** | חוק התכנון והבניה, התשכ"ה-1965 — Planning and Building Law 1965 (§145 read for the permit requirement and the "internal change" exception) | <https://he.wikisource.org/wiki/חוק_התכנון_והבניה> | ס"ח תשכ"ה 307 |
 | **HAGA** | תקנות ההתגוננות האזרחית (מפרטים לבניית מקלטים), התש"ן-1990 — Civil Defence Regulations (Specifications for the Construction of Shelters) | <https://he.wikisource.org/wiki/תקנות_ההתגוננות_האזרחית_(מפרטים_לבניית_מקלטים)> | ק"ת תש"ן 1020 — <https://olaw.org.il/takanot/takanot-5289.pdf> |
 | **EXEMPT** | תקנות התכנון והבנייה (עבודות ומבנים הפטורים מהיתר), התשע"ד-2014 — Works and Structures Exempt from a Permit | <https://he.wikisource.org/wiki/תקנות_התכנון_והבנייה_(עבודות_ומבנים_הפטורים_מהיתר)> | ק"ת תשע"ד 1532 — <https://olaw.org.il/takanot/takanot-7400.pdf> |
 | **PARK** | תקנות התכנון והבניה (התקנת מקומות חניה), התשמ"ג-1983 — Installation of Parking Places | <https://he.wikisource.org/wiki/תקנות_התכנון_והבניה_(התקנת_מקומות_חניה)> | ק"ת תשמ"ג 1737 — <https://olaw.org.il/takanot/takanot-4513.pdf> |
@@ -36,6 +37,8 @@ official gazette (קובץ התקנות) with all amendments and links every ame
 | **ELEC** | תקנות החשמל (מעגלים סופיים הניזונים במתח עד 1000 וולט), התשמ"ה-1984 — Electricity Regulations (Final Circuits up to 1000 V) | <https://he.wikisource.org/wiki/תקנות_החשמל_(מעגלים_סופיים_הניזונים_במתח_עד_1000_וולט)> | ק"ת תשמ"ה 350 — <https://olaw.org.il/takanot/takanot-4731.pdf> |
 | **NKBA** | NKBA Kitchen Planning Guidelines with Access Standards | <https://kb.nkba.org/uploads/2022/05/Kitchen-Planning-Guidelines.pdf> | — |
 | **HFC** | Home Front Command (פיקוד העורף) guidance on everyday use of the mamad — read as quoted by N12 and The Jerusalem Post (oref.org.il refuses automated access) | <https://www.mako.co.il/news-money/real_estate/Article-faf656164ae0b81026.htm> | — |
+
+| **HFC-door** | Home Front Command guidance on a second (inner) door in the mamad doorway — **secondary source only**: Maariv, "עברו על ההנחיות: האם הממ"ד שלכם מוכן לשעת חירום?", 5.8.2024 (unattributed paragraph); no official text was found, oref.org.il refuses automated access | <https://www.maariv.co.il/news/article-1122569> | — |
 
 Israeli Standards (ת"י) are sold by the Standards Institution and are not open-access; their numbers below come from
 the regulation that cites them or from secondary sources, and are marked accordingly.
@@ -66,6 +69,12 @@ Definitions (PBR reg. 1): *"חדר מגורים" – חדר המיועד למג�
 | Height: shelter (מקלט או מחסה) / parking | 2.00 m / 2.05 m | §2.03(א)(2), (11) | high |
 | Head room in escape routes | 2.20 m (fixtures to 2.00 m; in a dwelling the Part B heights apply) | Part C §3.1.2.5, §3.8.2.2 | high |
 | Laundry / utility room | no statutory minimum area (not a defined room type) | reg. 1 | medium |
+| Closet room (חדר ארונות), pantry, store | a "service room" by definition; no minimum area in §2.04 and no ventilation duty (§2.21(ג)) | reg. 1, §2.21(ג) | high |
+
+How the checker applies this to rooms the owner creates or reshapes: a habitable room below 8.0 m² / 2.60 m but at
+least 6.0 m² / 2.00 m is a **warning** (it can only count as a *חדרון*, a half room — the regulations give the size
+but no further definition of the term); below that it is a **failure** unless the room is re-typed as a closet room
+or store. The "width" is the shorter side of the largest clear rectangle in the room — conservative for L-shaped rooms.
 
 ### 1.2 Daylight and ventilation — PBR Part B, signs ג'–ו'
 
@@ -105,6 +114,16 @@ The regulations do **not** state an "openable fraction" of the window for a dwel
 | Single-family house: signs כ'–כ"ד and כ"ט of the residential chapter do not apply (no fire-brigade access road, sprinklers, etc.) | — | §3.8.2.3 | high |
 | Entrance door security (steel door, multi-point lock) | detailed spec | Part B sign ז', §2.90–2.92 | high |
 
+Door-less passages (`kind: 'opening'`, added by the owner) are checked against the same clear widths as the door they
+replace — table 3.2.1.3 is headed "רוחב הפתח של דלתות" (width of the opening of doors), so this is an application by
+analogy, *medium*.
+
+**Access between rooms — nothing found.** PBR Part B and Part C (§3.2.1.3 and the dwelling chapter) were searched for
+rules on which room may open onto which — a bedroom reached only through another bedroom, a WC or bathroom opening
+directly onto a kitchen. **No such rule is in the consolidated text read** (older editions and health guidance may
+differ; not verified). The checker therefore does **not** flag these arrangements; it only reports a room that has no
+door or passage at all (`room-access`, best practice).
+
 ### 1.4 Fall protection, glazing, user safety — SAFETY regulations (replaced PBR Part B sign ח' in 2020)
 
 | Requirement | Section | Confidence |
@@ -131,11 +150,15 @@ For E7 the floor is 15 cm above the garden (assumed), so no window is at a 60 cm
 | May not be a kitchen, bathroom or toilet | — | 199 | high |
 | External walls | **≤ 2** without approval | 200 | high |
 | Door: gas-tight blast door from inside the dwelling, **opening outwards** | — | 202(א), 204(א) | high |
+| **Second, ordinary (inner) door in the same doorway** | **not required and not mentioned** for a dwelling's mamad — see below | 202–204 (silent); 287(ב) for health institutions | high (text) / medium (permission) |
+| Second **blast** door | only instead of the blast window, not in the same wall, with approval of the competent authority | 204(ב2) | high |
+| A wall that is part of the structure or of reinforced concrete facing the blast door | **≥ 1.10 m** from the door (free space for a wheelchair user to open it) | 202(ב) | high |
+| Door frame details | per ת"י 4422 | 204(ג) | high |
 | Door clear opening | **min 70 × 200, max 80 × 200 cm**; 80–90 × 200 when a concrete wall faces it within 1.30 m (wheelchair turning space 1.10 m) | 204(ב), (ב1), 202(ב) | high |
 | Door position | internal wall, **≥ 4.00 m** from the parallel external wall facing it, **≥ 2.20 m** from a perpendicular external wall — or shielded per the HFC spec | 203 | high |
 | Window: exactly one blast window; sill | **≥ 1.05 m** | 205 | high |
 | Window size | **area ≤ 1.21 m²; width 0.60–1.10 m; height 0.80–1.10 m**; inner gas-tight window + outer blast shutter | 206 | high |
-| Walls (reinforced concrete): external / internal / wall with a sliding blast window | **≥ 25 cm / ≥ 20 cm / ≥ 30 cm** | 208(א)–(ב) | high |
+| Walls (reinforced concrete): external / internal / wall (external or internal) with a **sliding** blast window (חלון הדף נגרר) / wall shared by two adjoining safe rooms | **≥ 25 cm / ≥ 20 cm / ≥ 30 cm / ≥ 15 cm** | 208(א)–(ג) | high |
 | Floor and ceiling slabs | ≥ 15 cm (20 cm top / bottom of the tower) | 208(ד) | high |
 | Finishes: walls and ceiling smooth concrete with plaster / paint ≤ 2 mm or an ת"י 5075 system; **no ceramic or other tiles on walls and ceiling**; floor tiles and a skirting ≤ 10 cm allowed | — | 192(א)–(ב), 193 via 217 | high |
 | Ventilation: filtration system (ת"י 4570), two 4" pipes, 8" sleeve for central AC, sealed sleeve for a split AC | — | 214 | high |
@@ -143,6 +166,37 @@ For E7 the floor is 15 cm above the garden (assumed), so no window is at a 60 cm
 | LPG cylinders | **≥ 3 m** from the mamad walls | 217א | high |
 | No gas pipes in mamad walls | — | PBR §20.07 | high |
 | AC in a mamad installed per **ת"י 994 חלק 5** | — | EXEMPT reg. 19(4) | high |
+
+**The two doors of the safe-room doorway (plan: `door-mamad.innerDoor`).** The architect drew a steel blast door
+opening out into the hall and an ordinary door opening into the room. What the sources say, exactly:
+
+* **Regulations (HAGA, text read, high confidence).** Reg. 202(א): *"הכניסה למרחב מוגן דירתי תהיה מתוך שטח הדירה ותותקן
+  בה דלת הדף דירתית, אשר תהיה אטומה בפני גזים."* Reg. 204(א): *"דלת ההדף הדירתית … תיפתח כלפי חוץ."* Nothing in regs.
+  202–204 **requires** a second door, and nothing mentions one for a dwelling. The only second door they know is a
+  second *blast* door instead of the window (204(ב2)).
+* **By contrast**, for protected spaces in **health institutions** reg. 287(ב) says: *"ניתן להתקין, נוסף על דלת ההדף …
+  גם דלת רגילה, הנפתחת פנימה ומיועדת לשימוש בימי שגרה."* — an explicit *permission* (not a duty) for an ordinary,
+  inward-opening everyday door. There is no parallel sentence in the dwelling chapter.
+* **Home Front Command guidance (secondary source, medium / low confidence).** Maariv (5.8.2024) states, without
+  naming a speaker, that *"ניתן גם מבחינה טכנית וגם על פי התקנים והנחיות פיקוד העורף, להתקין במרחב המוגן דלת פנימית נוספת
+  נוחה יותר לשימוש, ולהותיר את דלת הפלדה של הממ"ד פתוחה באופן קבוע בשגרה"*. The official wording and any conditions
+  (frame, approved product) could **not** be verified on oref.org.il.
+
+**Conclusion used by the checker (`mamad-inner-door`, kind *standard*, confidence *medium*):** the inner door is
+**optional — permitted by guidance, not required by the regulations**. The owner's belief that regulations require it
+is not supported by the text. The checker reports it as a note when present (and passes a doorway that has only the
+blast door), verifies that it opens *into* the room so it cannot collide with the blast door, and warns when furniture
+stands in its arc. Conditions that do follow from the regulations: the blast door, its ת"י 4422 frame and its seal
+stay intact and operable, and the blast door must still open outwards.
+
+`mamad-door-clear` measures the free floor straight out from the blast door to the first wall: less than the leaf
+width → failure (the door cannot open); less than 1.10 m → warning (reg. 202(ב) — written for structural / concrete
+walls; for a light partition the checker says so and still warns). Reg. 203 distances (4.00 m / 2.20 m) are to
+*external* walls, which the editor cannot change, so removing an interior wall never affects them.
+
+Wall check on the real data: all four shell walls are typed `mamad`; north 20, east 25, west 20 cm are internal
+(≥ 20 required), south 30 cm is external and holds the window (≥ 25, and ≥ 30 if the blast window is the sliding
+type) — all met. A window wall of 25–29 cm would be reported as a note (acceptable only with a non-sliding window).
 
 ### 1.6 Parking — PARK regulations
 
@@ -235,6 +289,31 @@ Zones (reg. 1): **0** inside the bath / shower tray; **1** above it (or 60 cm ar
 | Washing machine: dedicated 16 A socket near its tap | 11(ד) | high |
 | Sockets ≥ 25 cm above the floor | 18(א) | high |
 
+### 1.13 Changing the plan — what needs a permit (LAW §145, EXEMPT reg. 20)
+
+The owner can edit interior walls and openings in the app (`src/core/plan-edit.js`). The checker lists every
+difference from the architect's drawing in the category **Changes to the approved plan**.
+
+Planning and Building Law §145(א): *"לא יעשה אדם אחד מאלה ולא יתחיל לעשותו אלא לאחר שנתנה לו רשות הרישוי המקומית היתר
+לכך ולא יעשה אותו אלא בהתאם לתנאי ההיתר: … (2) הקמתו של בנין, הריסתו והקמתו שנית, כולו או מקצתו, הוספה לבנין קיים וכל
+תיקון בו, למעט שינוי פנימי בדירה"*, and: *"שינוי פנימי" – שינוי שאינו נוגע לצד החיצוני של הבנין, אינו פוגע בחזיתו או
+במראהו או בשלד של הבנין או ברכוש משותף או בצנרת או ציוד אחר המשרתים גם דירות אחרות, אינו פוגע בזולת ואינו משנה את
+שטחה של הדירה … או את מספרן של יחידות הדיור.*
+
+| `planDiff()` level | Finding | Basis | Confidence |
+| --- | --- | --- | --- |
+| `free` — partitions (< 15 cm, or drawn by the owner), interior doors / passages, re-hanging | **note**, "non-structural change" | "Internal change" → no permit, §145(א)(2) | text *high*; how a change made **during construction** is recorded (revised working drawings / as-made plan for the completion certificate) was **not verified** → rule *medium* |
+| `warn` — interior wall ≥ 15 cm from the architect's plan (20 cm here) | **warning**, structural-engineer confirmation | **Not a regulation — an engineering caution**: partitions on this plan are 10 cm, so a 20 cm interior wall may be load-bearing or carry a beam; the drawing does not say. Only *if* it is part of the structural frame (שלד) does §145(א)(2) make the change permit-relevant | *medium* |
+| `permit` — move / resize / add / close an opening in an exterior wall | **warning**, permit | Touches "the outside of the building … its façade or appearance" → not an internal change → §145(א)(2) requires it in the permit. Only like-for-like replacement is exempt: EXEMPT reg. 20(א) *"החלפת רכיב בבניין … ברכיב אחר בעל מידות זהות, כגון … חלונות … פטורה מהיתר, ובלבד שהרכיב שיוחלף יהיה באותו מיקום"* | text *high*; the procedure of the local committee (amended permit, change during construction) and its spatial guidelines (הנחיות מרחביות) were **not verified** → rule *medium* |
+| `locked` — safe-room shell, door, window; exterior walls | refused by the editor, never reaches the checker | HAGA regs. 202–208; building envelope | — |
+
+One summary finding (`plan-change-summary`) passes while the plan is the architect's and otherwise counts the changes.
+**Consequences** that are real regulation checks are added to the same group when a change causes them:
+`plan-change-room` (a room created or reshaped by the owner falls below §2.04) and `plan-change-light` (a habitable
+room or kitchen is left with less than 8 % / 5 % of window, or a bathroom / WC loses its natural ventilation,
+§2.20–2.21). They are reported only when the architect's version of the room passed. All ordinary checks (room size,
+light, door and passage widths, corridor widths, routes, safe room) are recomputed on the edited geometry as well.
+
 ---
 
 ## 2. STANDARDS that do **not** apply (or were not confirmed) for a private house
@@ -318,11 +397,14 @@ Panero & Zelnik (*Human Dimension & Interior Space*) are standard references quo
 
 ## 6. What the checker finds on the real plan (lot 98) and the architect's layout
 
-Run `node tests/regulations.test.mjs` for the full report (102 findings: 82 pass, 16 notes, 4 warnings, 0 failures).
+Run `node tests/regulations.test.mjs` for the full report (106 findings: 85 pass, 17 notes, 4 warnings, 0 failures);
+the same script then edits the plan (merge two bedrooms, partition off a too-small room, add a door, move an exterior
+window, remove a 20 cm wall, put a partition in front of the blast door), checks the findings and resets it.
 
 **Passes worth knowing:** all room areas and widths; ceiling 3.00 m; light ratios (bedrooms 13.0 %, master 12.8 %,
 living space 18.0 %, mamad 9.5 %); all doors; corridor 1.10 m; mamad 10.5 m² / 31.5 m³, door 80 × 200 outwards,
-window 100 × 100 at +110, walls 20 / 25 / 30 / 20 cm, one external wall, door 8.3 m from the facing external wall;
+window 100 × 100 at +110, shell walls 20 / 25 / 30 / 20 cm (all reinforced concrete, reg. 208 met), one external
+wall, door 8.3 m from the facing external wall and more than 4 m of free floor in front of it; plan unmodified;
 2 parking bays of 2.50 × 5.00 m; setbacks W 6.05 / N 3.08 / E 3.49 / S 3.10 m; house inside the building line.
 
 **Warnings**
@@ -335,8 +417,8 @@ window 100 × 100 at +110, walls 20 / 25 / 30 / 20 cm, one external wall, door 8
 4. **Dining table** as drawn stands 50 cm from the corridor wall on its south side — the three chairs there cannot be
    pulled out (75–90 cm needed).
 
-**Notes:** laundry room has no window; glazed terrace door needs safety glass; smoke detectors; the mamad's west wall is
-typed as an ordinary partition in the plan data; anchor the mamad wardrobe; utility yard lies 1.90 m beyond the
+**Notes:** laundry room has no window; glazed terrace door needs safety glass; smoke detectors; the safe-room doorway
+has an inner door behind the blast door — optional, not a regulatory requirement (§ 1.5); anchor the mamad wardrobe; utility yard lies 1.90 m beyond the
 building line (acceptable only as open, low paving / service area); 5 island stools at 56 cm each and a 30 cm
 overhang; work triangle 9.6 m; cooktop under the north window; master wardrobe has 75 cm in front; PV / solar reminder;
 five open drawing assumptions.
@@ -348,3 +430,12 @@ and `confidence` exactly as above. `runChecks({ store, plan, catalog })` compute
 `store.items` (nothing about the house is hard-coded), returns passing checks too, and tags each finding with
 `spaceId` / `itemIds` / `at`. Routes are measured on a 5 cm grid (± 5 cm). When a regulation changes, update the number
 here and in `rules.js` together.
+
+**Edited plans.** `plan-edit.js` keeps the `PLAN` object and replaces its `walls / openings / rooms / wallOutline`
+arrays on every edit. Everything the checker caches (plan-only findings, room metrics, the walkable raster, the
+entry-path raster) is therefore keyed on `planRev(plan)` (`geom.js`) — a counter that goes up when any of those parts
+is a different object — plus the ceiling height (`store.project.ceilingHeight`) and the safe-room wall finish. Call
+`runChecks` again on the store's `'plan'` event; an unchanged plan costs nothing extra, the first run after an edit
+about 10 ms. Room polygons of an edited plan may contain a zero-width slit (free-standing wall): areas, the largest
+clear rectangle, narrow-passage detection (`polyEdges` cancels the slit) and the route raster all handle it. Change
+findings carry `at` = the changed wall / opening so the UI can focus it.

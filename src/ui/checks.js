@@ -1,11 +1,12 @@
 /**
- * Checks tab: results of the regulations module (clearances, setbacks, safe-room rules…) plus the assumptions the
- * drawing leaves open. The module is written by another specialist and loaded on demand; when it is missing the tab
- * says so instead of failing.
+ * Checks tab: results of the regulations module (clearances, setbacks, safe-room rules…), what the owner changed in
+ * the architect's plan, the assumptions the drawing leaves open and the module's disclaimer. The module is written
+ * by another specialist and loaded on demand; when it is missing the tab says so instead of failing.
  */
 import { h, setKids, debounce } from './dom.js';
 import { icon } from './icons.js';
-import { btn, section, emptyState } from './components.js';
+import { btn, section, emptyState, extLink } from './components.js';
+import { changesSection } from './structure-panels.js';
 
 const ORDER = ['fail', 'warn', 'info', 'pass'];
 const LABEL = { fail: 'Problems', warn: 'Warnings', info: 'Notes', pass: 'Passed' };
@@ -18,6 +19,7 @@ export function initChecks(root, app, onCounts) {
   let unavailable = false;
   let filter = 'all';
   let runner;                // undefined = not tried
+  let rules = null;          // RULES of the regulations module (for the source links)
 
   const summary = h('div', { class: 'chips chips--wrap', role: 'group', 'aria-label': 'Filter checks' });
   const list = h('div', { class: 'checks' });
@@ -26,17 +28,22 @@ export function initChecks(root, app, onCounts) {
     h('ul', { class: 'assume' }, (plan.assumptions || []).map((a) => h('li', { class: 'assume__row' },
       h('span', { class: `tag tag--${a.status === 'confirmed' ? 'pass' : 'warn'}` }, a.status === 'confirmed' ? 'Confirmed' : 'Assumed'),
       h('span', { class: 'assume__text' }, a.text)))));
-  root.append(summary, list, assumptions);
+  const changes = changesSection(app, { quietWhenEmpty: true });
+  const disclaimer = h('p', { class: 'checks__disclaimer', hidden: true });
+  root.append(summary, changes, list, assumptions, disclaimer);
 
   async function loadRunner() {
     if (runner !== undefined) return runner;
-    if (typeof app.runChecks === 'function') { runner = app.runChecks; return runner; }   // injected (tests, dev harness)
-    try {
-      const mod = await import('../regulations/index.js');
-      runner = typeof mod.runChecks === 'function' ? mod.runChecks : null;
-    } catch (err) { runner = null; }
+    let mod = null;
+    try { mod = await import('../regulations/index.js'); } catch (err) { mod = null; }
+    if (mod && Array.isArray(mod.RULES)) rules = mod.RULES;
+    if (mod && typeof mod.DISCLAIMER === 'string' && mod.DISCLAIMER) { disclaimer.textContent = mod.DISCLAIMER; disclaimer.hidden = false; }
+    if (typeof app.runChecks === 'function') runner = app.runChecks;   // injected (tests, dev harness)
+    else runner = mod && typeof mod.runChecks === 'function' ? mod.runChecks : null;
     return runner;
   }
+  /** The published source of a finding's rule, when the rule has one. */
+  const sourceUrl = (finding) => { const rule = rules && finding.ruleId ? rules.find((r) => r.id === finding.ruleId) : null; return rule && rule.reference ? rule.reference.url : null; };
 
   async function run() {
     if (runner === null) { if (active) render(); return; }   // module missing: tried once, wait for the user
@@ -65,10 +72,12 @@ export function initChecks(root, app, onCounts) {
 
   function focus(check) {
     if (check.itemIds && check.itemIds.length) actions.focusItems(check.itemIds);
-    else if (check.spaceId) actions.focusSpace(check.spaceId);
+    else if (check.spaceId && plan.rooms.concat(plan.outdoorAreas || []).some((s) => s.id === check.spaceId)) actions.focusSpace(check.spaceId);
+    else if (check.at) app.structure.focusPoint(check.at);
   }
 
   function render(counts) {
+    changes.refresh();
     if (unavailable) {
       setKids(summary);
       setKids(list, emptyState({ icon: 'checks', title: 'Checks are being prepared', text: 'Clearance, setback and safe-room checks will appear here. The assumptions below already apply.',
@@ -88,13 +97,15 @@ export function initChecks(root, app, onCounts) {
     const groups = new Map();
     for (const r of shown) { const k = r.category || 'General'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
     setKids(list, [...groups.entries()].map(([name, rows]) => section(name, h('ul', { class: 'checklist' }, rows.map((r) => {
-      const clickable = (r.itemIds && r.itemIds.length) || r.spaceId;
+      const clickable = (r.itemIds && r.itemIds.length) || r.spaceId || r.at;
+      // The source is a real link, so it sits beside the row button rather than inside it.
+      const link = r.reference ? extLink(r.reference, sourceUrl(r), 'checkrow__ref checkrow__ref--link') : null;
       const body = [h('span', { class: `check-ico check-ico--${r.severity}` }, icon(ORDER.includes(r.severity) ? r.severity : 'info', { size: 16 })),
         h('span', { class: 'checkrow__text' }, h('span', { class: 'checkrow__title' }, r.title),
-          r.detail && h('span', { class: 'checkrow__detail' }, r.detail), r.reference && h('span', { class: 'checkrow__ref' }, r.reference))];
-      return h('li', null, clickable
+          r.detail && h('span', { class: 'checkrow__detail' }, r.detail), r.reference && !link && h('span', { class: 'checkrow__ref' }, r.reference))];
+      return h('li', { class: 'checkitem' }, clickable
         ? h('button', { type: 'button', class: 'checkrow is-link', onClick: () => focus(r), 'data-tip': 'Show in the design', 'data-tip-side': 'left' }, body)
-        : h('div', { class: 'checkrow' }, body));
+        : h('div', { class: 'checkrow' }, body), link);
     })))));
   }
 
@@ -104,6 +115,12 @@ export function initChecks(root, app, onCounts) {
   store.on('finishes', schedule);
   store.on('project', schedule);
   store.on('load', schedule);
+  store.on('plan', (e) => {
+    if (e && e.transient) return;
+    if (active) changes.refresh();
+    schedule();
+  });
+  store.on('ui', (e) => { if (active && e.keys.includes('tool')) changes.refresh(); });
 
   // First run in the background so the tab badge is right before the tab is opened.
   setTimeout(run, 900);

@@ -78,6 +78,7 @@ export function createStructure(app) {
   const undo = { label: 'Undo', fn: () => store.undo() };
   let diff = null;
   let lastWarning = { text: '', at: 0 };
+  let toolChangedAt = -1;
 
   /** A warning that came back from the engine, in its level colour. The same text is not stacked while it is showing. */
   function levelToast(text, level) {
@@ -93,12 +94,25 @@ export function createStructure(app) {
     /** Switch a structure tool on (entering Structure mode from Furnish, 3D or the walk-through if needed). */
     setTool(tool = 'structure') {
       if (!isStructureTool(tool)) return;
-      if (!api.isActive()) store.clearSelection();
+      const entering = !api.isActive();
+      if (entering) store.clearSelection();
       store.setUI(planShown() ? { tool } : { tool, mode: '2d' });
+      // Narrow screens keep the guide in a drawer: say what the mode is for and where the rules are.
+      if (entering && app.isCompact()) toast('Structure: tap a wall, door or window to change it', { action: { label: 'Guide', fn: () => app.openPanel('catalog') } });
     },
     enter() { if (!api.isActive()) api.setTool('structure'); },
     exit() { if (api.isActive()) store.setUI({ tool: 'select', structureSel: null }); },
     toggle() { if (api.isActive()) api.exit(); else api.enter(); },
+    /**
+     * Esc: a wall / door / window / passage tool goes back to Select; from Select, leave Structure. The plan view
+     * follows the same rule for its own gestures — when it already changed the tool during this very key press
+     * (`event`), there is nothing left to do.
+     */
+    escape(event) {
+      if (event && toolChangedAt >= event.timeStamp) return;
+      if (store.ui.tool !== 'structure') store.setUI({ tool: 'structure' });
+      else api.exit();
+    },
 
     /** The selected wall segment / opening resolved against the current plan, or null. */
     selected() {
@@ -259,6 +273,7 @@ export function createStructure(app) {
   store.on('ui', (e) => {
     if (e.keys.includes('mode') && api.isActive() && !planShown()) api.exit();   // Structure lives in Plan and Split
     if (e.keys.includes('tool')) {
+      toolChangedAt = performance.now();
       if (!api.isActive() && store.ui.structureSel) store.setUI({ structureSel: null });
       syncClasses();
     }

@@ -1,7 +1,11 @@
 /**
  * Walls: solid poché from `plan.walls` (pixel-snapped rects so neighbours never show seams), a concrete hatch
- * for the mamad shell, and the architect's outline stroked crisply on top.
+ * for the mamad shell, and the wall outline stroked crisply on top. `plan.walls` / `plan.wallOutline` are read on
+ * every paint — the plan engine replaces them on each edit. While a structure tool is active the poché is tinted
+ * by what may be done with each wall; walls that are not on the architect's plan get an accent tint.
  */
+import { drawWallTints } from './structure.js';
+
 const patterns = new Map();
 
 function hatchPattern(ctx, color, dpr) {
@@ -31,6 +35,7 @@ export function drawWalls(G, env) {
     for (const w of plan.walls) if ((w.kind || 'exterior') === kind || (kind === 'exterior' && !fills[w.kind])) G.rect(w.x, w.y, w.w, w.h);
     ctx.fillStyle = fills[kind]; ctx.fill();
   }
+  drawWallTints(G, env);
   // reinforced-concrete hatch for the shelter, anchored to the plan so it does not swim while panning
   const { pattern, size } = hatchPattern(ctx, pal.wallHatch, G.dpr);
   if (pattern) {

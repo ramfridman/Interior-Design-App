@@ -1,7 +1,8 @@
 /**
  * Frame composer. The plan is painted into two off-screen caches that are slightly larger than the view:
  *   under — paper, site, floors, grid, walls, openings and every item that is not being manipulated
- *   over  — labels and dimension lines
+ *   over  — labels, dimension lines and the markers of the "changes" overlay
+ * Everything is read from `env.plan` at paint time; a 'plan' event only has to invalidate the caches.
  * A frame is then: blit `under`, draw the few live (dragged) items, blit `over`, draw the interaction overlay.
  * Panning re-uses the caches (pixel-exact integer offsets) until the margin is used up; a zoom frame paints
  * straight to the screen from vectors (always crisp). Nothing is drawn unless the view was invalidated.
@@ -13,8 +14,10 @@ import { drawWalls } from './walls.js';
 import { drawOpenings } from './openings.js';
 import { drawItems, drawItem } from './items.js';
 import { drawRoomLabels, drawExteriorDims, drawInteriorDims } from './annotations.js';
+import { isStructureTool, drawRemovedWalls, drawChangeMarkers } from './structure.js';
 
 const MARGIN = 192;   // device px of slack around the view in the caches
+const ITEMS_DIMMED = 0.35;
 
 /** Optional per-layer timing (diagnostics only): env.profile = {} collects ms per layer, forcing a raster flush after each. */
 function profiler(G, env) {
@@ -38,10 +41,13 @@ export function paintUnder(G, env, skip = null) {
   step('floors', () => { drawOutdoorAreas(G, env); drawRoomFloors(G, env); });
   if (ui.showGrid && !env.exporting) step('grid', () => drawGrid(G, env));
   if (ui.showSite) step('siteLines', () => drawSiteLines(G, env));
-  if (ui.showItems) step('itemsBelow', () => drawItems(G, env, 'below', skip));
+  // while the building itself is being edited the furniture steps back (and cannot be picked)
+  const alpha = isStructureTool(ui.tool) && !env.exporting ? ITEMS_DIMMED : 1;
+  if (ui.showItems) step('itemsBelow', () => drawItems(G, env, 'below', skip, alpha));
   step('walls', () => drawWalls(G, env));
   step('openings', () => drawOpenings(G, env));
-  if (ui.showItems) step('items', () => drawItems(G, env, 'above', skip));
+  step('changes', () => drawRemovedWalls(G, env));
+  if (ui.showItems) step('items', () => drawItems(G, env, 'above', skip, alpha));
 }
 
 /** Labels and dimensions. */
@@ -54,6 +60,7 @@ export function paintOver(G, env) {
   if (ui.showDimensions) step('extDims', () => drawExteriorDims(G, env, boxes));
   if (ui.showRoomLabels) step('labels', () => drawRoomLabels(G, env, boxes));
   if (ui.showDimensions) step('intDims', () => drawInteriorDims(G, env, boxes));
+  drawChangeMarkers(G, env);
 }
 
 export function createRenderer(canvas, env) {

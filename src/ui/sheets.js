@@ -2,7 +2,7 @@
  * Dialog sheets: first-run welcome, keyboard shortcuts, settings, and the item context menu.
  */
 import { areaM2 } from '../core/geometry.js';
-import { h } from './dom.js';
+import { h, setKids } from './dom.js';
 import { icon } from './icons.js';
 import { btn, segmented, numField, toggle, kbd } from './components.js';
 import { openDialog, openMenu } from './dialogs.js';
@@ -45,23 +45,33 @@ export function openWelcome(app) {
   const title = m.lot ? `House ${m.lot}, Kibbutz Afikim (model ${m.model || 'E7'})` : (m.name || store.project.name);
   const open = (plan.assumptions || []).filter((a) => a.status !== 'confirmed');
   const tip = (name, head, text) => h('li', { class: 'tips__row' }, h('span', { class: 'tips__icon' }, icon(name, { size: 18 })), h('div', null, h('p', { class: 'tips__head' }, head), h('p', { class: 'tips__text' }, text)));
+  // The drawing and the facts are read from PLAN, which the owner can edit (and undo) — redraw them when it changes.
+  const drawing = h('div', { class: 'welcome__drawing' });
+  const facts = h('dl', { class: 'titleblock' });
+  const drawPlan = () => {
+    setKids(drawing, planSvg(plan, { pad: 80 }));
+    setKids(facts, houseFacts(plan, store).map(([k, v, sub]) => h('div', { class: 'titleblock__cell' }, h('dt', null, k), h('dd', { class: 'num' }, v, sub ? h('small', null, sub) : null))));
+  };
+  drawPlan();
+  const offPlan = store.on('plan', drawPlan);
   const body = h('div', { class: 'welcome' },
-    h('div', { class: 'welcome__plan' }, planSvg(plan, { pad: 80 }),
+    h('div', { class: 'welcome__plan' }, drawing,
       h('p', { class: 'welcome__caption' }, [m.architect ? `Drawn from ${m.architect}` : 'Drawn from the architect’s plan', m.drawingScale ? `, ${m.drawingScale}` : ''])),
     h('div', { class: 'welcome__text' },
       h('p', { class: 'welcome__lead' }, 'Furnish and landscape your real house. The plan is measured from the architect’s drawing, every product is on sale in Israel with its price and shop link, and you can walk through the result in 3D.'),
-      h('dl', { class: 'titleblock' }, houseFacts(plan, store).map(([k, v, sub]) => h('div', { class: 'titleblock__cell' }, h('dt', null, k), h('dd', { class: 'num' }, v, sub ? h('small', null, sub) : null)))),
+      facts,
       h('ul', { class: 'tips' },
         tip('sofa', 'Drag products onto the plan', 'Or press the + on a product card, then click where it goes. Floors and wall finishes apply to the room you click.'),
         tip('swap', 'Swap the architect’s placeholders', 'The furniture already on the plan has no product yet. Select a piece and pick a real one in the Inspector.'),
-        tip('walk', 'Walk through and keep an eye on the budget', 'Press 3 to walk the house. The shopping list adds up prices as you place things.')),
+        tip('wall', 'Change walls, doors and windows', 'Press B for Structure. Partitions and interior doors are yours to change; the app says what needs your engineer or a permit, and what is locked.'),
+        tip('walk', 'Walk through and keep an eye on the budget', 'Press 3 to walk the house and watch the sun move through the rooms. The shopping list adds up prices as you place things.')),
       open.length ? h('details', { class: 'welcome__assume' },
         h('summary', null, `${open.length} ${open.length === 1 ? 'assumption' : 'assumptions'} to confirm with the architect`),
         h('ul', null, open.map((a) => h('li', null, a.text)))) : null));
   const dlg = openDialog({
     title, size: 'xl', cls: 'dialog--welcome', body,
     actions: [btn('Keyboard shortcuts', { variant: 'quiet', icon: 'keyboard', onClick: () => { dlg.close(); openShortcuts(); } }), btn('Start designing', { variant: 'primary', onClick: () => dlg.close() })],
-    onClose: () => setPref('welcomed', true),
+    onClose: () => { offPlan(); setPref('welcomed', true); },
   });
   return dlg;
 }

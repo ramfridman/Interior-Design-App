@@ -2,10 +2,14 @@
  * Pointer / wheel / keyboard interaction for the plan view: pan & zoom, select, marquee, move (with smart
  * snapping), rotate, resize, placing new items and the measure tool. Mouse, trackpad, touch and pen all go
  * through Pointer Events. All edits go to the store as transient updates inside begin() … commit().
+ * While a structure tool is active ('structure' | 'wall' | 'door' | 'window' | 'passage') the pointer is handed to
+ * structure-tools.js: furniture cannot be picked, gestures whose type starts with 's-' belong to that module.
  */
 import { itemAABB, itemLocalToPlan, planToItemLocal, spaceAt, isIndoors, polygonBounds, normDeg, snapTo, DEG } from '../core/geometry.js';
 import { itemHandles } from './overlay.js';
 import { isBelowWalls } from './items.js';
+import { isStructureTool } from './structure.js';
+import { createStructureTools } from './structure-tools.js';
 
 const DRAG_SLOP = 3;           // px before a press becomes a drag
 const DOUBLE_MS = 350;
@@ -30,6 +34,9 @@ export function attachInteraction(V) {
   const snapOn = (e) => !!store.ui.snap && !(e && (e.ctrlKey || e.metaKey));
   const tool = () => store.ui.tool || 'select';
   const redraw = () => V.invalidate();
+  const structureTool = () => isStructureTool(tool());
+  const isStructureGesture = (g) => !!g && typeof g.type === 'string' && g.type.startsWith('s-');
+  const structure = createStructureTools(V, { toPlan, snapOn, tool, startPan: (p, extra) => startPan(p, extra) });
 
   // ───────────── hit testing ─────────────
   function hitItem(pp) {
@@ -68,6 +75,7 @@ export function attachInteraction(V) {
     if (g && g.type === 'pan') c = 'grabbing';
     else if (st.spaceDown || tool() === 'pan') c = 'grab';
     else if (st.placing) c = 'copy';
+    else if (structureTool()) c = structure.cursor();
     else if (tool() === 'measure') c = 'crosshair';
     else if (g && g.type === 'rotate') c = 'grabbing';
     else if (g && g.type === 'resize') c = g.cursor;
@@ -126,6 +134,7 @@ export function attachInteraction(V) {
     const g = st.gesture;
     if (!g) return false;
     if (g.batch) { V.selfWrite = true; store.cancel(); V.selfWrite = false; }
+    if (isStructureGesture(g)) structure.cancel();
     endGesture();
     return true;
   }
@@ -300,7 +309,7 @@ export function attachInteraction(V) {
       const pose = poseFor(base, pp, !!store.ui.snap, {}, true);
       return addFromPose(partial, pose);
     },
-    cancel() { if (cancelGesture()) return true; if (st.placing) { endPlacing(null); return true; } return false; },
+    cancel() { if (cancelGesture()) return true; if (st.placing) { endPlacing(null); return true; } return structure.cancel(); },
     /** The store changed while a gesture is running (someone else rotated or removed the dragged item). */
     externalItems(e) {
       const g = st.gesture;
@@ -309,7 +318,26 @@ export function attachInteraction(V) {
         for (const id of e.ids) { const o = g.orig.get(id), it = store.getItem(id); if (o && it) { o.rot = it.rot || 0; g.manualRot = true; } }
       } else if (e.type === 'remove' || e.type === 'reset') { st.gesture = null; endGesture(); }
     },
-    toolChanged() { st.measures = []; st.measureDraft = null; cancelGesture(); setCursor(null); redraw(); },
+    toolChanged() {
+      st.measures = []; st.measureDraft = null; cancelGesture();
+      structure.toolChanged();
+      if (structureTool()) st.hoverId = null;
+      setCursor(null); redraw();
+    },
+    /** The plan was edited (by this view, the inspector, undo / redo, a load …). */
+    planChanged(e) {
+      const g = st.gesture, own = V.selfWrite;
+      if (!own && isStructureGesture(g) && g.batch) {
+        // someone else changed the plan in the middle of a drag: close the drag where it is
+        st.gesture = null;
+        V.selfWrite = true; store.commit(); V.selfWrite = false;
+        structure.cancel(); endGesture();
+      }
+      structure.planChanged(e, own);
+    },
+    /** `store.ui.structureSel` was set (by this view or by the inspector). */
+    structureSelChanged() { structure.remember(); },
+    getStructureHover: () => structure.getHover(),
   };
 
   // ───────────── pointer handlers ─────────────
@@ -331,6 +359,7 @@ export function attachInteraction(V) {
     if (e.button === 1 || st.spaceDown || tool() === 'pan') { startPan(p); setCursor(p); return; }
     if (e.button !== 0) return;
     if (st.placing) { updateGhost(p, e); st.gesture = { type: 'place', start: p }; return; }
+    if (structureTool()) { structure.down(p, e); setCursor(p); return; }
     if (tool() === 'measure') {
       const pt = snapper.snapPoint(pp, { scale: cam.scale, enabled: snapOn(e) });
       if (st.measureDraft && st.measureDraft.armed) {
@@ -386,6 +415,7 @@ export function attachInteraction(V) {
     const g = st.gesture;
     if (!g) {
       if (st.placing) { updateGhost(p, e); return; }
+      if (structureTool()) { if (e.pointerType !== 'touch') structure.hover(p, e); setCursor(p); return; }
       if (tool() === 'measure' && st.measureDraft) {
         st.measureDraft.b = constrain(st.measureDraft.a, snapper.snapPoint(pp, { scale: cam.scale, enabled: snapOn(e) }), e);
         redraw();
@@ -426,7 +456,9 @@ export function attachInteraction(V) {
         redraw();
         break;
       case 'place': updateGhost(p, e); break;
-      default: break;
+      default:
+        if (isStructureGesture(g)) { structure.move(g, p, e, far); setCursor(p); }
+        break;
     }
   }
 
@@ -463,6 +495,12 @@ export function attachInteraction(V) {
       case 'context': {
         if (st.placing) { endPlacing(null); break; }
         if (st.measureDraft) { st.measureDraft = null; redraw(); break; }
+        if (structureTool()) {
+          // right-click drops a wall being drawn; otherwise it is a context menu on the wall / opening under it
+          const pp = toPlan(p);
+          if (!structure.cancel()) V.emit('contextmenu', { item: null, structure: structure.getHover(), clientX: e.clientX, clientY: e.clientY, x: pp.x, y: pp.y });
+          break;
+        }
         const it = hitItem(toPlan(p));
         if (it && !store.selection.includes(it.id)) store.select([it.id]);
         const pp = toPlan(p);
@@ -470,7 +508,7 @@ export function attachInteraction(V) {
         break;
       }
       case 'pan': {
-        if (g.tap && !g.moved) { click(p, e, null); break; }
+        if (g.tap && !g.moved) { if (g.structure) structure.up({ type: 's-empty', start: p }, p, e); else click(p, e, null); break; }
         // a flick with a finger or pen glides on; a mouse stays exactly where it was released
         const now = performance.now(), s = g.samples.filter((q) => now - q.t < 90);
         if (e.pointerType !== 'mouse' && s.length >= 2 && now - s[s.length - 1].t < 40) {
@@ -493,7 +531,9 @@ export function attachInteraction(V) {
       case 'place':
         if (Math.hypot(p.x - g.start.x, p.y - g.start.y) < 12 || e.pointerType === 'touch') commitPlacing(e);
         break;
-      default: break;
+      default:
+        if (isStructureGesture(g)) structure.up(g, p, e);
+        break;
     }
     endGesture();
     setCursor(p);
@@ -508,6 +548,7 @@ export function attachInteraction(V) {
   function onLeave() {
     if (st.hoverId && !st.gesture) { st.hoverId = null; redraw(); }
     if (st.placing && !st.gesture && st.placing.visible) { st.placing.visible = false; st.feedback = null; redraw(); }
+    if (structureTool()) structure.leave();
   }
 
   function onWheel(e) {
@@ -531,6 +572,7 @@ export function attachInteraction(V) {
       cam.zoomToward(p.x, p.y, Math.exp(-Math.sign(dy) * Math.min(0.5, Math.abs(dy) / 100 * 0.2)));
     }
     if (st.placing && st.placing.visible) updateGhost(p, e);
+    else if (structureTool() && !st.gesture) structure.hover(p, e);
     redraw();
   }
 

@@ -76,12 +76,14 @@ export function drawItem(G, env, it, opts = {}) {
  * Draw a pass of the item list in array order.
  * @param {'below'|'above'} pass  below = ground surfaces + rugs (under the walls); above = everything else
  * @param {Set<string>|null} skip  ids drawn live by the caller (being dragged)
+ * @param {number} alpha  overall opacity (furniture is dimmed while the building is being edited)
  */
-export function drawItems(G, env, pass, skip) {
+export function drawItems(G, env, pass, skip, alpha = 1) {
+  const opts = alpha < 1 ? { alpha } : undefined;
   for (const it of env.store.items) {
     if (it.hidden || isBelowWalls(it) !== (pass === 'below')) continue;
     if (skip && skip.has(it.id)) continue;
-    drawItem(G, env, it);
+    drawItem(G, env, it, opts);
   }
   G.deviceSpace();
 }

@@ -63,6 +63,10 @@
 .seg--tools .seg__btn[aria-checked='true'] { color: var(--accent); }
 .seg--block { display: flex; }
 .seg--block .seg__btn { flex: 1 1 0; }
+.seg--mode .seg__btn { padding: 0 12px; }
+.seg--mode .seg__btn[aria-checked='true'] { font-weight: 600; }
+.seg--thick { padding: 1px; }
+.seg--thick .seg__btn { height: calc(var(--ctl) - 8px); min-width: 28px; padding: 0 5px; font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
 .seg--mini { padding: 1px; border: 0; background: transparent; }
 .seg--mini .seg__btn { height: 20px; min-width: 28px; padding: 0 6px; font-size: var(--fs-11); }
 .seg--mini .seg__btn[aria-checked='true'] { background: var(--sunken); box-shadow: none; }
@@ -140,6 +144,24 @@
 .tag { flex: none; display: inline-block; padding: 1px 6px; border-radius: var(--r-1); font-size: var(--fs-11); font-weight: 500; line-height: 1.5; }
 .tag--pass { background: var(--pass-soft); color: var(--pass); }
 .tag--warn { background: var(--warn-soft); color: var(--warn); }
+.tag--new { background: var(--accent-soft); color: var(--accent); }
+
+/* Structure levels (free / check with engineer / permit / locked): always an icon AND a label, never colour alone. */
+.lvl { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px 1px 4px; border-radius: var(--r-1); font-size: var(--fs-11); font-weight: 500; line-height: 1.5; white-space: nowrap; }
+.lvl--free { background: var(--level-free-soft); color: var(--level-free); }
+.lvl--warn { background: var(--level-warn-soft); color: var(--level-warn); }
+.lvl--permit { background: var(--level-permit-soft); color: var(--level-permit); }
+.lvl--locked { background: var(--level-locked-soft); color: var(--level-locked); }
+.lvlbanner { display: flex; gap: var(--s-2); margin-top: var(--s-3); padding: var(--s-2) var(--s-3) var(--s-2) calc(var(--s-3) - 3px); border-left: 3px solid var(--lv); border-radius: var(--r-1) var(--r-2) var(--r-2) var(--r-1); background: var(--lv-soft); }
+.lvlbanner--free { --lv: var(--level-free); --lv-soft: var(--level-free-soft); }
+.lvlbanner--warn { --lv: var(--level-warn); --lv-soft: var(--level-warn-soft); }
+.lvlbanner--permit { --lv: var(--level-permit); --lv-soft: var(--level-permit-soft); }
+.lvlbanner--locked { --lv: var(--level-locked); --lv-soft: var(--level-locked-soft); }
+.lvlbanner__icon { flex: none; margin-top: 1px; color: var(--lv); }
+.lvlbanner__title { font-weight: 600; color: var(--lv); }
+.lvlbanner__text { margin-top: 1px; color: var(--ink-2); font-size: var(--fs-12); max-width: 46ch; }
+.dialog .lvlbanner { margin-top: 0; }
+.dialog__text--after { margin-top: var(--s-3); }
 .kbd { display: inline-flex; gap: 3px; vertical-align: middle; }
 .kbd kbd {
   display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px;
@@ -257,6 +279,13 @@
   background: var(--primary); color: var(--primary-ink); box-shadow: var(--shadow-2); font-size: var(--fs-13); max-width: 100%;
   animation: toast-in var(--t-med) var(--ease);
 }
+/* A warning that belongs to a structure level: paper card with the level's edge and icon. */
+.toast--level { background: var(--raised); color: var(--ink); border: 1px solid var(--line-strong); border-left: 3px solid var(--lv); max-width: min(560px, 100%); align-items: flex-start; }
+.toast--level > .icon { margin-top: 2px; color: var(--lv); }
+.toast--level-free { --lv: var(--level-free); }
+.toast--level-warn { --lv: var(--level-warn); }
+.toast--level-permit { --lv: var(--level-permit); }
+.toast--level-locked { --lv: var(--level-locked); }
 .toast.is-leaving { opacity: 0; transform: translateY(4px); transition: opacity 160ms, transform 160ms; }
 .toast__action { margin-left: var(--s-2); padding: 2px 6px; border-radius: var(--r-1); color: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .toast__action:focus-visible { outline-color: var(--primary-ink); }

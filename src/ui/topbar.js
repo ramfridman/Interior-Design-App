@@ -1,13 +1,17 @@
 /**
- * Top bar: product mark + project name, undo / redo, tools, the view switch, plan-display toggles,
- * the live budget and the file / settings / help menus.
+ * Top bar: product mark + project name, undo / redo, the Furnish | Structure switch with the tools of the current
+ * mode, the view switch, plan-display toggles, the "plan modified" chip, the live budget and the file / settings /
+ * help menus. On narrow screens the structure tools float over the plan instead (same element, moved).
  */
-import { h, debounce, isMac } from './dom.js';
+import { h, debounce, rafThrottle, isMac } from './dom.js';
+import { icon } from './icons.js';
 import { iconBtn, segmented } from './components.js';
 import { openMenu } from './dialogs.js';
 import { canPrint } from './exporter.js';
 import { fmtPrice } from './format.js';
 import { shoppingTotal } from './shopping.js';
+import { WALL_THICKNESSES } from './structure.js';
+import { STRUCTURE_TOOL_LIST, planChip } from './structure-panels.js';
 
 const MOD = isMac() ? '⌘' : 'Ctrl';
 
@@ -22,6 +26,10 @@ const TOOLS = [
   { value: 'pan', label: 'Pan', icon: 'pan', kbd: 'H' },
   { value: 'measure', label: 'Measure', icon: 'measure', kbd: 'M' },
 ];
+const EDIT_MODES = [
+  { value: 'furnish', label: 'Furnish', tip: 'Furnish: place and arrange products', kbd: 'B' },
+  { value: 'structure', label: 'Structure', tip: 'Structure: change walls, doors and windows', kbd: 'B' },
+];
 const TOGGLES = [
   { key: 'snap', label: 'Snap to walls and grid', icon: 'snap' },
   { key: 'showGrid', label: 'Grid', icon: 'grid', kbd: 'G' },
@@ -32,7 +40,7 @@ const TOGGLES = [
 
 /** @param {HTMLElement} root  @param {object} app */
 export function initTopbar(root, app) {
-  const { store, actions } = app;
+  const { store, actions, structure } = app;
 
   /* Mark + project name */
   const mark = h('div', { class: 'mark', 'aria-hidden': 'true' }, h('span', { class: 'mark__text display' }, app.plan.meta.model || 'E7'));
@@ -44,8 +52,32 @@ export function initTopbar(root, app) {
   const undo = iconBtn('undo', 'Undo', { kbd: `${MOD} Z`, onClick: actions.undo });
   const redo = iconBtn('redo', 'Redo', { kbd: `${MOD} ⇧ Z`, onClick: actions.redo });
 
-  /* Tools + view switch */
+  /* Furnish | Structure, and the tools of each mode */
+  const editMode = segmented({ options: EDIT_MODES, value: structure.isActive() ? 'structure' : 'furnish', label: 'Editing mode', cls: 'seg--mode',
+    onChange: (v) => (v === 'structure' ? structure.enter() : structure.exit()) });
+  const editBadge = h('span', { class: 'badge', hidden: true });
+  const editBtn = iconBtn('wall', 'Structure: change walls, doors and windows', { kbd: 'B', pressed: structure.isActive(), class: 'only-compact modebtn', onClick: () => structure.toggle() });
+  editBtn.append(editBadge);
   const tools = segmented({ options: TOOLS, value: store.ui.tool, iconOnly: true, label: 'Tool', cls: 'seg--tools', onChange: (tool) => store.setUI({ tool }) });
+
+  const sTools = segmented({ options: STRUCTURE_TOOL_LIST.map((t) => ({ value: t.value, label: t.long, icon: t.icon, kbd: t.kbd })), value: store.ui.tool, iconOnly: true,
+    label: 'Structure tool', cls: 'seg--tools', onChange: (tool) => structure.setTool(tool) });
+  const thickness = segmented({ options: WALL_THICKNESSES.map((v) => ({ value: v, label: String(v), tip: `Draw ${v} cm walls` })), value: store.ui.wallThickness,
+    label: 'Thickness of new walls, in centimetres', cls: 'seg--thick', onChange: (v) => { store.setUI({ wallThickness: v }); structure.setTool('wall'); } });
+  const showChanges = iconBtn('changes', 'Highlight changes to the architect’s plan', { pressed: !!store.ui.showPlanChanges, onClick: () => store.setUI({ showPlanChanges: !store.ui.showPlanChanges }) });
+  const resetPlanBtn = iconBtn('reset', 'Reset to architect’s plan…', { onClick: () => structure.reset() });
+  const structureBar = h('div', { class: 'sbar', role: 'group', 'aria-label': 'Structure tools' },
+    sTools,
+    h('div', { class: 'sbar__thick', 'data-tip': 'Thickness of new walls' }, icon('wall', { size: 16 }), thickness, h('span', { class: 'sbar__unit' }, 'cm')),
+    h('span', { class: 'sbar__sep', 'aria-hidden': 'true' }),
+    showChanges, resetPlanBtn);
+  const structureHost = h('div', { class: 'topbar__group topbar__structure' });
+  const structureFloat = h('div', { class: 'ov__tc sbar-float' });
+  document.getElementById('ov2d')?.append(structureFloat);
+  const placeStructureBar = () => (app.isCompact() ? structureFloat : structureHost).append(structureBar);
+  if (typeof matchMedia === 'function') matchMedia('(max-width: 1099px)').addEventListener?.('change', placeStructureBar);
+
+  const chip = planChip(app);
   const views = segmented({ options: VIEW_MODES, value: store.ui.mode, label: 'View', cls: 'seg--views', onChange: (mode) => actions.setMode(mode) });
 
   /* Display toggles (inline on wide screens, in a menu on narrow ones) */
@@ -54,7 +86,7 @@ export function initTopbar(root, app) {
     b.dataset.key = t.key;
     return b;
   });
-  const togglesMenuBtn = iconBtn('site', 'Plan display', { class: 'only-compact', onClick: () => openMenu(togglesMenuBtn,
+  const togglesMenuBtn = iconBtn('site', 'Plan display', { class: 'only-compact toggles-menu', onClick: () => openMenu(togglesMenuBtn,
     TOGGLES.map((t) => ({ label: t.label, checked: !!store.ui[t.key], kbd: t.kbd, onSelect: () => store.setUI({ [t.key]: !store.ui[t.key] }) })), { placement: 'bottom-end' }) });
   togglesMenuBtn.setAttribute('aria-haspopup', 'menu');
 
@@ -69,6 +101,7 @@ export function initTopbar(root, app) {
     budgetMeta.textContent = t.pending ? `${t.pending} to choose` : '';
     budgetMeta.hidden = !t.pending;
     budget.setAttribute('aria-label', `Budget ${fmtPrice(t.total)}${t.pending ? `, ${t.pending} items still to choose` : ''}. Open the shopping list`);
+    fit();
   }, 120);
 
   /* Menus */
@@ -99,31 +132,67 @@ export function initTopbar(root, app) {
       compact && { label: 'Keyboard shortcuts', icon: 'keyboard', onSelect: () => app.openShortcuts() },
       compact && { label: 'Welcome and house facts', icon: 'home', onSelect: () => app.openWelcome() },
       compact && { heading: 'Tool' },
-      ...(compact ? TOOLS.map((t) => ({ label: t.label, icon: t.icon, checked: store.ui.tool === t.value ? true : undefined, onSelect: () => store.setUI({ tool: t.value }) })) : []),
+      ...(compact && !structure.isActive() ? TOOLS.map((t) => ({ label: t.label, icon: t.icon, checked: store.ui.tool === t.value ? true : undefined, onSelect: () => store.setUI({ tool: t.value }) })) : []),
+      ...(compact && structure.isActive() ? STRUCTURE_TOOL_LIST.map((t) => ({ label: t.long, icon: t.icon, checked: store.ui.tool === t.value ? true : undefined, onSelect: () => structure.setTool(t.value) })) : []),
     ];
   }
 
+  const center = h('div', { class: 'topbar__center' }, views);
   root.append(
     h('div', { class: 'topbar__group topbar__brand' }, mark, name),
     h('div', { class: 'topbar__group', role: 'group', 'aria-label': 'History' }, undo, redo),
-    h('div', { class: 'topbar__group hide-phone' }, tools),
-    h('div', { class: 'topbar__center' }, views),
+    h('div', { class: 'topbar__group topbar__edit' }, h('div', { class: 'hide-compact' }, editMode), editBtn),
+    h('div', { class: 'topbar__group topbar__furnish hide-phone' }, tools),
+    structureHost,
+    center,
     h('div', { class: 'topbar__group topbar__toggles hide-compact', role: 'group', 'aria-label': 'Plan display' }, toggleBtns),
-    h('div', { class: 'topbar__group topbar__end' }, togglesMenuBtn, budget, fileBtn, settingsBtn, helpBtn),
+    h('div', { class: 'topbar__group topbar__end' }, togglesMenuBtn, chip, budget, fileBtn, settingsBtn, helpBtn),
   );
+  placeStructureBar();
+
+  /*
+   * Fit: the bar holds more in Structure mode and once the plan is modified. When it gets cramped the least important
+   * things give way first — classes fit1 … fit6 on the bar, cumulative (see layout.css) — instead of anything overlapping.
+   */
+  const FIT_STEPS = 6;
+  const cramped = () => views.offsetWidth > center.clientWidth + 0.5 || (name.offsetParent !== null && name.offsetWidth < 72);
+  const fit = rafThrottle(() => {
+    for (let i = 1; i <= FIT_STEPS; i++) root.classList.remove(`fit${i}`);
+    for (let i = 1; i <= FIT_STEPS && cramped(); i++) root.classList.add(`fit${i}`);
+  });
+  if (typeof ResizeObserver === 'function') new ResizeObserver(fit).observe(root);
 
   /* Store → controls */
   const syncHistory = () => { const s = store.historyState(); undo.disabled = !s.canUndo; redo.disabled = !s.canRedo; };
   const syncUI = () => {
-    tools.set(store.ui.tool);
+    const on = structure.isActive();
+    editMode.set(on ? 'structure' : 'furnish');
+    editBtn.setPressed(on);
+    tools.set(on ? null : store.ui.tool);
+    sTools.set(on ? store.ui.tool : null);
+    thickness.set(store.ui.wallThickness);
+    showChanges.setPressed(!!store.ui.showPlanChanges);
     views.set(store.ui.mode);
     toggleBtns.forEach((b) => b.setPressed(!!store.ui[b.dataset.key]));
+    fit();
   };
+  const syncPlan = () => {
+    chip.refresh();
+    const modified = structure.isModified(), n = structure.diff().items.length;
+    resetPlanBtn.disabled = !modified;
+    editBadge.hidden = !modified;
+    editBadge.textContent = String(n || '•');
+    editBtn.setAttribute('aria-label', `Structure: change walls, doors and windows${modified ? ` (plan modified, ${n} ${n === 1 ? 'change' : 'changes'})` : ''}`);
+    fit();
+  };
+  store.on('plan', (e) => { if (!e || !e.transient) syncPlan(); });
+  store.on('load', syncPlan);
   store.on('history', syncHistory);
   store.on('ui', syncUI);
   store.on('project', () => { if (document.activeElement !== name) name.value = store.project.name; refreshBudget(); });
   store.on('items', (e) => { if (!e.transient) refreshBudget(); });
   store.on('finishes', refreshBudget);
-  syncHistory(); syncUI(); refreshBudget();
+  store.on('plan', (e) => { if (!e || !e.transient) refreshBudget(); });
+  syncHistory(); syncUI(); syncPlan(); refreshBudget();
 }
 

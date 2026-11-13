@@ -15,6 +15,8 @@ import { toast, initTooltips, hasOpenLayer } from './dialogs.js';
 import { applyTheme, getPref, setPref } from './prefs.js';
 import { createThumbs } from './thumbs.js';
 import { createActions } from './actions.js';
+import { createStructure } from './structure.js';
+import { initStructureGuide } from './structure-panels.js';
 import { initTopbar } from './topbar.js';
 import { initViewport } from './viewport.js';
 import { initStatusbar } from './statusbar.js';
@@ -64,6 +66,7 @@ export function initUI(ctx) {
     openSettings: () => openSettings(app),
   };
   app.thumbs = createThumbs(app);
+  app.structure = createStructure(app);
   app.actions = createActions(app);
 
   /* ───────── Panels: docked on wide screens, drawers / sheets on narrow ones ───────── */
@@ -134,6 +137,7 @@ export function initUI(ctx) {
   initTopbar(document.getElementById('topbar'), app);
   viewport = initViewport(app);
   catalogPanel = initCatalogPanel(left, app);
+  initStructureGuide(left, app);
   const panels = {
     inspector: initInspector(tabPanels.get('inspector'), app),
     budget: initBudget(tabPanels.get('budget'), app),
@@ -162,10 +166,26 @@ export function initUI(ctx) {
   }
 
   /* ───────── Edge tabs (reopen a hidden sidebar) and the phone navigation ───────── */
-  const edgeLeft = h('button', { type: 'button', class: 'edge edge--left', 'aria-label': 'Show the catalogue', 'data-tip': 'Catalogue', 'data-tip-side': 'right', onClick: () => setPanelOpen('left', true) }, icon('sofa', { size: 18 }));
+  const edgeLeft = h('button', { type: 'button', class: 'edge edge--left', 'aria-label': 'Show the catalogue', 'data-tip': 'Catalogue', 'data-tip-side': 'right', onClick: () => setPanelOpen('left', true) });
   const edgeRight = h('button', { type: 'button', class: 'edge edge--right', 'aria-label': 'Show the inspector and lists', 'data-tip': 'Inspector, shopping list, rooms, checks', 'data-tip-side': 'left', onClick: () => setPanelOpen('right', true) }, icon('inspector', { size: 18 }));
   const scrim = h('div', { class: 'drawer-scrim', onClick: closePanels });
   document.getElementById('stage').append(edgeLeft, edgeRight, scrim);
+  /** The left sidebar holds the catalogue, or the structure guide while in Structure mode. */
+  let leftIs = '';
+  function syncLeftLabels() {
+    const next = app.structure.isActive() ? 'guide' : 'catalog';
+    if (next === leftIs) return;
+    leftIs = next;
+    const guide = next === 'guide';
+    left.setAttribute('aria-label', guide ? 'Structure guide' : 'Catalogue');
+    edgeLeft.setAttribute('aria-label', guide ? 'Show the structure guide' : 'Show the catalogue');
+    edgeLeft.dataset.tip = guide ? 'Structure guide' : 'Catalogue';
+    edgeLeft.replaceChildren(icon(guide ? 'wall' : 'sofa', { size: 18 }));
+    const nav = navButtons.get('catalog');
+    if (nav) nav.replaceChildren(icon(guide ? 'wall' : 'sofa', { size: 20 }), h('span', null, guide ? 'Guide' : 'Catalogue'));
+    if (!guide && isOpen('left')) catalogPanel.relayout();
+    viewport.resize();
+  }
   function syncEdges() {
     edgeLeft.hidden = isOpen('left');
     edgeRight.hidden = isOpen('right');
@@ -213,7 +233,12 @@ export function initUI(ctx) {
 
   /* ───────── Store wiring ───────── */
   let hadSelection = store.selection.length > 0;
-  store.on('ui', (e) => { if (e.keys.includes('rightPanel')) syncTab(); });
+  store.on('ui', (e) => {
+    if (e.keys.includes('rightPanel')) syncTab();
+    if (e.keys.includes('tool')) syncLeftLabels();
+    // Picking a wall or an opening in the plan brings up the Inspector, like picking furniture does.
+    if (e.keys.includes('structureSel') && store.ui.structureSel && !app.selectingFromPanel && store.ui.rightPanel !== 'inspector' && !compactMq.matches) store.setUI({ rightPanel: 'inspector' });
+  });
   store.on('selection', () => {
     const has = store.selection.length > 0;
     // Selecting something in a view brings up the Inspector — unless a panel made the selection itself.
@@ -225,6 +250,7 @@ export function initUI(ctx) {
   app.onThemeChange = () => viewport.redrawMinimap();
 
   syncPanels();
+  syncLeftLabels();
   syncTab();
   root.classList.add('ui-ready');
   viewport.resize();

@@ -4,7 +4,7 @@
  */
 import { areaM2, pointInPolygon, polygonBounds, pointInRect } from '../core/geometry.js';
 import { ruleById, refString } from './rules.js';
-import { m, num, rectPoly, rectObstacle, freeDepth, largestInnerRect, narrowPassages, overshoot, segDist, polyInside } from './geom.js';
+import { m, num, planRev, rectPoly, rectObstacle, freeDepth, largestInnerRect, narrowPassages, overshoot, segDist, polyInside } from './geom.js';
 
 /** Build one finding; category / kind / reference come from the rule. */
 export function finding(ruleId, severity, key, title, detail, extra) {
@@ -41,6 +41,17 @@ export function roomMetrics(plan, r) {
   const windows = roomGlazing(plan, r.id);
   const glazing = windows.reduce((s, o) => s + openingArea(o), 0);
   return { area, rect, width: Math.min(rect.w, rect.h), windows, glazing, ratio: area ? glazing / area : 0 };
+}
+
+const METRICS = new WeakMap();
+/** roomMetrics of every room of a plan (Map room → metrics), computed once per plan revision. */
+export function planMetrics(plan) {
+  const rev = planRev(plan);
+  const hit = METRICS.get(plan);
+  if (hit && hit.rev === rev) return hit.map;
+  const map = new Map(plan.rooms.map((r) => [r, roomMetrics(plan, r)]));
+  METRICS.set(plan, { rev, map });
+  return map;
 }
 
 /** The living-type room that holds the kitchen: the one with the 'kitchen' zone, else the largest. */
@@ -381,14 +392,14 @@ function checkMamad(plan, H, store, catalog, out, metrics) {
           `The safe-room doorway is drawn with two leaves: the steel blast door (opens ${outward ? 'outwards' : 'inwards'}) and an ordinary inner door ${iw} × ${ih} cm that opens ${inward ? 'into the room' : 'outwards'}. `
           + 'Status: the inner door is NOT required by the regulations. The Civil Defence regulations require one gas-tight blast door opening outwards (regs. 202(a), 204(a)) and do not mention a second, ordinary door for the safe room of a dwelling; '
           + 'they expressly allow "a regular door, opening inwards, for everyday use" in addition to the blast door only for protected spaces in health institutions (reg. 287(b)), and a second blast door only in place of the window, with approval (reg. 204(b2)). '
-          + 'For a home it is an optional comfort feature that Home Front Command guidance is reported to permit (press report, not verified on the Home Front Command site) — keep it only if it is on the Home Front Command–approved drawing. '
+          + 'For a home it is an optional comfort feature that Home Front Command guidance is reported to permit (press report; not verified on the Home Front Command site) — ask the architect to confirm that the plan approved by the Home Front Command shows it. '
           + 'Conditions: the blast door, its frame and its seal stay untouched and are never removed; the inner door opens into the room and must not stop the blast door closing; '
           + `keep its ${iw} cm arc inside the room free of furniture.`
           + (inward ? '' : ' As drawn it swings the same way as the blast door — the two leaves would collide; hang it to open inwards.')
           + (fits ? '' : ' It is drawn larger than the blast-door opening — check the size.'), { spaceId: r.id, at: dAt }));
       } else if (blast) {
         out.push(finding('mamad-inner-door', 'pass', o.id, 'Safe-room doorway has the blast door only — nothing more is required',
-          'The regulations require one gas-tight blast door opening outwards (regs. 202(a), 204(a)). A second, ordinary inner door is not required; it may be added as a comfort feature if the Home Front Command–approved drawing shows it, without touching the blast door, its frame or its seal.', { spaceId: r.id, at: dAt }));
+          'The regulations require one gas-tight blast door opening outwards (regs. 202(a), 204(a)). A second, ordinary inner door is not required; Home Front Command guidance is reported to allow one as a comfort feature, opening inwards, as long as the blast door, its frame and its seal are not touched (confirm with the architect before adding it).', { spaceId: r.id, at: dAt }));
       }
 
       if (side && !side.exterior) {
@@ -551,7 +562,7 @@ function checkAssumptions(plan, out) {
 export function checkBuilding({ plan, store, catalog }) {
   const out = [];
   const H = num(store && store.project && store.project.ceilingHeight, num(plan.heights && plan.heights.ceiling, 300));
-  const metrics = new Map(plan.rooms.map((r) => [r, roomMetrics(plan, r)]));
+  const metrics = planMetrics(plan);
   checkRooms(plan, H, out, metrics);
   checkLight(plan, out, metrics);
   checkDoors(plan, out);

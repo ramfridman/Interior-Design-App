@@ -23,6 +23,14 @@ export const SHORTCUTS = [
   { group: 'Tools and files', rows: [
     [['V'], 'Select'], [['H'], 'Pan'], [['M'], 'Measure'], [[MOD, 'S'], 'Save design file'], [['?'], 'This list'],
   ] },
+  { group: 'Structure: walls, doors and windows', rows: [
+    [['B'], 'Switch between Furnish and Structure'], [['V'], 'Select walls and openings'], [['W'], 'Draw a wall'],
+    [['D'], 'Place a door'], [['N'], 'Place a window'], [['P'], 'Place an open passage'],
+  ] },
+  { group: 'Structure: the selected wall or opening', rows: [
+    [['←', '↑', '→', '↓'], 'Move it 5 cm'], [['Delete'], 'Remove it'], [['Esc'], 'Put the tool down, then leave Structure'],
+    [[MOD, 'Z'], 'Undo a plan change'],
+  ] },
 ];
 
 /** @param {object} app */
@@ -39,7 +47,7 @@ export function initKeyboard(app) {
       if (closeTopmost()) { e.preventDefault(); return; }
       if (isTyping()) { document.activeElement.blur(); return; }
       if (app.closeDrawers && app.closeDrawers()) return;
-      actions.escape();
+      actions.escape(e);
       return;
     }
     if (mod && key === 's') { e.preventDefault(); actions.saveDesign(); return; }
@@ -56,6 +64,17 @@ export function initKeyboard(app) {
     const walking = store.ui.mode === 'walk';
     if (modes[key] && !e.altKey) { actions.setMode(modes[key]); return; }
     if (walking) return;
+
+    if (key === 'b') { app.structure.toggle(); return; }
+    if (app.structure.isActive()) {
+      // Structure mode: the letters pick wall / opening tools, Delete and the arrows act on the selected wall or opening.
+      const tool = { v: 'structure', w: 'wall', d: 'door', n: 'window', p: 'passage' }[key];
+      const arrow = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[key];
+      if (tool) { app.structure.setTool(tool); return; }
+      if (arrow) { if (app.structure.nudge(arrow[0], arrow[1])) e.preventDefault(); return; }
+      if (key === 'Delete' || key === 'Backspace') { if (store.ui.structureSel) { e.preventDefault(); app.structure.removeSelected(); } return; }
+      if (key === 'h' || key === 'm' || key === 'r' || key === '®') return;   // furnishing tools
+    }
 
     const step = e.shiftKey ? 10 : 1;
     switch (key) {

@@ -1,6 +1,7 @@
 /**
  * Interaction overlay, drawn live on every frame above the cached plan: hover / selection outlines, handles,
  * marquee, smart guides, clearance read-outs, measurements, the placing ghost and the scale bar / north arrow.
+ * While a structure tool is active the furniture is not selectable and the structure overlay takes over.
  */
 import { itemCorners, itemAABB, itemLocalToPlan, DEG } from '../core/geometry.js';
 import { css } from './color.js';
@@ -9,6 +10,9 @@ import { drawItem } from './items.js';
 import { drawScaleBar, drawNorthArrow } from './hud.js';
 import { dimText } from './dimensions.js';
 import { isResizable } from './snapping.js';
+import { isStructureTool } from './structure.js';
+import { drawStructureOverlay } from './structure-overlay.js';
+import { fmtDim as fmt, pill, drawGuides, drawClearances } from './readouts.js';
 
 export const ROTATE_STEM = 26;   // CSS px from the item's front edge to the rotate handle
 
@@ -28,18 +32,6 @@ export function itemHandles(it, cam) {
   const a = S(0, it.d / 2), r = (it.rot || 0) * DEG;
   out.push({ kind: 'rotate', x: a.x - Math.sin(r) * ROTATE_STEM, y: a.y + Math.cos(r) * ROTATE_STEM, ax: a.x, ay: a.y });
   return out;
-}
-
-const fmt = (cm, units) => `${dimText(cm, units)} ${units === 'cm' ? 'cm' : 'm'}`;
-
-function pill(G, text, x, y, bg, color, size = 10.5) {
-  const { ctx } = G, d = G.dpr;
-  const w = G.measure(text, size, 600) + 12 * d, h = (size + 7) * d;
-  x = Math.round(x - w / 2); y = Math.round(y - h / 2);
-  roundRect(ctx, x, y, w, h, h / 2);
-  ctx.fillStyle = bg; ctx.fill();
-  G.text(text, x + w / 2, y + h / 2 + 0.5 * d, { size, weight: 600, color });
-  return { x0: x, y0: y, x1: x + w, y1: y + h };
 }
 
 function outline(G, it, color, lw, fill, dash) {
@@ -95,6 +87,7 @@ export function drawOverlay(G, V) {
   const { ctx } = G, d = G.dpr, { env, state: st, cam } = V, { pal, store, ui } = env;
   const units = ui.units;
   const fb = st.feedback;
+  const structure = isStructureTool(ui.tool) && !st.placing;
 
   for (const m of st.measures) drawMeasure(G, pal, units, m, false);
   if (st.measureDraft) drawMeasure(G, pal, units, st.measureDraft, true);
@@ -107,7 +100,7 @@ export function drawOverlay(G, V) {
     outline(G, ghost, fb && fb.problems && fb.problems.any ? pal.danger : pal.accent, G.px(1.5), fb && fb.problems && fb.problems.any ? css(pal.danger, 0.16) : null);
   }
 
-  if (ui.showItems) {
+  if (ui.showItems && !structure) {
     const moving = st.gesture && (st.gesture.type === 'move' || st.gesture.type === 'resize' || st.gesture.type === 'rotate');
     const hover = st.hoverId && !moving && !store.selection.includes(st.hoverId) ? store.getItem(st.hoverId) : null;
     if (hover && !hover.hidden) outline(G, hover, css(pal.accent, 0.65), G.px(1.25));
@@ -144,28 +137,9 @@ export function drawOverlay(G, V) {
   }
 
   if (fb) {
-    // wall faces being snapped to, then alignment guides
-    for (const g of fb.guides || []) {
-      const x1 = G.X(g.x1), y1 = G.Y(g.y1), x2 = G.X(g.x2), y2 = G.Y(g.y2);
-      const vert = g.x1 === g.x2, ext = g.kind === 'wall' ? 0 : 10 * d;
-      const lw = g.kind === 'wall' ? G.px(2.5) : G.px(1), off = lw % 2 ? 0.5 : 0;
-      ctx.beginPath();
-      if (vert) { ctx.moveTo(Math.round(x1) + off, Math.min(y1, y2) - ext); ctx.lineTo(Math.round(x1) + off, Math.max(y1, y2) + ext); }
-      else { ctx.moveTo(Math.min(x1, x2) - ext, Math.round(y1) + off); ctx.lineTo(Math.max(x1, x2) + ext, Math.round(y1) + off); }
-      if (g.kind === 'center') ctx.setLineDash([6 * d, 3 * d, 1.5 * d, 3 * d]);
-      ctx.strokeStyle = pal.guide; ctx.lineWidth = lw; ctx.stroke(); ctx.setLineDash([]);
-    }
-    // live clearances to the nearest walls
-    for (const c of fb.clear || []) {
-      const x1 = Math.round(G.X(c.x1)) + 0.5, y1 = Math.round(G.Y(c.y1)) + 0.5, x2 = Math.round(G.X(c.x2)) + 0.5, y2 = Math.round(G.Y(c.y2)) + 0.5;
-      const vert = c.x1 === c.x2, t = 4 * d;
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
-      if (vert) { ctx.moveTo(x1 - t, y1); ctx.lineTo(x1 + t, y1); ctx.moveTo(x2 - t, y2); ctx.lineTo(x2 + t, y2); }
-      else { ctx.moveTo(x1, y1 - t); ctx.lineTo(x1, y1 + t); ctx.moveTo(x2, y2 - t); ctx.lineTo(x2, y2 + t); }
-      ctx.strokeStyle = pal.accent; ctx.lineWidth = 1; ctx.stroke();
-      const px = Math.hypot(x2 - x1, y2 - y1);
-      if (px > 30 * d) pill(G, fmt(c.dist, units), (x1 + x2) / 2, (y1 + y2) / 2, pal.accent, pal.onAccent, 9.5);
-    }
+    // wall faces being snapped to, alignment guides, then the live clearances to the nearest walls
+    drawGuides(G, pal, fb.guides);
+    drawClearances(G, pal, fb.clear, units);
     if (fb.box) {
       const cx = G.X(fb.box.x + fb.box.w / 2), top = G.Y(fb.box.y), bottom = G.Y(fb.box.y + fb.box.h);
       if (fb.size) pill(G, `${dimText(fb.size.w, units)} × ${fmt(fb.size.d, units)}`, cx, bottom + 15 * d, pal.ink, pal.paper, 10);
@@ -173,6 +147,8 @@ export function drawOverlay(G, V) {
       if (fb.angle != null) pill(G, `${Math.round(fb.angle * 10) / 10}°`, cx, top - 15 * d, pal.accent, pal.onAccent, 10.5);
     }
   }
+
+  drawStructureOverlay(G, V);
 
   if (st.marquee) {
     const m = st.marquee;

@@ -1,14 +1,15 @@
 /**
  * The stage: shows / hides the 2D and 3D panes for the current view mode, the split divider, drag-and-drop from the
  * catalogue, and the quiet controls that float over each view (zoom, compass, scale bar, camera, sun, walk HUD).
+ * The sun control itself lives in sun.js.
  */
 import { spaceAt } from '../core/geometry.js';
-import { h, append, call, listen, clamp, rafThrottle, setKids } from './dom.js';
+import { h, append, call, listen, clamp, rafThrottle } from './dom.js';
 import { icon } from './icons.js';
 import { btn, iconBtn, kbd } from './components.js';
 import { openMenu, toast } from './dialogs.js';
-import { fmtClock } from './format.js';
 import { getPref, setPref } from './prefs.js';
+import { createSunControl } from './sun.js';
 
 export const DND_TYPE = 'application/x-e7-product';
 
@@ -173,27 +174,12 @@ export function initViewport(app) {
   const roofBtn = iconBtn('roof', 'Show roof', { pressed: !!store.ui.showRoof, onClick: () => store.setUI({ showRoof: !store.ui.showRoof }) });
   const cutBtn = iconBtn('cutaway', 'Cut walls low (dollhouse view)', { pressed: !!store.ui.wallsCutaway, onClick: () => store.setUI({ wallsCutaway: !store.ui.wallsCutaway }) });
 
-  const sunIcon = h('span', { class: 'sun__icon' });
-  const sunTime = h('span', { class: 'sun__time num' });
-  const sunRange = h('input', { type: 'range', class: 'range', min: '0', max: '24', step: '0.25', 'aria-label': 'Time of day',
-    onInput: () => store.setUI({ timeOfDay: Number(sunRange.value) }) });
-  const sun = h('div', { class: 'ovl sun' }, sunIcon, sunRange, sunTime);
-  let sunGlyph = '';
-  function syncSun() {
-    const t = Number(store.ui.timeOfDay ?? 12);
-    if (document.activeElement !== sunRange) sunRange.value = String(t);
-    sunRange.style.setProperty('--fill', `${(t / 24) * 100}%`);
-    sunTime.textContent = fmtClock(t);
-    sunRange.setAttribute('aria-valuetext', fmtClock(t));
-    const glyph = t >= 6 && t < 18.5 ? 'sun' : 'moon';
-    if (glyph !== sunGlyph) { sunGlyph = glyph; setKids(sunIcon, icon(glyph, { size: 16 })); }
-  }
+  const sun = createSunControl(app);
 
   const walkBtn = btn('Walk through', { icon: 'walk', variant: 'primary', kbd: '3', onClick: () => actions.setMode('walk') });
   const orbitHud = h('div', { class: 'ov__layer' },
     h('div', { class: 'ov__tl' }, h('div', { class: 'ovl ovl--row' }, cameraBtn)),
     h('div', { class: 'ov__tr' }, h('div', { class: 'ovl ovl--row', role: 'group', 'aria-label': '3D display' }, roofBtn, cutBtn)),
-    h('div', { class: 'ov__bc' }, sun),
     h('div', { class: 'ov__br' }, walkBtn));
 
   /* ───────── Walk HUD ───────── */
@@ -207,7 +193,8 @@ export function initViewport(app) {
       hint,
       btn('Exit walk', { icon: 'close', small: true, onClick: () => actions.setMode('3d') })),
     h('div', { class: 'ov__br' }, h('div', { class: 'ovl minimap' }, mini)));
-  ov3d.append(orbitHud, walkHud);
+  // The sun control stays available on foot: it sits clear of the mini-map (see .sunhost in panels.css).
+  ov3d.append(orbitHud, walkHud, h('div', { class: 'ov__bc sunhost' }, sun.el));
 
   let lastPos = null;
   const drawMini = rafThrottle(() => drawMinimap(mini, plan, lastPos));
@@ -223,14 +210,15 @@ export function initViewport(app) {
   /* ───────── Store wiring ───────── */
   store.on('ui', (e) => {
     if (e.keys.includes('mode')) applyMode();
-    if (e.keys.includes('timeOfDay')) syncSun();
     if (e.keys.includes('showRoof')) roofBtn.setPressed(store.ui.showRoof);
     if (e.keys.includes('wallsCutaway')) cutBtn.setPressed(store.ui.wallsCutaway);
   });
   if (typeof matchMedia === 'function') matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', drawMini);
 
+  // Walls can change (Structure mode, undo, opening a design): the mini-map is drawn from PLAN.walls.
+  store.on('plan', drawMini);
+
   applyMode();
-  syncSun();
   drawMini();
   return { resize: resizeViews, redrawMinimap: drawMini, stage };
 }

@@ -65,7 +65,12 @@ export function drawSiteGround(G, env) {
     ctx.lineTo(G.X(mid[0] + st.u[0] * half), G.Y(mid[1] + st.u[1] * half));
     ctx.setLineDash([14 * G.dpr, 12 * G.dpr]); ctx.strokeStyle = pal.pavingLine; ctx.lineWidth = G.px(1); ctx.stroke(); ctx.setLineDash([]);
     if (STREET_WIDTH * G.scale > 60) {
-      G.text('STREET', G.X(mid[0] + st.out[0] * STREET_WIDTH * 0.22), G.Y(mid[1] + st.out[1] * STREET_WIDTH * 0.22),
+      // the name sits beside the longer stretch of street past the house, clear of the house's dimension chains
+      const hb = plan.bounds, ts = [[hb.x, hb.y], [hb.x + hb.w, hb.y], [hb.x + hb.w, hb.y + hb.h], [hb.x, hb.y + hb.h]]
+        .map(([x, y]) => (x - st.a[0]) * st.u[0] + (y - st.a[1]) * st.u[1]);
+      const len = Math.hypot(st.b[0] - st.a[0], st.b[1] - st.a[1]), t0 = Math.min(...ts), t1 = Math.max(...ts);
+      const t = (t0 > len - t1 ? t0 / 2 : len - t1 > 0 ? (t1 + len) / 2 : len / 2) - len / 2;
+      G.text('STREET', G.X(mid[0] + st.u[0] * t + st.out[0] * STREET_WIDTH * 0.22), G.Y(mid[1] + st.u[1] * t + st.out[1] * STREET_WIDTH * 0.22),
         { size: 10.5, weight: 600, color: pal.inkFaint, angle: upright(st.u[0], st.u[1]), spacing: 0.22 });
     }
   }

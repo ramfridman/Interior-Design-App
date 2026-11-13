@@ -90,6 +90,7 @@ export function initBudget(root, app) {
   store.on('items', (e) => { if (!e.transient) invalidate(); });
   store.on('finishes', invalidate);
   store.on('project', invalidate);
+  store.on('plan', (e) => { if (!e || !e.transient) invalidate(); });   // rooms group the list; a plan edit can add or merge rooms
 
   return {
     activate() { active = true; if (dirty) render(); },

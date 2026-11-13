@@ -1,0 +1,206 @@
+/**
+ * Structure editing — what the view derives from one plan revision (docs/CONTRACT.md § 7) and the parts of it
+ * that are painted into the cached plan layers:
+ *   • wall poché tinted by policy level while a structure tool is active (free / warn / locked);
+ *   • the "changes" overlay: new walls tinted, removed architect walls as dashed ghosts, markers on openings
+ *     that were added / changed / removed (also part of the PNG export).
+ * Everything is recomputed lazily when the engine hands out a new `wallSegments()` array — nothing is kept
+ * across plan revisions.
+ */
+import { wallSegments, openingPolicy, planDiff, isPlanModified, BASE_PLAN } from '../core/plan-edit.js';
+import { css } from './color.js';
+
+export const STRUCTURE_TOOLS = ['structure', 'wall', 'door', 'window', 'passage'];
+/** Is `tool` one of the wall / door / window editing tools? */
+export const isStructureTool = (tool) => STRUCTURE_TOOLS.includes(tool);
+/** Engine opening kind placed by each opening tool. */
+export const OPENING_TOOL_KIND = { door: 'door', window: 'window', passage: 'opening' };
+/** Junction squares where two walls cross belong to neither wall — they are not selectable. */
+export const isJunction = (seg) => seg.id.startsWith('seg:j');
+
+/** Distance from a point to a rectangle { x, y, w, h } (0 inside). */
+export function rectDist(px, py, r) {
+  const dx = Math.max(r.x - px, 0, px - (r.x + r.w)), dy = Math.max(r.y - py, 0, py - (r.y + r.h));
+  return Math.hypot(dx, dy);
+}
+
+/** Span of a rect along / across a wall axis: { a0, a1 } along, { c0, c1 } across. */
+export function spanOf(r, axis) {
+  return axis === 'h' ? { a0: r.x, a1: r.x + r.w, c0: r.y, c1: r.y + r.h } : { a0: r.y, a1: r.y + r.h, c0: r.x, c1: r.x + r.w };
+}
+/** Rect from spans (inverse of spanOf). */
+export const rectOf = (axis, a0, a1, c0, c1) => (axis === 'h' ? { x: a0, y: c0, w: a1 - a0, h: c1 - c0 } : { x: c0, y: a0, w: c1 - c0, h: a1 - a0 });
+
+/** [a0, a1] minus a list of [lo, hi] intervals → remaining intervals. */
+function subtract(a0, a1, cuts) {
+  const out = [];
+  let from = a0;
+  for (const [lo, hi] of cuts.slice().sort((p, q) => p[0] - q[0])) {
+    if (hi <= from) continue;
+    if (lo >= a1) break;
+    if (lo > from) out.push([from, lo]);
+    from = Math.max(from, hi);
+  }
+  if (from < a1) out.push([from, a1]);
+  return out;
+}
+
+const cache = new WeakMap();
+
+/**
+ * Derived data of the current plan revision:
+ *   segs        selectable wall segments (no junction squares)
+ *   byId        Map id → segment (all segments)
+ *   pieces      Map id → solid wall rectangles of the segment (its rectangle minus its openings)
+ *   segOfOpening  Map opening id → its segment
+ */
+export function structureOf(plan) {
+  const segments = wallSegments(plan);
+  let d = cache.get(segments);
+  if (d && d.openings === plan.openings) return d;
+  const openings = new Map(plan.openings.map((o) => [o.id, o]));
+  d = { openings: plan.openings, segments, segs: [], byId: new Map(), pieces: new Map(), segOfOpening: new Map(), removed: null, diff: null };
+  for (const s of segments) {
+    d.byId.set(s.id, s);
+    if (!isJunction(s)) d.segs.push(s);
+    const { a0, a1, c0, c1 } = spanOf(s, s.axis);
+    const cuts = [];
+    for (const id of s.openingIds) {
+      const o = openings.get(id);
+      if (!o) continue;
+      d.segOfOpening.set(id, s);
+      const q = spanOf(o, s.axis);
+      cuts.push([q.a0, q.a1]);
+    }
+    d.pieces.set(s.id, subtract(a0, a1, cuts).map(([p, q]) => rectOf(s.axis, p, q, c0, c1)));
+  }
+  cache.set(segments, d);
+  return d;
+}
+
+/** Policy of a selectable target: `{ level, reason }`. */
+export function policyOfTarget(plan, target) {
+  if (!target) return { level: 'locked', reason: '' };
+  if (target.type === 'opening') return openingPolicy(target.id);
+  const s = structureOf(plan).byId.get(target.id);
+  return s ? s.policy : { level: 'locked', reason: '' };
+}
+
+/**
+ * Screen-space (CSS px) grips of the selected wall segment / opening:
+ *   segment — 'move' (middle, drags the wall sideways) and 'end0' / 'end1' on free wall ends
+ *   opening — 'slide' (middle) and 'w0' / 'w1' on the jambs (width)
+ * Locked targets have none. @returns {{ kind:string, axis:'h'|'v', x:number, y:number }[]}
+ */
+export function selectionHandles(plan, sel, cam) {
+  const out = [];
+  if (!sel) return out;
+  if (sel.type === 'segment') {
+    const s = structureOf(plan).byId.get(sel.id);
+    if (!s || isJunction(s) || s.policy.level === 'locked') return out;
+    const { a0, a1, c0, c1 } = spanOf(s.core, s.axis), c = (c0 + c1) / 2;
+    const P = (a) => (s.axis === 'h' ? cam.toScreen(a, c) : cam.toScreen(c, a));
+    if ((a1 - a0) * cam.scale >= 30 || !(s.freeEnds[0] || s.freeEnds[1])) out.push({ kind: 'move', axis: s.axis, ...P((a0 + a1) / 2) });
+    if (s.freeEnds[0]) out.push({ kind: 'end0', axis: s.axis, ...P(a0) });
+    if (s.freeEnds[1]) out.push({ kind: 'end1', axis: s.axis, ...P(a1) });
+  } else if (sel.type === 'opening') {
+    const o = plan.openings.find((q) => q.id === sel.id);
+    if (!o || openingPolicy(o.id).level === 'locked') return out;
+    const { a0, a1, c0, c1 } = spanOf(o, o.axis), c = (c0 + c1) / 2;
+    const P = (a) => (o.axis === 'h' ? cam.toScreen(a, c) : cam.toScreen(c, a));
+    out.push({ kind: 'w0', axis: o.axis, ...P(a0) }, { kind: 'w1', axis: o.axis, ...P(a1) });
+    if ((a1 - a0) * cam.scale >= 34) out.push({ kind: 'slide', axis: o.axis, ...P((a0 + a1) / 2) });
+  }
+  return out;
+}
+
+/** Parts of the architect's walls that are no longer wall (removed or moved away), as rectangles. */
+function removedWalls(plan, d) {
+  if (d.removed) return d.removed;
+  const solids = [...plan.walls, ...plan.openings], out = [];
+  for (const b of wallSegments(BASE_PLAN)) {
+    const { a0, a1, c0, c1 } = spanOf(b, b.axis);
+    const cover = [];
+    for (const r of solids) {
+      const q = spanOf(r, b.axis);
+      if (q.a1 <= a0 || q.a0 >= a1 || Math.min(c1, q.c1) - Math.max(c0, q.c0) < (c1 - c0) / 2) continue;
+      cover.push([q.a0, q.a1]);
+    }
+    for (const [p, q] of subtract(a0, a1, cover)) if (q - p >= 1) out.push(rectOf(b.axis, p, q, c0, c1));
+  }
+  d.removed = out;
+  return out;
+}
+
+/** Should the "changes from the architect's plan" overlay be drawn? */
+export const showsChanges = (env) => !!env.ui.showPlanChanges && isPlanModified();
+
+/**
+ * Wall fills that replace the normal poché: level tints while a structure tool is active, and the accent tint
+ * of walls that are not on the architect's plan. Called by drawWalls between the fills and the outline.
+ */
+export function drawWallTints(G, env) {
+  const { plan, pal, ui } = env, { ctx } = G;
+  const levels = isStructureTool(ui.tool) && !env.exporting, changes = showsChanges(env);
+  if (!levels && !changes) return;
+  const d = structureOf(plan);
+  const groups = { free: [], warn: [], locked: [], fresh: [] };
+  for (const s of d.segments) {
+    const key = changes && s.isNew ? 'fresh' : levels ? s.policy.level : null;
+    if (key && groups[key]) groups[key].push(...d.pieces.get(s.id));
+  }
+  const fills = { locked: pal.wallTint.locked, warn: pal.wallTint.warn, free: pal.wallTint.free, fresh: pal.wallNew };
+  for (const key of ['locked', 'warn', 'free', 'fresh']) {
+    if (!groups[key].length) continue;
+    ctx.beginPath();
+    for (const r of groups[key]) G.rect(r.x, r.y, r.w, r.h);
+    ctx.fillStyle = fills[key]; ctx.fill();
+  }
+}
+
+/** Dashed ghosts of the architect's walls that were removed or moved away. */
+export function drawRemovedWalls(G, env) {
+  if (!showsChanges(env)) return;
+  const { plan, pal } = env, { ctx } = G;
+  const list = removedWalls(plan, structureOf(plan));
+  if (!list.length) return;
+  ctx.beginPath();
+  for (const r of list) G.rect(r.x, r.y, r.w, r.h);
+  ctx.fillStyle = css(pal.ink, pal.dark ? 0.07 : 0.05); ctx.fill();
+  ctx.beginPath();
+  for (const r of list) {
+    const x0 = G.RX(r.x) + 0.5, y0 = G.RY(r.y) + 0.5;
+    ctx.rect(x0, y0, Math.max(1, G.RX(r.x + r.w) - G.RX(r.x) - 1), Math.max(1, G.RY(r.y + r.h) - G.RY(r.y) - 1));
+  }
+  ctx.setLineDash([4 * G.dpr, 3 * G.dpr]);
+  ctx.strokeStyle = css(pal.ink, pal.dark ? 0.6 : 0.5); ctx.lineWidth = 1; ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+const MARK = { 'opening-added': '+', 'opening-removed': '−', 'opening-changed': '' };
+
+/** Small level-coloured markers on openings that differ from the architect's plan. */
+export function drawChangeMarkers(G, env) {
+  if (!showsChanges(env)) return;
+  const { plan, pal } = env, { ctx } = G, dpr = G.dpr;
+  const d = structureOf(plan);
+  if (!d.diff) d.diff = planDiff().items.filter((it) => it.kind in MARK);
+  const r = 6.5 * dpr;
+  for (const it of d.diff) {
+    if (!G.visible(it.at.x - 40, it.at.y - 40, it.at.x + 40, it.at.y + 40)) continue;
+    const x = Math.round(G.X(it.at.x)), y = Math.round(G.Y(it.at.y));
+    const col = pal.level[it.level] || pal.level.free;
+    ctx.beginPath(); ctx.arc(x, y, r + 1.5 * dpr, 0, Math.PI * 2); ctx.fillStyle = pal.paper; ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
+    const ink = pal.dark ? '#101418' : '#ffffff', arm = 3.2 * dpr;
+    ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineWidth = Math.max(1, 1.6 * dpr); ctx.lineCap = 'round';
+    ctx.beginPath();
+    if (it.kind === 'opening-changed') { ctx.arc(x, y, 2 * dpr, 0, Math.PI * 2); ctx.fill(); }
+    else {
+      ctx.moveTo(x - arm, y); ctx.lineTo(x + arm, y);
+      if (it.kind === 'opening-added') { ctx.moveTo(x, y - arm); ctx.lineTo(x, y + arm); }
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+  }
+}

@@ -2,14 +2,16 @@
  * Inspector tab. Three states: nothing selected (active room + project summary), one item (full editor) and several
  * items (totals, align / distribute, group actions). The DOM is rebuilt only when the selection or the item's
  * structure changes; while an item is dragged in a view only the number fields are patched, so nothing jumps.
+ * In Structure mode the tab shows the selected wall / opening instead (structure-inspector.js).
  */
 import { normDeg } from '../core/geometry.js';
 import { getSpace, floorAreaM2, resolveFinish } from '../core/finishes.js';
-import { h, setKids } from './dom.js';
+import { h, setKids, rafThrottle } from './dom.js';
 import { icon } from './icons.js';
 import { btn, iconBtn, numField, section, swatch, extLink, emptyState } from './components.js';
 import { fmtPrice, fmtDims, fmtArea, fmtUnitPrice, toUnit, fromUnit, unitDigits, RESIZABLE_TYPES } from './format.js';
 import { shoppingTotal } from './shopping.js';
+import { createStructureInspector } from './structure-inspector.js';
 
 const PALETTE = ['#f3f1ec', '#d9d2c5', '#b9b2a6', '#3a3d42', '#c8a476', '#8a5a3b', '#5c6b5a', '#3e5c76', '#b4543a'];
 const STRUCTURAL = ['productId', 'type', 'generic', 'placement', 'locked', 'hidden', 'params', 'price', 'url', 'retailer', 'priceUnit'];
@@ -20,6 +22,8 @@ export function initInspector(root, app) {
   let active = false, dirty = true;
   let fields = null;     // live controls of the single-item editor: { x, y, rot, elev, w, d, h, name, dial, cost }
   let shownId = null;
+  const structurePanel = createStructureInspector(app);
+  let structureShown = false;
 
   const units = () => store.ui.units;
   const typeLabel = (item) => (catalog.MODEL_TYPES && catalog.MODEL_TYPES[item.type] ? catalog.MODEL_TYPES[item.type].label.split(' / ')[0] : item.type);
@@ -29,6 +33,14 @@ export function initInspector(root, app) {
     dirty = false;
     fields = null;
     shownId = null;
+    structureShown = app.structure.isActive();
+    if (structureShown) {
+      // Keep the keyboard where it was when the panel has to be rebuilt (a style change, a wall that changed class).
+      const key = root.contains(document.activeElement) ? document.activeElement.dataset.fk : null;
+      setKids(root, structurePanel.render());
+      if (key) root.querySelector(`[data-fk="${key}"]`)?.focus({ preventScroll: true });
+      return;
+    }
     const items = store.getSelected();
     if (!items.length) setKids(root, renderNothing());
     else if (items.length === 1) { shownId = items[0].id; setKids(root, renderOne(items[0])); }
@@ -225,6 +237,13 @@ export function initInspector(root, app) {
   }
 
   const invalidate = () => { if (active) render(); else dirty = true; };
+  // Structure: coalesce "plan changed" + "the edited wall was re-selected under its new id" into one in-place patch.
+  const syncStructure = rafThrottle(() => {
+    if (!app.structure.isActive()) return;
+    if (!active) { dirty = true; return; }
+    if (!structureShown || !structurePanel.sync()) render();
+  });
+  store.on('plan', () => { if (app.structure.isActive()) syncStructure(); else if (!store.selection.length) invalidate(); });
   store.on('selection', invalidate);
   store.on('items', (e) => {
     const sel = store.selection;
@@ -235,7 +254,11 @@ export function initInspector(root, app) {
     if (e.transient) return;
     if (!sel.length || e.type !== 'update' || e.ids.some((id) => sel.includes(id))) invalidate();
   });
-  store.on('ui', (e) => { if (e.keys.includes('units') || (e.keys.includes('activeSpace') && !store.selection.length)) invalidate(); });
+  store.on('ui', (e) => {
+    if (e.keys.includes('tool') && app.structure.isActive() !== structureShown) invalidate();
+    else if (app.structure.isActive() && (e.keys.includes('structureSel') || e.keys.includes('units'))) syncStructure();
+    else if (e.keys.includes('units') || (e.keys.includes('activeSpace') && !store.selection.length)) invalidate();
+  });
   store.on('finishes', () => { if (!store.selection.length) invalidate(); });
   store.on('project', () => { if (!store.selection.length) invalidate(); });
 

@@ -1,7 +1,10 @@
 /**
  * Rooms tab: every room and outdoor area with its floor area, floor / wall finish pickers and shortcuts to see it
- * in the plan, in 3D or on foot. Also the default wall paint colour for the whole house.
+ * in the plan, in 3D or on foot. Also the default wall paint colour for the whole house and, at the top, what the
+ * owner changed in the architect's plan. Rooms are re-read on every 'plan' event: a new wall can add a room (which
+ * gets a name field and a type select), removing one merges two.
  */
+import { BASE_PLAN, updateRoom } from '../core/plan-edit.js';
 import { floorAreaM2, wallAreaM2, resolveFinish } from '../core/finishes.js';
 import { h, setKids, debounce } from './dom.js';
 import { icon } from './icons.js';
@@ -9,17 +12,23 @@ import { iconBtn, section, swatch } from './components.js';
 import { openPopover } from './dialogs.js';
 import { fmtArea, fmtPrice } from './format.js';
 import { drawFinishSwatch } from './thumbs.js';
+import { changesSection } from './structure-panels.js';
 
 const WALL_PAINTS = ['#ffffff', '#f4f1ea', '#ece7dc', '#e3e6e1', '#d9dedb', '#e8e0d2', '#dcd3c3', '#cfd6d8'];
+/** What a room the owner created can be. `wet` rooms get tiled walls by default. */
+const ROOM_TYPES = [['bedroom', 'Bedroom'], ['living', 'Living space'], ['bathroom', 'Bathroom'], ['wc', 'WC'], ['service', 'Service room'], ['office', 'Office']];
+const WET_TYPES = ['bathroom', 'wc', 'service'];
+const baseRoom = (id) => BASE_PLAN.rooms.find((r) => r.id === id) || null;
 
 /** @param {HTMLElement} root  @param {object} app */
 export function initRooms(root, app) {
   const { store, plan, catalog, actions } = app;
-  let active = false, dirty = true;
+  let active = false, dirty = true, activeChanged = true, inStructure = app.structure.isActive();
 
   const list = h('div', { class: 'rooms' });
   const paint = h('div', { class: 'swatches' });
-  root.append(section('Default wall paint', h('div', { class: 'colrow' }, paint), h('p', { class: 'sec__note' }, 'Used for every room without its own wall finish.')), list);
+  const changes = changesSection(app);
+  root.append(changes, section('Default wall paint', h('div', { class: 'colrow' }, paint), h('p', { class: 'sec__note' }, 'Used for every room without its own wall finish.')), list);
 
   function swatchCanvas(params, type) {
     const c = h('canvas', { class: 'fswatch', width: 56, height: 56, 'aria-hidden': 'true' });
@@ -62,13 +71,37 @@ export function initRooms(root, app) {
     const pop = openPopover(anchor, body, { cls: 'popover--panel popover--finishes', placement: 'left-start', label: 'Choose a finish' });
   }
 
+  /** Name field + type select for a room that is not on the architect's plan (created by a new wall). */
+  function newRoomEditor(room) {
+    const error = h('p', { class: 'form__error', role: 'alert', hidden: true });
+    const apply = (patch) => { const res = updateRoom(room.id, patch); error.textContent = res.ok ? '' : res.reason; error.hidden = res.ok; return res.ok; };
+    const name = h('input', { class: 'room__rename display', type: 'text', value: room.name, 'aria-label': 'Room name', spellcheck: 'false', maxlength: '40', autocomplete: 'off', 'data-fk': `name:${room.id}`,
+      onKeydown: (e) => { if (e.key === 'Enter') name.blur(); if (e.key === 'Escape') { name.value = room.name; name.blur(); e.stopPropagation(); } },
+      onChange: () => { const v = name.value.trim(); if (!v || v === room.name || !apply({ name: v })) name.value = room.name; } });
+    const type = h('select', { class: 'select select--quiet room__type', 'aria-label': 'Room type', 'data-fk': `type:${room.id}`, onChange: () => { if (!apply({ type: type.value, wet: WET_TYPES.includes(type.value) })) type.value = room.type; } },
+      ROOM_TYPES.map(([v, l]) => h('option', { value: v, selected: v === room.type }, l)),
+      ROOM_TYPES.some(([v]) => v === room.type) ? null : h('option', { value: room.type, selected: true }, room.type));
+    return { name, type, error };
+  }
+
   function card(space, indoor) {
     const isActive = store.ui.activeSpace === space.id;
-    return h('article', { class: `room${isActive ? ' is-active' : ''}`, dataset: { id: space.id } },
+    const area = floorAreaM2(space);
+    const base = indoor ? baseRoom(space.id) : null;
+    const isNew = indoor && !base;
+    const was = base ? floorAreaM2(base) : null;
+    const resized = was != null && Math.abs(was - area) >= 0.05;
+    const edit = isNew ? newRoomEditor(space) : null;
+    return h('article', { class: `room${isActive ? ' is-active' : ''}${isNew ? ' is-new' : ''}`, dataset: { id: space.id } },
       h('header', { class: 'room__head' },
-        h('button', { type: 'button', class: 'room__name', 'aria-pressed': String(isActive), 'data-tip': 'Make this the active room', onClick: () => store.setUI({ activeSpace: space.id }) },
-          h('span', { class: 'display truncate' }, space.name)),
-        h('span', { class: 'room__area num' }, fmtArea(floorAreaM2(space)))),
+        edit
+          ? h('div', { class: 'room__name room__name--edit' }, edit.name)
+          : h('button', { type: 'button', class: 'room__name', 'aria-pressed': String(isActive), 'data-tip': 'Make this the active room', onClick: () => store.setUI({ activeSpace: space.id }) },
+            h('span', { class: 'display truncate' }, space.name)),
+        h('span', { class: 'room__area num' }, fmtArea(area), resized ? h('small', { class: 'room__was', 'data-tip': 'Area on the architect’s plan' }, `was ${fmtArea(was)}`) : null)),
+      edit ? h('div', { class: 'room__newrow' }, h('span', { class: 'tag tag--new' }, 'New room'), edit.type,
+        isActive ? null : h('button', { type: 'button', class: 'room__activate', onClick: () => store.setUI({ activeSpace: space.id }) }, 'Make active')) : null,
+      edit ? edit.error : null,
       h('div', { class: 'room__finishes' }, finishButton(space, 'floor'), indoor ? finishButton(space, 'wall') : null),
       h('div', { class: 'room__actions' },
         iconBtn('plan', 'Show in plan', { onClick: () => actions.focusSpace(space.id, { view: '2d' }) }),
@@ -78,20 +111,30 @@ export function initRooms(root, app) {
 
   function render() {
     dirty = false;
+    // Keep the keyboard in the name field / type select of a new room across the re-render its own edit causes.
+    const key = root.contains(document.activeElement) ? document.activeElement.dataset.fk : null;
+    changes.refresh();
     const current = (store.project.wallColor || '').toLowerCase();
     const custom = h('input', { type: 'color', class: 'swatch swatch--custom', value: /^#[0-9a-f]{6}$/i.test(current) ? current : '#f4f1ea', 'aria-label': 'Custom wall colour', 'data-tip': 'Custom colour', onChange: () => store.setProject({ wallColor: custom.value }) });
     setKids(paint, WALL_PAINTS.map((c) => swatch(c, { selected: current === c, onClick: () => store.setProject({ wallColor: c }) })), custom);
     setKids(list,
       section('Rooms', { aside: h('span', { class: 'sec__note num' }, fmtArea(plan.rooms.reduce((s, r) => s + floorAreaM2(r), 0))) }, plan.rooms.map((r) => card(r, true))),
       (plan.outdoorAreas || []).length ? section('Outdoor areas', plan.outdoorAreas.map((r) => card(r, false))) : null);
+    if (key) { root.querySelector(`[data-fk="${key}"]`)?.focus({ preventScroll: true }); return; }
     const act = list.querySelector('.room.is-active');
-    if (act && act.scrollIntoView) act.scrollIntoView({ block: 'nearest' });
+    if (act && act.scrollIntoView && activeChanged) act.scrollIntoView({ block: 'nearest' });
+    activeChanged = false;
   }
 
   const invalidate = debounce(() => { if (active) render(); else dirty = true; }, 60);
   store.on('finishes', invalidate);
   store.on('project', invalidate);
-  store.on('ui', (e) => { if (e.keys.includes('activeSpace')) invalidate(); });
+  store.on('ui', (e) => {
+    if (e.keys.includes('activeSpace')) { activeChanged = true; invalidate(); }
+    else if (e.keys.includes('tool') && app.structure.isActive() !== inStructure) { inStructure = !inStructure; invalidate(); }   // the changes section offers "Change walls" only outside Structure
+  });
+  store.on('plan', (e) => { if (!e || !e.transient) invalidate(); });
+  store.on('load', invalidate);
 
   return {
     activate() { active = true; if (dirty) render(); },

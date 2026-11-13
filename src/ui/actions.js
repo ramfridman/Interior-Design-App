@@ -57,8 +57,10 @@ export function createActions(app) {
       const ids = store.items.filter((it) => !it.hidden && (!spaceId || safeSpaceId(it) === spaceId)).map((it) => it.id);
       store.select(ids);
     },
-    escape() {
+    /** Esc. `event` (the key press) lets Structure mode tell whether the plan view already acted on it. */
+    escape(event) {
       if (store.ui.mode === 'walk') { store.setUI({ mode: '3d' }); return; }
+      if (app.structure.isActive()) { app.structure.escape(event); return; }
       if (store.ui.tool !== 'select') { store.setUI({ tool: 'select' }); return; }
       store.clearSelection();
     },

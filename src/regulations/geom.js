@@ -291,28 +291,32 @@ export function cellsNear(g, x, y, r = 20) {
   return out;
 }
 
-/** Largest axis-aligned rectangle (by its shorter side, then area) inside a rectilinear polygon. */
+/**
+ * Largest axis-aligned rectangle (by its shorter side, then area) inside a rectilinear polygon.
+ * Works on the coordinate grid of the polygon's vertices, so a zero-width slit (free-standing wall inside the room)
+ * costs nothing and the hole it leads to is excluded. O(nx² · ny) for nx × ny grid cells.
+ */
 export function largestInnerRect(poly) {
   const xs = [...new Set(poly.map((p) => p[0]))].sort((a, b) => a - b);
   const ys = [...new Set(poly.map((p) => p[1]))].sort((a, b) => a - b);
   const nx = xs.length - 1, ny = ys.length - 1;
-  const inside = [];
-  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) inside.push(pointInPolygon((xs[i] + xs[i + 1]) / 2, (ys[j] + ys[j + 1]) / 2, poly));
   let best = { x: 0, y: 0, w: 0, h: 0 };
-  const better = (w, h) => {
-    const a = Math.min(w, h), b = Math.min(best.w, best.h);
-    return a > b || (a === b && w * h > best.w * best.h);
-  };
-  for (let i0 = 0; i0 < nx; i0++) for (let j0 = 0; j0 < ny; j0++) {
+  if (nx < 1 || ny < 1) return best;
+  // down[j * nx + i] = number of consecutive inside cells from row j downwards in column i
+  const down = new Int32Array(nx * ny);
+  for (let j = ny - 1; j >= 0; j--) for (let i = 0; i < nx; i++) {
+    if (pointInPolygon((xs[i] + xs[i + 1]) / 2, (ys[j] + ys[j + 1]) / 2, poly)) down[j * nx + i] = 1 + (j < ny - 1 ? down[(j + 1) * nx + i] : 0);
+  }
+  for (let j0 = 0; j0 < ny; j0++) for (let i0 = 0; i0 < nx; i0++) {
+    let rows = Infinity;
     for (let i1 = i0; i1 < nx; i1++) {
-      if (!inside[j0 * nx + i1]) break;
-      for (let j1 = j0; j1 < ny; j1++) {
-        let ok = true;
-        for (let i = i0; i <= i1; i++) if (!inside[j1 * nx + i]) { ok = false; break; }
-        if (!ok) break;
-        const w = xs[i1 + 1] - xs[i0], h = ys[j1 + 1] - ys[j0];
-        if (better(w, h)) best = { x: xs[i0], y: ys[j0], w, h };
-      }
+      const d = down[j0 * nx + i1];
+      if (!d) break;
+      if (d < rows) rows = d;
+      // for a fixed width the tallest rectangle is never worse, so only that one is a candidate
+      const w = xs[i1 + 1] - xs[i0], h = ys[j0 + rows] - ys[j0];
+      const a = Math.min(w, h), c = Math.min(best.w, best.h);
+      if (a > c || (a === c && w * h > best.w * best.h)) best = { x: xs[i0], y: ys[j0], w, h };
     }
   }
   return best;
