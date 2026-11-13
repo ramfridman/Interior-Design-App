@@ -30,6 +30,7 @@ const SNAP = 5;            // cm — every edit snaps to this grid
 const TMAX = 30;           // cm — thickest wall (mamad south wall); longer runs in both directions = junction
 const THICK = 15;          // cm — interior walls at least this thick may be structural
 const MIN_JAMB = 10;       // cm of solid wall kept between an opening and wall ends / other openings
+const CORNER_REACH = 20;   // cm — a door this close to a wall that ends on its wall travels with that wall when it moves
 const MIN_WALL = 30;       // cm — shortest wall a user can draw; shorter free-ended leftovers are refused
 const MIN_CLEAR = 60;      // cm — narrowest free space an edit may create
 const TRIM = 15;           // cm — a drawn wall end this close to a wall face is extended to it
@@ -842,6 +843,76 @@ export function moveWallSegment(segmentId, delta, opts) {
   if (!q.ok) return q;
   const d0 = snap(num(delta) ? delta : 0), { s } = q;
   if (!d0) return { ok: true, level: s.policy.level, warnings: [], ids: [segmentId] };
+  const riders = cornerOpenings(s, d0);
+  if (typeof riders === 'string') return fail(riders);
+  const r = riders.length ? withOpenings(riders, s, d0) : planMoveWall(s, d0);
+  if (!r.ok) return r;
+  return commit(r.d, 'move-wall', { level: s.policy.level, reason: s.policy.reason, ids: idsIn(r.d, r.target, s.axis) }, opts);
+}
+
+/**
+ * Doors / passages "hung at the corner" of a wall that is about to move: in a perpendicular wall it ends on, with at
+ * most CORNER_REACH cm of wall between them and the moving wall's face. They travel with the wall (same jamb), so a
+ * bedroom door next to a partition does not pin the partition. Openings further away stay where they are and block
+ * the move only if the wall would come too close (the usual jamb rule) or cut them.
+ * @returns {Array<{ from: object, to: object }> | string}  the moves, or a refusal text
+ */
+function cornerOpenings(s, d0) {
+  const { c0, c1, a0, a1 } = coreSpan(s), out = [];
+  const hz = s.axis === 'h';
+  for (const o of PLAN.openings) {
+    if (o.axis === s.axis) continue;
+    // flush with one end of the core: the opening's wall is the wall this one ends on
+    const across0 = hz ? o.x : o.y, across1 = hz ? o.x + o.w : o.y + o.h;
+    if (across1 !== a0 && across0 !== a1) continue;
+    const o0 = hz ? o.y : o.x, o1 = o0 + o.width;
+    const ahead = o0 >= c1 ? o0 - c1 : o1 <= c0 ? c0 - o1 : -1;    // wall between the opening and the moving wall's face
+    if (ahead < 0 || ahead > CORNER_REACH) continue;
+    if (policyOfOpening(o).level !== 'free') continue;               // exterior / mamad openings never move by themselves
+    const seg = segmentOfOpening(o);
+    if (!seg) continue;
+    const q = coreSpan(seg);
+    // the far end of its own wall must leave room for the jamb (the near end follows the moving wall)
+    if (o0 >= c1 ? o1 + d0 > q.a1 - MIN_JAMB : o0 + d0 < q.a0 + MIN_JAMB) {
+      const what = openingWord(o);
+      return `The ${what} beside the end of this wall has no room to move along with it — move or narrow the ${what} first.`;
+    }
+    out.push({ from: o, to: { ...o, ...(hz ? { y: o.y + d0 } : { x: o.x + d0 }) } });
+  }
+  return out;
+}
+
+/**
+ * Move a wall while some openings ride along: the move is planned with those openings filled with wall (so they
+ * neither pin the junction nor get in the way), then they are put back in at their new places and the result is
+ * checked again (solid wall all along each of them, jambs, overlaps). The live plan is untouched.
+ */
+function withOpenings(moves, s, d0) {
+  const saved = { walls: PLAN.walls, openings: PLAN.openings, rooms: PLAN.rooms, wallOutline: PLAN.wallOutline, analysis };
+  const riding = new Set(moves.map((m) => m.from));
+  const t = derive(solidsOf(PLAN), PLAN.openings.filter((o) => !riding.has(o)), PLAN.rooms, PLAN.walls);
+  let r;
+  PLAN.walls = t.walls; PLAN.openings = t.openings; PLAN.rooms = t.rooms; PLAN.wallOutline = t.wallOutline; analysis = t;
+  try { r = planMoveWall(s, d0); } finally {
+    PLAN.walls = saved.walls; PLAN.openings = saved.openings; PLAN.rooms = saved.rooms; PLAN.wallOutline = saved.wallOutline;
+    analysis = saved.analysis;
+    invalidatePlanCaches();
+  }
+  if (!r.ok) return r;
+  const blocked = moves.find((m) => r.d.walls.reduce((a, w) => a + overlapArea(w, m.to), 0) !== m.to.w * m.to.h);
+  if (blocked) return fail(`The ${openingWord(blocked.from)} next to this wall cannot move along with it here — move the ${openingWord(blocked.from)} first.`);
+  // back in their original order, so ids / drawing order do not shuffle
+  const order = new Map(PLAN.openings.map((o, i) => [o.id, i]));
+  const openings = [...r.d.openings, ...moves.map((m) => m.to)].sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9));
+  const d = derive([...r.d.walls, ...r.d.openings], openings, PLAN.rooms, PLAN.walls);
+  const bad = fitChecks(d, r.target, s.axis);
+  if (bad) return fail(bad === 'A wall cannot run along or on top of another wall.' ? 'That would cross another wall.' : bad);
+  return { ok: true, d, target: r.target };
+}
+const openingWord = (o) => (o.kind === 'opening' ? 'passage' : o.kind === 'window' ? 'window' : 'door');
+
+/** The geometry of a sideways wall move on the live plan: { ok, d, target } (nothing installed) or a refusal. */
+function planMoveWall(s, d0) {
   const { c0, c1, a0, a1 } = coreSpan(s), t = c1 - c0, n0 = c0 + d0, n1 = c1 + d0;
   const E = editModel(s.axis, [a0 + t, a1 - t], [n0, n1]), { m, K } = E;
   const uc0 = E.ci(c0), uc1 = E.ci(c1), un0 = E.ci(n0), un1 = E.ci(n1), va0 = E.ai(a0), va1 = E.ai(a1);
@@ -888,7 +959,7 @@ export function moveWallSegment(segmentId, delta, opts) {
   const d = derive([...wallRects(m), ...openings], openings, PLAN.rooms, PLAN.walls);
   const bad = fitChecks(d, target, s.axis);
   if (bad) return fail(bad === 'A wall cannot run along or on top of another wall.' ? cross : bad);
-  return commit(d, 'move-wall', { level: s.policy.level, reason: s.policy.reason, ids: idsIn(d, target, s.axis) }, opts);
+  return { ok: true, d, target };
 }
 
 /**

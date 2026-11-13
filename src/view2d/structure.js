@@ -166,16 +166,28 @@ export function drawRemovedWalls(G, env) {
   const { plan, pal } = env, { ctx } = G;
   const list = removedWalls(plan, structureOf(plan));
   if (!list.length) return;
+  const dpr = G.dpr;
+  ctx.save();
   ctx.beginPath();
   for (const r of list) G.rect(r.x, r.y, r.w, r.h);
-  ctx.fillStyle = css(pal.ink, pal.dark ? 0.07 : 0.05); ctx.fill();
+  ctx.fillStyle = pal.removedFill || css(pal.ink, 0.07); ctx.fill();
+  // 45° hatch inside the ghost: readable on any floor tint, and never mistaken for a wall that is still there
+  ctx.clip();
+  const step = Math.max(4, Math.round(5 * dpr));
+  ctx.beginPath();
+  for (const r of list) {
+    const x0 = G.RX(r.x), y0 = G.RY(r.y), x1 = G.RX(r.x + r.w), y1 = G.RY(r.y + r.h);
+    for (let t = Math.floor((x0 + y0) / step) * step; t < x1 + y1 + step; t += step) { ctx.moveTo(t - y0, y0); ctx.lineTo(t - y1, y1); }
+  }
+  ctx.strokeStyle = pal.removedHatch || css(pal.ink, 0.3); ctx.lineWidth = Math.max(1, Math.round(dpr)); ctx.stroke();
+  ctx.restore();
   ctx.beginPath();
   for (const r of list) {
     const x0 = G.RX(r.x) + 0.5, y0 = G.RY(r.y) + 0.5;
     ctx.rect(x0, y0, Math.max(1, G.RX(r.x + r.w) - G.RX(r.x) - 1), Math.max(1, G.RY(r.y + r.h) - G.RY(r.y) - 1));
   }
-  ctx.setLineDash([4 * G.dpr, 3 * G.dpr]);
-  ctx.strokeStyle = css(pal.ink, pal.dark ? 0.6 : 0.5); ctx.lineWidth = 1; ctx.stroke();
+  ctx.setLineDash([4 * dpr, 3 * dpr]);
+  ctx.strokeStyle = pal.removedLine || css(pal.ink, 0.6); ctx.lineWidth = Math.max(1, Math.round(1.25 * dpr)); ctx.stroke();
   ctx.setLineDash([]);
 }
 

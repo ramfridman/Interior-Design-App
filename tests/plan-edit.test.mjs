@@ -362,8 +362,40 @@ group('10b. Junctions: free-standing walls, corners that follow, walls that slid
     && Math.abs(m2(polygonArea(room('bedroom-2').polygon)) - (10.8 + 0.3 * 1.7)) < 0.001, hall.reason);
   check('diff reports one moved wall (no noise for the stretch or the carried door)', eq(E.planDiff().items.map((i) => i.kind), ['wall-moved']), E.planDiff().items.map((i) => i.text).join(' | '));
   sound('T move');
-  refused('moving the bedroom partition onto a door', E.moveWallSegment('seg:h:1050:1155:1515', 50), /end on a door/);
+  refused('moving the bedroom partition onto a door that cannot ride along', E.moveWallSegment('seg:h:1050:1155:1515', 50), /door beside the end of this wall/);
   refused('moving a wall through another wall', E.moveWallSegment('seg:h:1050:1155:1515', 400));
+  E.resetPlan();
+  check('reset', planEqualsBase());
+  store._undo.length = 0; store._redo.length = 0;
+}
+
+group('10c. Doors at the corner of a moved wall travel with it');
+{
+  E.resetPlan();
+  const P = 'seg:h:1050:1155:1515';            // partition Bedroom 2 | Bedroom 1, ends on the hall wall between the two doors
+  const d1 = () => opening('door-bedroom-1'), d2 = () => opening('door-bedroom-2');
+  const before = snapshot(), n = events.length, undoDepth = store._undo.length;
+  const north = E.moveWallSegment(P, -5);
+  check('partition 5 cm north: allowed although both bedroom doors are 10 cm from its end', north.ok && eq(north.ids, ['seg:h:1045:1155:1515']), north.reason);
+  check('…both doors keep their 10 cm jamb (they travel 5 cm north)', d1().y === 1065 && d2().y === 945 && d1().rooms.includes('bedroom-1') && d2().rooms.includes('bedroom-2'));
+  check('…one undo step, one plan event', events.length === n + 1 && events[n].reason === 'move-wall' && store._undo.length === undoDepth + 1);
+  sound('door rides along');
+  const far = E.moveWallSegment('seg:h:1045:1155:1515', -55);
+  check('then 55 cm further north in one call', far.ok && d1().y === 1010 && d2().y === 890 && Math.abs(m2(polygonArea(room('bedroom-2').polygon)) - 3.6 * 2.4) < 0.001, far.reason);
+  sound('door rides far');
+  const tooFar = E.moveWallSegment('seg:h:990:1155:1515', -5);
+  check('the Bedroom 2 door cannot go further (its wall ends 10 cm beyond it): refused, with the reason', !tooFar.ok && /Bedroom|door beside the end of this wall/.test(tooFar.reason), tooFar.reason);
+  store.undo(); store.undo();
+  check('undo twice: the architect\'s plan again', planEqualsBase() && snapshot() === before);
+  const south = E.moveWallSegment(P, 5);
+  check('south: the Bedroom 1 door fills its wall (10 + 90 + 10 cm) — refused with a reason, nothing changed', !south.ok && /move or narrow the door first/.test(south.reason) && snapshot() === before, south.reason);
+  // a door further than 20 cm from the end does not ride: it stays, and blocks only when the wall comes too close
+  E.updateOpening('door-bedroom-2', { offset: 20 });               // hall wall core 880..1050 → door at 900..990, 60 cm from the partition
+  const y2 = d2().y, away = E.moveWallSegment(P, -40);
+  check('a door 60 cm from the end stays put while the wall moves 40 cm towards it', away.ok && d2().y === y2 && d1().y === 1030, away.reason);
+  store.undo();
+  const close = E.moveWallSegment(P, -55);
+  check('…and the wall cannot come within 10 cm of it (refused with the jamb reason)', !close.ok && /keep at least 10 cm/.test(close.reason), close.reason);
   E.resetPlan();
   check('reset', planEqualsBase());
   store._undo.length = 0; store._redo.length = 0;

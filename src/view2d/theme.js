@@ -69,6 +69,10 @@ export function buildPalette(base, dark) {
     warn: dark ? m(base.warn, base.paper, 0.1) : m(base.warn, '#ffffff', 0.08),
     locked: m(base.wall, base.paper, dark ? 0.62 : 0.6),
   };
+  // ghosts of removed architect's walls ("show plan changes"): must read clearly on both papers
+  p.removedFill = css(base.ink, dark ? 0.14 : 0.07);
+  p.removedHatch = css(base.ink, dark ? 0.42 : 0.28);
+  p.removedLine = css(base.ink, dark ? 0.85 : 0.6);
   p.wallNew = dark ? m(base.accent, '#ffffff', 0.1) : m(base.accent, '#ffffff', 0.32);
   /** Room floor tint from a finish colour. */
   p.floor = (hex) => (dark ? m(hex || '#cccccc', base.paper, 0.74) : m(hex || '#dddddd', '#ffffff', 0.52));

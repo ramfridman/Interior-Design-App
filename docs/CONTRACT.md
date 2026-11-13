@@ -303,6 +303,8 @@ addWall({ x1, y1, x2, y2, thickness = 10 })   // ids = new segment ids
 removeWallSegment(segmentId)                  // removes the core and the openings in it; junction squares stay with
                                               // the walls that meet there (clean ends). Rooms merge.
 moveWallSegment(segmentId, delta)             // sideways, cm (+ = east / south), snapped. Its openings travel with it.
+                                              // Free doors / passages in a wall it ends on, within 20 cm of its face, travel too (keeping their
+                                              // jamb) and appear in planDiff as moved; exterior and safe-room openings never travel.
 //   Walls it met at its ends follow: a wall that ended on it stretches / shrinks, a wall it stands on is slid along
 //   (and stretched if it moves past that wall's end). Refused if it would cross another wall, leave the house, end
 //   on an opening, leave a space < 60 cm or a free wall stub < 30 cm.  ids = the moved segment's new id(s)
