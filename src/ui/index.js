@@ -29,6 +29,7 @@ import { initBudget } from './budget.js';
 import { initRooms } from './rooms.js';
 import { initChecks } from './checks.js';
 import { openWelcome, openShortcuts, openSettings, openItemMenu } from './sheets.js';
+import { initEmptyPlanHint } from './projects.js';
 
 const TABS = [
   { id: 'inspector', label: 'Inspector', icon: 'inspector' },
@@ -262,6 +263,7 @@ export function initUI(ctx) {
   root.classList.add('ui-ready');
   viewport.resize();
 
+  if (app.projects) initEmptyPlanHint(app, document.getElementById('ov2d'));
   if (!getPref('welcomed')) setTimeout(() => openWelcome(app), 350);
 
   return {

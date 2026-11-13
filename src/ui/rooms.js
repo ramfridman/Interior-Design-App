@@ -4,7 +4,7 @@
  * owner changed in the architect's plan. Rooms are re-read on every 'plan' event: a new wall can add a room (which
  * gets a name field and a type select), removing one merges two.
  */
-import { BASE_PLAN, updateRoom } from '../core/plan-edit.js';
+import { BASE_PLAN, updateRoom, isBuiltinBase } from '../core/plan-edit.js';
 import { floorAreaM2, wallAreaM2, resolveFinish } from '../core/finishes.js';
 import { h, setKids, debounce } from './dom.js';
 import { icon } from './icons.js';
@@ -16,7 +16,7 @@ import { changesSection } from './structure-panels.js';
 
 const WALL_PAINTS = ['#ffffff', '#f4f1ea', '#ece7dc', '#e3e6e1', '#d9dedb', '#e8e0d2', '#dcd3c3', '#cfd6d8'];
 /** What a room the owner created can be. `wet` rooms get tiled walls by default. */
-const ROOM_TYPES = [['bedroom', 'Bedroom'], ['living', 'Living space'], ['bathroom', 'Bathroom'], ['wc', 'WC'], ['service', 'Service room'], ['office', 'Office']];
+const ROOM_TYPES = [['bedroom', 'Bedroom'], ['living', 'Living space'], ['bathroom', 'Bathroom'], ['wc', 'WC'], ['service', 'Service room'], ['office', 'Office'], ['kitchen', 'Kitchen'], ['mamad', 'Safe room (mamad)']];
 const WET_TYPES = ['bathroom', 'wc', 'service'];
 const baseRoom = (id) => BASE_PLAN.rooms.find((r) => r.id === id) || null;
 
@@ -91,15 +91,16 @@ export function initRooms(root, app) {
     const isNew = indoor && !base;
     const was = base ? floorAreaM2(base) : null;
     const resized = was != null && Math.abs(was - area) >= 0.05;
-    const edit = isNew ? newRoomEditor(space) : null;
+    // the architect's rooms keep their names; rooms of the user's own plan can always be named and typed
+    const edit = isNew || (indoor && !isBuiltinBase()) ? newRoomEditor(space) : null;
     return h('article', { class: `room${isActive ? ' is-active' : ''}${isNew ? ' is-new' : ''}`, dataset: { id: space.id } },
       h('header', { class: 'room__head' },
         edit
           ? h('div', { class: 'room__name room__name--edit' }, edit.name)
           : h('button', { type: 'button', class: 'room__name', 'aria-pressed': String(isActive), 'data-tip': 'Make this the active room', onClick: () => store.setUI({ activeSpace: space.id }) },
             h('span', { class: 'display truncate' }, space.name)),
-        h('span', { class: 'room__area num' }, fmtArea(area), resized ? h('small', { class: 'room__was', 'data-tip': 'Area on the architect’s plan' }, `was ${fmtArea(was)}`) : null)),
-      edit ? h('div', { class: 'room__newrow' }, h('span', { class: 'tag tag--new' }, 'New room'), edit.type,
+        h('span', { class: 'room__area num' }, fmtArea(area), resized ? h('small', { class: 'room__was', 'data-tip': isBuiltinBase() ? 'Area on the architect’s plan' : 'Area on the plan as built' }, `was ${fmtArea(was)}`) : null)),
+      edit ? h('div', { class: 'room__newrow' }, isNew ? h('span', { class: 'tag tag--new' }, 'New room') : null, edit.type,
         isActive ? null : h('button', { type: 'button', class: 'room__activate', onClick: () => store.setUI({ activeSpace: space.id }) }, 'Make active')) : null,
       edit ? edit.error : null,
       h('div', { class: 'room__finishes' }, finishButton(space, 'floor'), indoor ? finishButton(space, 'wall') : null),

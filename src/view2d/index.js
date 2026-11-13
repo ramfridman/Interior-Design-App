@@ -120,6 +120,7 @@ export function createView2D(container, ctx) {
       }
       target = 'house';
     }
+    if (target === 'house' && !plan.walls.length) target = 'lot';   // nothing drawn yet (a new project): frame the lot
     if (target === 'house') {
       const h = houseEnvelope(plan);
       return { rect: { x: h.x0, y: h.y0, w: h.x1 - h.x0, h: h.y1 - h.y0 }, extra: 14, dims: true, nearOnly: true };

@@ -277,7 +277,7 @@ carried out and the text comes back in `warnings` — the UI decides whether to 
 
 ### Queries
 ```js
-BASE_PLAN                                   // deep-frozen architect's plan (same shape as PLAN) — for diffing; never changes
+BASE_PLAN                                   // deep-frozen base plan (same shape as PLAN; House 98 = the architect's) — for diffing; changes only when a project is opened (§ 10)
 wallSegments(plan = PLAN) → Segment[]       // cached per plan revision; treat as read-only
 segmentAt(x, y, tol = 6) → Segment | null   // hit-test (nearest segment rectangle within tol cm)
 openingPolicy(openingId) → { level: 'free' | 'permit' | 'locked', reason }
@@ -847,3 +847,100 @@ hardware descriptions, `hwVariantLabel` in the hardware schedule); schedule `mat
   legs (`corner`) are added to the notes.
 * Owner's estimate: per-run low / typical / high and totals excl. / incl. VAT, basis (method, tier, `asOf`, VAT), each
   component's `basis`, every `missingRates` / `noRate` line under "Priced by the carpenter (not in the estimate)", and sources.
+
+## 10. Projects and plan source (`src/core/projects.js`, `src/core/plan-build.js`, `src/core/plan-edit.js`) — core
+
+The app holds **several projects**, each with its own base plan (house + site + location), plan phase and design.
+House 98 (`plan.js`) is the **built-in** base plan and the default; it behaves exactly as before.
+
+### Switchable base plan (`plan-edit.js`)
+`PLAN` stays ONE object; opening a project replaces EVERY field of it. Read `PLAN.*` (or `ctx.plan.*`) at the time of
+use — never keep `PLAN.meta` / `PLAN.site` / `PLAN.bounds` / arrays across a `'base'` event.
+```js
+import { BASE_PLAN, BUILTIN_PLAN, PLAN_KEYS, setBasePlan, isBuiltinBase, planPhase, setPlanPhase,
+         currentPlanData, analyseWalls, wallBounds } from './core/plan-edit.js';
+BASE_PLAN               // live binding (`export let`): deep-frozen base plan of the open project (House 98 = BUILTIN_PLAN)
+BUILTIN_PLAN            // House 98, deep-frozen, never changes
+setBasePlan(planData, { phase: 'draft' | 'fixed' })   // engine only — UI / projects use store.openProject()
+isBuiltinBase() → bool  // the base plan is House 98: the architect's layout / carpentry / "architect's plan" wording exist only then
+planPhase() → 'draft' | 'fixed'
+setPlanPhase(phase)     // engine only — use store.setPlanPhase()
+currentPlanData()       // plain copy of the live plan as a complete PLAN-shaped object
+analyseWalls(walls, openings, { prevRooms, outdoorAreas }) → { walls, openings, rooms, wallOutline, problems, segments }  // pure
+wallBounds(walls, openings?) → { x, y, w, h } | null
+```
+**Phases.** `'fixed'` = the base plan is the house as built: § 7 applies unchanged (four permission levels, changes list
+against `BASE_PLAN`). `'draft'` = the owner is still drawing the existing house: every wall and opening is `'free'`, walls
+may be drawn anywhere on the lot (7–30 cm thick; a wall drawn from / to another wall's centre line makes a clean corner),
+no permit warnings, `isPlanModified()` is false and `planDiff()` is empty, `PLAN.bounds` follows the walls. Rooms are
+always re-derived from the walls (§ 7 "What is recomputed"; matched to the previous rooms by exact overlap, so names,
+types and finishes of rooms that still exist are kept). draft → fixed: the current plan becomes the new base plan.
+fixed → draft: the base stays; the changes list restarts when fixed again. House 98 is `'fixed'`.
+
+### Store (`store.js`, additive)
+```js
+store.openProject({ basePlan, phase, design, name })   // replaces base plan + design, clears selection, undo history,
+        // structure / carpentry selection, active room, walk mode. Emits 'plan' { reason: 'base', changed: all true },
+        // the usual 'load' events, then 'base' {}.
+store.setPlanPhase('draft' | 'fixed') → bool            // clears undo history; emits 'plan' { reason: 'phase' }
+store.saver = fn                                         // autosave target (set by projects.js); null = legacy key
+store.on('base', fn)                                     // another project was opened — rebuild what you captured at creation
+```
+`'plan'` reasons gain `'base'` and `'phase'`. `main.js` rebuilds both views (destroy + create, same proxy object for
+every holder: `on`, `addOverlay`, `setCarpentryDrag`, `setActive`, `showCarpentry` are replayed) on `'base'`, so cameras,
+site, sun, walk state and daylight caches start fresh.
+
+### Plan builder (`plan-build.js`) — for the sketch importer
+```js
+import { buildPlan, emptyPlan, DEFAULT_LOCATION, DEFAULT_HEIGHTS } from './core/plan-build.js';
+const { ok, plan, warnings } = buildPlan({ walls, openings, meta, heights, site, outdoorAreas });
+```
+* Input in plan space (cm, +x east, +y south, origin = the house's outer NW corner — the plan is shifted there if needed,
+  with an `info` warning). `walls`: exactly the shapes of `PLAN.walls` (`{ x, y, w, h, kind?, id? }` or `[x, y, w, h, kind]`),
+  or an axis-aligned centre line `{ x1, y1, x2, y2, thickness }`. `openings`: the shapes of `PLAN.openings` (`kind`, gap
+  rectangle `x, y, w, h`; `axis`, `width`, `height`, `sill`, `style`, `hinge`, `swing`, `id` are optional and defaulted).
+* **Orthogonal, one floor.** Diagonal / curved / polygon walls and other floors are `error`s ("…the plan engine is
+  orthogonal…") and left out; openings that are not in a wall, overlap, or lack 10 cm of jamb are `error`s and left out.
+* Output: `plan` is always complete (`PLAN_KEYS`): derived `walls` (clean rectangles, ids `wNN`), `wallOutline`, `bounds`,
+  `openings` (with `rooms`, `exterior`, `outside`), `rooms` (enclosed regions → polygon, label; first-guess name / type:
+  largest = `'living'` "Living space", others "Room n" — ≥ 6 m² `'bedroom'`, smaller `'service'`), `outdoorAreas` (none by
+  default), `site` (rectangular lot around the house: `site.margins` default 3 m each side, or `site.lot { width, depth }`,
+  or `site.boundary`; `street.side` default `'e'`; no parking / building line / setbacks unless given), `meta` (defaults:
+  name "New house", the built-in house's latitude / longitude / time zone, `northAngle` 0, `floors` 1), `heights`
+  (House 98's), `assumptions` (every default used, shown to the user). `ok` = no `error` warnings.
+* `warnings`: `[{ level: 'error' | 'warning' | 'info', text, ref? }]`, plain English. Never throws.
+* `emptyPlan({ meta, heights, lot, margins, street })` = an empty lot (house drawn later with the Structure tools).
+
+### Projects (`projects.js`)
+```js
+import { createProjects, createLocalAdapter, createMemoryAdapter } from './core/projects.js';
+const projects = createProjects({ store, adapter });   // main.js: adapter = createLocalAdapter(); window.app.projects
+await projects.init();            // first run: migrates the old autosave (localStorage 'e7-interior-design/v1', left in place
+                                  // as a backup) into a project named after it, else House 98 + the architect's layout
+projects.current() → summary | null          projects.list() → Promise<summary[]> (newest first)
+projects.open(id) → Promise<bool>            projects.create(opts) → Promise<{ ok, project?: summary, reason? }>
+projects.rename(id, name)  projects.duplicate(id, { open })  projects.remove(id)   // → Promise<{ ok, reason? }>
+projects.exportFile(id?) → Promise<{ ok, filename, text }>   projects.importFile(textOrObject, { open }) → Promise<{ ok, project?, reason? }>
+projects.save() / flush()   projects.on(fn)  // { type: 'open' | 'list' | 'error' | 'saved', … }   projects.lastError()
+```
+* **Import wizard:** `await projects.create({ name, fromPlan: buildPlan(...).plan })` → a new project in phase `'draft'`
+  (pass `phase: 'fixed'` to skip drafting), opened at once (`open: false` to only store it).
+* Other `create` forms: `{ from: 'blank', lot: { width, depth } (cm), location: { name, latitude, longitude, timeZone },
+  northAngle, ceiling }` (empty lot, draft) · `{ from: 'house98', ceiling }` (copy of the built-in house with the architect's
+  furniture) · `{ from: 'file', file }`.
+* Project record: `{ id, name, createdAt, updatedAt, phase, builtin, basePlan, design, thumbnail? }` — `design` is
+  `store.serialize()` (plan edits are relative to `basePlan`; in a draft project the drawn walls live there until the plan
+  is fixed). Summary = the record without `basePlan` / `design`.
+* Project file: `{ app: 'e7-house-designer', kind: 'project', version: 1, exportedAt, project }`. `importFile` also accepts a
+  design file from earlier versions (→ a project on House 98). Imports always get a new id.
+* **Storage adapter** (replaceable by an online backend, callers unchanged): `{ list() → summaries, get(id) → record | null,
+  put(record), remove(id) }`, all async. `createLocalAdapter()`: IndexedDB → localStorage → memory (sandboxed iframe /
+  private window: the app runs in memory; a failed save is reported via `on` / `lastError()`, never thrown).
+  The open project's id is remembered in localStorage `'e7-projects/current'`. Autosave (400 ms) saves the open project.
+
+### UI (`src/ui/projects.js`)
+Project switcher = the project name in the top bar (menu: current project, other projects, New project…, Rename…,
+Duplicate, Export project file, Import project file…, Delete project…). Structure guide: phase card (draft → "This is the
+house as built…"; fixed own plan → "Back to drafting…"). An empty plan shows a "Draw walls" hint. House-98-only features
+(reset to the architect's layout, Carpentry "Start from the architect's layout") are shown only when `isBuiltinBase()`.
+Regulations skip with "Not checked: …" findings when a project lacks the data (setbacks, parking, written room areas, a draft plan).

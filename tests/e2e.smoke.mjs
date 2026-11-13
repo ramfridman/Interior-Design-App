@@ -74,6 +74,32 @@ async function main() {
     return store.items.length === n ? 'ok' : 'undo mismatch';
   });
   check('add / rotate / undo round-trip', roundTrip === 'ok', roundTrip);
+
+  // Projects: an empty project, two walls drawn programmatically, 3D, then back to House 98 with its design intact.
+  const before = await page.evaluate(() => ({ id: window.app.projects.current().id, items: JSON.stringify(window.app.store.items), plan: JSON.stringify(window.app.plan) }));
+  const made = await page.evaluate(async () => {
+    const { projects, plan, store } = window.app;
+    const res = await projects.create({ name: 'E2E empty lot', from: 'blank', lot: { width: 2400, depth: 1800 } });
+    const { addWall, planPhase } = await import('/src/core/plan-edit.js');
+    const a = addWall({ x1: 0, y1: 0, x2: 700, y2: 0, thickness: 20 }), b = addWall({ x1: 700, y1: 0, x2: 700, y2: 500, thickness: 20 });
+    return { ok: res.ok, phase: planPhase(), items: store.items.length, walls: plan.walls.length, a: a.ok || a.reason, b: b.ok || b.reason, site: plan.site.bounds.w };
+  });
+  check('new empty project opens (draft, no items)', made.ok && made.phase === 'draft' && made.items === 0 && made.site === 2400, JSON.stringify(made));
+  check('two walls drawn on the empty lot', made.a === true && made.b === true && made.walls > 0, JSON.stringify(made));
+  await page.evaluate(() => window.app.store.setUI({ mode: '3d' }));
+  await sleep(4000);
+  check('empty project in 3D without console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+  const back = await page.evaluate(async (id) => {
+    const { projects, store } = window.app;
+    store.setUI({ mode: '2d' });
+    const tmp = projects.current().id;
+    const ok = await projects.open(id);
+    const r = { ok, items: JSON.stringify(store.items), plan: JSON.stringify(window.app.plan), canUndo: store.historyState().canUndo };
+    await projects.remove(tmp);
+    return r;
+  }, before.id);
+  await sleep(1500);
+  check('back on House 98: design and plan intact', back.ok && back.items === before.items && back.plan === before.plan && !back.canUndo);
   check('no console errors overall', errors.length === 0, errors.slice(0, 5).join(' | '));
   await browser.close();
 }

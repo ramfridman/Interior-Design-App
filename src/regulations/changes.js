@@ -5,7 +5,7 @@
  * Only the live plan (`PLAN`) can be compared with the architect's; for any other plan object nothing is returned.
  */
 import { PLAN } from '../core/plan.js';
-import { BASE_PLAN, planDiff, isPlanModified } from '../core/plan-edit.js';
+import { BASE_PLAN, planDiff, isPlanModified, planPhase, isBuiltinBase } from '../core/plan-edit.js';
 import { finding, roomMetrics, planMetrics, sizeVerdict, HABITABLE, SERVICE } from './building.js';
 import { m } from './geom.js';
 
@@ -43,10 +43,16 @@ function detailOf(item) {
 export function checkChanges({ plan }) {
   const out = [];
   if (plan !== PLAN) return out;
+  if (planPhase() === 'draft') {
+    out.push(finding('plan-change-summary', 'info', 'all', 'Not checked: changes to the plan (the plan is still a draft)',
+      'While you are still drawing the existing house nothing counts as a change. Fix the plan ("This is the house as built") to start tracking changes against it.'));
+    return out;
+  }
   const diff = isPlanModified() ? planDiff() : { changed: false, items: [] };
   if (!diff.changed) {
-    out.push(finding('plan-change-summary', 'pass', 'all', 'The plan is the architect\'s drawing — nothing was changed',
-      'Walls, doors and windows are exactly as on the architect\'s plan submitted for the permit.'));
+    out.push(isBuiltinBase()
+      ? finding('plan-change-summary', 'pass', 'all', 'The plan is the architect\'s drawing — nothing was changed', 'Walls, doors and windows are exactly as on the architect\'s plan submitted for the permit.')
+      : finding('plan-change-summary', 'pass', 'all', 'The plan is the house as built — nothing was changed', 'Walls, doors and windows are exactly as fixed for this project.'));
     return out;
   }
 

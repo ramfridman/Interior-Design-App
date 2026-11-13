@@ -214,9 +214,14 @@ export function initViewport(app) {
   }
   listen(view2d, 'zoom', syncScale);
 
-  const north = plan.meta && typeof plan.meta.northAngle === 'number' ? plan.meta.northAngle : 0;
-  const compass = h('div', { class: 'ovl compass', role: 'img', 'aria-label': `North is ${Math.abs(north)}° ${north < 0 ? 'left' : 'right'} of up on the plan`, 'data-tip': 'North', 'data-tip-side': 'left' });
-  compass.append(compassSvg(north));
+  const compass = h('div', { class: 'ovl compass', role: 'img', 'data-tip': 'North', 'data-tip-side': 'left' });
+  const syncNorth = () => {   // per project (store 'base'): plan.meta.northAngle
+    const north = plan.meta && typeof plan.meta.northAngle === 'number' ? plan.meta.northAngle : 0;
+    compass.setAttribute('aria-label', `North is ${Math.abs(north)}° ${north < 0 ? 'left' : 'right'} of up on the plan`);
+    compass.replaceChildren(compassSvg(north));
+  };
+  syncNorth();
+  store.on('base', syncNorth);
 
   const zoom = h('div', { class: 'ovl ovl--stack', role: 'group', 'aria-label': 'Zoom' },
     iconBtn('plus', 'Zoom in', { kbd: '+', onClick: () => call(view2d, 'zoomBy', 1.25) }),
@@ -315,7 +320,7 @@ function drawMinimap(canvas, plan, pos) {
   const accent = css.getPropertyValue('--accent').trim() || '#1d4e89';
   const soft = css.getPropertyValue('--line-strong').trim() || 'rgba(0,0,0,.2)';
   const size = canvas.width, pad = 22;
-  const b = plan.bounds;
+  const b = plan.bounds.w > 0 && plan.bounds.h > 0 ? plan.bounds : (plan.site && plan.site.bounds) || { x: 0, y: 0, w: 1000, h: 1000 };
   const s = (size - pad * 2) / Math.max(b.w, b.h);
   const ox = (size - b.w * s) / 2 - b.x * s, oy = (size - b.h * s) / 2 - b.y * s;
   g.clearRect(0, 0, size, size);

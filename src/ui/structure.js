@@ -6,7 +6,7 @@
  * through core/plan-edit.js (remove, nudge, reset — with the confirmations the owner asked for) and the toasts for
  * what the plan view reports about its own gestures (`view2d.on('structure', …)`).
  */
-import { wallSegments, openingPolicy, removeWallSegment, removeOpening, moveWallSegment, resizeWallSegment, updateOpening, resetPlan, planDiff, isPlanModified } from '../core/plan-edit.js';
+import { wallSegments, openingPolicy, removeWallSegment, removeOpening, moveWallSegment, resizeWallSegment, updateOpening, resetPlan, planDiff, isPlanModified, isBuiltinBase } from '../core/plan-edit.js';
 import { h, call, listen } from './dom.js';
 import { icon } from './icons.js';
 import { confirmDialog, toast } from './dialogs.js';
@@ -14,6 +14,8 @@ import { confirmDialog, toast } from './dialogs.js';
 export const STRUCTURE_TOOLS = ['structure', 'wall', 'door', 'window', 'passage'];
 export const isStructureTool = (tool) => STRUCTURE_TOOLS.includes(tool);
 export const WALL_THICKNESSES = [7, 10, 15, 20];
+/** What plan edits are measured against, in words: the architect's plan (built-in house) or the user's fixed plan. */
+export const basePlanName = () => (isBuiltinBase() ? 'the architect’s plan' : 'the plan as built');
 /** Every plan edit snaps to this grid (cm). */
 export const STEP = 5;
 
@@ -259,12 +261,12 @@ export function createStructure(app) {
       if (!isPlanModified()) return;
       const n = api.diff().items.length;
       const ok = await confirmDialog({
-        title: 'Reset to the architect’s plan?', confirmLabel: 'Reset plan', danger: true,
-        message: `${n > 1 ? `All ${n} changes` : 'Your changes'} to walls, doors and windows are undone and the rooms go back to the architect’s drawing. Furniture stays where it is. You can undo this.`,
+        title: `Reset to ${basePlanName()}?`, confirmLabel: 'Reset plan', danger: true,
+        message: `${n > 1 ? `All ${n} changes` : 'Your changes'} to walls, doors and windows are undone and the rooms go back to ${isBuiltinBase() ? 'the architect’s drawing' : 'the plan as built'}. Furniture stays where it is. You can undo this.`,
       });
       if (!ok) return;
       const res = resetPlan();
-      if (res.ok) { api.select(null); toast('Back to the architect’s plan', { action: undo }); }
+      if (res.ok) { api.select(null); toast(`Back to ${basePlanName()}`, { action: undo }); }
     },
 
     /** Bring a plan point into view (switching to the plan if it is hidden). */

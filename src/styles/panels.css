@@ -449,3 +449,29 @@
   .sellist__row { padding: 11px 0; }
   .dial { width: 40px; height: 40px; }
 }
+
+/* ───────── Projects (src/ui/projects.js) ───────── */
+.projname--switch { display: flex; align-items: center; gap: var(--s-1); max-width: 260px; text-align: left; cursor: pointer; color: var(--ink); }
+.projname--switch > .icon { flex: none; color: var(--ink-3); }
+.projname__text { min-width: 0; }
+.newproj { display: flex; flex-direction: column; gap: var(--s-3); }
+.newproj .field__input:not(.num) { text-align: left; }
+.newproj__group { display: flex; flex-direction: column; gap: var(--s-2); }
+.newproj__group[hidden], .newproj__row[hidden] { display: none; }
+.newproj__label { font-size: var(--fs-12); font-weight: 600; color: var(--ink-2); }
+.newproj__row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--s-2); align-items: center; }
+.newproj__hint { color: var(--ink-3); font-size: var(--fs-11); }
+.newproj .select { width: 100%; }
+.phase { display: flex; flex-direction: column; gap: var(--s-2); margin-bottom: var(--s-3); padding: var(--s-3); border-radius: var(--r-2); background: var(--info-soft); }
+.phase[hidden] { display: none; }
+.phase__title { display: flex; align-items: center; gap: var(--s-2); font-weight: 600; }
+.phase__title > .icon { color: var(--info); }
+.phase__text { color: var(--ink-2); font-size: var(--fs-12); }
+.phase .btn { align-self: flex-start; }
+.emptyplan { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 5; width: min(360px, calc(100% - 32px));
+  display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-4); border: 1px solid var(--line); border-radius: var(--r-3); background: var(--raised); box-shadow: var(--shadow-2); }
+.emptyplan[hidden] { display: none; }
+.emptyplan__title { font-size: var(--fs-16); font-weight: 600; }
+.emptyplan__text { color: var(--ink-2); font-size: var(--fs-12); }
+.emptyplan .btn { align-self: flex-start; }
+.welcome__empty { padding: var(--s-6) 0; color: var(--ink-3); text-align: center; }

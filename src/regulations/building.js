@@ -143,7 +143,8 @@ function checkRooms(plan, H, out, metrics) {
     out.push(finding('ceiling-height', 'fail', `opening:${o.id}`, `${o.kind === 'window' ? 'Window' : 'Door'} head at ${m(head)} m is above the ${m(H)} m ceiling`,
       `This ${o.kind === 'window' ? 'window' : 'opening'} reaches ${m(head)} m above the floor but the ceiling height of the project is ${m(H)} m. Lower the opening or correct the ceiling height.`, { at: openingCentre(o), spaceId: (o.rooms || [])[0] }));
   }
-  out.push(finding('plan-consistency', mismatches.length ? 'info' : 'pass', 'areas', mismatches.length ? 'Room areas differ from the drawing' : 'Room areas match the drawing',
+  if (!plan.rooms.some((r) => r.drawnArea)) out.push(finding('plan-consistency', 'info', 'areas', 'Not checked: room areas against the drawing', 'No room areas are written for this plan, so the computed areas cannot be compared with a drawing.'));
+  else out.push(finding('plan-consistency', mismatches.length ? 'info' : 'pass', 'areas', mismatches.length ? 'Room areas differ from the drawing' : 'Room areas match the drawing',
     mismatches.length ? mismatches.join('; ') + '.' : 'Every room area computed from the digitised plan is within 0.35 m² of the area written on the drawing.'));
 }
 
@@ -500,7 +501,9 @@ function checkSite(plan, out) {
     if (!ok) worst = 'fail';
     parts.push(`${SIDE_NAME[side]} ${m(dist)} m${need != null ? ` (required ${m(need)} m${ok ? '' : ' — TOO CLOSE'})` : ''}`);
   }
-  out.push(finding('setbacks', worst, 'house', worst === 'pass' ? 'House setbacks respected on all four sides' : 'House is closer to the property line than the setback',
+  if (!plan.walls.length) { /* no house drawn yet: nothing to measure */ } else if (!site.setbacks) out.push(finding('setbacks', 'info', 'house', 'Not checked: setbacks (none are known for this lot)',
+    `No setbacks are recorded for this lot, so the distances cannot be checked. Shortest distance from the house walls to each property line: ${parts.join(', ')}.`));
+  else out.push(finding('setbacks', worst, 'house', worst === 'pass' ? 'House setbacks respected on all four sides' : 'House is closer to the property line than the setback',
     `Shortest distance from the house walls to each property line: ${parts.join(', ')}.` + (site.street ? ` The street is on the ${SIDE_NAME[site.street.side] || site.street.side} side.` : '')));
 
   // building line
@@ -532,7 +535,8 @@ function checkSite(plan, out) {
   // parking
   const bays = site.parking || [];
   const okCount = bays.length >= 2;
-  out.push(finding('parking-count', okCount ? 'pass' : 'fail', 'count', `${bays.length} parking place${bays.length === 1 ? '' : 's'} on the lot`,
+  if (!bays.length) out.push(finding('parking-count', 'info', 'count', 'Not checked: parking (no parking places are drawn)', 'The site plan of this project has no parking places, so the number and size of the bays cannot be checked. A detached house needs at least 2.'));
+  else out.push(finding('parking-count', okCount ? 'pass' : 'fail', 'count', `${bays.length} parking place${bays.length === 1 ? '' : 's'} on the lot`,
     `The site plan shows ${bays.length} parking place${bays.length === 1 ? '' : 's'}; a detached house needs at least 2 (in a settlement without a mass-transit system).`,
     bays[0] ? { at: { x: bays[0].x + bays[0].w / 2, y: bays[0].y + bays[0].h / 2 } } : undefined));
   for (const p of bays) {

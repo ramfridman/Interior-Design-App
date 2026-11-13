@@ -8,6 +8,7 @@ import { h, setKids, rafThrottle } from '../dom.js';
 import { icon } from '../icons.js';
 import { btn, iconBtn, kbd } from '../components.js';
 import { openPopover, openMenu } from '../dialogs.js';
+import { isBuiltinBase } from '../../core/plan-edit.js';
 import { KINDS, kindInfo, LEVEL_GROUPS, moduleGlyph, num, metres, roomName } from './vocab.js';
 
 export const DND_MODULE = 'application/x-carp-module';
@@ -18,7 +19,7 @@ export function initRunsPanel(root, app, C) {
   const body = h('div', { class: 'cpanel__body' });
   const newBtn = btn('New run', { small: true, variant: 'primary', icon: 'plus', kbd: 'N', onClick: () => openKinds(newBtn) });
   const moreBtn = iconBtn('more', 'More', { onClick: () => openMenu(moreBtn, [
-    { label: 'Adopt the architect’s layout', icon: 'home', onSelect: () => C.adopt() },
+    isBuiltinBase() ? { label: 'Adopt the architect’s layout', icon: 'home', onSelect: () => C.adopt() } : null,
     { label: 'Keyboard shortcuts', icon: 'keyboard', kbd: '?', onSelect: () => app.openShortcuts() },
     { separator: true },
     { label: 'Back to furnishing', icon: 'sofa', kbd: 'C', onSelect: () => C.exit() },
@@ -35,7 +36,8 @@ export function initRunsPanel(root, app, C) {
   function renderEmpty() {
     return h('div', { class: 'cstart' },
       h('p', { class: 'cstart__lead' }, 'Design the made-to-measure carpentry of the house — kitchen, island, wardrobes, pantry, vanities — and hand complete drawings to a carpenter.'),
-      h('button', { type: 'button', class: 'cstart__opt cstart__opt--main', onClick: () => C.adopt() },
+      // the architect's carpentry exists only for the built-in house
+      !isBuiltinBase() ? null : h('button', { type: 'button', class: 'cstart__opt cstart__opt--main', onClick: () => C.adopt() },
         h('span', { class: 'cstart__icon' }, icon('home', { size: 22 })),
         h('span', { class: 'cstart__text' },
           h('span', { class: 'cstart__title' }, 'Start from the architect’s layout'),
@@ -45,7 +47,7 @@ export function initRunsPanel(root, app, C) {
         h('span', { class: 'cstart__text' },
           h('span', { class: 'cstart__title' }, 'Start empty'),
           h('span', { class: 'cstart__desc' }, 'Pick a kind of run, then click a wall in the plan. You get a sensible set of starter units to change.'))),
-      h('p', { class: 'cstart__note' }, 'Everything can be undone. The architect’s furniture placeholders stay until a run replaces them.'));
+      h('p', { class: 'cstart__note' }, isBuiltinBase() ? 'Everything can be undone. The architect’s furniture placeholders stay until a run replaces them.' : 'Everything can be undone.'));
   }
 
   /* ───────── new run: kinds ───────── */

@@ -5,7 +5,8 @@
  * MODEL
  *   `PLAN` (plan.js) is one shared object. An edit replaces PLAN.walls / openings / rooms / wallOutline with NEW
  *   arrays (same PLAN identity) and then tells the store, which records undo and emits 'plan'.
- *   `BASE_PLAN` is a deep-frozen copy of the architect's plan, used for classification, diffing and reset.
+ *   `BASE_PLAN` is a deep-frozen copy of the base plan (the architect's for House 98; another project's after
+ *   `setBasePlan()`), used for classification, diffing and reset. Phase 'draft' (see setPlanPhase) lifts every lock.
  *   A plan whose wall solids, openings and room names equal the architect's IS the architect's plan again
  *   (isPlanModified() → false, exact base arrays restored).
  *
@@ -442,24 +443,30 @@ function buildRooms(m, prevRooms) {
     return { room: r, x0, y0, x1, y1, best: -1, bestArea: 0 };
   });
   for (const c of comps) for (const k of c.cells) { const i = k % nx, j = (k - i) / nx; c.area += (xs[i + 1] - xs[i]) * (ys[j + 1] - ys[j]); }
-  // overlap of every component with every previous room: one scanline per grid row (cell centres)
-  for (let j = 0; j < ny; j++) {
-    const cy = (ys[j] + ys[j + 1]) / 2, dy = ys[j + 1] - ys[j];
-    for (let p = 0; p < prev.length; p++) {
-      const q = prev[p];
-      if (cy < q.y0 || cy > q.y1) continue;
-      const poly = q.room.polygon, cuts = [];
-      for (let e = 0; e < poly.length; e++) {
-        const a = poly[e], b = poly[(e + 1) % poly.length];
-        if ((a[1] > cy) !== (b[1] > cy)) cuts.push(a[0] + ((cy - a[1]) * (b[0] - a[0])) / (b[1] - a[1]));
-      }
-      cuts.sort((a, b) => a - b);
-      for (let t = 0; t + 1 < cuts.length; t += 2) {
-        for (let i = Math.max(0, lowerBound(xs, cuts[t]) - 1); i < nx && xs[i] < cuts[t + 1]; i++) {
-          const cx = (xs[i] + xs[i + 1]) / 2, cid = comp[j * nx + i];
-          if (cid < 0 || cx <= cuts[t] || cx >= cuts[t + 1]) continue;
-          const o = comps[cid].overlap;
-          o.set(p, (o.get(p) || 0) + (xs[i + 1] - xs[i]) * dy);
+  // overlap of every component with every previous room, exact for rectilinear rooms: each grid row is cut into bands at
+  // the room's own vertex heights, and each band's cross-section is intersected with the cells (a coarse grid — few
+  // walls — would otherwise credit a whole wide cell to whichever room holds its centre)
+  for (let p = 0; p < prev.length; p++) {
+    const q = prev[p], poly = q.room.polygon;
+    const vy = [...new Set(poly.map((v) => v[1]))].sort((a, b) => a - b);
+    for (let j = 0; j < ny; j++) {
+      const r0 = Math.max(ys[j], q.y0), r1 = Math.min(ys[j + 1], q.y1);
+      if (r1 <= r0) continue;
+      const stops = [r0, ...vy.filter((y) => y > r0 && y < r1), r1];
+      for (let b = 0; b + 1 < stops.length; b++) {
+        const cy = (stops[b] + stops[b + 1]) / 2, dy = stops[b + 1] - stops[b], cuts = [];
+        for (let e = 0; e < poly.length; e++) {
+          const a = poly[e], c = poly[(e + 1) % poly.length];
+          if ((a[1] > cy) !== (c[1] > cy)) cuts.push(a[0] + ((cy - a[1]) * (c[0] - a[0])) / (c[1] - a[1]));
+        }
+        cuts.sort((a, c) => a - c);
+        for (let t = 0; t + 1 < cuts.length; t += 2) {
+          for (let i = Math.max(0, lowerBound(xs, cuts[t]) - 1); i < nx && xs[i] < cuts[t + 1]; i++) {
+            const cid = comp[j * nx + i], len = Math.min(xs[i + 1], cuts[t + 1]) - Math.max(xs[i], cuts[t]);
+            if (cid < 0 || len <= 0) continue;
+            const o = comps[cid].overlap;
+            o.set(p, (o.get(p) || 0) + len * dy);
+          }
         }
       }
     }
@@ -795,6 +802,15 @@ function fitWall(E, c0, c1, a, b) {
     while (slab(k) === 'free' && gap <= TRIM) { gap += A[k + 1] - A[k]; k++; }
     if (gap <= TRIM && slab(k) === 'wall') kb = k;
   } else while (kb > ka && slab(kb - 1) === 'wall') kb--;
+  // While drafting, a wall drawn by its centre line from / to the centre line of another wall overlaps it partly at
+  // the corner: take in the whole overlap (both walls' thickness) so the two make a clean corner.
+  let lead = ka, trail = kb;
+  if (ENV.draft) {
+    while (slab(ka) === 'mixed' && slab(ka - 1) === 'mixed') ka--;
+    while (kb > ka && slab(kb - 1) === 'mixed' && slab(kb) === 'mixed') kb++;
+    lead = ka; while (lead < kb && slab(lead) === 'mixed') lead++;
+    trail = kb; while (trail > lead && slab(trail - 1) === 'mixed') trail--;
+  }
   if (kb <= ka || A[kb] - A[ka] < MIN_WALL) return fail(`A wall must be at least ${MIN_WALL} cm long.`);
   const rect = E.rect(c0, c1, A[ka], A[kb]);
   let fresh = 0;
@@ -802,7 +818,8 @@ function fitWall(E, c0, c1, a, b) {
     const s = slab(v);
     if (s === 'out') return fail('A new wall must stay inside the house.');
     if (s === 'opening') return fail('A wall cannot run through a door or window.');
-    if (s === 'mixed') return fail('A wall cannot run along or on top of another wall.');
+    if (s === 'mixed' && v >= lead && v < trail) return fail('A wall cannot run along or on top of another wall.');
+    if (s === 'mixed') { fresh += A[v + 1] - A[v]; continue; }
     if (s === 'free') fresh += A[v + 1] - A[v];
     else { const hit = lockedAt(E.rect(c0, c1, A[v], A[v + 1])); if (hit) return fail(hit.cls === 'mamad' ? REASONS.mamad : 'A new wall cannot cross an exterior wall. ' + REASONS.exteriorWall); }
   }
@@ -1070,7 +1087,7 @@ function planAddOpening(input) {
   if (!(width >= K.minW && width <= K.maxW)) return fail(`Width must be ${K.minW}–${K.maxW} cm.`);
   const start = slot(s, width, (s.axis === 'h' ? p.x : p.y) - width / 2, null);
   if (start == null) return fail(`There is not enough free wall here for a ${width} cm opening.`);
-  return { ok: true, segmentId: s.id, rect: openingRect(s, start, width), level: exterior ? 'permit' : 'free', s, width, start };
+  return { ok: true, segmentId: s.id, rect: openingRect(s, start, width), level: exterior && !ENV.draft ? 'permit' : 'free', s, width, start };
 }
 
 /**

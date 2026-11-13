@@ -9,6 +9,7 @@ import { openDialog, openMenu } from './dialogs.js';
 import { SHORTCUTS } from './keyboard.js';
 import { planSvg } from './plan-svg.js';
 import { applyTheme, getPref, setPref } from './prefs.js';
+import { isBuiltinBase, planPhase } from '../core/plan-edit.js';
 
 const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
 
@@ -18,7 +19,7 @@ const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
  */
 export function houseFacts(plan, store) {
   const m = plan.meta || {};
-  const facts = [['Footprint', `${(plan.bounds.w / 100).toFixed(2)} × ${(plan.bounds.h / 100).toFixed(2)} m`, 'outer walls']];
+  const facts = plan.walls.length ? [['Footprint', `${(plan.bounds.w / 100).toFixed(2)} × ${(plan.bounds.h / 100).toFixed(2)} m`, 'outer walls']] : [['House', 'not drawn yet', 'Structure → draw walls']];
   if (m.grossFloorArea) facts.push(['Floor area', `${m.grossFloorArea} m²`, 'ground floor, as drawn']);
   const lot = plan.site && plan.site.boundary;
   if (lot && lot.length >= 4) {
@@ -29,7 +30,8 @@ export function houseFacts(plan, store) {
   const rooms = plan.rooms || [];
   const count = (...types) => rooms.filter((r) => types.includes(r.type)).length;
   const beds = count('bedroom', 'mamad'), baths = count('bathroom'), wcs = count('wc');
-  if (beds) {
+  if (!isBuiltinBase() && rooms.length) facts.push(['Rooms', `${rooms.length}`, `${Math.round(rooms.reduce((a, r) => a + areaM2(r.polygon), 0))} m² inside`]);
+  else if (beds) {
     const sub = [count('mamad') ? 'incl. safe room' : '', baths ? `${baths} ${baths === 1 ? 'bath' : 'baths'}${wcs ? ' + WC' : ''}` : ''].filter(Boolean).join(', ');
     facts.push(['Rooms', `${beds} bedrooms`, sub]);
   }
@@ -42,37 +44,48 @@ export function houseFacts(plan, store) {
 export function openWelcome(app) {
   const { plan, store } = app;
   const m = plan.meta || {};
-  const title = m.lot ? `House ${m.lot}, Kibbutz Afikim (model ${m.model || 'E7'})` : (m.name || store.project.name);
+  const builtin = isBuiltinBase();
+  const title = builtin && m.lot ? `House ${m.lot}, Kibbutz Afikim (model ${m.model || 'E7'})` : store.project.name || m.name;
   const open = (plan.assumptions || []).filter((a) => a.status !== 'confirmed');
   const tip = (name, head, text) => h('li', { class: 'tips__row' }, h('span', { class: 'tips__icon' }, icon(name, { size: 18 })), h('div', null, h('p', { class: 'tips__head' }, head), h('p', { class: 'tips__text' }, text)));
   // The drawing and the facts are read from PLAN, which the owner can edit (and undo) — redraw them when it changes.
   const drawing = h('div', { class: 'welcome__drawing' });
   const facts = h('dl', { class: 'titleblock' });
   const drawPlan = () => {
+    if (!plan.walls.length) { setKids(drawing, h('p', { class: 'welcome__empty' }, 'No house drawn yet.')); setKids(facts, houseFacts(plan, store).map(([k, v, sub]) => h('div', { class: 'titleblock__cell' }, h('dt', null, k), h('dd', { class: 'num' }, v, sub ? h('small', null, sub) : null)))); return; }
     setKids(drawing, planSvg(plan, { pad: 80 }));
     setKids(facts, houseFacts(plan, store).map(([k, v, sub]) => h('div', { class: 'titleblock__cell' }, h('dt', null, k), h('dd', { class: 'num' }, v, sub ? h('small', null, sub) : null))));
   };
   drawPlan();
   const offPlan = store.on('plan', drawPlan);
+  const offBase = store.on('base', () => dlg.close());     // another project was opened: this one's facts are stale
   const body = h('div', { class: 'welcome' },
     h('div', { class: 'welcome__plan' }, drawing,
-      h('p', { class: 'welcome__caption' }, [m.architect ? `Drawn from ${m.architect}` : 'Drawn from the architect’s plan', m.drawingScale ? `, ${m.drawingScale}` : ''])),
+      h('p', { class: 'welcome__caption' }, builtin ? [m.architect ? `Drawn from ${m.architect}` : 'Drawn from the architect’s plan', m.drawingScale ? `, ${m.drawingScale}` : '']
+        : [m.location || 'Your own plan', planPhase() === 'draft' ? ' · draft' : ' · as built'])),
     h('div', { class: 'welcome__text' },
-      h('p', { class: 'welcome__lead' }, 'Furnish and landscape your real house. The plan is measured from the architect’s drawing, every product is on sale in Israel with its price and shop link, and you can walk through the result in 3D.'),
+      h('p', { class: 'welcome__lead' }, builtin ? 'Furnish and landscape your real house. The plan is measured from the architect’s drawing, every product is on sale in Israel with its price and shop link, and you can walk through the result in 3D.'
+        : 'Furnish and landscape your house. Every product is on sale in Israel with its price and shop link, and you can walk through the result in 3D.'),
       facts,
-      h('ul', { class: 'tips' },
+      !builtin ? h('ul', { class: 'tips' },
+        planPhase() === 'draft' ? tip('wall', 'Draw the house as it is', 'Press B for Structure and W for the wall tool, then drag each wall. Add doors and windows, name the rooms, and press “This is the house as built” when the plan is right.') : null,
+        tip('sofa', 'Drag products onto the plan', 'Or press the + on a product card, then click where it goes. Floors and wall finishes apply to the room you click.'),
+        tip('carpentry', 'Design the made-to-measure carpentry', 'Press C for Carpentry: add kitchen, wardrobe and vanity runs along your walls and prepare a quotation package for carpenters.'),
+        tip('walk', 'Walk through and keep an eye on the budget', 'Press 3 to walk the house and watch the sun move through the rooms. The shopping list adds up prices as you place things.'),
+        tip('plan', 'Several projects', 'The project name at the top left switches between projects, creates new ones and exports a project to one file.'))
+      : h('ul', { class: 'tips' },
         tip('sofa', 'Drag products onto the plan', 'Or press the + on a product card, then click where it goes. Floors and wall finishes apply to the room you click.'),
         tip('swap', 'Swap the architect’s placeholders', 'The furniture already on the plan has no product yet. Select a piece and pick a real one in the Inspector.'),
         tip('carpentry', 'Design the made-to-measure carpentry', 'Press C for Carpentry: start from the architect’s kitchen, wardrobes and vanities, edit units right in the elevation, and prepare a quotation package for carpenters.'),
         tip('wall', 'Change walls, doors and windows', 'Press B for Structure. Partitions and interior doors are yours to change; the app says what needs your engineer or a permit, and what is locked.'),
         tip('walk', 'Walk through and keep an eye on the budget', 'Press 3 to walk the house and watch the sun move through the rooms. The shopping list adds up prices as you place things.')),
       open.length ? h('details', { class: 'welcome__assume' },
-        h('summary', null, `${open.length} ${open.length === 1 ? 'assumption' : 'assumptions'} to confirm with the architect`),
+        h('summary', null, `${open.length} ${open.length === 1 ? 'assumption' : 'assumptions'} to confirm${builtin ? ' with the architect' : ''}`),
         h('ul', null, open.map((a) => h('li', null, a.text)))) : null));
   const dlg = openDialog({
     title, size: 'xl', cls: 'dialog--welcome', body,
     actions: [btn('Keyboard shortcuts', { variant: 'quiet', icon: 'keyboard', onClick: () => { dlg.close(); openShortcuts(); } }), btn('Start designing', { variant: 'primary', onClick: () => dlg.close() })],
-    onClose: () => { offPlan(); setPref('welcomed', true); },
+    onClose: () => { offPlan(); offBase(); setPref('welcomed', true); },
   });
   return dlg;
 }
@@ -107,13 +120,13 @@ export function openSettings(app) {
       h('label', { class: 'setrow' }, h('span', { class: 'setrow__label' }, 'Grid step'), grid),
       toggle({ label: 'Snap to walls, grid and other items', checked: store.ui.snap, onChange: (v) => store.setUI({ snap: v }) })),
     h('section', { class: 'settings__group' }, h('h3', { class: 'sec__title' }, 'House'),
-      h('div', { class: 'setrow' }, h('span', { class: 'setrow__label' }, 'Ceiling height', h('small', { class: 'faint' }, 'Confirmed by the owner: 3.00 m')),
+      h('div', { class: 'setrow' }, h('span', { class: 'setrow__label' }, 'Ceiling height', isBuiltinBase() ? h('small', { class: 'faint' }, 'Confirmed by the owner: 3.00 m') : null),
         numField({ value: store.project.ceilingHeight, min: 220, max: 450, step: 5, suffix: 'cm', title: 'Ceiling height in centimetres', onCommit: (v) => store.setProject({ ceilingHeight: Math.round(v) }) })),
       colour('Interior wall paint', 'wallColor'), colour('Exterior render', 'exteriorColor'), colour('Window and door frames', 'frameColor')),
     h('section', { class: 'settings__group' }, h('h3', { class: 'sec__title' }, 'Design'),
       h('div', { class: 'settings__buttons' },
         btn('Show the welcome again', { small: true, onClick: () => { dlg.close(); openWelcome(app); } }),
-        btn("Reset to architect's layout…", { small: true, icon: 'reset', onClick: () => { dlg.close(); actions.resetLayout(); } }))));
+        isBuiltinBase() ? btn("Reset to architect's layout…", { small: true, icon: 'reset', onClick: () => { dlg.close(); actions.resetLayout(); } }) : null)));
   const dlg = openDialog({ title: 'Settings', size: 'md', body, actions: [btn('Done', { variant: 'primary', onClick: () => dlg.close() })] });
   return dlg;
 }

@@ -12,6 +12,8 @@ import { fmtPrice } from './format.js';
 import { shoppingTotal, onCarpentryBudget } from './shopping.js';
 import { WALL_THICKNESSES } from './structure.js';
 import { STRUCTURE_TOOL_LIST, planChip } from './structure-panels.js';
+import { projectSwitcher } from './projects.js';
+import { isBuiltinBase, planPhase } from '../core/plan-edit.js';
 
 const MOD = isMac() ? '⌘' : 'Ctrl';
 
@@ -46,7 +48,8 @@ export function initTopbar(root, app) {
 
   /* Mark + project name */
   const mark = h('div', { class: 'mark', 'aria-hidden': 'true' }, h('span', { class: 'mark__text display' }, app.plan.meta.model || 'E7'));
-  const name = h('input', { class: 'projname display', type: 'text', value: store.project.name, 'aria-label': 'Project name', spellcheck: 'false', maxlength: '60', autocomplete: 'off',
+  // With projects (app.projects) the name is the project switcher; test pages without projects keep the editable name.
+  const name = app.projects ? projectSwitcher(app) : h('input', { class: 'projname display', type: 'text', value: store.project.name, 'aria-label': 'Project name', spellcheck: 'false', maxlength: '60', autocomplete: 'off',
     onKeydown: (e) => { if (e.key === 'Enter') name.blur(); if (e.key === 'Escape') { name.value = store.project.name; name.blur(); e.stopPropagation(); } },
     onBlur: () => { const v = name.value.trim() || app.plan.meta.name; name.value = v; if (v !== store.project.name) store.setProject({ name: v }); } });
 
@@ -80,10 +83,13 @@ export function initTopbar(root, app) {
 
   const sTools = segmented({ options: STRUCTURE_TOOL_LIST.map((t) => ({ value: t.value, label: t.long, icon: t.icon, kbd: t.kbd })), value: store.ui.tool, iconOnly: true, iconSize: 18,
     label: 'Structure tool', cls: 'seg--tools seg--stools', onChange: (tool) => structure.setTool(tool) });
-  const thickness = segmented({ options: WALL_THICKNESSES.map((v) => ({ value: v, label: String(v), tip: `Draw ${v} cm walls` })), value: store.ui.wallThickness,
+  // While the plan is a draft, exterior and safe-room walls (25, 30 cm) can be drawn too.
+  const makeThickness = (draft) => segmented({ options: [...WALL_THICKNESSES, ...(draft ? [25, 30] : [])].map((v) => ({ value: v, label: String(v), tip: `Draw ${v} cm walls` })), value: store.ui.wallThickness,
     label: 'Thickness of new walls, in centimetres', cls: 'seg--thick', onChange: (v) => { store.setUI({ wallThickness: v }); structure.setTool('wall'); } });
+  let thicknessDraft = planPhase() === 'draft';
+  let thickness = makeThickness(thicknessDraft);
   const showChanges = iconBtn('changes', 'Highlight changes to the architect’s plan', { pressed: !!store.ui.showPlanChanges, onClick: () => store.setUI({ showPlanChanges: !store.ui.showPlanChanges }) });
-  const resetPlanBtn = iconBtn('reset', 'Reset to architect’s plan…', { onClick: () => structure.reset() });
+  const resetPlanBtn = iconBtn('reset', 'Reset walls, doors and windows…', { onClick: () => structure.reset() });
   const structureBar = h('div', { class: 'sbar', role: 'group', 'aria-label': 'Structure tools' },
     sTools,
     h('div', { class: 'sbar__thick', 'data-tip': 'Thickness of new walls' }, icon('wall', { size: 16 }), thickness, h('span', { class: 'sbar__unit' }, 'cm')),
@@ -140,8 +146,8 @@ export function initTopbar(root, app) {
     return [
       { label: 'Save design', icon: 'save', kbd: `${MOD} S`, onSelect: actions.saveDesign },
       { label: 'Open design…', icon: 'open', onSelect: actions.openDesign },
-      { label: "Reset to architect's layout…", icon: 'reset', onSelect: actions.resetLayout },
-      { label: 'Reset walls to architect’s plan…', icon: 'wall', disabled: !structure.isModified(), onSelect: () => structure.reset() },
+      isBuiltinBase() && { label: "Reset to architect's layout…", icon: 'reset', onSelect: actions.resetLayout },
+      { label: isBuiltinBase() ? 'Reset walls to architect’s plan…' : 'Reset walls to the plan as built…', icon: 'wall', disabled: !structure.isModified(), onSelect: () => structure.reset() },
       { separator: true },
       { label: 'Export plan as PNG', icon: 'image', onSelect: actions.exportPlanPNG },
       { label: 'Export 3D snapshot', icon: 'camera', onSelect: actions.export3DSnapshot },
@@ -204,6 +210,12 @@ export function initTopbar(root, app) {
   };
   const syncPlan = () => {
     chip.refresh();
+    if ((planPhase() === 'draft') !== thicknessDraft) {
+      thicknessDraft = planPhase() === 'draft';
+      const next = makeThickness(thicknessDraft);
+      thickness.replaceWith(next); thickness = next;
+      if (!thicknessDraft && store.ui.wallThickness > 20) store.setUI({ wallThickness: 20 });
+    }
     const modified = structure.isModified(), n = structure.diff().items.length;
     resetPlanBtn.disabled = !modified;
     editBadge.hidden = !modified;
@@ -215,6 +227,7 @@ export function initTopbar(root, app) {
   };
   store.on('plan', (e) => { if (!e || !e.transient) syncPlan(); });
   store.on('load', syncPlan);
+  store.on('base', () => { syncPlan(); syncHistory(); });
   store.on('history', syncHistory);
   store.on('ui', syncUI);
   store.on('project', () => { if (document.activeElement !== name) name.value = store.project.name; refreshBudget(); });

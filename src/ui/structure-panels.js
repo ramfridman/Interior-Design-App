@@ -6,7 +6,9 @@ import { h, setKids } from './dom.js';
 import { icon } from './icons.js';
 import { btn, iconBtn, section, kbd } from './components.js';
 import { openPopover } from './dialogs.js';
-import { LEVELS, LEVEL_ORDER, levelTag } from './structure.js';
+import { LEVELS, LEVEL_ORDER, levelTag, basePlanName } from './structure.js';
+import { phaseCard } from './projects.js';
+import { planPhase } from '../core/plan-edit.js';
 
 /** Structure tools: value = store.ui.tool. Shared by the top bar and the guide so the two can never drift apart. */
 export const STRUCTURE_TOOL_LIST = [
@@ -49,6 +51,7 @@ export function initStructureGuide(root, app) {
     h('header', { class: 'side__head' }, h('h2', { class: 'cat__title display truncate' }, 'Structure'),
       iconBtn('panel-left', 'Hide this guide', { onClick: () => app.setPanelOpen('left', false) })),
     h('div', { class: 'guide__body' },
+      app.projects ? phaseCard(app) : null,
       h('p', { class: 'guide__lead' }, 'Change the walls, doors and windows of your house, within what is allowed. Every wall and opening is one of four levels.'),
       legend,
       section('Tools', tools),
@@ -82,14 +85,16 @@ export function changesSection(app, opts = {}) {
   const { structure } = app;
   const count = h('span', { class: 'sec__note num' });
   const body = h('div', { class: 'changes__body' });
-  const el = section(opts.title || 'Changes to the architect’s plan', { aside: count, class: 'changes-sec' }, body);
+  const el = section(opts.title || `Changes to ${basePlanName()}`, { aside: count, class: 'changes-sec' }, body);
   el.refresh = () => {
+    const title = !opts.title && el.querySelector('.sec__title');
+    if (title && title.firstChild && title.firstChild.nodeType === 3) title.firstChild.textContent = planPhase() === 'draft' ? 'Changes to the plan' : `Changes to ${basePlanName()}`;
     const items = structure.diff().items;
     const modified = structure.isModified();
     el.hidden = !!opts.quietWhenEmpty && !modified;
     count.textContent = modified ? `${items.length} ${items.length === 1 ? 'change' : 'changes'}` : '';
     if (!modified) {
-      setKids(body, h('p', { class: 'sec__empty' }, 'None. The walls, doors and windows are exactly as the architect drew them.'),
+      setKids(body, h('p', { class: 'sec__empty' }, planPhase() === 'draft' ? 'Not tracked while the plan is a draft — everything you draw is the house as it is.' : `None. The walls, doors and windows are exactly as on ${basePlanName()}.`),
         structure.isActive() ? null : btn('Change walls and openings', { small: true, icon: 'wall', kbd: 'B', onClick: () => structure.enter() }));
       return;
     }
@@ -97,7 +102,7 @@ export function changesSection(app, opts = {}) {
     setKids(body,
       note ? h('p', { class: 'changes__note' }, note) : null,
       items.length ? changeRows(app, items) : h('p', { class: 'sec__empty' }, 'Rooms were renamed; the walls and openings are unchanged.'),
-      h('div', { class: 'changes__foot' }, btn('Reset to architect’s plan', { small: true, icon: 'reset', onClick: () => structure.reset() })));
+      h('div', { class: 'changes__foot' }, btn(`Reset to ${basePlanName()}`, { small: true, icon: 'reset', onClick: () => structure.reset() })));
   };
   el.refresh();
   return el;
@@ -112,15 +117,15 @@ export function planChip(app) {
   const dot = h('span', { class: 'planchip__dot', 'aria-hidden': 'true' });
   const label = h('span', { class: 'planchip__label' }, 'Plan modified');
   const count = h('span', { class: 'planchip__count num' });
-  const el = h('button', { type: 'button', class: 'planchip', hidden: true, 'aria-haspopup': 'dialog', 'data-tip': 'Changes to the architect’s plan', onClick: open }, dot, label, count);
+  const el = h('button', { type: 'button', class: 'planchip', hidden: true, 'aria-haspopup': 'dialog', 'data-tip': 'Changes to the plan', onClick: open }, dot, label, count);
   function open() {
     const items = structure.diff().items;
     const note = attention(items);
     const pop = openPopover(el, h('div', { class: 'changes-pop' },
-      h('p', { class: 'fopts__title' }, 'Changes to the architect’s plan', h('span', { class: 'num faint' }, String(items.length))),
+      h('p', { class: 'fopts__title' }, `Changes to ${basePlanName()}`, h('span', { class: 'num faint' }, String(items.length))),
       note ? h('p', { class: 'changes__note' }, note) : null,
       items.length ? changeRows(app, items, () => pop.close(false)) : h('p', { class: 'sec__empty' }, 'Rooms were renamed; the walls and openings are unchanged.'),
-      h('div', { class: 'changes__foot' }, btn('Reset to architect’s plan', { small: true, icon: 'reset', onClick: () => { pop.close(); structure.reset(); } }))),
+      h('div', { class: 'changes__foot' }, btn(`Reset to ${basePlanName()}`, { small: true, icon: 'reset', onClick: () => { pop.close(); structure.reset(); } }))),
     { cls: 'popover--panel popover--changes', placement: 'bottom-end', label: 'Changes to the architect’s plan' });
   }
   el.refresh = () => {
