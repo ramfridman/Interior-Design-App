@@ -1,6 +1,10 @@
 # Public hosting plan — E7 House Designer
 
-Status: **plan only, nothing here has been done yet.** Written 13 Nov 2026.
+Status (13 Nov 2026, night): **the site build is ready; nothing is deployed.** Steps 1, 3 and 4 are done by `node dev/build-site.mjs`, which writes `dist/site/` with `robots.txt`, a `noindex` tag, and a `_headers` file (Content-Security-Policy, no-index header, cache rules) in the format Cloudflare Pages reads. The built site was booted locally with those headers applied (`node dev/build-site.mjs --serve`) — plan, carpentry and the quotation document loaded with no policy errors; the 3D view under that policy is still to be re-checked.
+
+What remains needs the owner: (1) decide whether the working branch is merged into the default branch first (a pull request), (2) the Cloudflare account and GitHub authorisation, (3) the list of invited email addresses. In Cloudflare Pages use build command `node dev/build-site.mjs`, output directory `dist/site`, no framework preset.
+
+Note: the later request for online saving with several people on one project (see `docs/TODO.md`) changes hosting from static-only to static + a small backend; this static deployment is still the right first step and stays valid.
 
 ## Owner's decisions (13 Nov 2026)
 
