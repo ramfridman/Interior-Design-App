@@ -338,6 +338,37 @@ group('10. Store still behaves (items, history) and plan + items share one histo
   store._redo.length = 0;
 }
 
+group('10b. Junctions: free-standing walls, corners that follow, walls that slide along others');
+{
+  const mainArea = () => polygonArea(room('main').polygon), a0 = mainArea();
+  const isle = E.addWall({ x1: 500, y1: 400, x2: 800, y2: 400 });
+  check('free-standing partition: the room polygon gets a hole (slit), area − 0.30 m²', isle.ok && eq(isle.ids, ['seg:h:395:500:800']) && a0 - mainArea() === 3000
+    && !pointInPolygon(650, 400, room('main').polygon) && pointInPolygon(650, 420, room('main').polygon) && PLAN.rooms.length === 9, isle.reason);
+  sound('free-standing wall');
+  const arm = E.addWall({ x1: 795, y1: 400, x2: 795, y2: 600 });
+  check('second wall from its end makes a clean L (trimmed to the first wall\'s face)', arm.ok && eq(arm.ids, ['seg:v:790:405:600']) && !!seg('seg:h:395:500:790'), arm.reason || arm.ids.join());
+  const north = E.moveWallSegment('seg:h:395:500:790', -50);
+  check('moving one arm away: the other stretches to follow', north.ok && eq(north.ids, ['seg:h:345:500:790']) && !!seg('seg:v:790:355:600'), north.reason);
+  const south = E.moveWallSegment('seg:h:345:500:790', 120);
+  check('moving it back over the other arm: that one shrinks', south.ok && !!seg('seg:v:790:475:600') && a0 - mainArea() === 300 * 10 + 125 * 10, south.reason);
+  sound('L moves');
+  const cross = E.addWall({ x1: 600, y1: 300, x2: 600, y2: 700 });
+  check('a wall may cross a partition (X junction)', cross.ok && eq(cross.ids, ['seg:v:595:300:465', 'seg:v:595:475:700']) && PLAN.walls.some((w) => w.x === 500 && w.y === 465 && w.w === 300), cross.reason);
+  sound('crossing');
+  E.resetPlan();
+  // sliding a T-wall along the walls it stands on; the walls it carried follow
+  const hall = E.moveWallSegment('seg:v:1145:880:1050', -30);
+  check('hall / bedroom-2 wall 30 cm west: door travels, bedroom partition stretches', hall.ok && opening('door-bedroom-2').x === 1115 && !!seg('seg:h:1050:1125:1145')
+    && Math.abs(m2(polygonArea(room('bedroom-2').polygon)) - (10.8 + 0.3 * 1.7)) < 0.001, hall.reason);
+  check('diff reports one moved wall (no noise for the stretch or the carried door)', eq(E.planDiff().items.map((i) => i.kind), ['wall-moved']), E.planDiff().items.map((i) => i.text).join(' | '));
+  sound('T move');
+  refused('moving the bedroom partition onto a door', E.moveWallSegment('seg:h:1050:1155:1515', 50), /end on a door/);
+  refused('moving a wall through another wall', E.moveWallSegment('seg:h:1050:1155:1515', 400));
+  E.resetPlan();
+  check('reset', planEqualsBase());
+  store._undo.length = 0; store._redo.length = 0;
+}
+
 group('11. 200 random valid edits, then resetPlan()');
 {
   let seed = 98;
@@ -390,9 +421,10 @@ group('12. Performance of single operations (warm)');
   const time = (f) => { const t = performance.now(); f(); return performance.now() - t; };
   const t = [
     time(() => E.removeWallSegment('seg:h:1050:1155:1515')), time(() => E.addWall({ x1: 1000, y1: 130, x2: 1000, y2: 500 })),
-    time(() => E.moveWallSegment('seg:v:995:120:510', 50)), time(() => E.addOpening({ kind: 'door', x: 1050, y: 300 })),
+    time(() => E.moveWallSegment('seg:v:995:120:510', 20)), time(() => E.addOpening({ kind: 'door', x: 1050, y: 300 })),
     time(() => E.updateOpening('win-living-e', { offset: 30 })), time(() => store.undo()), time(() => E.resetPlan()),
   ];
+  check('all of them were real edits', E.isPlanModified() === false && events.slice(-7).map((e) => e.reason).join() === 'remove-wall,add-wall,move-wall,add-opening,update-opening,history,reset', events.slice(-7).map((e) => e.reason).join());
   check('each < 30 ms', Math.max(...t) < 30, t.map((x) => x.toFixed(1)).join(' / ') + ' ms');
   check('final state is the architect\'s plan', planEqualsBase());
 }

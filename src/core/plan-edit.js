@@ -862,9 +862,9 @@ export function moveWallSegment(segmentId, delta, opts) {
       while (across(v, uc0, uc1, (k) => m.cell[k] && m.type[k] === T_J)) { rows.push(v); v += end.dir; }
       const continues = across(v, uc0, uc1, (k) => m.cell[k] !== FREE);
       const landed = rows.every((r) => across(r, un0, un1, (k) => m.cell[k] === WALL));
+      if (!rows.every((r) => across(r, un0, un1, (k) => m.cell[k] !== GAP))) return fail('That wall would end on a door or window.');
       for (const r of rows) for (let u = hull0; u < hull1; u++) {                               // stretch the wall it meets
         const k = K(u, r);
-        if (m.cell[k] === GAP) return fail('A door or window is in the way.');
         if (m.cell[k] === FREE) { if (m.out[k]) return fail('A wall cannot leave the house.'); fill.push(k); }
       }
       const trail = d0 > 0 ? uc0 - 1 : uc1, s0 = d0 > 0 ? uc0 : un1, s1 = d0 > 0 ? un0 : uc1;
@@ -1105,12 +1105,16 @@ export function planDiff() {
   const items = [];
   if (!modified) return { changed: false, items };
   const base = analysisOf(BASE_PLAN), cur = current(), solids = solidsOf(PLAN), coreLen = (s) => (s.axis === 'h' ? s.core.w : s.core.h);
-  const gone = base.segments.filter((s) => coverage(s.core, solids) < 0.5), added = cur.segments.filter((s) => s.isNew && !s.id.startsWith('seg:j'));
+  const gone = base.segments.filter((s) => coverage(s.core, solids) < 0.5), carried = [];
+  // a short new piece in line with an existing wall is that wall stretched to follow a move, not a new wall
+  const stretch = (n) => { const a = coreSpan(n); return cur.segments.some((g) => { const b = coreSpan(g); return !g.isNew && g.axis === n.axis && a.c0 === b.c0 && a.c1 === b.c1 && Math.min(Math.abs(b.a0 - a.a1), Math.abs(a.a0 - b.a1)) <= TMAX; }); };
+  const added = cur.segments.filter((s) => s.isNew && !s.id.startsWith('seg:j') && !stretch(s));
   for (const g of gone) {
     const pos = (s) => (s.axis === 'h' ? s.core.y : s.core.x), a = coreSpan(g);
     const twin = added.find((n) => { const b = coreSpan(n); return n.axis === g.axis && n.thickness === g.thickness && Math.abs(pos(n) - pos(g)) <= 200 && overlapLen(a.a0, a.a1, b.a0, b.a1) >= 0.5 * Math.min(coreLen(g), coreLen(n)); });
     if (twin) {
       added.splice(added.indexOf(twin), 1);
+      carried.push({ core: twin.core, dx: g.axis === 'v' ? pos(twin) - pos(g) : 0, dy: g.axis === 'h' ? pos(twin) - pos(g) : 0 });
       const by = pos(twin) - pos(g), dir = g.axis === 'h' ? (by > 0 ? 'south' : 'north') : (by > 0 ? 'east' : 'west');
       items.push({ kind: 'wall-moved', level: g.policy.level, text: `Moved the ${wallName(g)} ${sides(g)} ${Math.abs(by)} cm ${dir}`, at: centreOf(twin.core), ref: twin.id });
     } else items.push({ kind: 'wall-removed', level: g.policy.level, text: `Removed the ${wallName(g)} ${sides(g)} (${metres(coreLen(g))})`, at: centreOf(g.core), ref: g.id });
@@ -1124,7 +1128,8 @@ export function planDiff() {
     const o = PLAN.openings.find((x) => x.id === b.id), level = b.exterior ? 'permit' : 'free';
     if (!o) { if (coverage(b, solids) >= 0.5) items.push({ kind: 'opening-removed', level, text: `Closed the ${openingName(b)} (${b.width} cm) — ${whereOpening(b)}`, at: centreOf(b), ref: b.id }); continue; }
     const what = [];
-    if (o.x !== b.x || o.y !== b.y) what.push(`moved ${Math.abs(o.x - b.x) + Math.abs(o.y - b.y)} cm`);
+    const rode = carried.some((c) => overlapArea(o, c.core) > 0 && o.x - b.x === c.dx && o.y - b.y === c.dy);   // travelled with its wall
+    if ((o.x !== b.x || o.y !== b.y) && !rode) what.push(`moved ${Math.abs(o.x - b.x) + Math.abs(o.y - b.y)} cm`);
     if (o.width !== b.width) what.push(`width ${b.width} → ${o.width} cm`);
     if (o.height !== b.height) what.push(`height ${b.height} → ${o.height} cm`);
     if (o.sill !== b.sill) what.push(`sill ${b.sill} → ${o.sill} cm`);
