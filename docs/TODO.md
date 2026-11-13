@@ -48,6 +48,8 @@ Decisions: quotation PDF in **English and Hebrew** (chosen at export); **cost es
 
 Build order: (1) core engine `src/carpentry/` — runs, module library, fit, validation, take-off, estimate, dimensioned drawings, schedules [in progress, Opus]; (2) carpenter directory research and (3) Israeli price-book research [in progress, Sonnet]; (4) drawing / PDF kit: SVG preview + real vector PDF with embedded Hebrew font, bilingual document composer; (5) Carpentry mode UI: run editor on the plan, elevation editor, spec inspector, estimate panel, quotation preview + export, carpenter list; (6) integration, review, publish.
 
+Added 13 Nov — **Bespoke ideas** (owner's example: a corner pantry with removable doors): door operations on any unit, tall corner pantry, free-form bespoke unit composer, and free-text special requirements that flow to drawings, schedules, the quotation form and the PDF [engine extension in progress].
+
 Original request and scope notes:
 
 Design all made-to-measure carpentry for the house and hand a carpenter a complete package to price.
