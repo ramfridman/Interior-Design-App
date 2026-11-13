@@ -25,6 +25,7 @@ const PARAPET_T = 20;                         // parapet thickness (cm) — same
 const COPING_H = 0.04, COPING_OVER = 2;       // parapet coping: 4 cm slab, 2 cm overhang (cm)
 const AO_FLOOR = { width: 0.45, alpha: 0.34 }, AO_CEILING = { width: 0.4, alpha: 0.2 };   // baked contact shading strips
 const WALL_FADE = 0.45;                       // height (m) of the soft darkening at the foot / head of interior walls
+const PLINTH_PROUD = 0.8;                     // cm the plinth course stands proud of the render
 const IDENTITY = new THREE.Matrix4();
 
 /** Soft contact-shadow strips (black, per-vertex alpha) laid on floors and ceilings along the walls. */
@@ -173,7 +174,7 @@ function buildShellSoups(grid, plan, sides, top, ceiling, plinthDepth, dryRooms)
     ]) {
       const nk = (j + dj) * nx + (i + di), nKind = kind[nk];
       if (nKind === WALL) continue;
-      if (nKind === OUT) addFace(axis, c, s, a0, a1, -plinthDepth, 0, 'plinth');
+      if (nKind === OUT) addFace(axis, c + s * PLINTH_PROUD, s, a0, a1, -plinthDepth, 0.012, 'plinth');   // stands 8 mm proud, laps the wall foot
       for (const [y0, y1] of subtract(solid, solidOf(grid, nk, top))) {
         if (nKind === OPENING) splitAcross(ref[nk], a0, a1, (p, q, mat) => addFace(axis, c, s, p, q, y0, y1, mat));
         else addFace(axis, c, s, a0, a1, y0, y1, faceMat(grid, nk));
@@ -322,7 +323,8 @@ export function prism(outline, holes, y0, y1, soups) {
 function buildRoofSoups(outline, H, slab, parapet) {
   const ext = new Soup(), topSoup = new Soup(), coping = new Soup();
   if (!outline) return { ext, top: topSoup, coping };
-  prism(outline, [], H, H + slab, { top: topSoup, bottom: ext, side: ext });
+  prism(outline, [], H, H + slab, { top: topSoup, bottom: ext });
+  prism(outline, [], H - 0.015, H + slab, { side: ext });               // laps the wall head so no hairline can open at the joint
   if (parapet > 0.01) {
     const inner = insetLoop(outline, PARAPET_T), y = H + slab;
     prism(outline, [inner], y, y + parapet, { side: ext });

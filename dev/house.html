@@ -88,7 +88,7 @@ const VIEWS = {
   living: () => { const l = zone('living'), d = opening('door-terrace'); return [[l[0] + 1.2, eye, l[1] + 0.4], [d[0], 1.25, d[1]], 72]; },
   kitchen: () => { const k = zone('kitchen'), d = zone('dining'); return [[d[0] + 2.6, eye, d[1] + 0.6], [k[0] - 1.2, 1.2, k[1]], 72]; },
   corridor: () => { const h = zone('hall'), p = opening('door-parents'); return [[h[0] - 0.9, eye, p[1]], [p[0], 1.3, p[1]], 65]; },
-  hall: () => { const h = zone('hall'), f = zone('foyer'); return [[f[0] - 0.3, eye, f[1] + 0.3], [h[0], 1.3, h[1] + 1], 72]; },
+  hall: () => { const h = zone('hall'), d = zone('dining'); return [[d[0] + 1.6, eye, d[1] + 1.2], [h[0], 1.2, h[1] + 0.6], 72]; },
   bedroom: () => { const d = opening('door-bedroom-1'), l = lab('bedroom-1'); return [[d[0] + 0.5, eye, d[1] - 0.1], [l[0] + 1.3, 1.1, l[1] + 1], 75]; },
   'master-bedroom': () => { const d = opening('door-parents'), l = lab('parents-bedroom'); return [[d[0] - 0.5, eye, d[1] - 0.2], [l[0] - 1.2, 1.1, l[1] + 0.8], 75]; },
   bathroom: () => { const d = opening('door-bath'), l = lab('bath'); return [[d[0] - 0.35, eye, d[1]], [l[0] - 0.6, 1.2, l[1] + 1.6], 78]; },
