@@ -34,6 +34,9 @@ async function main() {
   check('app boots (app-ready)', ready, ready ? '' : await page.evaluate(() => document.getElementById('boot-status')?.textContent || ''));
   if (!ready) { console.log(errors.join('\n')); await browser.close(); return; }
   await sleep(1200);
+  // Dismiss the first-run welcome so screenshots show the views.
+  await page.getByRole('button', { name: 'Start designing' }).click({ timeout: 3000 }).catch(() => {});
+  await sleep(400);
 
   const info = await page.evaluate(() => {
     const a = window.app;
