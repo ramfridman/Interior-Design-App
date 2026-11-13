@@ -349,10 +349,9 @@ function roomPolygon(m, comp, cid, cells) {
     const px = m.xs[i], py = v[1];
     const k = poly.findIndex((a, q) => { const b = poly[(q + 1) % poly.length]; return a[0] === px && b[0] === px && a[1] > b[1] && py < a[1] && py >= b[1]; });
     if (k < 0) continue;                                    // cannot bridge — leave the hole out (area slightly over-stated)
-    const b = poly[(k + 1) % poly.length], onVertex = b[1] === py;
-    const bridge = [...(onVertex ? [] : [[px, py]]), ...hole, [v[0], v[1]], [px, py]];
-    poly = [...poly.slice(0, k + 1), ...bridge, ...poly.slice(k + 1)];
-    if (onVertex) poly.splice(k + 1 + bridge.length - 1, 1);  // the vertex itself already follows the bridge
+    const at = (k + 1) % poly.length, onVertex = poly[at][1] === py;
+    if (onVertex) poly.splice(at + 1, 0, ...hole, [v[0], v[1]], [px, py]);
+    else poly.splice(k + 1, 0, [px, py], ...hole, [v[0], v[1]], [px, py]);
   }
   return poly;
 }
@@ -429,7 +428,8 @@ function buildRooms(m, prevRooms) {
   const kept = new Array(prev.length).fill(null), fresh = [], roomOf = new Array(comps.length);
   comps.forEach((c, cid) => {
     let winner = -1, parent = -1;
-    for (const [p, a] of c.overlap) {
+    for (const p of [...c.overlap.keys()].sort((a, b) => a - b)) {      // ties → the room listed first
+      const a = c.overlap.get(p);
       if (parent < 0 || a > c.overlap.get(parent)) parent = p;
       if (prev[p].best === cid && (winner < 0 || a > c.overlap.get(winner))) winner = p;
     }
@@ -480,9 +480,9 @@ function derive(solids, openings, prevRooms, prevWalls) {
       // MIN_JAMB of solid wall of the same core on both sides
       const wallAt = (a) => { for (let t = horizontal ? j0 : i0; t < (horizontal ? j1 : i1); t++) { const k = horizontal ? t * nx + a : a * nx + t; if (cell[k] !== WALL || cores[core0[k]] !== c) return false; } return true; };
       const A = horizontal ? xs : ys, s = horizontal ? i0 : j0, e = horizontal ? i1 : j1;
-      let a = s - 1; while (a >= 0 && wallAt(a) && A[s] - A[a] < MIN_JAMB) a--;
+      let a = s; while (a > 0 && wallAt(a - 1) && A[s] - A[a] < MIN_JAMB) a--;
       let b = e; while (b < A.length - 1 && wallAt(b) && A[b] - A[e] < MIN_JAMB) b++;
-      if (A[s] - A[a + 1] < MIN_JAMB || A[b] - A[e] < MIN_JAMB) ok = false;
+      if (A[s] - A[a] < MIN_JAMB || A[b] - A[e] < MIN_JAMB) ok = false;
     }
     if (!ok) { problems.push({ id: o.id, type: 'jamb' }); return o; }
     const im = (i0 + i1) >> 1, jm = (j0 + j1) >> 1;
@@ -541,14 +541,8 @@ const sameOpening = (a, b, keys) => keys.every((k) => a[k] === b[k]);
 function sameSolid(a, b) {
   const area = (list) => list.reduce((s, r) => s + r.w * r.h, 0);
   if (area(a) !== area(b)) return false;
-  const m = buildModel(a, []), other = buildModel([], [], m.xs, m.ys);
-  if (b.some((r) => lowerBound(m.xs, r.x) >= m.xs.length || m.xs[lowerBound(m.xs, r.x)] !== r.x || m.xs[lowerBound(m.xs, r.x + r.w)] !== r.x + r.w
-    || m.ys[lowerBound(m.ys, r.y)] !== r.y || m.ys[lowerBound(m.ys, r.y + r.h)] !== r.y + r.h)) {
-    const both = buildModel([...a, ...b], []), A = buildModel(a, [], both.xs, both.ys), B = buildModel(b, [], both.xs, both.ys);
-    return A.cell.every((v, k) => v === B.cell[k]);
-  }
-  for (const r of b) paint(other, r, WALL);
-  return m.cell.length === other.cell.length && m.cell.every((v, k) => v === other.cell[k]);
+  const all = buildModel([...a, ...b], []), A = buildModel(a, [], all.xs, all.ys), B = buildModel(b, [], all.xs, all.ys);
+  return A.cell.length === B.cell.length && A.cell.every((v, k) => v === B.cell[k]);
 }
 
 function isArchitectPlan(d) {
@@ -623,11 +617,15 @@ export function applyPlanState(state) {
     const d = derive([...s.walls, ...s.openings], s.openings, prevRooms, s.walls);
     const locked = analysisOf(BASE_PLAN).segments.filter((g) => g.policy.level === 'locked');
     const solids = [...d.walls, ...d.openings];
+    const footprint = (walls, openings, rooms) => [...walls, ...openings].reduce((a, r) => a + r.w * r.h, 0) + rooms.reduce((a, r) => a + polygonArea(r.polygon), 0);
     const intact = d.problems.length === 0 && d.rooms.length > 0
       && locked.every((g) => coverage(g, solids) > 0.999)
-      && d.segments.every((g) => g.policy.level !== 'locked' || coverage(g, BASE_SOLIDS) > 0.999)
+      && Math.abs(footprint(d.walls, d.openings, d.rooms) - footprint(BASE_PLAN.walls, BASE_PLAN.openings, BASE_PLAN.rooms)) < 1
       && BASE_PLAN.openings.filter(inMamad).every((b) => { const o = d.openings.find((x) => x.id === b.id); return o && JSON.stringify(o) === JSON.stringify(b); });
     if (!intact) return toBase('The saved plan edits do not fit this house — the architect\'s plan was restored.');
+    // keep the saved rectangles (ids included) when they describe the same walls, so undo / redo is exact
+    const area = (list) => list.reduce((a, r) => a + r.w * r.h, 0);
+    if (s.walls.every((w) => typeof w.id === 'string' && typeof w.kind === 'string') && area(s.walls) === area(d.walls)) d.walls = s.walls;
     return { ok: true, changed: install(d) };
   } catch (e) {
     return toBase('The saved plan edits could not be applied — the architect\'s plan was restored.');
@@ -935,7 +933,7 @@ function planAddOpening(input) {
   if (!num(p.x) || !num(p.y)) return fail('An opening needs a position.');
   const width = snap(num(p.width) ? p.width : K.width);
   let s = null, sd = Infinity;
-  for (const g of current().segments) { if (g.core.w <= 0) continue; const dist = rectDist(p.x, p.y, g.core); if (dist < sd) { sd = dist; s = g; } }
+  for (const g of current().segments) { if (g.id.startsWith('seg:j')) continue; const dist = rectDist(p.x, p.y, g.core); if (dist < sd) { sd = dist; s = g; } }
   if (!s || sd > REACH) return fail('There is no wall here.');
   if (s.cls === 'mamad') return fail(REASONS.mamad);
   const exterior = s.cls === 'exterior';

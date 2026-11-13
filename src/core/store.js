@@ -11,6 +11,11 @@
  *   'ui'         { keys: string[] }          – store.ui changed
  *   'project'    { keys: string[] }          – store.project changed (ceiling height, roof, name…)
  *   'finishes'   { ids: string[] }           – room floor / wall finish changed
+ *   'plan'       { reason, changed: { walls, openings, rooms }, transient? }
+ *                                            – PLAN.walls / openings / rooms / wallOutline were REPLACED (core/plan-edit.js,
+ *                                              undo / redo, load). reason: 'add-wall' | 'remove-wall' | 'move-wall' |
+ *                                              'resize-wall' | 'add-opening' | 'update-opening' | 'remove-opening' |
+ *                                              'update-room' | 'reset' | 'history' | 'load'. Rebuild everything drawn from PLAN.
  *   'history'    { canUndo, canRedo }
  *   'load'       {}                          – whole design replaced (file open / reset)
  *   '*'          (eventName, payload)        – everything
@@ -18,9 +23,12 @@
  * HISTORY
  *   Every mutating call records one undo step, except calls with { transient: true } (used while dragging).
  *   Wrap a drag as: store.begin(); …updateItem(id, patch, { transient: true })…; store.commit('Move');
+ *   Plan edits (core/plan-edit.js) are part of the same history: every snapshot also holds the edited plan
+ *   ({ walls, openings, rooms }, or null while the plan is the architect's), so undo / redo / cancel restore it.
  */
 import { PLAN } from './plan.js';
 import { spaceAt } from './geometry.js';
+import { bindPlanHost, planState, planStateKey, applyPlanState } from './plan-edit.js';
 
 const STORAGE_KEY = 'e7-interior-design/v1';
 const HISTORY_LIMIT = 200;
@@ -118,7 +126,7 @@ class Store {
   spaceOf(item) { return spaceAt(item.x, item.y); }
 
   // ---------- history ----------
-  _snapshot() { return JSON.stringify({ items: this.items, finishes: this.finishes, project: this.project }); }
+  _snapshot() { return `{"items":${JSON.stringify(this.items)},"finishes":${JSON.stringify(this.finishes)},"project":${JSON.stringify(this.project)},"plan":${planStateKey()}}`; }
   _pushUndo(snap) {
     this._undo.push(snap);
     if (this._undo.length > HISTORY_LIMIT) this._undo.shift();
@@ -148,8 +156,10 @@ class Store {
   historyState() { return { canUndo: this._undo.length > 0, canRedo: this._redo.length > 0 }; }
   _restore(snap) {
     const s = JSON.parse(snap);
+    const plan = applyPlanState(s.plan || null);            // no-op unless the snapshot holds a different plan
     this.items = s.items; this.finishes = s.finishes || {}; this.project = { ...DEFAULT_PROJECT, ...s.project };
     this.selection = this.selection.filter((id) => this.getItem(id));
+    if (plan.changed.walls || plan.changed.openings || plan.changed.rooms) this.emit('plan', { reason: 'history', changed: plan.changed });
     this.emit('items', { type: 'reset', ids: this.items.map((i) => i.id) });
     this.emit('finishes', { ids: Object.keys(this.finishes) });
     this.emit('project', { keys: Object.keys(this.project) });
@@ -272,14 +282,32 @@ class Store {
     this.emit('finishes', { ids: [spaceId], transient: !!opts.transient });
   }
 
+  // ---------- plan edits (see core/plan-edit.js) ----------
+  /** Drop finishes of rooms that no longer exist (merged away by a plan edit). Returns the dropped space ids. */
+  _pruneFinishes() {
+    const spaces = new Set([...PLAN.rooms, ...PLAN.outdoorAreas].map((s) => s.id));
+    const gone = Object.keys(this.finishes).filter((id) => !spaces.has(id));
+    for (const id of gone) delete this.finishes[id];
+    if (this.ui.activeSpace && !spaces.has(this.ui.activeSpace)) this.ui.activeSpace = null;
+    return gone;
+  }
+  /** plan-edit.js calls this right after it replaced the PLAN arrays. */
+  _planChanged(payload) {
+    const gone = this._pruneFinishes();
+    this.emit('plan', payload);
+    if (gone.length) this.emit('finishes', { ids: gone, transient: !!payload.transient });
+  }
+
   // ---------- persistence ----------
+  /** `planEdits` = { walls, openings, rooms } of an edited plan, null while the plan is the architect's. */
   serialize() {
-    return { app: 'e7-interior-design', version: 1, savedAt: new Date().toISOString(), project: this.project, items: this.items, finishes: this.finishes, ui: this.ui };
+    return { app: 'e7-interior-design', version: 1, savedAt: new Date().toISOString(), project: this.project, items: this.items, finishes: this.finishes, ui: this.ui, planEdits: planState() };
   }
   /** Replace the whole design. `data` is the output of serialize(). */
   load(data, opts = {}) {
     if (!data || !Array.isArray(data.items)) throw new Error('Not a valid design file');
     if (opts.recordUndo) this._pushUndo(this._snapshot());
+    const plan = applyPlanState(data.planEdits || null);    // a file without planEdits restores the architect's plan
     const seen = new Set();
     this.items = data.items.map((raw) => {
       const item = normalizeItem(raw);
@@ -291,6 +319,8 @@ class Store {
     this.project = { ...DEFAULT_PROJECT, ...(data.project || {}) };
     if (data.ui && opts.restoreUI) this.ui = { ...DEFAULT_UI, ...data.ui };
     this.selection = [];
+    this._pruneFinishes();
+    if (plan.changed.walls || plan.changed.openings || plan.changed.rooms) this.emit('plan', { reason: 'load', changed: plan.changed });
     this.emit('load', {});
     this.emit('items', { type: 'reset', ids: this.items.map((i) => i.id) });
     this.emit('finishes', { ids: Object.keys(this.finishes) });
@@ -317,5 +347,6 @@ class Store {
 }
 
 export const store = new Store();
+bindPlanHost({ record: (opts) => store._record(opts), changed: (payload) => store._planChanged(payload) });
 export { DEFAULT_UI, DEFAULT_PROJECT };
 export default store;
