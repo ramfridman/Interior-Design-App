@@ -61,6 +61,21 @@ export function initTopbar(root, app) {
   const editBtn = iconBtn('wall', 'Structure: change walls, doors and windows', { kbd: 'B', pressed: structure.isActive(), class: 'only-compact modebtn', onClick: () => structure.toggle() });
   editBtn.append(editBadge);
   const carpBtn = iconBtn('carpentry', 'Carpentry: made-to-measure kitchen, wardrobes and vanities', { kbd: 'C', pressed: carpentry.isActive(), class: 'only-compact modebtn modebtn--carp', onClick: () => carpentry.toggle() });
+  // Narrow phones: one button for the three modes (its icon shows the current one), so Carpentry is never hidden in a menu.
+  const modeMenuBtn = iconBtn('sofa', 'Mode: Furnish, Structure or Carpentry', { pressed: false, class: 'modebtn modebtn--menu', onClick: () => openMenu(modeMenuBtn, [
+    { heading: 'Mode' },
+    { label: 'Furnish: products and furniture', icon: 'sofa', checked: !structure.isActive() && !carpentry.isActive(), onSelect: () => { structure.exit(); carpentry.exit(); } },
+    { label: 'Structure: walls, doors, windows', icon: 'wall', checked: structure.isActive(), onSelect: () => structure.enter() },
+    { label: 'Carpentry: kitchen, wardrobes, vanities', icon: 'carpentry', checked: carpentry.isActive(), onSelect: () => carpentry.enter() },
+  ]) });
+  const modeBadge = h('span', { class: 'badge', hidden: true });
+  let modeIcon = 'sofa';
+  const syncModeBtn = () => {
+    const want = structure.isActive() ? 'wall' : carpentry.isActive() ? 'carpentry' : 'sofa';
+    if (want !== modeIcon) { modeIcon = want; modeMenuBtn.setIcon(want); modeMenuBtn.append(modeBadge); }
+    modeMenuBtn.setPressed(want !== 'sofa');
+  };
+  modeMenuBtn.append(modeBadge);
   const tools = segmented({ options: TOOLS, value: store.ui.tool, iconOnly: true, label: 'Tool', cls: 'seg--tools', onChange: (tool) => store.setUI({ tool }) });
 
   const sTools = segmented({ options: STRUCTURE_TOOL_LIST.map((t) => ({ value: t.value, label: t.long, icon: t.icon, kbd: t.kbd })), value: store.ui.tool, iconOnly: true, iconSize: 18,
@@ -149,7 +164,7 @@ export function initTopbar(root, app) {
   root.append(
     h('div', { class: 'topbar__group topbar__brand' }, mark, name),
     h('div', { class: 'topbar__group', role: 'group', 'aria-label': 'History' }, undo, redo),
-    h('div', { class: 'topbar__group topbar__edit' }, h('div', { class: 'hide-compact' }, editMode), editBtn, carpBtn),
+    h('div', { class: 'topbar__group topbar__edit' }, h('div', { class: 'hide-compact' }, editMode), editBtn, carpBtn, modeMenuBtn),
     h('div', { class: 'topbar__group topbar__furnish hide-phone' }, tools),
     structureHost,
     center,
@@ -178,6 +193,7 @@ export function initTopbar(root, app) {
     editMode.set(editModeNow());
     editBtn.setPressed(on);
     carpBtn.setPressed(carpentry.isActive());
+    syncModeBtn();
     tools.set(on || carpentry.isActive() ? null : store.ui.tool);
     sTools.set(on ? store.ui.tool : null);
     thickness.set(store.ui.wallThickness);
@@ -192,6 +208,8 @@ export function initTopbar(root, app) {
     resetPlanBtn.disabled = !modified;
     editBadge.hidden = !modified;
     editBadge.textContent = String(n || '•');
+    modeBadge.hidden = !modified;
+    modeBadge.textContent = String(n || '•');
     editBtn.setAttribute('aria-label', `Structure: change walls, doors and windows${modified ? ` (plan modified, ${n} ${n === 1 ? 'change' : 'changes'})` : ''}`);
     fit();
   };

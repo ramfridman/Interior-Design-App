@@ -182,6 +182,7 @@
 .sb__saved.is-warn { color: var(--warn); }
 
 .mobnav { display: none; }
+.modebtn--menu { display: none; }
 .only-compact { display: none; }
 
 /* ───────── Narrow: sidebars become drawers ───────── */
@@ -224,4 +225,10 @@
   .seg--views .seg__label { display: none; }
   /* Phone: tools and thickness only. Highlighting changes is in the plan-display menu, reset in the changes lists. */
   .sbar-float .sbar__plan, .sbar-float .sbar__sep, .sbar-float .sbar__thick > .icon { display: none; }
+}
+
+/* Narrow phones: the Structure and Carpentry buttons merge into one mode button with a menu. */
+@media (max-width: 429px) {
+  .topbar .modebtn--menu { display: inline-grid; }
+  .topbar .modebtn.only-compact { display: none; }
 }
