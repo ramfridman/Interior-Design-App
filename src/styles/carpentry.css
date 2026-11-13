@@ -395,7 +395,7 @@
   .cwb__title { max-width: none; flex: 1 1 auto; }
   .app.is-carpentry .cwb-open {
     display: inline-flex; position: absolute; bottom: var(--s-3); left: 50%; transform: translateX(-50%); z-index: 4; align-items: center; gap: 6px;
-    height: 40px; padding: 0 16px; border-radius: 20px; background: var(--primary); color: var(--primary-ink); font-weight: 600; box-shadow: var(--shadow-2);
+    height: 40px; padding: 0 16px; border-radius: 20px; pointer-events: auto; background: var(--primary); color: var(--primary-ink); font-weight: 600; box-shadow: var(--shadow-2);
   }
   .cinsp__headacts .btn { flex: 1 1 auto; }
   .popover--kinds .ckinds__grid { grid-template-columns: 1fr; }
