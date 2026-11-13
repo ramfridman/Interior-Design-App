@@ -12,7 +12,7 @@ import { fmtPrice } from './format.js';
 import { shoppingTotal, onCarpentryBudget } from './shopping.js';
 import { WALL_THICKNESSES } from './structure.js';
 import { STRUCTURE_TOOL_LIST, planChip } from './structure-panels.js';
-import { projectSwitcher } from './projects.js';
+import { projectSwitcher, openProjectMenu } from './projects.js';
 import { isBuiltinBase, planPhase } from '../core/plan-edit.js';
 
 const MOD = isMac() ? '⌘' : 'Ctrl';
@@ -144,6 +144,8 @@ export function initTopbar(root, app) {
   function fileMenu() {
     const compact = app.isCompact();
     return [
+      app.projects && { label: 'Projects…', icon: 'home', onSelect: () => openProjectMenu(app, fileBtn) },   // always reachable, also when the name is hidden (phones, crowded bar)
+      app.projects && { separator: true },
       { label: 'Save design', icon: 'save', kbd: `${MOD} S`, onSelect: actions.saveDesign },
       { label: 'Open design…', icon: 'open', onSelect: actions.openDesign },
       isBuiltinBase() && { label: "Reset to architect's layout…", icon: 'reset', onSelect: actions.resetLayout },
