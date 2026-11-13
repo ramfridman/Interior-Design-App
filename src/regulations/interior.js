@@ -5,7 +5,7 @@ import { itemCorners, polygonBounds, pointInPolygon, convexOverlap, wallsHitByIt
 import { finding } from './building.js';
 import {
   rectPoly, rectObstacle, m, num, cmStr, segDist, polyDist, faceFrame, freeDepth, compass, doorSwing, openingSides,
-  makeGrid, cloneGrid, fillPoly, clearance, flood, reachedNear, cellsNear,
+  makeGrid, cloneGrid, fillPoly, clearance, flood, reachedNear, cellsNear, planRev,
 } from './geom.js';
 
 const SEATS = new Set(['chair', 'bar-stool', 'office-chair', 'pouf']);
@@ -137,15 +137,18 @@ function checkDoorsAndWindows(ctx, out) {
   for (const o of plan.openings) {
     const centre = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
     const mamad = (o.rooms || []).some((id) => (plan.rooms.find((r) => r.id === id) || {}).type === 'mamad');
-    if (o.kind === 'door' || o.kind === 'sliding-door') {
+    if (o.kind === 'door' || o.kind === 'sliding-door' || o.kind === 'opening') {
       const swing = doorSwing(o);
-      const label = o.style === 'entry' ? 'the entrance door' : o.style === 'mamad' ? 'the blast door of the safe room' : o.kind === 'sliding-door' ? 'the sliding terrace door'
-        : `the door between ${(o.rooms || []).map((id) => (plan.rooms.find((r) => r.id === id) || (plan.outdoorAreas || []).find((r) => r.id === id) || { name: id }).name).join(' and ')}`;
+      const label = o.style === 'entry' ? 'the entrance door' : o.style === 'mamad' ? 'the blast door of the safe room' : o.kind === 'sliding-door' ? `the sliding ${o.exterior ? 'terrace ' : ''}door`
+        : `the ${o.kind === 'opening' ? 'passage' : 'door'} between ${(o.rooms || []).map((id) => (plan.rooms.find((r) => r.id === id) || (plan.outdoorAreas || []).find((r) => r.id === id) || { name: id }).name).join(' and ')}`;
       const R = Math.max(o.width, 60) + 5;
       const nearby = movable.filter((i) => i.bb.x < o.x + o.w + R && i.bb.x + i.bb.w > o.x - R && i.bb.y < o.y + o.h + R && i.bb.y + i.bb.h > o.y - R);
       const inSwing = swing ? nearby.filter((i) => convexOverlap(i.poly, swing, 1.5)) : [];
       const zones = openingSides(o, 60).map((s) => rectPoly(s.rect));
-      const inWay = nearby.filter((i) => !inSwing.includes(i) && zones.some((z) => convexOverlap(i.poly, z, 10)));
+      // second leaf hung in the same doorway (the safe room's inner door, which opens into the room)
+      const innerSwing = o.innerDoor ? doorSwing({ ...o, ...o.innerDoor, kind: 'door', width: num(o.innerDoor.width, o.width) }) : null;
+      const inInner = innerSwing ? nearby.filter((i) => !inSwing.includes(i) && convexOverlap(i.poly, innerSwing, 1.5)) : [];
+      const inWay = nearby.filter((i) => !inSwing.includes(i) && !inInner.includes(i) && zones.some((z) => convexOverlap(i.poly, z, 10)));
       if (inSwing.length) {
         blockedDoors++;
         out.push(finding(mamad ? 'mamad-openings' : 'door-swing', mamad ? 'fail' : 'warn', o.id, `${names(inSwing)} blocks the swing of ${label}`,
@@ -156,6 +159,12 @@ function checkDoorsAndWindows(ctx, out) {
         blockedDoors++;
         out.push(finding(mamad ? 'mamad-openings' : 'doorway-clear', 'warn', o.id + ':way', `${names(inWay)} stands in front of ${label}`,
           `${names(inWay)} ${inWay.length > 1 ? 'are' : 'is'} within 60 cm of ${label}, narrowing the way through.`, { itemIds: ids(inWay), at: centre, spaceId: inWay[0].room && inWay[0].room.id }));
+      }
+      if (inInner.length) {
+        blockedDoors++;
+        out.push(finding(mamad ? 'mamad-openings' : 'door-swing', 'warn', o.id + ':inner', `${names(inInner)} blocks the inner door of ${mamad ? 'the safe room' : label}`,
+          `${names(inInner)} stand${inInner.length > 1 ? '' : 's'} inside the arc of the inner door, which opens into the room, so that door cannot open fully`
+          + (mamad ? ' and the way into the safe room is narrowed — an alert leaves only seconds to get in.' : '.'), { itemIds: ids(inInner), at: centre, spaceId: inInner[0].room && inInner[0].room.id }));
       }
       const underDoor = swing ? rugs.filter((r) => convexOverlap(r.poly, swing, 2)) : [];
       if (underDoor.length) {
@@ -182,15 +191,23 @@ function checkDoorsAndWindows(ctx, out) {
 }
 
 const GRID = new WeakMap();
-/** Static walkable raster of the house: room floors and doorways are free. */
+/**
+ * Static walkable raster of the house: room floors, doorways and door-less passages are free.
+ * Rebuilt when the plan is edited (keyed on planRev — the plan object stays the same, its arrays are replaced);
+ * the scratch buffers are kept across rebuilds while the grid size is unchanged.
+ */
 function houseGrid(plan) {
+  const rev = planRev(plan);
   let g = GRID.get(plan);
-  if (!g) {
+  if (!g || g.rev !== rev) {
+    const old = g;
     g = makeGrid(plan.bounds, 5);
+    g.rev = rev;
     for (const r of plan.rooms) fillPoly(g, r.polygon, 1);
     for (const o of plan.openings) if (o.kind !== 'window') fillPoly(g, rectPoly(o), 1);
     const n = g.free.length;                                   // scratch buffers reused on every run
-    g.scratch = { free: new Uint8Array(n), dist: new Float32Array(n), wide: new Uint8Array(n), narrow: new Uint8Array(n), queue: new Int32Array(n) };
+    g.scratch = old && old.free.length === n ? old.scratch
+      : { free: new Uint8Array(n), dist: new Float32Array(n), wide: new Uint8Array(n), narrow: new Uint8Array(n), queue: new Int32Array(n) };
     GRID.set(plan, g);
   }
   return g;

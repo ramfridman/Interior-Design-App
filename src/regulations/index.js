@@ -10,9 +10,15 @@
  *
  * Finding = { id, ruleId, severity: 'pass'|'info'|'warn'|'fail', category, kind, title, detail,
  *             reference: string, spaceId?, itemIds?, at?: { x, y } }
+ *
+ * The plan may be edited at runtime (src/core/plan-edit.js): call runChecks again on the store's 'plan' event.
+ * Results are always computed for the plan as it is at the time of the call; nothing is recomputed while the plan,
+ * the ceiling height and the safe-room finish are unchanged.
  */
 import { RULES, DISCLAIMER, CATEGORIES, ruleById } from './rules.js';
 import { checkBuilding } from './building.js';
+import { checkChanges } from './changes.js';
+import { planRev } from './geom.js';
 import { buildContext, checkInterior } from './interior.js';
 import { checkOutdoor } from './outdoor.js';
 
@@ -21,23 +27,32 @@ export { RULES, DISCLAIMER, CATEGORIES, ruleById };
 const SEVERITY_ORDER = { fail: 0, warn: 1, info: 2, pass: 3 };
 const BUILDING_CACHE = new WeakMap();
 
-/** Plan-only findings change only with the ceiling height and the safe-room wall finish — cache them per plan. */
+/**
+ * Plan-only findings (building checks + the owner's changes) depend on the plan, the ceiling height and the
+ * safe-room wall finish. They are cached per plan REVISION: plan-edit.js keeps the `plan` object and replaces its
+ * arrays, so the key is `planRev(plan)` (identity of walls / openings / rooms …), not the object.
+ */
 function buildingFindings(args) {
   const { plan, store } = args;
   const mamadWalls = plan.rooms.filter((r) => r.type === 'mamad').map((r) => (store && store.finishes && store.finishes[r.id] && store.finishes[r.id].wall) || '').join('|');
-  const key = `${store && store.project ? store.project.ceilingHeight : ''}#${mamadWalls}`;
+  const key = `${planRev(plan)}#${store && store.project ? store.project.ceilingHeight : ''}#${mamadWalls}`;
   const hit = BUILDING_CACHE.get(plan);
-  if (hit && hit.key === key) return hit.findings;
-  const findings = checkBuilding(args);
-  BUILDING_CACHE.set(plan, { key, findings });
+  if (hit && hit.key === key && hit.catalog === args.catalog) return hit.findings;
+  const findings = [];
+  // each group is guarded on its own so a problem in one does not hide the other; errors are not cached
+  let failed = false;
+  for (const [label, fn] of [['building', () => checkBuilding(args)], ['plan changes', () => checkChanges(args)]]) {
+    try { findings.push(...fn()); } catch (err) { failed = true; findings.push(errorFinding(label, err)); }
+  }
+  if (!failed) BUILDING_CACHE.set(plan, { key, catalog: args.catalog, findings });
   return findings;
 }
 
+const errorFinding = (label, err) => ({ id: `error:${label}`, ruleId: 'plan-consistency', severity: 'info', category: 'Assumptions', kind: 'best-practice',
+  title: `The ${label} checks could not run`, detail: `An unexpected problem stopped these checks (${err && err.message ? err.message : 'unknown error'}). The other results are still valid.`, reference: '' });
+
 function guarded(label, fn, out) {
-  try { out.push(...fn()); } catch (err) {
-    out.push({ id: `error:${label}`, ruleId: 'plan-consistency', severity: 'info', category: 'Assumptions', kind: 'best-practice',
-      title: `The ${label} checks could not run`, detail: `An unexpected problem stopped these checks (${err && err.message ? err.message : 'unknown error'}). The other results are still valid.`, reference: '' });
-  }
+  try { out.push(...fn()); } catch (err) { out.push(errorFinding(label, err)); }
 }
 
 /**

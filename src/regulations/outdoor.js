@@ -5,7 +5,7 @@ import { pointInPolygon, polygonBounds, convexOverlap, areaM2 } from '../core/ge
 import { finding, boundaryEdge } from './building.js';
 import {
   rectPoly, m, num, cmStr, segDist, polyDist, overshoot, pointPolyEdgeDist, openingSides,
-  makeGrid, cloneGrid, fillPoly, clearance, flood, reachedNear,
+  makeGrid, cloneGrid, fillPoly, clearance, flood, reachedNear, planRev,
 } from './geom.js';
 
 const names = (list) => [...new Set(list.map((i) => i.name || i.type))].join(', ');
@@ -237,10 +237,12 @@ function checkTrees(ctx, list, out) {
 }
 
 const PATH_GRID = new WeakMap();
+/** Raster of the entry path; depends on the entrance door, so it is keyed on the plan revision (see planRev). */
 function pathGrid(plan) {
-  let g = PATH_GRID.get(plan);
-  if (g !== undefined) return g;
-  g = null;
+  const rev = planRev(plan);
+  const hit = PATH_GRID.get(plan);
+  if (hit && hit.rev === rev) return hit.g;
+  let g = null;
   const site = plan.site;
   const entry = plan.openings.find((o) => o.style === 'entry') || plan.openings.find((o) => o.exterior && o.kind === 'door');
   if (entry && site.paths && site.paths.length) {
@@ -264,7 +266,7 @@ function pathGrid(plan) {
     }
     g = { grid, seeds, target: outside ? outside.probe : null, polys, start: far };
   }
-  PATH_GRID.set(plan, g);
+  PATH_GRID.set(plan, { rev, g });
   return g;
 }
 

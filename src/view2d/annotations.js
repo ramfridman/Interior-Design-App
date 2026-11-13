@@ -8,10 +8,14 @@ import { exteriorChains, interiorDims, dimText, spanThrough } from './dimensions
 import { isBelowWalls, isFloating } from './items.js';
 import { boundaryEdge } from './site.js';
 
-const chainCache = new WeakMap();
+/** Dimension chains of the current plan revision (the engine replaces plan.walls / openings / rooms on every edit). */
+let dimsCache = null;
 function plansDims(plan) {
-  if (!chainCache.has(plan)) chainCache.set(plan, { chains: exteriorChains(plan), interior: interiorDims(plan) });
-  return chainCache.get(plan);
+  const c = dimsCache;
+  if (!c || c.walls !== plan.walls || c.openings !== plan.openings || c.rooms !== plan.rooms) {
+    dimsCache = { walls: plan.walls, openings: plan.openings, rooms: plan.rooms, chains: exteriorChains(plan), interior: interiorDims(plan) };
+  }
+  return dimsCache;
 }
 
 /** Device-px boxes of the furniture labels should try not to cover. */
@@ -159,41 +163,99 @@ function subLabel(o) {
   return o.kind === 'window' ? `${o.height}(+${o.sill ?? 0})` : `h ${o.height}`;
 }
 
+const SIDES = ['n', 's', 'w', 'e'];
+const FIG = 15, SUB = 14, TICK = 5;       // CSS px a row needs beside its line: figure / opening sub-label / bare ticks
+const ROW_PAD = 3, NEAR_LEAD = 15, FAR_LEAD = 3, CLEAR = 3;
+
+/**
+ * Where the exterior chains of each side go (CSS px outward from the house envelope) at a given zoom.
+ * The rows of a side stay together. They sit right beside the house when that band is clear; otherwise the whole
+ * group moves out past whatever is in the way — parking bays, paved paths, the property line and its side-length
+ * label — so a chain never runs through a site feature.
+ * @returns {{ [side]: null | { horiz, sign, base, offsets: number[], start: number, reach: number, far: boolean } }}
+ */
+export function exteriorDimLayout(plan, ui, scale) {
+  const { chains } = plansDims(plan);
+  const env0 = envelope(plan), site = plan.site, out = {};
+  for (const side of SIDES) {
+    const rows = chains[side];
+    if (!rows.length) { out[side] = null; continue; }
+    const horiz = side === 'n' || side === 's', sign = side === 'n' || side === 'w' ? -1 : 1;
+    const base = side === 'n' ? env0.y0 : side === 's' ? env0.y1 : side === 'w' ? env0.x0 : env0.x1;
+    const a0 = rows[0][0].from - 8 / scale, a1 = rows[0][rows[0].length - 1].to + 8 / scale;
+    // px needed on the house side / the far side of each row's line (figures sit above / left of their line)
+    const figOut = sign < 0;
+    const before = rows.map((r, i) => (figOut ? (i === 0 ? SUB : TICK) : FIG));
+    const after = rows.map((r, i) => (figOut ? FIG : (i === 0 ? SUB : TICK)));
+    const place = (start, lead) => {
+      const offsets = [];
+      let at = start + lead;
+      rows.forEach((r, i) => { at += before[i]; offsets.push(at); at += after[i] + ROW_PAD; });
+      return { offsets, end: at - ROW_PAD + 2 };
+    };
+    // what is in the way, as [lo, hi] px outward from the envelope
+    const blocks = [];
+    if (ui.showSite && site) {
+      const span = (lo, hi, c0, c1, m0 = CLEAR, m1 = CLEAR) => {
+        if (hi <= a0 || lo >= a1) return;
+        const p = (sign > 0 ? c0 - base : base - c1) * scale - m0, q = (sign > 0 ? c1 - base : base - c0) * scale + m1;
+        if (q > 0) blocks.push([Math.max(0, p), q]);
+      };
+      for (const bay of site.parking || []) {
+        if (horiz) span(bay.x, bay.x + bay.w, bay.y, bay.y + bay.h); else span(bay.y, bay.y + bay.h, bay.x, bay.x + bay.w);
+      }
+      for (const path of site.paths || []) {
+        const b = polygonBounds(path.polygon);
+        if (horiz) span(b.x, b.x + b.w, b.y, b.y + b.h); else span(b.y, b.y + b.h, b.x, b.x + b.w);
+      }
+      // the property line and the side length written just outside it
+      const [pa, pb] = boundaryEdge(site.boundary, side);
+      const k = horiz ? 1 : 0;
+      const m = sign > 0 ? [4, 21] : [21, 4];
+      span(-Infinity, Infinity, Math.min(pa[k], pb[k]), Math.max(pa[k], pb[k]), sign > 0 ? m[0] : m[1], sign > 0 ? m[1] : m[0]);
+      blocks.sort((p, q) => p[0] - q[0]);
+    }
+    let start = 0, lead = NEAR_LEAD, fit = place(start, lead);
+    for (let guard = 0; guard < 12; guard++) {
+      const hit = blocks.find(([lo, hi]) => fit.end > lo && start < hi);
+      if (!hit) break;
+      start = hit[1]; lead = FAR_LEAD; fit = place(start, lead);
+    }
+    out[side] = { horiz, sign, base, offsets: fit.offsets, start, reach: fit.end, far: start > 0 };
+  }
+  return out;
+}
+
+/**
+ * CSS px the exterior chains stick out beyond a plan rectangle on each side at zoom `scale` — used to frame
+ * the lot / the house so the dimensions stay in view.
+ */
+export function dimensionOverhang(plan, ui, scale, rect) {
+  const lay = exteriorDimLayout(plan, ui, scale);
+  const edge = { n: rect.y, s: rect.y + rect.h, w: rect.x, e: rect.x + rect.w };
+  const over = (side) => (lay[side] ? Math.max(0, lay[side].reach - lay[side].sign * (edge[side] - lay[side].base) * scale) : 0);
+  return { top: over('n'), bottom: over('s'), left: over('w'), right: over('e') };
+}
+
 export function drawExteriorDims(G, env, boxes) {
   const { plan, pal, ui } = env, { ctx } = G, d = G.dpr;
   const { chains } = plansDims(plan);
-  const env0 = envelope(plan);
+  const layout = exteriorDimLayout(plan, ui, G.scale);
   const ink = pal.dim, size = 10.5, subSize = 8.5;
   // knock-out colour behind a figure: garden inside the lot, paper outside
   const inLot = (box) => ui.showSite && pointInPolygon(((box.x0 + box.x1) / 2 - G.ox) / G.k, ((box.y0 + box.y1) / 2 - G.oy) / G.k, plan.site.boundary);
   const mask = [css(pal.paper, 0.85), css(pal.garden, 0.85)];
   const unitSuffix = ui.units === 'cm' ? ' cm' : ' m';
 
-  for (const side of ['n', 's', 'w', 'e']) {
-    const rows = chains[side];
-    if (!rows.length) continue;
-    const horiz = side === 'n' || side === 's';
-    const sign = side === 'n' || side === 'w' ? -1 : 1;
-    const base = horiz ? G.RY(side === 'n' ? env0.y0 : env0.y1) : G.RX(side === 'w' ? env0.x0 : env0.x1);
-    const subOutward = sign > 0;           // the opening sub-label sits below / right of its line
+  for (const side of SIDES) {
+    const rows = chains[side], lay = layout[side];
+    if (!rows.length || !lay) continue;
+    const { horiz, sign } = lay;
+    const base = horiz ? G.RY(lay.base) : G.RX(lay.base);
     const A = (v) => (horiz ? G.RX(v) : G.RY(v));
-    let off = DIM_ROW0;
     let lastPos = base;
-    // a chain must not run along the property line: step over it
-    let lotLine = null;
-    if (ui.showSite) {
-      const [pa, pb] = boundaryEdge(plan.site.boundary, side);
-      lotLine = horiz ? G.Y((pa[1] + pb[1]) / 2) : G.X((pa[0] + pb[0]) / 2);
-    }
     rows.forEach((row, ri) => {
-      if (ri > 0) off += ri === 1 && subOutward ? DIM_GAP_SUB : DIM_GAP;
-      let pos = base + sign * Math.round(off * d);
-      if (lotLine != null) {
-        // figures sit above / left of their line, the lot's side length just outside the property line
-        const gap = (pos - lotLine) / d;
-        const push = sign > 0 ? (gap > -3 && gap < 32 ? 33 - gap : 0) : (gap > -14 && gap < 10 ? gap + 15 : 0);
-        if (push) { off += push; pos = base + sign * Math.round(off * d); }
-      }
+      const pos = base + sign * Math.round(lay.offsets[ri] * d);
       lastPos = pos;
       const a0 = A(row[0].from), a1 = A(row[row.length - 1].to);
       // line
@@ -252,7 +314,9 @@ export function drawExteriorDims(G, env, boxes) {
     ctx.beginPath();
     for (const [v, depth] of [[first.from, first.depth], [last.to, last.depth]]) {
       const a = A(v) + 0.5;
-      const from = (horiz ? G.RY(depth) : G.RX(depth)) + sign * 6 * d, to = lastPos + sign * 7 * d;
+      // beside the house they start at the façade; a group moved out past the site features keeps short stubs
+      const from = lay.far ? base + sign * Math.round((lay.start + 1) * d) : (horiz ? G.RY(depth) : G.RX(depth)) + sign * 6 * d;
+      const to = lastPos + sign * 7 * d;
       if (horiz) { ctx.moveTo(a, from); ctx.lineTo(a, to); } else { ctx.moveTo(from, a); ctx.lineTo(to, a); }
     }
     ctx.strokeStyle = css(ink, 0.45); ctx.lineWidth = 1; ctx.stroke();

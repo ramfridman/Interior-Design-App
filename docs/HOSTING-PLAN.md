@@ -2,6 +2,22 @@
 
 Status: **plan only, nothing here has been done yet.** Written 13 Nov 2026.
 
+## Owner's decisions (13 Nov 2026)
+
+| Question | Decision |
+| --- | --- |
+| Who can open it | **Only invited people** |
+| Site shows the floor plan, lot number, "Kibbutz Afikim", parking | **Acceptable** |
+| Address | **Free host subdomain** (no custom domain) |
+| Search engines | **Keep it out for now** (`robots.txt` + `noindex`) |
+
+**Chosen route: Cloudflare Pages + Cloudflare Access** (section 5, steps 0, 1, 2B, 3–6). Vercel is not used: its free plan does not offer invite-only access for the production site.
+
+Needed from the owner on the day:
+1. A free Cloudflare account (sign-up with an email address; no payment card is required for Pages or for Access on the free plan as far as I know — confirm at sign-up).
+2. Authorising Cloudflare's GitHub app for the `interior-design-app` repo (done by the owner in the browser).
+3. The list of email addresses to invite. Each invited person signs in with a one-time code sent to that address.
+
 ## 1. Where the app runs today
 
 | Copy | Where | Who can open it |

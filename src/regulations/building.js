@@ -199,7 +199,7 @@ function checkLight(plan, out, metrics) {
 // ───────────────────────── doors & corridors ─────────────────────────
 
 function checkDoors(plan, out) {
-  const doors = plan.openings.filter(isDoor);
+  const doors = plan.openings.filter((o) => isDoor(o) || isPassage(o));
   let wideToiletDoor = false;
   const serviceDoors = [];
   for (const o of doors) {
@@ -225,6 +225,16 @@ function checkDoors(plan, out) {
     const svc = inner.find((r) => SERVICE.has(r.type));
     const other = inner.find((r) => r.type !== 'living') || inner[0];
     const name = (svc ? svc.name : other ? other.name : 'Door') + (o.exterior ? ' outside' : '');
+    if (isPassage(o)) {
+      // door-less passage: the clear opening must be as wide as the door it replaces
+      const min = svc ? 60 : 70;
+      const ok = o.width >= min && hOk;
+      const between = rooms.map((r) => r.name).join(' and ') || name;
+      out.push(finding(svc ? 'door-service' : 'door-room', ok ? 'pass' : 'fail', o.id, `Passage ${size} — ${between}`,
+        `The open passage between ${between} is ${o.width} cm wide and ${o.height} cm high — ${ok ? 'above' : 'below'} the ${min} cm clear width and 1.98 m height the regulations set for the doorway of a ${svc ? 'service room' : 'room'} (applied here to an opening without a door leaf).`
+        + (svc ? ' A bathroom or WC needs a door for privacy — a door-less passage into it is unusual.' : ''), { at, spaceId: (svc || other || {}).id }));
+      continue;
+    }
     if (svc) {
       serviceDoors.push({ o, svc });
       if (o.width >= 70) wideToiletDoor = true;
@@ -239,6 +249,13 @@ function checkDoors(plan, out) {
   }
   if (serviceDoors.length && !wideToiletDoor) {
     out.push(finding('door-service', 'fail', 'one-wide', 'No bathroom door of 70 cm', 'At least one room with a toilet must have a door 70 cm wide.'));
+  }
+
+  // every room needs a way in
+  for (const r of plan.rooms) {
+    if (plan.openings.some((o) => o.kind !== 'window' && (o.rooms || []).includes(r.id))) continue;
+    out.push(finding('room-access', 'warn', r.id, `${r.name} has no door or passage`,
+      `${r.name} is closed on all sides — no door or passage leads into it. Add a door, or remove the wall that cut it off.`, { spaceId: r.id, at: spot(r) }));
   }
 
   // corridors: narrow parts of the open living space
@@ -294,10 +311,10 @@ export function roomSides(plan, room) {
   return sides;
 }
 
-function checkMamad(plan, H, store, catalog, out) {
+function checkMamad(plan, H, store, catalog, out, metrics) {
+  let wallObstacles = null;
   for (const r of plan.rooms.filter((x) => x.type === 'mamad')) {
-    const area = areaM2(r.polygon), volume = area * H / 100;
-    const rect = largestInnerRect(r.polygon), width = Math.min(rect.w, rect.h);
+    const { area, width } = metrics.get(r), volume = area * H / 100;
     const at = spot(r), ex = { spaceId: r.id, at };
     const okA = area >= 9 && volume >= 22.5;
     out.push(finding('mamad-area', okA ? 'pass' : (area >= 5 ? 'warn' : 'fail'), r.id, `Safe room: ${area.toFixed(1)} m² net, ${volume.toFixed(1)} m³`,
@@ -316,21 +333,27 @@ function checkMamad(plan, H, store, catalog, out) {
     out.push(finding('mamad-ext-walls', ext.length <= 2 ? 'pass' : 'warn', r.id, `Safe room: ${ext.length} external wall${ext.length === 1 ? '' : 's'}`,
       `The mamad has ${ext.length} external wall${ext.length === 1 ? '' : 's'}${ext.length ? ' (' + ext.map((s) => s.dir).join(', ') + ')' : ''}; up to two are allowed without special approval.`, ex));
 
-    // walls
+    // walls — reg. 208: external ≥ 25 cm, internal ≥ 20 cm, a wall holding a SLIDING blast window ≥ 30 cm
     const parts = [], notes = [];
-    let wallFail = false;
+    let wallFail = false, windowWallThin = false;
     const win = plan.openings.filter((o) => o.kind === 'window' && (o.rooms || []).includes(r.id));
-    for (const s of sides) {
-      if (!s.walls.length) continue;
+    const walled = sides.filter((s) => s.walls.length);
+    for (const s of walled) {
       const hasWin = s.openings.some((o) => win.includes(o));
-      const need = hasWin ? 30 : s.exterior ? 25 : 20;
+      const need = s.exterior ? 25 : 20;
       if (s.thickness < need) wallFail = true;
-      parts.push(`${s.dir} ${s.thickness} cm (${s.exterior ? 'external' : 'internal'}${hasWin ? ', holds the blast window' : ''}; minimum ${need} cm)`);
-      if (s.walls.some((w) => w.kind !== 'mamad')) notes.push(`the ${s.dir} wall is recorded in the plan data as an ordinary ${s.walls.find((w) => w.kind !== 'mamad').kind} wall`);
+      else if (hasWin && s.thickness < 30) windowWallThin = true;
+      parts.push(`${s.dir} ${s.thickness} cm (${s.exterior ? 'external' : 'internal'}${hasWin ? ', holds the blast window' : ''}; minimum ${hasWin ? `${need} cm, 30 cm for a sliding blast window` : `${need} cm`})`);
+      const odd = s.walls.find((w) => w.kind !== 'mamad');
+      if (odd) notes.push(`the ${s.dir} wall is recorded in the plan data as an ordinary ${odd.kind} wall`);
     }
-    out.push(finding('mamad-walls', wallFail ? 'fail' : notes.length ? 'info' : 'pass', r.id, wallFail ? 'Safe-room wall thinner than required' : `Safe-room walls ${Math.min(...sides.map((s) => s.thickness))}–${Math.max(...sides.map((s) => s.thickness))} cm`,
-      `Wall thickness as drawn: ${parts.join('; ')}.`
-      + (notes.length ? ` Note: ${notes.join(' and ')} — every wall of the mamad must be reinforced concrete cast with the shell; confirm on the structural drawings.` : ' All four walls are drawn as reinforced-concrete shelter walls.'), ex));
+    const range = walled.length ? `${Math.min(...walled.map((s) => s.thickness))}–${Math.max(...walled.map((s) => s.thickness))} cm` : 'not drawn';
+    out.push(finding('mamad-walls', wallFail ? 'fail' : notes.length || windowWallThin || !walled.length ? 'info' : 'pass', r.id,
+      wallFail ? 'Safe-room wall thinner than required' : `Safe-room walls ${range}`,
+      `Wall thickness as drawn: ${parts.join('; ')}. Required for reinforced-concrete shelter walls: external 25 cm, internal 20 cm, and 30 cm for a wall that holds a sliding blast window`
+      + (wallFail ? ' — at least one wall is thinner.' : windowWallThin ? ' — the window wall is thinner than 30 cm, which is acceptable only with an outward-opening (not sliding) blast window.' : ' — all met.')
+      + (notes.length ? ` Note: ${notes.join(' and ')} — every wall of the mamad must be reinforced concrete cast with the shell; confirm on the structural drawings.`
+        : walled.length ? ` All ${walled.length} walls are recorded as reinforced-concrete shelter walls.` : ''), ex));
 
     // door
     const doors = plan.openings.filter((o) => isDoor(o) && (o.rooms || []).includes(r.id));
@@ -338,18 +361,58 @@ function checkMamad(plan, H, store, catalog, out) {
       const dAt = openingCentre(o);
       const side = sides.find((s) => s.openings.includes(o));
       const outward = side ? (o.swing === side.dir[0]) : true;
+      const blast = o.style === 'mamad';
       const okSize = o.width >= 70 && o.width <= 90 && o.height >= 200;
       const std = o.width <= 80;
       const assumed = (o.assumed || []).length ? ' The door size is an assumption in the plan data — confirm it against the Home Front Command approved drawing.' : '';
-      out.push(finding('mamad-door', okSize && outward ? (std ? 'pass' : 'info') : 'fail', o.id, `Blast door ${o.width} × ${o.height} cm, opens ${outward ? 'outwards' : 'INTO the mamad'}`,
-        `The blast door is ${o.width} × ${o.height} cm clear and opens ${outward ? 'out of' : 'into'} the mamad. Required: 70–80 × 200 cm clear opening, opening outwards`
+      out.push(finding('mamad-door', okSize && outward && blast ? (std ? 'pass' : 'info') : 'fail', o.id,
+        blast ? `Blast door ${o.width} × ${o.height} cm, opens ${outward ? 'outwards' : 'INTO the mamad'}` : `Safe-room door ${o.width} × ${o.height} cm is not a blast door`,
+        `The ${blast ? 'blast door' : `door (style "${o.style}")`} is ${o.width} × ${o.height} cm clear and opens ${outward ? 'out of' : 'into'} the mamad. Required: one gas-tight steel blast door, 70–80 × 200 cm clear opening, opening outwards`
         + (o.width > 80 ? ' (80–90 cm is only for a door facing a concrete wall closer than 1.30 m).' : '.') + assumed, { spaceId: r.id, at: dAt }));
+
+      // second, ordinary leaf in the same doorway
+      const inn = o.innerDoor;
+      if (inn) {
+        const iw = num(inn.width, o.width), ih = num(inn.height, o.height);
+        const inward = !side || !inn.swing || inn.swing !== side.dir[0];
+        const fits = iw <= o.width && ih <= o.height;
+        out.push(finding('mamad-inner-door', inward && fits ? 'info' : 'warn', o.id,
+          inward ? `Inner door ${iw} × ${ih} cm behind the blast door — optional, not a requirement` : 'Inner door opens OUTWARDS, against the blast door',
+          `The safe-room doorway is drawn with two leaves: the steel blast door (opens ${outward ? 'outwards' : 'inwards'}) and an ordinary inner door ${iw} × ${ih} cm that opens ${inward ? 'into the room' : 'outwards'}. `
+          + 'Status: the inner door is NOT required by the regulations. The Civil Defence regulations require one gas-tight blast door opening outwards (regs. 202(a), 204(a)) and do not mention a second, ordinary door for the safe room of a dwelling; '
+          + 'they expressly allow "a regular door, opening inwards, for everyday use" in addition to the blast door only for protected spaces in health institutions (reg. 287(b)), and a second blast door only in place of the window, with approval (reg. 204(b2)). '
+          + 'For a home it is an optional comfort feature that Home Front Command guidance is reported to permit (press report, not verified on the Home Front Command site) — keep it only if it is on the Home Front Command–approved drawing. '
+          + 'Conditions: the blast door, its frame and its seal stay untouched and are never removed; the inner door opens into the room and must not stop the blast door closing; '
+          + `keep its ${iw} cm arc inside the room free of furniture.`
+          + (inward ? '' : ' As drawn it swings the same way as the blast door — the two leaves would collide; hang it to open inwards.')
+          + (fits ? '' : ' It is drawn larger than the blast-door opening — check the size.'), { spaceId: r.id, at: dAt }));
+      } else if (blast) {
+        out.push(finding('mamad-inner-door', 'pass', o.id, 'Safe-room doorway has the blast door only — nothing more is required',
+          'The regulations require one gas-tight blast door opening outwards (regs. 202(a), 204(a)). A second, ordinary inner door is not required; it may be added as a comfort feature if the Home Front Command–approved drawing shows it, without touching the blast door, its frame or its seal.', { spaceId: r.id, at: dAt }));
+      }
+
       if (side && !side.exterior) {
         const dist = rayToExterior(plan, dAt, side.n, side.thickness / 2);
         const ok = dist >= 400;
         out.push(finding('mamad-door-position', ok ? 'pass' : 'info', o.id, `Blast door faces an external wall ${m(dist)} m away`,
           `Measured straight out from the blast door, the first external wall is ${m(dist)} m away; the rule is at least 4.00 m`
           + (ok ? '.' : ' — otherwise the door must be shielded by a concrete wall as the Home Front Command specification details. Confirm with the architect.'), { spaceId: r.id, at: dAt }));
+
+        // free floor in front of the door, up to the first wall (an interior wall the owner adds can come too close)
+        if (!wallObstacles) wallObstacles = [...plan.walls.map((w) => rectObstacle(w, { wall: w })), ...plan.openings.filter((x) => x.kind === 'window').map((x) => rectObstacle(x, { wall: x }))];
+        const horizontal = o.axis === 'h';
+        const face = horizontal ? [dAt.x, side.n[1] > 0 ? o.y + o.h : o.y] : [side.n[0] > 0 ? o.x + o.w : o.x, dAt.y];
+        const { depth, hit } = freeDepth({ o: face, u: side.n, v: horizontal ? [1, 0] : [0, 1], hw: o.width / 2 }, 400, wallObstacles, { inset: 1 });
+        const w = hit && hit.wall;
+        const light = w && (w.cls === 'partition' || (w.kind === 'interior' && Math.min(w.w, w.h) < 15));
+        const sev = depth < o.width ? 'fail' : depth < 110 ? 'warn' : depth < 130 && o.width < 80 && !light ? 'info' : 'pass';
+        out.push(finding('mamad-door-clear', sev, o.id,
+          depth >= 400 ? 'More than 4 m clear in front of the blast door' : `${m(depth)} m clear in front of the blast door`,
+          (depth >= 400 ? 'No wall stands within 4 m in front of the blast door.' : `Straight out from the blast door the first wall is ${m(depth)} m away${light ? ' (a light partition)' : ''}.`)
+          + (sev === 'fail' ? ` The ${o.width} cm leaf opens outwards and cannot swing fully open — the wall stands inside its arc. Move the wall.`
+            : sev === 'warn' ? ` A wall that is part of the structure or made of reinforced concrete must be at least 1.10 m from the door so that a wheelchair user can open it${light ? '; for a light partition the regulation does not apply as written, but the same space is needed in practice — an alert leaves seconds to get in' : ''}.`
+            : sev === 'info' ? ` With a structural or concrete wall closer than 1.30 m the blast door must be 80–90 cm wide (it is ${o.width} cm).`
+            : ' The regulation asks for at least 1.10 m to a structural or concrete wall facing the door; the leaf itself needs its full width to open.'), { spaceId: r.id, at: dAt }));
       } else if (side) {
         out.push(finding('mamad-door-position', 'warn', o.id, 'Blast door is in an external wall', 'The blast door must be in an internal wall of the mamad, entered from inside the dwelling.', { spaceId: r.id, at: dAt }));
       }
@@ -488,10 +551,11 @@ function checkAssumptions(plan, out) {
 export function checkBuilding({ plan, store, catalog }) {
   const out = [];
   const H = num(store && store.project && store.project.ceilingHeight, num(plan.heights && plan.heights.ceiling, 300));
-  checkRooms(plan, H, out);
-  checkLight(plan, out);
+  const metrics = new Map(plan.rooms.map((r) => [r, roomMetrics(plan, r)]));
+  checkRooms(plan, H, out, metrics);
+  checkLight(plan, out, metrics);
   checkDoors(plan, out);
-  checkMamad(plan, H, store, catalog, out);
+  checkMamad(plan, H, store, catalog, out, metrics);
   checkSite(plan, out);
   checkAssumptions(plan, out);
   return out;
