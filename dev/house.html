@@ -41,6 +41,7 @@ import * as models from '../src/models/index.js';
 import { buildHouse } from '../src/view3d/house.js';
 import { buildSite } from '../src/view3d/site.js';
 import { createEnvironment } from '../src/view3d/environment.js';
+import { createDaylight } from '../src/view3d/daylight/index.js';
 
 store.persist = false;
 await Promise.allSettled([catalog.loadCatalog(), models.loadModels()]);
@@ -59,6 +60,9 @@ controls.maxPolarAngle = Math.PI / 2 - 0.02;
 
 const house = buildHouse(ctx), site = buildSite(ctx), env = createEnvironment({ scene, renderer, ctx, shadowMapSize: +new URLSearchParams(location.search).get('shadow') || undefined });
 scene.add(site.group, house.group);
+// diffuse daylight (radiosity solver in a worker); ?daylight=0 compares with the old fill lights
+const daylight = new URLSearchParams(location.search).get('daylight') === '0' ? null : createDaylight({ ctx, renderer, scene });
+if (daylight) daylight.attach({ house, env });
 
 // furniture from the architect's layout (whatever model modules exist; boxes otherwise)
 const furniture = new THREE.Group(); furniture.visible = false; scene.add(furniture);
@@ -120,15 +124,15 @@ const setStudy = (v) => { flags.study = !!v; syncStudy(); document.getElementByI
 document.getElementById('roof').addEventListener('click', syncStudy);
 document.getElementById('study').onclick = () => setStudy(!flags.study);
 btn('cut', () => { flags.cut = !flags.cut; house.setCutaway(flags.cut ? 120 : null); syncStudy(); });
-btn('doors', () => { flags.doors = !flags.doors; house.setDoorsOpen(flags.doors); });
-btn('furn', () => { flags.furn = !flags.furn; furniture.visible = flags.furn; });
+btn('doors', () => { flags.doors = !flags.doors; house.setDoorsOpen(flags.doors); daylight?.setDoorsOpen(flags.doors); });
+btn('furn', () => { flags.furn = !flags.furn; furniture.visible = flags.furn; daylight?.patchFurniture?.(furniture); });
 const timeEl = document.getElementById('time');
 const clock = (h) => (h == null ? '—' : `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.floor((h % 1) * 60)).padStart(2, '0')}`);
 const showSun = () => { const s = env.getSunInfo(); document.getElementById('sun').textContent = `az ${s.azimuth.toFixed(1)}° ${s.compass} · el ${s.elevation.toFixed(1)}° · rise ${clock(s.sunrise)} · noon ${clock(s.solarNoon)} · set ${clock(s.sunset)}`; };
-const setTime = (h) => { timeEl.value = h; env.setTimeOfDay(+h); document.getElementById('timeLabel').textContent = clock(+h); showSun(); };
+const setTime = (h) => { timeEl.value = h; env.setTimeOfDay(+h); daylight?.relight(); document.getElementById('timeLabel').textContent = clock(+h); showSun(); };
 timeEl.oninput = () => setTime(+timeEl.value);
 const dateEl = document.getElementById('date');
-const setDate = (d) => { env.setDate(d); dateEl.value = env.getSunInfo().date; showSun(); };
+const setDate = (d) => { env.setDate(d); daylight?.relight(); dateEl.value = env.getSunInfo().date; showSun(); };
 dateEl.onchange = () => setDate(dateEl.value);
 document.querySelectorAll('button[data-d]').forEach((b) => (b.onclick = () => setDate(`${env.getSunInfo().date.slice(0, 4)}-${b.dataset.d}`)));
 document.querySelectorAll('button[data-t]').forEach((b) => (b.onclick = () => setTime(+b.dataset.t)));
@@ -171,8 +175,8 @@ function setFinish(spaceIds, kind, name) {
     store.setFinish(id, { [kind]: `dev-${kind}-${name}` });
   }
 }
-store.on('finishes', () => { house.update(); site.update(); });
-store.on('project', () => { house.update(); env.setTimeOfDay(+timeEl.value); });
+store.on('finishes', () => { house.update(); site.update(); daylight?.relight(); });
+store.on('project', () => { house.update(); env.setTimeOfDay(+timeEl.value); daylight?.onProject(); });
 const fsel = document.getElementById('floor'), wsel = document.getElementById('wall');
 Object.keys(FLOORS).forEach((k) => fsel.add(new Option('Floor: ' + k, k)));
 Object.keys(WALLS).forEach((k) => wsel.add(new Option('Wall: ' + k, k)));
@@ -185,13 +189,15 @@ document.getElementById('ceil').onclick = () => store.setProject({ ceilingHeight
 
 addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
 setView('aerial'); setDate(store.ui.date); setTime(13); syncStudy();
-store.on('plan', () => { window.dev.rebuildMs = house.rebuildPlan(); env.refreshPlan(); });
+store.on('plan', () => { window.dev.rebuildMs = house.rebuildPlan(); env.refreshPlan(); daylight?.onPlan(); });
 
 const statsEl = document.getElementById('stats');
 let frames = 0, last = performance.now(), fps = 0;
 function frame() {
   if (active === camera) controls.update();
   env.update(active);
+  // walk-like eye adaptation while the roof is on and the camera is indoors; dollhouse display gain otherwise
+  daylight?.update(active, { mode: flags.roof && !flags.cut ? 'walk' : 'orbit', dollhouse: !flags.roof || flags.cut, suppress: !flags.study && (!flags.roof || flags.cut) });
   renderer.render(scene, active);
   frames++;
   const now = performance.now();
@@ -202,7 +208,7 @@ frame();
 
 /** Test handle for Playwright. */
 window.dev = {
-  THREE, scene, camera, renderer, house, site, env, store, furniture, controls,
+  THREE, scene, camera, renderer, house, site, env, store, furniture, controls, daylight,
   setView, setCam, setTime, setDate, setStudy, setRoof, setFinish, PLAN, ortho,
   setCut: (cm) => { flags.cut = cm != null; house.setCutaway(cm); syncStudy(); }, setDoors: (v) => house.setDoorsOpen(v), setFurniture: (v) => { furniture.visible = v; },
   hideUI: () => { document.getElementById('bar').style.display = 'none'; statsEl.style.display = 'none'; },

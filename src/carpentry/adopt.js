@@ -159,7 +159,7 @@ export function adoptArchitectLayout(opts = {}, mopts) {
       const id = newId('run');
       const run = {
         id, code: '', kind,
-        name: kind === 'kitchen' ? `${kindL.en} — ${side.en}` : kind === 'island' ? kindL.en : `${first.name}${room && room.id !== 'main' ? ' — ' + room.name : ''}`,
+        name: kind === 'kitchen' ? `${kindL.en} — ${side.en}` : kind === 'island' ? kindL.en : `${(carpItems[0] || first).name}${room && room.id !== 'main' ? ' — ' + room.name : ''}`,
         nameHe: kind === 'kitchen' ? `${kindL.he} — ${side.he}` : kind === 'island' ? kindL.he : `${kindL.he}${room ? ' — ' + (room.nameHe || room.name) : ''}`,
         roomId: roomId || null, anchor, length, levels: [...KIND_LEVELS[kind]], freeStanding: kind === 'island', spec, unitIds: [], worktops: [], ends, notes: '', source: 'architect',
       };

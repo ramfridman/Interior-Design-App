@@ -60,6 +60,8 @@ date.onchange = () => store.setUI({ date: date.value });
 dateLabel.append('date ', date); bar.appendChild(dateLabel);
 for (const d of ['06-21', '12-21', '03-20']) button(d, () => { date.value = `${store.ui.date.slice(0, 4)}-${d}`; store.setUI({ date: date.value }); });
 button('sun study', () => store.setUI({ sunStudy: !store.ui.sunStudy }));
+button('daylight', () => store.setUI({ daylight: store.ui.daylight === false }));
+button('overcast', () => store.setUI({ daylightSky: store.ui.daylightSky === 'overcast' ? 'clear' : 'overcast' }));
 
 // ── live plan edits (what the plan editor will do): mutate PLAN in place, then store.emit('plan') ──
 const rectsTouch = (a, b) => a.x <= b.x + b.w && b.x <= a.x + a.w && a.y <= b.y + b.h && b.y <= a.y + a.h;
@@ -110,6 +112,14 @@ button('window →', () => planEdit.moveWindow('win-living-n', 40));
 button('plan reset', () => planEdit.reset());
 
 const info = document.getElementById('info');
+/** Daylight solver status line (patches, timings, exposure) — view.debug.daylight(). */
+function daylightInfo() {
+  const d = view.debug && view.debug.daylight && view.debug.daylight();
+  if (!d) return '\ndaylight: off';
+  const s = d.state(), t = s.timings;
+  return `\ndaylight ${s.enabled ? (s.ready ? (s.coarse ? 'coarse' : 'fine') : 'solving…') : 'off'} (${s.mode})  ${s.patches} patches  ${s.links} links  atlas ${s.atlas && s.atlas.join('×')}`
+    + `\n  visibility ${t.visWorkerMs ?? '…'} ms  relight ${t.relight ?? '…'} ms  exposure ${s.exposure.toFixed(2)}  weight ${s.on.toFixed(2)}${s.failed ? '  FAILED: ' + s.error : ''}`;
+}
 let walkPos = null;
 view.on('walk-position', (p) => { walkPos = p; });
 view.on('mode', () => { walkPos = null; });
@@ -123,7 +133,8 @@ setInterval(() => {
     + (sun ? `\nsun ${sun.date} ${hhmm(sun.hours)}  az ${sun.azimuth.toFixed(1)}° ${sun.compass}  el ${sun.elevation.toFixed(1)}°  rise ${hhmm(sun.sunrise)}  set ${hhmm(sun.sunset)}` : '')
     + (s.planRebuilds ? `\nplan rebuild ${s.planRebuildMs.toFixed(1)} ms (×${s.planRebuilds})` : '')
     + (walkPos ? `\nwalk ${walkPos.x.toFixed(0)}, ${walkPos.y.toFixed(0)}  ${walkPos.heading.toFixed(0)}°  ${walkPos.spaceId}` : '')
-    + `\nstand-ins: ${Object.entries(view.debug.standIns).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none'}`;
+    + `\nstand-ins: ${Object.entries(view.debug.standIns).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none'}`
+    + daylightInfo();
 }, 400);
 
 Object.assign(window, { view, store, PLAN, catalog, models, getThumbnail, ctx, planEdit });

@@ -13,9 +13,11 @@
  *   install.<runKind> (or install) percent | m | unit · lighting.led m · splashback.<material> m2
  */
 import { takeoff as doTakeoff } from './takeoff.js';
+import { marketEstimate, hasMarketKeys, MARKET_COMPONENTS } from './market.js';
 
 const L = (en, he) => ({ en, he });
 const r0 = (v) => Math.round(v);
+export { MARKET_COMPONENTS };
 export const COMPONENTS = {
   carcass: L('Carcasses, backs, plinth & edging', 'גופים, גבות, צוקל וקנטים'), fronts: L('Fronts & end panels', 'חזיתות ופאנלים'),
   worktop: L('Worktop', 'משטח עבודה'), hardware: L('Hardware', 'פרזול'), internal: L('Internal fittings', 'אביזרים פנימיים'),
@@ -29,7 +31,8 @@ function makeRater(pb, tier, missing) {
     const r = rates[key];
     if (!r) { if (qty > 0) missing.add(key); return null; }
     const f = (r.tierFactor && r.tierFactor[tier]) ?? (pb.tierFactor && pb.tierFactor[tier]) ?? 1;
-    return { rateKey: key, label: r.label || L(key, key), unit: r.unit || unitHint, qty: Math.round(qty * 1000) / 1000, low: qty * r.low * f, typical: qty * r.typical * f, high: qty * r.high * f, source: r.source || null };
+    return { rateKey: key, rateKeys: [key], label: r.label || L(key, key), unit: r.unit || unitHint, qty: Math.round(qty * 1000) / 1000, low: qty * r.low * f, typical: qty * r.typical * f, high: qty * r.high * f,
+      sources: Array.isArray(r.sources) ? r.sources : r.source ? [r.source] : [], confidence: r.confidence || null, includes: r.includes || null };
   };
 }
 
@@ -83,11 +86,11 @@ function runEstimate(rt, pb, tier, missing) {
     const f = (ir.tierFactor && ir.tierFactor[tier]) ?? (pb.tierFactor && pb.tierFactor[tier]) ?? 1;
     const qty = ir.unit === 'percent' ? 1 : ir.unit === 'm' ? rt.length / 100 : rt.units.filter((u) => !['filler', 'panel'].includes(u.module)).length;
     const v = (k) => (ir.unit === 'percent' ? (sub(k) * ir[k] * f) / 100 : qty * ir[k] * f);
-    merged.installation = [{ rateKey: ikey, label: ir.label || L(ikey, ikey), unit: ir.unit, qty: ir.unit === 'percent' ? ir.typical : qty, low: v('low'), typical: v('typical'), high: v('high'), source: ir.source || null }];
+    merged.installation = [{ rateKey: ikey, rateKeys: [ikey], label: ir.label || L(ikey, ikey), unit: ir.unit, qty: ir.unit === 'percent' ? ir.typical : qty, low: v('low'), typical: v('typical'), high: v('high'), sources: Array.isArray(ir.sources) ? ir.sources : ir.source ? [ir.source] : [] }];
   } else missing.add(`install.${rt.kind}`);
   const components = Object.keys(COMPONENTS).filter((c) => merged[c] && merged[c].length).map((c) => {
     const lines = merged[c].map((l) => ({ ...l, low: r0(l.low), typical: r0(l.typical), high: r0(l.high) }));
-    return { key: c, label: COMPONENTS[c], optional: c === 'lighting' || c === 'splashback', low: lines.reduce((s, l) => s + l.low, 0), typical: lines.reduce((s, l) => s + l.typical, 0), high: lines.reduce((s, l) => s + l.high, 0), rateKeys: lines.map((l) => l.rateKey), lines };
+    return { key: c, label: COMPONENTS[c], basis: L('Bottom-up from the take-off × material / hardware rates', 'חישוב מלמטה: כמויות × מחירי חומרים ופרזול'), optional: c === 'lighting' || c === 'splashback', low: lines.reduce((s, l) => s + l.low, 0), typical: lines.reduce((s, l) => s + l.typical, 0), high: lines.reduce((s, l) => s + l.high, 0), rateKeys: lines.map((l) => l.rateKey), lines };
   });
   const total = { low: 0, typical: 0, high: 0 };
   for (const c of components) for (const k of ['low', 'typical', 'high']) total[k] += c[k];
@@ -103,11 +106,19 @@ function runEstimate(rt, pb, tier, missing) {
 export function estimate(runId = 'all', opts = {}) {
   const pb = opts.pricebook || null;
   const tiers = (pb && pb.tiers) || ['basic', 'mid', 'premium'];
-  const tier = opts.tier || tiers[Math.floor(tiers.length / 2)];
+  const method = opts.method || (hasMarketKeys(pb) ? 'market' : 'materials');
+  const tier = opts.tier || (method === 'market' ? null : tiers[Math.floor(tiers.length / 2)]);
   const vat = pb && typeof pb.vat === 'number' ? pb.vat : 0.18;
-  const missing = new Set();
-  const t = opts.takeoff || doTakeoff(runId, opts.src);
-  const runs = t.runs.map((rt) => runEstimate(rt, pb, tier, missing));
+  let runs, missingRates;
+  if (method === 'market') {
+    const m = marketEstimate(runId, { ...opts, tier });
+    runs = m.runs; missingRates = m.missing;
+  } else {
+    const missing = new Set();
+    const t = opts.takeoff || doTakeoff(runId, opts.src);
+    runs = t.runs.map((rt) => runEstimate(rt, pb, tier, missing));
+    missingRates = [...missing].sort().map((key) => ({ key, label: L(`No rate: ${key}`, `אין מחיר: ${key}`) }));
+  }
   const inc = (o) => ({ low: r0(o.low * (1 + vat)), typical: r0(o.typical * (1 + vat)), high: r0(o.high * (1 + vat)) });
   for (const r of runs) r.totalIncVat = inc(r.total);
   const total = { low: 0, typical: 0, high: 0 };
@@ -115,7 +126,7 @@ export function estimate(runId = 'all', opts = {}) {
   return {
     isEstimate: true, label: L('Estimate — not a quotation', 'הערכה בלבד — אינה הצעת מחיר'),
     disclaimer: L('Indicative range from market rates for budgeting. The carpenter\'s quotation after a site measurement is binding.', 'טווח מחירים משוער לפי מחירי שוק, לצורך תקצוב. הצעת המחיר של הנגר לאחר מדידה באתר היא המחייבת.'),
-    currency: (pb && pb.currency) || 'ILS', vat, asOf: (pb && pb.asOf) || null, tier, tiers,
-    runs, total, totalIncVat: inc(total), missingRates: [...missing].sort(), notes: (pb && pb.notes) || [], pricebookMissing: !pb,
+    method, currency: (pb && pb.currency) || 'ILS', vat, asOf: (pb && pb.asOf) || null, tier: tier || 'suggested', tiers,
+    runs, total, totalIncVat: inc(total), missingRates, notes: (pb && pb.notes) || [], pricebookMissing: !pb,
   };
 }

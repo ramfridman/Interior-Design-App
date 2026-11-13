@@ -490,20 +490,50 @@ hanging-height, sliding-min, sliding-max, aisle, door-swing, clash`. Re-run chec
 * `totals = { materials [{ group, material, thickness, label, areaM2, pieces, edgeM }], edges [{ type, label, m }], fronts { count, areaM2 },
   hardware Hw[], worktops [{ material, thickness, label, areaM2, pieces, polishedM, upstandM, cutouts {sink, hob, basin} }], plinthM, lightingM, splashbackM2 }`.
 
-### Estimate — `estimate(runId | 'all', { tier, pricebook })`
-Price book (`src/carpentry/pricebook.js`): `{ currency: 'ILS', vat: 0.18, asOf: 'YYYY-MM', tiers: ['basic','mid','premium'],
-tierFactor?: { basic, mid, premium }, rates: { [key]: { unit: 'm'|'m2'|'unit'|'percent', low, typical, high, tierFactor?, label { en, he },
-source { name, url } } }, notes: [] }`. Rate keys the engine looks up (missing → 0 and listed in `missingRates`):
-`carcass.<mfc|plywood|mdf>` m2 · `back.<hdf|mfc|plywood>` m2 · `edge.<abs-1|abs-2|pvc-0.4|laser|painted>` m · `plinth.<matching-fronts|aluminium|carcass>` m ·
-`fronts.<frontMaterial>` m2 · `fronts.glass` m2 · `fronts.mirror` m2 · `worktop.<worktopMaterial>` m2 or m (per running metre ≤ 65 cm deep; deeper = area / 0.6) ·
-`worktop.cutout.<sink|hob|basin>` unit · `worktop.edge` m · `worktop.upstand` m · `worktop.waterfall` unit · `hardware.<Hw kind>` unit (`hardware.rail`,
-`hardware.profile`, `hardware.sliding-track` per m) · `internal.pullout.<variant>` · `internal.larder` · `internal.trouser-rack` unit ·
-`install.<runKind>` or `install` (percent of the run's material subtotal, or per m of run, or per unit) · `lighting.led` m · `splashback.<material>` m2.
-Price = qty × rate × tierFactor (rate's, else the book's, else 1). Result: `{ isEstimate: true, label { en, he }, disclaimer { en, he },
-currency, vat, asOf, tier, tiers, runs: [{ runId, code, name, components: [{ key: carcass|fronts|worktop|hardware|internal|installation|lighting|splashback,
-label, optional, low, typical, high, rateKeys, lines: [{ rateKey, label, unit, qty, low, typical, high, source }] }], total, totalIncVat, rateKeys }],
-total, totalIncVat, missingRates, notes, pricebookMissing }` — whole ILS, `total` before VAT; total = Σ runs = Σ components = Σ lines.
-**Always present it as an estimate** (show `label` / `disclaimer`, the `asOf`, and each line's source).
+### Estimate — `estimate(runId | 'all', { tier, pricebook, method: 'market' | 'materials', src })`
+Two methods, same result shape. **`'market'` is primary** (default whenever the book has market keys — `hasMarketKeys(pb)`);
+`'materials'` (bottom-up from the take-off) is secondary. Price book = `src/carpentry/pricebook.js` (`import PRICEBOOK from
+'./carpentry/pricebook.js'`): `{ currency: 'ILS', vat: 0.18, asOf: 'YYYY-MM', priceBasis, tiers: ['basic','mid','premium'],
+tierFactor?, rates: { [key]: { unit: 'm'|'m2'|'unit'|'percent'|'job'|'day', low, typical, high, includes, label { en, he },
+sources: [{ name, url, date }] (or a single `source`), confidence, tierFactor? } }, notes: [{ en, he }] }` — ILS excluding VAT.
+
+**Tier.** `opts.tier` ∈ `tiers`; without it every run uses `suggestTier(run)`: melamine / laminate fronts → `basic`; lacquer /
+Fenix / J-profile → `mid`; veneer / solid wood / glass fronts, gola or premium hardware → `premium` (the UI lets the owner override).
+Each run reports `tier` and `suggestedTier`.
+
+**Market mapping** (from the run's real geometry; `rateKeys` on every line):
+* Kitchen / pantry / utility runs, along the run: metres with BOTH base and wall units × `kitchen.complete.per-m.<tier>`; base only
+  × `kitchen.cabinets.per-m.<tier>`; wall only (incl. the top box over a free-standing fridge) × `kitchen.wall-units.per-m.<tier>`,
+  else derived `complete − cabinets` (`derived: true`); tall units × `kitchen.tall-unit.per-unit` scaled by width / 60.
+  Free-standing appliance spaces are not counted.
+* Island × `kitchen.island.per-m` (else `kitchen.island.per-unit`).
+* Add-ons the per-metre rates exclude: corner fittings (LeMans / magic corner / carousel) × `kitchen.corner-fitting.per-unit`, lift-up
+  wall units × `kitchen.lift-up-unit[-120].per-unit`, every drawer (fronts + internal) × `kitchen.drawer.per-unit`; pull-outs /
+  larders → `noRate` line.
+* Worktop pieces × `worktop.<material>.per-m` per running metre (≤ 65 cm deep; deeper pieces and waterfalls pro-rata depth / 60) +
+  `worktop.cutout.<sink|hob>[.natural-stone]` (basins use the sink key; granite / local marble use `.natural-stone`).
+* Full-height units (wardrobes, closets, laundry / utility cupboards, entry) × m² of front (width × height above the plinth,
+  incl. top boxes) × `wardrobe.per-m2.<tier>`; + `wardrobe.sliding.premium-percent` and `wardrobe.mirror-door.premium-percent` on the
+  share of sliding / mirror front; internal drawers × `wardrobe.drawer.soft-close`. Bookcases × `bookcase.per-m2`.
+* Vanities × `vanity.per-m.<tier>` (mid = mean of basic and premium, `derived`), else `vanity.per-unit`.
+* Installation: one `labour.installation.kitchen` job per estimate (on the first kitchen run); wardrobe m² rates include it.
+* Lighting: `lighting.led.strip.per-m` × LED metres (strip only).
+* Anything else (media, desk, shelving units, custom, pull-outs, a worktop material without a key) → a line with `noRate: true`,
+  zero money, a label saying "no published rate — ask the carpenter", and an entry in `missingRates`.
+
+**Materials method** looks up `carcass.<material>` m2 · `back.<material>` m2 · `edge.<type>` m · `plinth.<finish>` m · `fronts.<material>` /
+`fronts.glass` / `fronts.mirror` m2 · `worktop.<material>` m2 or m · `worktop.cutout.<kind>` · `worktop.edge` m · `worktop.upstand` m ·
+`worktop.waterfall` · `hardware.<Hw kind>` · `internal.pullout.<variant>` / `internal.larder` / `internal.trouser-rack` · `install.<runKind>`
+or `install` (percent of the material subtotal, per m, or per unit) · `lighting.led` · `splashback.<material>`; qty × rate × tierFactor.
+
+**Result:** `{ isEstimate: true, method, label { en, he }, disclaimer { en, he }, currency, vat, asOf, tier ('suggested' when per run),
+tiers, runs: [{ runId, code, name, nameHe, kind, tier, suggestedTier, components: [{ key, label, basis { en, he }, optional, low, typical,
+high, rateKeys, lines: [{ rateKey, rateKeys, label, unit, qty, low, typical, high, sources: [], confidence, includes, note?, derived?,
+noRate? }] }], total, totalIncVat, rateKeys, noRateLines }], total, totalIncVat, missingRates: [{ key, label { en, he } }], notes, pricebookMissing }`.
+Market component keys: `cabinets, addons, worktop, installation, lighting, other` (`MARKET_COMPONENTS`); materials:
+`carcass, fronts, worktop, hardware, internal, installation, lighting, splashback` (`COMPONENTS`). Whole ILS; `total` before VAT;
+total = Σ runs = Σ components = Σ lines. **Always present it as an estimate**: show `label` / `disclaimer`, `asOf`, each component's
+`basis`, each line's sources / confidence / `includes`, the book's `notes`, and "no published rate — ask the carpenter" for `noRate` lines.
 
 ### Drawings — `drawings(runId)` → `Drawing[]` (plan, elevation, section, worktop if any, internal if tall / full units)
 `Drawing = { id, kind: 'plan'|'elevation'|'section'|'worktop'|'internal', runId, title { en, he }, scale (1:scale, from 10/20/25/50/100 to

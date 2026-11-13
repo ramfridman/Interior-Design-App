@@ -14,7 +14,8 @@ export { KIND_LEVELS, createRun, updateRun, removeRun, duplicateRun, layoutRun, 
 export { adoptArchitectLayout } from './adopt.js';
 export { checkRun, runContext } from './checks.js';
 export { takeoff, unitTakeoff, runnerFor, HARDWARE } from './takeoff.js';
-export { estimate, COMPONENTS } from './estimate.js';
+export { estimate, COMPONENTS, MARKET_COMPONENTS } from './estimate.js';
+export { suggestTier, hasMarketKeys } from './market.js';
 export { drawings, textBox, textWidthMm, LW, TEXT, FILL, fmt } from './drawings.js';
 export { schedules, HEADERS } from './schedules.js';
 export { sortCarpentersByDistance, haversineKm } from './distance.js';

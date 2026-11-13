@@ -3,6 +3,7 @@ import { store } from '../src/core/store.js';
 import { initialLayout } from '../src/core/initial-layout.js';
 import { itemAABB } from '../src/core/geometry.js';
 import * as C from '../src/carpentry/index.js';
+import PRICEBOOK from '../src/carpentry/pricebook.js';
 
 store.persist = false;
 let failed = 0, passed = 0;
@@ -176,15 +177,39 @@ store.undo();
 
 // ───────────────────────── estimate ─────────────────────────
 group('Estimate');
-const est = { basic: C.estimate('all', { tier: 'basic', pricebook: TEST_PRICEBOOK }), mid: C.estimate('all', { tier: 'mid', pricebook: TEST_PRICEBOOK }), premium: C.estimate('all', { tier: 'premium', pricebook: TEST_PRICEBOOK }) };
+const est = { basic: C.estimate('all', { tier: 'basic', pricebook: TEST_PRICEBOOK, method: 'materials' }), mid: C.estimate('all', { tier: 'mid', pricebook: TEST_PRICEBOOK, method: 'materials' }), premium: C.estimate('all', { tier: 'premium', pricebook: TEST_PRICEBOOK, method: 'materials' }) };
 check('estimate is labelled an estimate', est.mid.isEstimate && HEB.test(est.mid.label.he));
 check('monotonic in tier (low, typical, high)', ['low', 'typical', 'high'].every((k) => est.basic.total[k] < est.mid.total[k] && est.mid.total[k] < est.premium.total[k]));
 check('low ≤ typical ≤ high', Object.values(est).every((e) => e.total.low <= e.total.typical && e.total.typical <= e.total.high));
 check('total = sum of runs = sum of components = sum of lines', Object.values(est).every((e) => ['low', 'typical', 'high'].every((k) => e.total[k] === sum(e.runs, (r) => r.total[k]) && e.runs.every((r) => r.total[k] === sum(r.components, (c) => c[k]) && r.components.every((c) => c[k] === sum(c.lines, (l) => l[k]))))));
 check('incl. 18 % VAT', est.mid.totalIncVat.typical === Math.round(est.mid.total.typical * 1.18));
-check('every component carries its rate keys; unknown rates are listed', est.mid.runs.every((r) => r.components.every((c) => c.rateKeys.length && c.lines.every((l) => TEST_PRICEBOOK.rates[l.rateKey]))) && est.mid.missingRates.includes('carcass.mfc') === false && est.mid.missingRates.includes('hardware.leg'));
+check('every component carries its rate keys; unknown rates are listed', est.mid.runs.every((r) => r.components.every((c) => c.rateKeys.length && c.lines.every((l) => TEST_PRICEBOOK.rates[l.rateKey]))) && !est.mid.missingRates.some((m) => m.key === 'carcass.mfc') && est.mid.missingRates.some((m) => m.key === 'hardware.leg'));
 const kEst = est.mid.runs.find((r) => r.runId === north.id);
 check('kitchen installation = 10 % of the material subtotal', kEst.components.find((c) => c.key === 'installation').typical === Math.round(sum(kEst.components.filter((c) => ['carcass', 'fronts', 'worktop', 'hardware', 'internal'].includes(c.key)), (c) => sum(c.lines, (l) => l.typical)) * 0.1) || near(kEst.components.find((c) => c.key === 'installation').typical, sum(kEst.components.filter((c) => c.key !== 'installation'), (c) => c.typical) * 0.1, 3));
+
+// ───────────────────────── market estimate (real price book) ─────────────────────────
+group('Market estimate with the researched price book');
+check('market is the default method for the real price book', C.estimate('all', { pricebook: PRICEBOOK }).method === 'market');
+const mk = Object.fromEntries(['basic', 'mid', 'premium'].map((t) => [t, C.estimate('all', { tier: t, pricebook: PRICEBOOK })]));
+const target = runs.filter((r) => ['kitchen', 'island', 'wardrobe'].includes(r.kind));
+const mrun = (t, id) => mk[t].runs.find((r) => r.runId === id);
+check('kitchen K1 + K2 + island + worktops and every wardrobe: non-zero ranges in all three tiers', target.every((r) => ['basic', 'mid', 'premium'].every((t) => mrun(t, r.id).total.low > 0)) && ['basic', 'mid', 'premium'].every((t) => [north, west, island].every((r) => mrun(t, r.id).components.some((c) => c.key === 'worktop' && c.typical > 0))));
+check('low ≤ typical ≤ high everywhere', Object.values(mk).every((e) => e.runs.every((r) => r.total.low <= r.total.typical && r.total.typical <= r.total.high)));
+check('basic ≤ mid ≤ premium (per run and in total)', ['low', 'typical', 'high'].every((k) => mk.basic.total[k] <= mk.mid.total[k] && mk.mid.total[k] <= mk.premium.total[k] && runs.every((r) => mrun('basic', r.id).total[k] <= mrun('mid', r.id).total[k] && mrun('mid', r.id).total[k] <= mrun('premium', r.id).total[k])) && mk.basic.total.typical < mk.premium.total.typical);
+check('totals = Σ runs = Σ components = Σ lines', Object.values(mk).every((e) => ['low', 'typical', 'high'].every((k) => e.total[k] === sum(e.runs, (r) => r.total[k]) && e.runs.every((r) => r.total[k] === sum(r.components, (c) => c[k]) && r.components.every((c) => c[k] === sum(c.lines, (l) => l[k]))))));
+check('every line has at least one source or is flagged noRate', Object.values(mk).every((e) => e.runs.every((r) => r.components.every((c) => c.lines.every((l) => l.noRate || (l.sources && l.sources.length))))));
+check('missing rates are listed with a bilingual label; noRate lines are zero', mk.mid.missingRates.every((m) => m.key && HEB.test(m.label.he)) && mk.mid.runs.every((r) => r.components.every((c) => c.lines.filter((l) => l.noRate).every((l) => l.typical === 0 && mk.mid.missingRates.some((m) => m.key === l.rateKey)))));
+check('estimate keeps its label, disclaimer, basis per component and the book\'s notes', mk.mid.isEstimate && HEB.test(mk.mid.disclaimer.he) && mk.mid.notes.length > 0 && mk.mid.runs.every((r) => r.components.every((c) => c.basis && c.basis.en)));
+check('kitchen installation counted once', sum(mk.mid.runs, (r) => r.components.filter((c) => c.key === 'installation').length) === 1);
+check('suggested tiers: lacquer kitchen → mid, melamine wardrobes → basic', C.suggestTier(north) === 'mid' && C.suggestTier(master) === 'basic' && C.suggestTier({ spec: { ...north.spec, fronts: { ...north.spec.fronts, style: 'gola' } } }) === 'premium');
+check('without a tier each run uses its suggested tier', C.estimate('all', { pricebook: PRICEBOOK }).runs.every((r) => r.tier === r.suggestedTier));
+const fmtN = (n) => String(n.toLocaleString('en-US')).padStart(9);
+console.log('\n      Market estimate, tier mid, ILS excl. VAT (architect\'s design as adopted)');
+console.log('      run  ' + 'name'.padEnd(36) + '      low  typical     high');
+for (const r of mk.mid.runs) console.log(`      ${r.code.padEnd(5)}${(r.name || '').slice(0, 36).padEnd(36)}${fmtN(r.total.low)}${fmtN(r.total.typical)}${fmtN(r.total.high)}${r.noRateLines ? '  (' + r.noRateLines + ' without rate)' : ''}`);
+console.log(`      ${'TOTAL'.padEnd(41)}${fmtN(mk.mid.total.low)}${fmtN(mk.mid.total.typical)}${fmtN(mk.mid.total.high)}   incl. VAT ${mk.mid.totalIncVat.typical.toLocaleString('en-US')} typical`);
+console.log('      basic / mid / premium typical: ' + ['basic', 'mid', 'premium'].map((t) => mk[t].total.typical.toLocaleString('en-US')).join(' / '));
+console.log('      missing rates: ' + (mk.mid.missingRates.map((m) => m.key).join(', ') || 'none'));
 
 // ───────────────────────── drawings ─────────────────────────
 group('Drawings');
@@ -266,7 +291,7 @@ for (let i = 0; i < N; i++) {
   C.updateRun(north.id, { notes: 'perf ' + i });                       // forces a full re-layout of the L (+ linked run)
   C.takeoff(north.id); C.takeoff(west.id); C.takeoff(island.id);
   kit.forEach((id) => C.drawings(id));
-  C.estimate('all', { pricebook: TEST_PRICEBOOK });
+  C.estimate('all', { pricebook: TEST_PRICEBOOK, method: 'materials' });
 }
 const ms = (performance.now() - t0) / N;
 check('full kitchen: layout + take-off + drawings + estimate < 30 ms', ms < 30, `${ms.toFixed(1)} ms`);

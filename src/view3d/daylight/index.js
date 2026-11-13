@@ -475,6 +475,8 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
       if (S && Math.abs(ceilingCm() / 100 - S.H) > 1e-6) { try { rebuildScene(); sendScene(); } catch (e) { fail(e); } }
       else relight();
     },
+    /** Light any extra object tree (e.g. a test bench's furniture group) from the probe field indoors. */
+    patchFurniture: patchTree,
     /** The house rebuilt some meshes (cut-away, ceiling): map them into the atlas again. */
     refreshUVs: applyUVs,
     update,
