@@ -201,7 +201,7 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
 
   const S = { zenith: new THREE.Color(), horizon: new THREE.Color(), sun: new THREE.Color() };
   const state = {
-    hours: 13, date: todayAt(where.timeZone), interior: false, study: false, night: 0, day: 1, exposure: 1, k: 0, texel: 0,
+    hours: 13, date: todayAt(where.timeZone), interior: false, study: false, night: 0, day: 1, exposure: 1, k: 0, texel: 0, daylight: 0,
     fillColor: new THREE.Color(), fillIntensity: 0, info: null,
   };
   const hb = plan.bounds, houseBox = { x0: hb.x / 100, x1: (hb.x + hb.w) / 100, z0: hb.y / 100, z1: (hb.y + hb.h) / 100 };
@@ -322,6 +322,19 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
       state.interior = !!on;
       if (!state.interior) blend(0);
     },
+    /**
+     * Weight (0..1) of the solved daylight (daylight/index.js). While it is shown, the interior "fill" look — point
+     * lights in the rooms, warm hemisphere, lifted exposure — is retired: the rooms are lit by the solution instead,
+     * and the exterior keeps the true outdoor sky light. At night the weight fades to 0 and the old look returns.
+     */
+    setDaylight(w) {
+      const v = Math.max(0, Math.min(1, Number(w) || 0));
+      if (Math.abs(v - state.daylight) < 1e-4) return;
+      state.daylight = v;
+      if (state.interior) state.forceBlend = true;
+    },
+    /** Exposure of the current outdoor / indoor look (before the daylight eye adaptation). */
+    getExposure: () => state.exposure,
     /** Per-frame hook: keeps the sky centred on the camera and moves the fill lights to the rooms around it. */
     update(camera) {
       if (!camera || state.disposed) return;
@@ -332,8 +345,8 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
       // indoor look only while the camera is under the roof; fades out within 2.5 m of the facade
       const H = ceilingH();
       const away = Math.max(houseBox.x0 - _v.x, _v.x - houseBox.x1, houseBox.z0 - _v.z, _v.z - houseBox.z1, _v.y - H, 0);
-      const k = 1 - smooth(0, 2.5, away);
-      if (Math.abs(k - state.k) > 0.002) blend(k);
+      const k = (1 - smooth(0, 2.5, away)) * (1 - state.daylight);
+      if (Math.abs(k - state.k) > 0.002 || state.forceBlend) { state.forceBlend = false; blend(k); }
       if (k <= 0.001 || !anchors.length) return;
       const y = H * 0.6;
       for (let i = 0; i < anchors.length; i++) dist[i] = Math.hypot(anchors[i].x - _v.x, anchors[i].z - _v.z);

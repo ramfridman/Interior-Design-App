@@ -114,6 +114,7 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
   const entries = new Map();
   const marks = { [LAYER_SELECTED]: new Set(), [LAYER_HOVER]: new Set() };
   const listeners = new Set();
+  let materialHook = null;                                             // daylight: patches item materials for the probe field
   const notify = () => listeners.forEach((fn) => fn());
 
   // ───────────── lamp light pool ─────────────
@@ -142,6 +143,7 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
       if (o.isLight && o.userData.isLampLight) { lamps.push({ light: o, intensity: o.intensity }); o.visible = false; }
     });
     root.add(model);
+    if (materialHook) root.traverse((o) => { if (o.isMesh && o.material) materialHook(o.material); });
     return { id: item.id, root, sig: signature(item), lamps, box: new THREE.Box3() };
   }
 
@@ -243,6 +245,11 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
       return best;
     },
     setLampGain(g) { lampGain = g; },
+    /** `fn(material)` is called for every mesh material of every item (now and on each build); null removes it. */
+    setMaterialHook(fn) {
+      materialHook = typeof fn === 'function' ? fn : null;
+      if (materialHook) for (const entry of entries.values()) entry.root.traverse((o) => { if (o.isMesh && o.material) materialHook(o.material); });
+    },
     /** Enable / disable lamp lighting and move the pool onto the lamps nearest to the camera. */
     updateLamps(camera, enabled) {
       const cands = [];

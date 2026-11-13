@@ -39,6 +39,8 @@ const AO_FLOOR = { width: 0.45, alpha: 0.34 }, AO_CEILING = { width: 0.4, alpha:
 const WALL_FADE = 0.45;                       // height (m) of the soft darkening at the foot / head of interior walls
 const PLINTH_PROUD = 0.8;                     // cm the plinth course stands proud of the render
 const IDENTITY = new THREE.Matrix4();
+/** Meshes of the room interiors (lit by the daylight lightmap when the daylight solver is attached). */
+const isInterior = (name) => name.startsWith('floor:') || name.startsWith('wall:room:') || name === 'ceilings' || name === 'wall:skirting';
 
 /** Soft contact-shadow strips (black, per-vertex alpha) laid on floors and ceilings along the walls. */
 class ShadeStrips {
@@ -395,6 +397,8 @@ export function buildHouse(ctx) {
     roofCaster: Object.assign(casterMaterial(), { shadowSide: THREE.DoubleSide }),   // hidden roof: both faces, so nothing touching the ceiling plane is lit
   };
   const meshes = new Map();
+  let daylight = null;                                                  // daylight/index.js hooks (lightmap UVs + materials)
+  let fakeShading = true;                                               // baked contact strips: off while real daylight is shown
 
   /** Create or refresh a named mesh from a soup. */
   function setMesh(name, soup, parent, cast, receive) {
@@ -405,6 +409,7 @@ export function buildHouse(ctx) {
       mesh.name = name; meshes.set(name, mesh); parent.add(mesh);
     } else { mesh.geometry.dispose(); mesh.geometry = soup.toGeometry(name.startsWith('wall:room:')); mesh.visible = true; }
     mesh.castShadow = cast; mesh.receiveShadow = receive;
+    if (daylight && isInterior(name)) daylight.prepareMesh(mesh);
     return mesh;
   }
 
@@ -439,7 +444,7 @@ export function buildHouse(ctx) {
     const { soups, aoFloor, aoCeiling } = buildShellSoups(grid, plan, sides, topH(), state.H, plinthDepth, dryRooms);
     for (const [name, strips, parent] of [['ao:floor', aoFloor, shell], ['ao:ceiling', aoCeiling, roof]]) {
       const mesh = setMesh(name, strips.idx.length ? { empty: false, toGeometry: () => strips.toGeometry() } : null, parent, false, false);
-      if (mesh) { mesh.material = own.shade; mesh.renderOrder = 1; }
+      if (mesh) { mesh.material = own.shade; mesh.renderOrder = 1; if (mesh.visible) mesh.visible = fakeShading; }
     }
     for (const key of new Set([...soups.keys(), ...[...meshes.keys()].filter((n) => n.startsWith('wall:')).map((n) => n.slice(5))])) {
       const mesh = setMesh('wall:' + key, soups.get(key), shell, wallsCast(), true);
@@ -494,7 +499,8 @@ export function buildHouse(ctx) {
     const p = store.project || {};
     const exterior = surfaceMaterial('render', { color: p.exteriorColor || '#efece6' });
     own.plinth.color.set(p.exteriorColor || '#efece6').multiplyScalar(0.8);
-    const assign = (name, material) => { const m = meshes.get(name); if (m) m.material = material; };
+    const assign = (name, material) => { const m = meshes.get(name); if (m) m.material = daylight && isInterior(name) ? daylight.lightmapMaterial(material) : material; };
+    assign('ceilings', own.ceiling);
     assign('wall:ext', exterior); assign('roof:ext', exterior);
     assign('wall:plinth', own.plinth); assign('wall:cap', own.cap); assign('wall:skirting', own.skirting);
     assign('roof:top', surfaceMaterial('roof')); assign('roof:coping', own.coping);
@@ -516,6 +522,7 @@ export function buildHouse(ctx) {
   rebuildShell(); rebuildRoof();
   const openings = buildOpenings(plan, openingOpts());
   shell.add(openings.group);
+  const rebuildOpenings = () => { openings.rebuild(openingOpts()); if (daylight) daylight.patchTree(openings.group); };
   applyMaterials(); applyRoofVisibility();
 
   return {
@@ -524,7 +531,7 @@ export function buildHouse(ctx) {
     /** Re-read store.project and store.finishes and refresh whatever changed. */
     update() {
       const H = ceilingH();
-      if (H !== state.H) { state.H = H; rebuildShell(); rebuildRoof(); openings.rebuild(openingOpts()); }
+      if (H !== state.H) { state.H = H; rebuildShell(); rebuildRoof(); rebuildOpenings(); }
       applyMaterials(); applyRoofVisibility();
     },
     /**
@@ -538,7 +545,7 @@ export function buildHouse(ctx) {
       state.H = ceilingH();
       readPlan();
       rebuildFloors(); rebuildShell(); rebuildRoof();
-      openings.rebuild(openingOpts());
+      rebuildOpenings();
       applyMaterials(); applyRoofVisibility();
       return performance.now() - t0;
     },
@@ -549,7 +556,7 @@ export function buildHouse(ctx) {
       const cut = heightCm == null || !Number.isFinite(+heightCm) ? null : Math.max(0.1, +heightCm / 100);
       if (cut === state.cut) return;
       state.cut = cut;
-      rebuildShell(); openings.rebuild(openingOpts()); applyMaterials(); applyRoofVisibility();
+      rebuildShell(); rebuildOpenings(); applyMaterials(); applyRoofVisibility();
     },
     /**
      * Sun study: true (default) = a hidden roof and cut-away walls still block the sun (invisible shadow casters), so
@@ -558,14 +565,32 @@ export function buildHouse(ctx) {
     setSunStudy(v) {
       if (!!v === state.sunStudy) return;
       state.sunStudy = !!v;
-      if (state.cut != null) openings.rebuild(openingOpts());
+      if (state.cut != null) rebuildOpenings();
       applyRoofVisibility();
     },
     /** Open (≈ 85°, on the hinge, towards `swing`) or close all hinged doors; the terrace slider parks half open. */
+    /**
+     * Attach / detach the daylight solver: { prepareMesh(mesh), lightmapMaterial(material), patchTree(root) }.
+     * Interior meshes get a second UV set into the lightmap atlas and lightmap-aware material clones.
+     */
+    setDaylight(dl) {
+      daylight = dl || null;
+      if (!daylight) this.setFakeShading(true);
+      for (const [name, mesh] of meshes) if (daylight && isInterior(name) && mesh.visible) daylight.prepareMesh(mesh);
+      if (daylight) daylight.patchTree(openings.group);
+      applyMaterials();
+    },
+    /** Visit every interior mesh (floors, room walls, ceilings, skirting) — `fn(name, mesh)`. */
+    forEachInterior(fn) { for (const [name, mesh] of meshes) if (isInterior(name) && mesh.visible) fn(name, mesh); },
+    /** Show / hide the baked contact-shading strips (the old fake ambient occlusion). */
+    setFakeShading(on) {
+      fakeShading = !!on;
+      for (const name of ['ao:floor', 'ao:ceiling']) { const m = meshes.get(name); if (m && m.geometry.index && m.geometry.index.count) m.visible = fakeShading; }
+    },
     setDoorsOpen(v) {
       if (!!v === state.doorsOpen) return;
       state.doorsOpen = !!v;
-      openings.rebuild(openingOpts());
+      rebuildOpenings();
     },
     dispose() {
       for (const mesh of meshes.values()) mesh.geometry.dispose();

@@ -64,7 +64,7 @@ export function createView3D(container, ctx) {
   let probe = 0;
   let slow = false;         // last measured frame interval was > 250 ms: camera animations are skipped, not played in slow motion
   let mode = 'orbit', fly = null, saved = null;
-  let house = null, site = null, env = null;
+  let house = null, site = null, env = null, daylight = null;
   let sunInfo = null, planRebuildMs = 0, planRebuilds = 0;
   const standIns = { house: false, site: false, environment: false };
   const stats = { frameMs: 0, renderMs: 0, fps: 0, frames: 0 };
@@ -102,8 +102,16 @@ export function createView3D(container, ctx) {
     call(house, 'setSunStudy', study);
     call(env, 'setSunStudy', study && !walking && (!store.ui.showRoof || !!store.ui.wallsCutaway));
     call(env, 'setInteriorMode', mode === 'walk');
+    call(daylight, 'setDoorsOpen', mode === 'walk');                   // walking: interior doors are drawn open
     invalidate();
   }
+  /** How the daylight solution is shown: walk (eye adaptation), roofless dollhouse (display gain), or not at all. */
+  const daylightView = () => {
+    const walking = mode === 'walk' && !(fly && fly.deferRoof);
+    const roofHidden = !walking && (!store.ui.showRoof || !!store.ui.wallsCutaway);
+    // without sun study the hidden roof casts nothing — the solved interior (which has a roof) would not match
+    return { mode: walking ? 'walk' : 'orbit', dollhouse: roofHidden, suppress: roofHidden && store.ui.sunStudy === false };
+  };
 
   /** Sun position and today's key times: from the environment, or straight from the ephemeris while a stand-in is used. */
   function readSun() {
@@ -118,6 +126,7 @@ export function createView3D(container, ctx) {
   function applySun() {
     call(env, 'setDate', store.ui.date);
     call(env, 'setTimeOfDay', store.ui.timeOfDay);
+    call(daylight, 'relight');
     sunInfo = readSun();
     emit('sun', sunInfo);
     invalidate();
@@ -134,6 +143,7 @@ export function createView3D(container, ctx) {
     call(house, 'rebuildPlan');
     call(env, 'refreshPlan');
     walk.refreshPlan(); interaction.refreshPlan(); items.refreshPlan();
+    call(daylight, 'onPlan');
     if (mode === 'walk' && !fly) walk.syncCamera();
     planRebuildMs = performance.now() - t0; planRebuilds++;
     invalidate();
@@ -141,7 +151,7 @@ export function createView3D(container, ctx) {
 
   async function assemble() {
     const load = (file) => import(file).catch(() => null);
-    const [houseMod, siteMod, envMod] = await Promise.all([load('./house.js'), load('./site.js'), load('./environment.js')]);
+    const [houseMod, siteMod, envMod, dlMod] = await Promise.all([load('./house.js'), load('./site.js'), load('./environment.js'), load('./daylight/index.js')]);
     if (destroyed) return;
     const build = (name, real, fallback, valid) => {
       if (real) {
@@ -154,6 +164,14 @@ export function createView3D(container, ctx) {
     site = build('site', siteMod && siteMod.buildSite && (() => siteMod.buildSite(ctx)), () => standInSite(ctx), (s) => s.group && s.group.isObject3D);
     scene.add(house.group, site.group);
     env = build('environment', envMod && envMod.createEnvironment && (() => envMod.createEnvironment({ scene, renderer, ctx, shadowMapSize: softwareGL(gl) ? 2048 : undefined })), () => standInEnvironment({ scene, renderer, ctx }), (e) => typeof e.setTimeOfDay === 'function');
+    // diffuse daylight (radiosity solver in a worker → lightmaps + probes); the standard lighting stays as the fallback
+    if (dlMod && dlMod.createDaylight && !standIns.house && !standIns.environment) {
+      try {
+        daylight = dlMod.createDaylight({ ctx, renderer, scene, invalidate });
+        daylight.setEnabled(store.ui.daylight !== false);
+        daylight.attach({ house, env, items });
+      } catch (e) { console.warn('[view3d] daylight unavailable — using the standard lighting', e); daylight = null; }
+    }
     applyHouseState();
     ready = true;
     applySun();
@@ -165,8 +183,10 @@ export function createView3D(container, ctx) {
     if (destroyed || contextLost || !canvas.width || !canvas.height) return;
     const t0 = performance.now();
     call(env, 'update', camera);
+    const dlBusy = call(daylight, 'update', camera, daylightView());
     items.updateLamps(camera, mode === 'walk' || !sunInfo || sunInfo.elevation < LAMPS_ON_BELOW);
     renderer.render(scene, camera);
+    if (dlBusy) { dirty = true; schedule(); }
     interaction.renderOverlay(renderer);
     dirty = false;
     stats.renderMs += (performance.now() - t0 - stats.renderMs) * 0.1;
@@ -304,6 +324,8 @@ export function createView3D(container, ctx) {
     store.on('ui', ({ keys = [] }) => {
       if (keys.includes('timeOfDay') || keys.includes('date')) applySun();
       if (keys.includes('showItems')) items.group.visible = store.ui.showItems !== false;
+      if (keys.includes('daylight')) call(daylight, 'setEnabled', store.ui.daylight !== false);
+      if (keys.includes('daylightSky')) call(daylight, 'relight');
       if (keys.includes('showRoof') || keys.includes('wallsCutaway') || keys.includes('sunStudy')) applyHouseState();
       if (keys.includes('mode')) {
         if (store.ui.mode === 'walk' && mode !== 'walk') enterWalk();
@@ -311,8 +333,8 @@ export function createView3D(container, ctx) {
       }
       invalidate();
     }),
-    store.on('project', () => { houseDirty = true; invalidate(); }),
-    store.on('finishes', () => { houseDirty = true; invalidate(); }),
+    store.on('project', () => { houseDirty = true; call(daylight, 'onProject'); invalidate(); }),
+    store.on('finishes', () => { houseDirty = true; call(daylight, 'relight'); invalidate(); }),
     store.on('selection', invalidate),
     store.on('plan', rebuildFromPlan),
   ];
@@ -363,6 +385,7 @@ export function createView3D(container, ctx) {
       renderer.setPixelRatio(1); renderer.setSize(w, h, false);
       camera.aspect = w / h; camera.updateProjectionMatrix();
       call(env, 'update', camera);
+      call(daylight, 'update', camera, daylightView());
       renderer.render(scene, camera);
       const url = canvas.toDataURL('image/png');
       renderer.setPixelRatio(prev.pr); renderer.setSize(prev.size.x, prev.size.y, false);
@@ -408,6 +431,7 @@ export function createView3D(container, ctx) {
       window.removeEventListener('resize', resize);
       canvas.removeEventListener('webglcontextlost', onContextLost);
       canvas.removeEventListener('webglcontextrestored', onContextRestored);
+      call(daylight, 'dispose'); daylight = null;
       walk.dispose(); interaction.dispose(); items.dispose(); rig.dispose();
       call(house, 'dispose'); call(site, 'dispose'); call(env, 'dispose');
       renderer.dispose();
@@ -422,6 +446,8 @@ export function createView3D(container, ctx) {
       isFlying: () => !!fly,
       stats: () => ({ ...stats, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, items: items.count(), planRebuildMs, planRebuilds }),
       house: () => house, environment: () => env, sun: () => sunInfo,
+      /** Daylight solver: state() (patch count, timings, …), sampleAt(xcm, ycm, hcm) → irradiance there. */
+      daylight: () => (daylight ? daylight.debug : null),
       renderNow,
     },
   };

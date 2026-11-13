@@ -161,7 +161,9 @@ export function buildScene(input, opts = {}) {
   });
   for (let k = nO - 1; k >= 0; k--) {
     const o = ops[k];
-    cellsIn(o.x, o.y, o.x + o.w, o.y + o.h, (c) => { if (oOpen[k]) { kind[c] = OPEN; reg[c] = k; } else { kind[c] = WALL; reg[c] = -1; } });
+    // always rasterised as an opening, so the chart layout does not depend on door states; a closed door (or a gap
+    // with no height) is solid while marching
+    cellsIn(o.x, o.y, o.x + o.w, o.y + o.h, (c) => { kind[c] = OPEN; reg[c] = k; });
   }
   for (const w of input.walls) cellsIn(w.x, w.y, w.x + w.w, w.y + w.h, (c) => { kind[c] = WALL; reg[c] = -1; });
   // the outdoor slabs (terrace, porch, utility yard) are 13 cm above the garden
@@ -171,21 +173,24 @@ export function buildScene(input, opts = {}) {
   // empty-space skipping: Chebyshev clearance (in cells) to the nearest cell of another class
   const clear = new Uint8Array(nc);
   {
-    const cls = (c) => (kind[c] === ROOM ? 1 : kind[c] === OUT ? 2 + gcls[c] : 0);
+    const cls = new Uint8Array(nc);
+    for (let c = 0; c < nc; c++) cls[c] = kind[c] === ROOM ? 1 : kind[c] === OUT ? 2 + gcls[c] : 0;
     const queue = new Int32Array(nc); let qh = 0, qt = 0;
     for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-      const c = j * nx + i, k = cls(c);
+      const c = j * nx + i, k = cls[c];
       let edge = k === 0 || i === 0 || j === 0 || i === nx - 1 || j === ny - 1;
-      for (let dj = -1; dj <= 1 && !edge; dj++) for (let di = -1; di <= 1; di++) if (cls((j + dj) * nx + i + di) !== k) { edge = true; break; }
+      if (!edge) {
+        const u = c - nx, d = c + nx;
+        edge = cls[u - 1] !== k || cls[u] !== k || cls[u + 1] !== k || cls[c - 1] !== k || cls[c + 1] !== k || cls[d - 1] !== k || cls[d] !== k || cls[d + 1] !== k;
+      }
       if (edge) { clear[c] = 1; queue[qt++] = c; }
     }
     while (qh < qt) {
-      const c = queue[qh++], i = c % nx, j = (c - i) / nx, k = cls(c), d = clear[c];
-      if (d >= 250) continue;
+      const c = queue[qh++], i = c % nx, j = (c - i) / nx, k = cls[c], d = clear[c];
+      if (d >= 250 || i === 0 || j === 0 || i === nx - 1 || j === ny - 1) continue;
       for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-        const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue;
-        const n = jj * nx + ii;
-        if (!clear[n] && cls(n) === k) { clear[n] = d + 1; queue[qt++] = n; }
+        const n = c + dj * nx + di;
+        if (!clear[n] && cls[n] === k) { clear[n] = d + 1; queue[qt++] = n; }
       }
     }
   }
@@ -235,7 +240,7 @@ export function buildScene(input, opts = {}) {
       if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue;
       const n = jj * nx + ii, nk = kind[n];
       if (nk === OUT || nk === WALL) continue;
-      const iv = subtract(solid, solidOf(n));
+      const iv = nk === ROOM ? solid : subtract(solid, solidOf(n));
       if (!iv.length) continue;
       const region = regionOf(n), plane = s === 0 ? i + 1 : s === 1 ? i : s === 2 ? j + 1 : j, along = s < 2 ? j : i;
       const ch = getChart(`v:${s}:${plane}:${region}`, () => ({
@@ -464,7 +469,7 @@ function march(S, px, py, pz, dx, dy, dz, stopOut, R) {
         if (tg <= tEnd) { R.type = HIT_GROUND; R.x = px + dx * tg; R.y = g; R.z = pz + dz * tg; R.idx = groundElement(S, R.x, R.z); R.T = T; return R; }
       }
       if (jump) { t = tEnd; reinit(); prev = -1; continue; }
-    } else if (k === WALL || (k === OPEN && (yIn < S.oSill[reg[c]] - 1e-7 || yIn > S.oHead[reg[c]] + 1e-7))) {
+    } else if (k === WALL || (k === OPEN && (!S.oOpen[reg[c]] || yIn < S.oSill[reg[c]] - 1e-7 || yIn > S.oHead[reg[c]] + 1e-7))) {
       return hitV(S, c, side, prev, px + dx * t, yIn, pz + dz * t, T, R);
     } else {                                                             // inside the air band of an opening
       const o = reg[c];
@@ -570,6 +575,8 @@ export function createVisibilityJob(S, { coarse = false } = {}) {
     return SRC_FACADE + f;
   };
   const links = new Links(1 << 18);
+  const apMask = new Uint32Array(nRec);                                     // bit a = receiver sees aperture a (≤ 32)
+  let curRec = 0;
   const owner = new Int32Array(nRec).fill(-1);                              // coarse pass: receiver whose links are reused
   const aps = apertures(S);
   const hemiN = coarse ? 16 : O.hemiRays, probeN = coarse ? 16 : O.probeRays;
@@ -623,6 +630,7 @@ export function createVisibilityJob(S, { coarse = false } = {}) {
         if (R.exitOpen === A.k) { any = true; break; }
       }
       if (!any) continue;
+      apMask[curRec] |= 1 << (aps.indexOf(A) & 31);
       const nu = coarse ? Math.max(2, Math.ceil(A.nu / 2)) : A.nu, nv = coarse ? Math.max(2, Math.ceil(A.nv / 2)) : A.nv;
       const dA = A.area / (nu * nv);
       for (let a = 0; a < nu; a++) for (let b = 0; b < nv; b++) {
@@ -657,6 +665,7 @@ export function createVisibilityJob(S, { coarse = false } = {}) {
     const end = Date.now() + budgetMs;
     while (next < nRec) {
       const r = next++;
+      curRec = r;
       if (r < nP) {
         if (!isSeed(r)) { links.close(); owner[r] = -2; continue; }
         const p3 = r * 3;
@@ -727,7 +736,8 @@ export function createVisibilityJob(S, { coarse = false } = {}) {
       return {
         coarse, nP, nRec, nGround, SRC_SKY, SRC_GROUND, SRC_FACADE, nFacades: facades.length,
         facades: Float32Array.from(facades.flatMap((F) => [F.x, F.y, F.z, F.nx, F.nz])),
-        start: L.start, idx: L.idx, w: L.w, owner, outdoor: outdoor.pack(), ms: stats.ms,
+        start: L.start, idx: L.idx, w: L.w, owner, apMask, outdoor: outdoor.pack(), ms: stats.ms,
+        apertures: aps.map((A) => ({ k: A.k, axisN: A.axisN, plane: A.plane, a0: A.a0, a1: A.a1, y0: A.y0, y1: A.y1 })),
       };
     },
   };
@@ -752,7 +762,7 @@ function fieldWeights(S) {
   // probes per room, layer 0 only (both layers share x/z)
   const byRoom = new Map();
   S.probes.forEach((p, k) => { if (p.layer !== 0) return; if (!byRoom.has(p.room)) byRoom.set(p.room, []); byRoom.get(p.room).push(k); });
-  const air = (c) => S.kind[c] === ROOM || (S.kind[c] === OPEN && S.oSill[S.reg[c]] < 1.0 && S.oHead[S.reg[c]] > 1.0);
+  const air = (c) => S.kind[c] === ROOM || (S.kind[c] === OPEN && S.oOpen[S.reg[c]] && S.oSill[S.reg[c]] < 1.0 && S.oHead[S.reg[c]] > 1.0);
   const lineClear = (x0, z0, x1, z1) => {                                  // 2D line of sight at ~1 m height
     const d = Math.hypot(x1 - x0, z1 - z0), steps = Math.ceil(d / (CS * 0.7));
     for (let s = 1; s < steps; s++) {
@@ -852,11 +862,7 @@ export function relight(S, vis, L) {
   const { radiance: sky } = skyRadiance({ sunDir, type: L.sky === 'overcast' ? 'overcast' : 'clear', scale: L.skyScale == null ? 1 : L.skyScale });
   const R = hitRecord();
   const sunOn = (sunE[0] + sunE[1] + sunE[2]) > 1e-6 && sunDir[1] > 0.0;
-  const sunBin = sunOn ? binOf(sunDir[0], sunDir[1], sunDir[2]) : -1;
   // sky bins near the sun: a receiver that sees none of them cannot be in the sun
-  const nearSun = new Uint8Array(SKY_BINS);
-  if (sunOn) for (let b = 0; b < SKY_BINS; b++) { const d = SKY.dirs[b]; if (d[0] * sunDir[0] + d[1] * sunDir[1] + d[2] * sunDir[2] > Math.cos(16 * Math.PI / 180)) nearSun[b] = 1; }
-  if (sunBin >= 0) nearSun[sunBin] = 1;
   const sunVis = (x, y, z) => { march(S, x, y, z, sunDir[0], sunDir[1], sunDir[2], false, R); return R.type === HIT_SKY ? R.T : 0; };
 
   // ── outdoor elements ──
@@ -894,19 +900,34 @@ export function relight(S, vis, L) {
   const sources = (r, cb) => { const o = linkOf(r); for (let q = vis.start[o]; q < vis.start[o + 1]; q++) cb(vis.idx[q], vis.w[q]); };
   const samples = L.sunSamples || S.opts.sunSamples;
   for (let p = 0; p < nP; p++) {
-    let r = 0, g = 0, b = 0, seesSun = false;
+    let r = 0, g = 0, b = 0;
     const o = linkOf(p);
     for (let q = vis.start[o]; q < vis.start[o + 1]; q++) {
       const s = vis.idx[q]; if (s < nP) continue;
       const w = vis.w[q] * Math.PI;
-      if (s < vis.SRC_GROUND) { const k = s - vis.SRC_SKY; r += w * sky[k * 3]; g += w * sky[k * 3 + 1]; b += w * sky[k * 3 + 2]; if (nearSun[k]) seesSun = true; }
+      if (s < vis.SRC_GROUND) { const k = s - vis.SRC_SKY; r += w * sky[k * 3]; g += w * sky[k * 3 + 1]; b += w * sky[k * 3 + 2]; }
       else { const k = (s - vis.SRC_GROUND) * 3; r += w * outL[k]; g += w * outL[k + 1]; b += w * outL[k + 2]; }
     }
     outside[p * 3] = r; outside[p * 3 + 1] = g; outside[p * 3 + 2] = b;
-    if (!seesSun) continue;
+    if (!sunOn) continue;
     const p3 = p * 3, nx = S.patch.nrm[p3], ny = S.patch.nrm[p3 + 1], nz = S.patch.nrm[p3 + 2];
     const cos = nx * sunDir[0] + ny * sunDir[1] + nz * sunDir[2];
     if (cos <= 0) continue;
+    // does the sun beam from this patch pass through one of the windows it can see? (patch-size tolerance)
+    const mask = vis.apMask[o];
+    if (!mask) continue;
+    let beam = false;
+    for (let a = 0; a < vis.apertures.length && !beam; a++) {
+      if (!(mask & (1 << (a & 31)))) continue;
+      const A = vis.apertures[a], dn = A.axisN === 0 ? sunDir[0] : sunDir[2];
+      if (Math.abs(dn) < 1e-6) continue;
+      const t = (A.plane - S.patch.pos[p3 + A.axisN]) / dn;
+      if (t <= 0) continue;
+      const y = S.patch.pos[p3 + 1] + sunDir[1] * t, al = A.axisN === 0 ? S.patch.pos[p3 + 2] + sunDir[2] * t : S.patch.pos[p3] + sunDir[0] * t;
+      const tol = 0.4;
+      beam = y > A.y0 - tol && y < A.y1 + tol && al > A.a0 - tol && al < A.a1 + tol;
+    }
+    if (!beam) continue;
     // sun samples spread over the patch (texel) along its tangent axes
     const ch = S.charts[S.patch.chart[p]];
     const du = ch.type === 'h' ? ch.tile * CS : ch.tile * CS, dv = ch.type === 'h' ? ch.tile * CS : S.rowH;
@@ -922,7 +943,7 @@ export function relight(S, vis, L) {
   }
 
   // ── diffuse bounces (Jacobi) ──
-  const bounces = L.bounces == null ? 4 : L.bounces;
+  const bounces = L.bounces == null ? 5 : L.bounces;
   let ind = new Float32Array(nP * 3), nxt = new Float32Array(nP * 3);
   const B = new Float32Array(nP * 3);                                      // radiosity × π  (= ρ · E_total)
   const iterations = [];
@@ -943,6 +964,11 @@ export function relight(S, vis, L) {
     }
     [ind, nxt] = [nxt, ind];
     iterations.push(total > 0 ? delta / total : 0);
+  }
+  // the bounces not iterated form a geometric series: add its remainder (ratio from the last two passes)
+  if (bounces >= 3 && L.extrapolate !== false) {
+    const r = iterations[bounces - 1] / Math.max(1e-9, iterations[bounces - 2]);
+    if (r > 0 && r < 0.95) { const k = r / (1 - r); for (let q = 0; q < nP * 3; q++) ind[q] += Math.max(0, ind[q] - nxt[q]) * k; }
   }
   // after the last pass, B for the probes (radiosity of every patch)
   for (let k = 0; k < nP * 3; k++) B[k] = rho[k] * (direct[k] + outside[k] + ind[k]);
@@ -1075,6 +1101,36 @@ export function roomAt(S, xcm, ycm) {
   if (i < 0 || j < 0 || i >= S.nx || j >= S.ny) return -1;
   const c = j * S.nx + i;
   return S.kind[c] === ROOM ? S.reg[c] : -1;
+}
+
+/**
+ * Carry a lightmap over to a new layout after a plan edit: every new texel takes the value of the old patch at the
+ * same place (same room / surface), else its room's old average — so nothing pops while the new solution is computed.
+ * @returns {Float32Array} RGBA float lightmap in S1's atlas
+ */
+export function transferLightmap(S0, lm0, S1) {
+  const out = new Float32Array(S1.atlas.width * S1.atlas.height * 4);
+  if (!S0 || !lm0 || lm0.length !== S0.atlas.width * S0.atlas.height * 4) return out;
+  const n = [0, 0, 0];
+  for (let p = 0; p < S1.patch.count; p++) {
+    const p3 = p * 3; n[0] = S1.patch.nrm[p3]; n[1] = S1.patch.nrm[p3 + 1]; n[2] = S1.patch.nrm[p3 + 2];
+    const q = patchAt(S0, S1.patch.pos[p3], S1.patch.pos[p3 + 1], S1.patch.pos[p3 + 2], n);
+    let src = q >= 0 ? S0.texelOf[q] : -1;
+    if (src < 0) {
+      const r = S1.patch.region[p], id = r < S1.nR ? S1.roomIds[r] : null, r0 = id ? S0.roomIds.indexOf(id) : -1;
+      if (r0 >= 0) src = S0.avgTexel[r0];
+    }
+    if (src < 0) continue;
+    out.set(lm0.subarray(src * 4, src * 4 + 4), S1.texelOf[p] * 4);
+  }
+  const A = S1.atlas;
+  for (let k = 0; k < A.fillDst.length; k++) {
+    const d = A.fillDst[k] * 4, s0 = A.fillSrcStart[k], s1 = A.fillSrcStart[k + 1], inv = 1 / (s1 - s0);
+    let r = 0, g = 0, b = 0;
+    for (let q = s0; q < s1; q++) { const s = A.fillSrc[q] * 4; r += out[s]; g += out[s + 1]; b += out[s + 2]; }
+    out[d] = r * inv; out[d + 1] = g * inv; out[d + 2] = b * inv; out[d + 3] = 1;
+  }
+  return out;
 }
 
 /** Float32 → IEEE half (Uint16) for a whole array. */

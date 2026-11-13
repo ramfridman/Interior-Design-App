@@ -85,6 +85,8 @@ const DEFAULT_UI = {
   timeOfDay: 15,           // hours 0..24 local clock time, drives the sun in 3D
   date: siteToday(),       // 'YYYY-MM-DD' — day of the year for the 3D sun (default: today at the house)
   sunStudy: true,          // 3D: a hidden roof / cut-away walls still block the sun, so rooms show the true sun patches
+  daylight: true,          // 3D: diffuse daylight solver (sky + bounced light through the real openings); false = simple fill lights
+  daylightSky: 'clear',    // 3D daylight sky model: 'clear' (CIE clear sky + sun) | 'overcast' (CIE overcast, no sun)
   leftPanel: 'catalog',    // which left panel tab is open
   rightPanel: 'inspector', // 'inspector' | 'budget' | 'checks' | 'rooms'
   catalogZone: 'indoor',   // 'indoor' | 'outdoor'
