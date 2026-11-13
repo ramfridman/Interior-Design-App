@@ -60,13 +60,16 @@ function placeLabel(G, poly, pref, w, h, obstacles, boxes, reachCm) {
   if (w > b.w * G.k - 4 * G.dpr || h > b.h * G.k - 4 * G.dpr) return null;
   const rect = poly.length === 4;
   const hw = w / 2 / G.k, hh = h / 2 / G.k, d2 = G.dpr * G.dpr;
+  // only the boxes that reach into this space can be in the way (most are dimension figures outside the house)
+  const bx0 = G.X(b.x), by0 = G.Y(b.y), bx1 = G.X(b.x + b.w), by1 = G.Y(b.y + b.h);
+  const taken = boxes.list.filter((q) => q.x1 > bx0 && q.x0 < bx1 && q.y1 > by0 && q.y0 < by1);
   const inside = (x, y) => (rect
     ? x - hw >= b.x && x + hw <= b.x + b.w && y - hh >= b.y && y + hh <= b.y + b.h
     : pointInPolygon(x - hw, y - hh, poly) && pointInPolygon(x + hw, y - hh, poly) && pointInPolygon(x + hw, y + hh, poly) && pointInPolygon(x - hw, y + hh, poly));
   const evaluate = (x, y, distPx) => {
     const cx = G.X(x), cy = G.Y(y);
     const box = { x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2 };
-    return { cost: overlap(box, obstacles) / d2 + boxes.overlapArea(box) * 25 / d2 + distPx * distPx * 0.1, x: cx, y: cy, box };
+    return { cost: overlap(box, obstacles) / d2 + overlap(box, taken) * 25 / d2 + distPx * distPx * 0.1, x: cx, y: cy, box };
   };
   // the architect's label point wins outright when nothing is in the way
   if (inside(pref[0], pref[1])) { const at = evaluate(pref[0], pref[1], 0); if (at.cost < 1) return at; }
@@ -240,6 +243,36 @@ export function dimensionOverhang(plan, ui, scale, rect, nearOnly = false) {
   return { top: over('n'), bottom: over('s'), left: over('w'), right: over('e') };
 }
 
+/** One string per side that changes exactly when that side's exterior chains change. */
+export function chainSignatures(plan) {
+  const { chains } = plansDims(plan), out = {};
+  for (const side of SIDES) {
+    out[side] = chains[side].map((row) => row.map((s) => `${s.from}:${s.to}:${s.depth}:${s.opening ? `${s.opening.id}/${s.opening.height}/${s.opening.sill}` : ''}`).join(',')).join('|');
+  }
+  return out;
+}
+
+/** Plan rectangle that holds the chain rows of one side at zoom `scale` (without their extension lines), or null. */
+export function dimBandRect(plan, ui, scale, side) {
+  const lay = exteriorDimLayout(plan, ui, scale)[side], rows = plansDims(plan).chains[side];
+  if (!lay || !rows.length) return null;
+  const a0 = rows[0][0].from - 16 / scale, a1 = rows[0][rows[0].length - 1].to + 16 / scale;
+  const p = lay.base + lay.sign * (lay.start - 6) / scale, q = lay.base + lay.sign * (lay.reach + 12) / scale;
+  const c0 = Math.min(p, q), c1 = Math.max(p, q);
+  return lay.horiz ? { x: a0, y: c0, w: a1 - a0, h: c1 - c0 } : { x: c0, y: a0, w: c1 - c0, h: a1 - a0 };
+}
+
+/** Does anything a side draws — its rows or its two extension lines — reach into the painted area? */
+function sideVisible(G, rows, lay) {
+  const { horiz, sign, base } = lay, m = 20 / G.scale;
+  const first = rows[0][0], last = rows[0][rows[0].length - 1];
+  const out = base + sign * (lay.reach + 12) / G.scale;
+  const vis = (a0, a1, c0, c1) => (horiz ? G.visible(a0, Math.min(c0, c1), a1, Math.max(c0, c1)) : G.visible(Math.min(c0, c1), a0, Math.max(c0, c1), a1));
+  if (vis(first.from - m, last.to + m, base + sign * (lay.start - 8) / G.scale, out)) return true;
+  if (lay.far) return false;
+  return vis(first.from - m, first.from + m, first.depth, out) || vis(last.to - m, last.to + m, last.depth, out);
+}
+
 export function drawExteriorDims(G, env, boxes) {
   const { plan, pal, ui } = env, { ctx } = G, d = G.dpr;
   const { chains } = plansDims(plan);
@@ -254,6 +287,7 @@ export function drawExteriorDims(G, env, boxes) {
     const rows = chains[side], lay = layout[side];
     if (!rows.length || !lay) continue;
     const { horiz, sign } = lay;
+    if (!sideVisible(G, rows, lay)) continue;
     const base = horiz ? G.RY(lay.base) : G.RX(lay.base);
     const A = (v) => (horiz ? G.RX(v) : G.RY(v));
     let lastPos = base;

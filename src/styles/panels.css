@@ -352,7 +352,13 @@
 .walk__hint > span { display: inline-flex; align-items: center; gap: 6px; }
 .minimap { width: var(--minimap); height: var(--minimap); padding: 4px; }
 .minimap__canvas { width: 100%; height: 100%; }
-@media (pointer: coarse) { .walk__hint { display: none; } }
+@media (pointer: coarse) {
+  .walk__hint { display: none; }
+  .suntrack { height: 36px; }
+  .suntrack__rail { left: 11px; right: 11px; }
+  .suntrack__input::-webkit-slider-thumb { width: 22px; height: 22px; margin-top: -10px; }
+  .suntrack__input::-moz-range-thumb { width: 19px; height: 19px; }
+}
 @media (max-width: 899px) { .ov { --minimap: 120px; } }
 
 /* ───────── Plan drawing (splash + welcome) ───────── */

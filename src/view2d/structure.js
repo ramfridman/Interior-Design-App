@@ -8,7 +8,9 @@
  * across plan revisions.
  */
 import { wallSegments, openingPolicy, planDiff, isPlanModified, BASE_PLAN } from '../core/plan-edit.js';
+import { polygonBounds } from '../core/geometry.js';
 import { css } from './color.js';
+import { chainSignatures } from './annotations.js';
 
 export const STRUCTURE_TOOLS = ['structure', 'wall', 'door', 'window', 'passage'];
 /** Is `tool` one of the wall / door / window editing tools? */
@@ -203,4 +205,39 @@ export function drawChangeMarkers(G, env) {
     }
     ctx.lineCap = 'butt';
   }
+}
+
+// ───────────── what a plan edit touched ─────────────
+const grow = (r, m) => ({ x: r.x - m, y: r.y - m, w: r.w + 2 * m, h: r.h + 2 * m });
+
+/**
+ * Compact fingerprint of everything the plan layers draw, taken after each plan revision. Two snapshots are
+ * compared by `planDirt` to find the part of the drawing that has to be repainted.
+ */
+export function planSnapshot(plan) {
+  const walls = new Map(), openings = new Map(), rooms = new Map(), segs = new Map();
+  for (const w of plan.walls) walls.set(`${w.x},${w.y},${w.w},${w.h},${w.kind}`, w);
+  // a door reaches as far as its leaf swings
+  for (const o of plan.openings) openings.set(o.id, { sig: JSON.stringify(o), rect: grow(o, Math.max(o.w, o.h) + 12) });
+  for (const r of plan.rooms) rooms.set(r.id, { sig: JSON.stringify(r), rect: polygonBounds(r.polygon) });
+  for (const s of wallSegments(plan)) segs.set(s.id, { sig: `${s.policy.level}|${s.isNew}|${s.x},${s.y},${s.w},${s.h}|${s.openingIds}`, rect: s });
+  return { walls, openings, rooms, segs, chains: chainSignatures(plan) };
+}
+
+/**
+ * Where two plan snapshots differ.
+ * @returns {{ rect: {x,y,w,h}|null, sides: string[] }}  rect = bounding box (plan cm) of every changed wall,
+ *   opening, room and segment (null when nothing changed); sides = façades whose dimension chains changed.
+ */
+export function planDirt(a, b) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const add = (r) => { x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y); x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h); };
+  for (const [k, w] of a.walls) if (!b.walls.has(k)) add(w);
+  for (const [k, w] of b.walls) if (!a.walls.has(k)) add(w);
+  for (const name of ['openings', 'rooms', 'segs']) {
+    for (const [k, v] of a[name]) { const o = b[name].get(k); if (!o || o.sig !== v.sig) { add(v.rect); if (o) add(o.rect); } }
+    for (const [k, v] of b[name]) if (!a[name].has(k)) add(v.rect);
+  }
+  const sides = Object.keys(b.chains).filter((side) => a.chains[side] !== b.chains[side]);
+  return { rect: x1 >= x0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null, sides };
 }

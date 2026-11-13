@@ -86,7 +86,9 @@ export function createStructure(app) {
     const now = Date.now();
     if (text === lastWarning.text && now - lastWarning.at < 5000) return;
     lastWarning = { text, at: now };
-    toast(text, { level: levelOf(level) });
+    // A warning on a free change is about its consequence ("the room has no door now"), not about permission.
+    if (levelOf(level) === 'free') toast(text, { kind: 'warn', duration: 6000 });
+    else toast(text, { level });
   }
 
   const api = {
@@ -250,26 +252,23 @@ export function createStructure(app) {
   /* ───────── What the plan view reports about its own gestures ───────── */
   listen(view2d, 'structure', (e) => {
     if (!e || !e.type) return;
-    if (e.type === 'locked') levelToast(e.text || LEVELS.locked.text, 'locked');
+    // Selecting a locked wall is explained by the Inspector's banner when that is in view; say it here otherwise.
+    if (e.type === 'locked') { if (e.op !== 'select' || !app.isShowing('inspector')) levelToast(e.text || LEVELS.locked.text, 'locked'); }
     else if (e.type === 'refused') toast(e.text || 'That change is not possible here.', { kind: 'warn' });
     else if (e.type === 'warning') levelToast(e.text, e.level);
     else if (e.type === 'done' && /^remove/.test(e.op || '')) toast(/wall/.test(e.op) ? 'Wall removed' : 'Opening removed', { action: undo });
   });
 
   /* ───────── Store wiring ───────── */
-  const syncClasses = () => {
-    root.classList.toggle('is-structure', api.isActive());
-    root.classList.toggle('plan-modified', isPlanModified());
-  };
+  const syncClasses = () => root.classList.toggle('is-structure', api.isActive());
   /** Drop a selection that no longer exists (undo, reset, a wall that was merged away). */
   const prune = () => { if (store.ui.structureSel && !api.selected()) store.setUI({ structureSel: null }); };
   store.on('plan', (e) => {
     diff = null;
-    syncClasses();
     // After the caller had its chance to re-select the edited wall under its new id.
     if (!e || !e.transient) queueMicrotask(prune);
   });
-  store.on('load', () => { diff = null; syncClasses(); prune(); });
+  store.on('load', () => { diff = null; prune(); });
   store.on('ui', (e) => {
     if (e.keys.includes('mode') && api.isActive() && !planShown()) api.exit();   // Structure lives in Plan and Split
     if (e.keys.includes('tool')) {

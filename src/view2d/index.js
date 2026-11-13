@@ -22,6 +22,10 @@ import { attachInteraction } from './interaction.js';
 import { drawOverlay } from './overlay.js';
 import { exportPNG } from './export.js';
 import { houseEnvelope, dimensionOverhang } from './annotations.js';
+import { planSnapshot, planDirt } from './structure.js';
+
+/** `store.ui` keys that change what the cached plan layers look like. */
+const PAINTED_UI = new Set(['tool', 'units', 'showGrid', 'showDimensions', 'showRoomLabels', 'showSite', 'showItems', 'showPlanChanges']);
 
 /**
  * @param {HTMLElement} container  mount point; the view fills it
@@ -168,6 +172,7 @@ export function createView2D(container, ctx) {
 
   // ───────────── store wiring ─────────────
   const interaction = attachInteraction(V);
+  let planShot = planSnapshot(plan);        // fingerprint of the drawn plan, to find what the next edit touched
   const offs = [
     store.on('items', (e) => {
       if (e.transient) { if (!state.gesture) for (const id of e.ids) state.live.add(id); }
@@ -176,18 +181,24 @@ export function createView2D(container, ctx) {
       if (state.hoverId && !store.getItem(state.hoverId)) state.hoverId = null;
       V.invalidate();
     }),
-    store.on('history', () => { if (!state.gesture && state.live.size) state.live.clear(); V.renderer.invalidate(); V.invalidate(); }),
+    // (undo / redo restore through 'items' / 'plan' / 'finishes' / 'project' events, which repaint what they touch)
+    store.on('history', () => { if (!state.gesture && state.live.size) { state.live.clear(); V.renderer.invalidate(); } V.invalidate(); }),
     store.on('selection', () => V.invalidate()),
     store.on('ui', (e) => {
       if (e.keys && e.keys.includes('tool')) interaction.toolChanged();
       if (e.keys && e.keys.includes('structureSel')) interaction.structureSelChanged();
-      V.renderer.invalidate(); V.invalidate();
+      // only these settings are baked into the cached layers; the rest (selection, panels, 3D settings …) is not
+      if (!e.keys || e.keys.some((k) => PAINTED_UI.has(k))) V.renderer.invalidate();
+      V.invalidate();
     }),
     // walls / openings / rooms were replaced: repaint every layer from the new plan (snapping, hit-testing and
     // the dimension chains re-derive themselves from the new arrays the next time they are used)
     store.on('plan', (e) => {
       interaction.planChanged(e);
-      V.renderer.invalidate(); V.invalidate();
+      const shot = planSnapshot(plan);
+      V.renderer.invalidatePlan(planDirt(planShot, shot));
+      planShot = shot;
+      V.invalidate();
     }),
     store.on('project', () => { V.renderer.invalidate(); V.invalidate(); }),
     store.on('finishes', () => { V.renderer.invalidate(); V.invalidate(); }),

@@ -60,6 +60,8 @@ export function initUI(ctx) {
     isCompact: () => compactMq.matches,
     isPhone: () => phoneMq.matches,
     openPanel, closePanels, setPanelOpen,
+    /** Whether a panel ('catalog' or a right-hand tab id) is on screen right now. */
+    isShowing: (name) => (name === 'catalog' ? isOpen('left') : isOpen('right') && store.ui.rightPanel === name),
     closeDrawers: () => (compactMq.matches && (root.classList.contains('left-open') || root.classList.contains('right-open')) ? (closePanels(), true) : false),
     openWelcome: () => openWelcome(app),
     openShortcuts: () => { if (!hasOpenLayer()) openShortcuts(); },

@@ -134,7 +134,7 @@ export function attachInteraction(V) {
     const g = st.gesture;
     if (!g) return false;
     if (g.batch) { V.selfWrite = true; store.cancel(); V.selfWrite = false; }
-    if (isStructureGesture(g)) structure.cancel();
+    if (isStructureGesture(g)) structure.cancel(g);
     endGesture();
     return true;
   }

@@ -205,12 +205,15 @@ export function createActions(app) {
         actions: [btn('Cancel', { variant: 'quiet', onClick: () => dlg.close() }), btn('Open pasted design', { variant: 'primary', onClick: () => { if (area.value.trim()) load(area.value); else area.focus(); } })],
       });
     },
+    /** Furniture and garden back to the architect's layout. Walls, doors and windows are a separate reset (Structure). */
     async resetLayout() {
-      const ok = await confirmDialog({ title: "Reset to the architect's layout?", message: 'Your furniture and garden are replaced by the layout from the architect’s drawing. You can undo this.', confirmLabel: 'Reset layout', danger: true });
+      const modified = app.structure.isModified();
+      const ok = await confirmDialog({ title: "Reset to the architect's layout?", confirmLabel: 'Reset layout', danger: true,
+        message: `Your furniture and garden are replaced by the layout from the architect’s drawing.${modified ? ' The walls, doors and windows you changed stay as they are.' : ''} You can undo this.` });
       if (!ok) return;
       try {
-        if (window.app && typeof window.app.resetToArchitectLayout === 'function') window.app.resetToArchitectLayout();
-        else { const { initialLayout } = await import('../core/initial-layout.js'); store.load({ items: initialLayout() }, { recordUndo: true }); }
+        const { initialLayout } = await import('../core/initial-layout.js');
+        store.load({ items: initialLayout(), planEdits: store.serialize().planEdits }, { recordUndo: true });
         toast("Back to the architect's layout", { action: { label: 'Undo', fn: () => store.undo() } });
       } catch (err) { console.error(err); toast('Could not reset the layout', { kind: 'error' }); }
     },

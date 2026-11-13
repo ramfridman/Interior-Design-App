@@ -87,7 +87,7 @@ export function createStructureInspector(app) {
     };
     return [
       head(seg.policy.level, 'wall', segmentTitle(seg), meta, seg.isNew ? h('span', { class: 'tag tag--new' }, 'Added by you') : null),
-      levelBanner(seg.policy.level, seg.policy.reason),
+      levelBanner(seg.policy.level, seg.policy.reason || 'Move or remove this wall as you like, or put a door in it.'),
       h('div', { class: 'insp__actions' }, h('div', { class: 'actrow', role: 'group', 'aria-label': 'Wall actions' },
         iconBtn('target', 'Show on the plan', { variant: 'outlined', onClick: () => { const s = live(); structure.focusPoint({ x: s.x + s.w / 2, y: s.y + s.h / 2 }); } }),
         iconBtn('trash', 'Remove wall', { kbd: 'Delete', variant: 'danger', disabled: locked,
@@ -161,7 +161,7 @@ export function createStructureInspector(app) {
       : null;
     const hang = o.kind === 'door' && !o.innerDoor
       ? section('Hanging', hung,
-        h('div', { class: 'grid2 sinsp__flips' }, flip('hinge', 'Flip hinge side', horizontal ? 'flip-h' : 'flip-v'), flip('swing', 'Flip swing', horizontal ? 'flip-v' : 'flip-h')),
+        h('div', { class: 'grid2 sinsp__flips' }, flip('hinge', 'Flip hinge side', horizontal ? 'flip-h' : 'flip-v'), flip('swing', 'Flip swing direction', horizontal ? 'flip-v' : 'flip-h')),
         style ? h('label', { class: 'setrow sinsp__style' }, h('span', { class: 'setrow__label' }, 'Style'), style) : null,
         hangError)
       : style ? section('Style', h('label', { class: 'setrow sinsp__style' }, h('span', { class: 'setrow__label' }, 'Opens by'), style), hangError) : null;

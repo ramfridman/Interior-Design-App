@@ -109,6 +109,8 @@ export function createStructureTools(V, io) {
     remember();
   }
 
+  const exists = (t) => (t.type === 'segment' ? data().byId.has(t.id) : plan.openings.some((o) => o.id === t.id));
+
   // ───────────── hit testing ─────────────
   function hitTarget(pp) {
     const d = data();
@@ -313,6 +315,7 @@ export function createStructureTools(V, io) {
       return;
     }
     g.refused = new Set(); g.warned = false; g.changed = false; g.level = policy.level;
+    g.orig = { type: g.target.type, id: g.target.id };
     if (g.target.type === 'segment') {
       const s = d.byId.get(g.target.id);
       if (!s) { g.type = 'noop'; return; }
@@ -417,6 +420,7 @@ export function createStructureTools(V, io) {
       else call(() => store.commit());
       if (g.type === 's-move-wall' && g.applied === 0) g.changed = false;
     }
+    if (g.changed) V.renderer.invalidate();                                   // settle on a complete repaint
     if (S.tip && S.tip.tone === 'refused') setTip(S.tip.text, 'refused');     // let the last reason fade out
     if (g.changed) emit('done', g.op, g.level, g.warning || '', e);
     resolveSelection('history');
@@ -496,11 +500,15 @@ export function createStructureTools(V, io) {
     hover(p, e);
   }
 
-  /** Esc / pointer-cancel / tool change. Returns true when something was in progress. */
-  function cancel() {
+  /**
+   * Esc / pointer-cancel / tool change. `g` = the structure gesture that was aborted (the store has already been
+   * restored): the selection goes back to what was grabbed. Returns true when something was in progress.
+   */
+  function cancel(g) {
     const had = !!(S.draft || S.live);
     S.draft = null; S.live = null;
     if (S.tip) setTip(null);
+    if (g && g.orig && exists(g.orig)) select(g.orig);
     V.invalidate();
     return had;
   }

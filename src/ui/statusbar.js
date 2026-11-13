@@ -5,7 +5,8 @@
 import { spaceAt } from '../core/geometry.js';
 import { h, listen, rafThrottle } from './dom.js';
 import { segmented } from './components.js';
-import { fmtPrice, toUnit, unitDigits } from './format.js';
+import { fmtPrice, fmtLen, toUnit, unitDigits } from './format.js';
+import { LEVELS, segmentTitle, openingTitle } from './structure.js';
 import { storageAvailable } from './prefs.js';
 
 /** @param {HTMLElement} root  @param {object} app */
@@ -51,6 +52,15 @@ export function initStatusbar(root, app) {
 
   /* Selection */
   function paintSelection() {
+    if (app.structure.isActive()) {
+      // Structure mode: the selected wall / opening and its level.
+      const cur = app.structure.selected();
+      if (!cur) { selection.textContent = 'Structure: select a wall, door or window'; return; }
+      const level = cur.type === 'segment' ? cur.seg.policy.level : cur.policy.level;
+      const what = cur.type === 'segment' ? `${segmentTitle(cur.seg)}, ${fmtLen(cur.seg.length, store.ui.units)}` : `${openingTitle(cur.opening)}, ${cur.opening.width} × ${cur.opening.height} cm`;
+      selection.textContent = `${what} — ${LEVELS[level] ? LEVELS[level].title : ''}`;
+      return;
+    }
     const items = store.getSelected();
     if (!items.length) { selection.textContent = `${store.items.length} items in the design`; return; }
     let cost = 0;
@@ -73,7 +83,12 @@ export function initStatusbar(root, app) {
 
   store.on('selection', paintSelection);
   store.on('items', (e) => { if (!e.transient) paintSelection(); });
-  store.on('ui', (e) => { if (e.keys.includes('units')) { units.set(store.ui.units); paintCursor(); } });
+  store.on('ui', (e) => {
+    if (e.keys.includes('units')) { units.set(store.ui.units); paintCursor(); }
+    if (e.keys.includes('units') || e.keys.includes('tool') || e.keys.includes('structureSel')) paintSelection();
+  });
+  const repaintStructure = rafThrottle(() => { if (app.structure.isActive()) paintSelection(); });
+  store.on('plan', repaintStructure);
   paintSelection();
   markSaved();
 }

@@ -123,6 +123,7 @@ export function initTopbar(root, app) {
       { label: 'Save design', icon: 'save', kbd: `${MOD} S`, onSelect: actions.saveDesign },
       { label: 'Open design…', icon: 'open', onSelect: actions.openDesign },
       { label: "Reset to architect's layout…", icon: 'reset', onSelect: actions.resetLayout },
+      { label: 'Reset walls to architect’s plan…', icon: 'wall', disabled: !structure.isModified(), onSelect: () => structure.reset() },
       { separator: true },
       { label: 'Export plan as PNG', icon: 'image', onSelect: actions.exportPlanPNG },
       { label: 'Export 3D snapshot', icon: 'camera', onSelect: actions.export3DSnapshot },
