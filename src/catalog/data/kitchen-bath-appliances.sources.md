@@ -37,3 +37,38 @@ No retailer exceeds 40 % of the file (largest: Home Center 24 %).
 
 ## Verification
 Re-fetched 15 URLs across all five retailers (HTTP 200 and recorded price present on the page): 15 of 15 returned 200; 14 matched the price string directly and the 15th (ACE Troya, 1,439.90 ILS) matched after format normalisation.
+
+## Gap-filling pass (2026-11-13): sanitary ware, bathtubs, towel rails, water heaters, islands, mirrors, cabinets
+
+43 products appended (ids unique, `loadCatalog()` accepts all). Prices ILS incl. VAT, `priceDate: '2026-11'`.
+
+| Retailer | Products | How price / dimensions were read |
+|---|---|---|
+| Makina (makina.co.il, WooCommerce) | 12 | Store API `/wp-json/wc/store/products` for the list, then the product page JSON-LD `price` (sale price = lower of the two UnitPriceSpecification values; `on-sale` tag, list price in `description`). Dimensions from the "מידות" lines of the product description (toilet length/width/height, tub L x W x H). |
+| IKEA Israel | 10 | Search API price, re-read from the product page; "Measurements" block of the page (all three dimensions present). |
+| ACE | 10 | Product JSON-LD price; dimensions from "מידות" text of the description (toilets: length/height/width; cabinets: W x D x H). LED mirrors: diameter / width x height from the title. |
+| Keter Dudim (keter-dudim.co.il, WooCommerce) | 7 | Store API price = page JSON-LD price; diameter and height from the description (w = d = diameter). |
+| Ambat4U (ambat4u.co.il, WooCommerce) | 3 | Page JSON-LD price; dimensions from the description (tub outer size; towel ladders in mm converted). |
+| Home Center | 1 | products.json price; service-cabinet dimensions in the description. |
+
+Largest share: Makina 28 %.
+
+### Conventions / approximations
+* Toilets: w = bowl width, d = projection from the wall (length), h = height as stated by the shop (pan height; for the smart toilet height incl. seat). Wall-hung models need a concealed frame, which is not included.
+* Boilers / solar tanks: w = d = body diameter, h = height as in the headline spec line (the pages also list slightly different inner values). Solar tanks are tagged `variant: 'solar-roof'`; collectors and frames are separate items.
+* Towel rails: dimensions as stated (Omnezza ladder 1600 x 450 x 85 mm, folding warmer open 855 x 500 x 70 mm; ATMOR 5-bar 65 x 60 x 12.5 cm; Makina 8-bar 80/52 cm + 10 cm off the wall).
+* Frameless LED mirrors (ACE): thickness is not stated, `d: 3` is a modelling approximation (same convention as the shower glass in the first pass).
+* Freestanding / built-in tubs are sold without frame, overflow, filler or taps.
+
+### Dropped / not found
+* Home Center wall-hung and monoblock toilets (TOKYO, MANILA, SEOUL, TAO, EMILIYA, BUFALO, wall-hung sets): pages give only width and depth, no height (the BUFALO dimensions quoted by a search summary are not on the page) - dropped. Home Center electric towel heaters (3-stage 12.5*56*45, shelf models 35.3*61*57): axis order not stated - dropped. Home Center has no tubs or boilers.
+* IKEA towel rails (BROGRUND, BROFJÄRDEN, BÄSINGEN, ENUDDEN, VILTO): height or depth missing - dropped.
+* ACE ATMOR 8-bar towel warmer (3031481): no dimensions on the page - dropped. ACE sells no tubs or boilers.
+* Keter Dudim heat pumps (Chromagen Eco-Heat 110/280 L): no dimensions on the page - dropped; combined solar kits: no dimensions - dropped. Gas (Hamgaz) and 60 / 30 / 45 L boilers not needed.
+* Makina "toilet + frame" sets and variable-size mirrors (size chosen in a drop-down): skipped. Ambat4U wall-hung toilets state only width/depth - dropped. Ambat4U 8167/5834 smart toilet duplicates the Makina SUPERA - not used.
+* 150/160/170 cm built-in acrylic tubs: Makina lists only 110/130 cm built-in (130 cm used); Ambat4U 180 x 70 used. MTI 170 cm models (Marco, Sharon, Hamefales, Makina MAK-07) appeared in search results but their pages were not fetched/verified, so they are not included.
+* No walk-in shower screens/trays were added (first pass already has ACE enclosures).
+* Not reachable / not used: Sharon Ceramic Woo API returned 0 products; Conex and Oz Ceramica feeds fetched but not mined.
+
+### Verification
+Random sample of 12 of the new URLs re-fetched: 12 of 12 returned HTTP 200 and showed the recorded price.

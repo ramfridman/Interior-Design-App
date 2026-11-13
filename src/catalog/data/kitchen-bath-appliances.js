@@ -3159,5 +3159,1387 @@ export default [
    "soundbar"
   ],
   "description": "Compact 81 cm soundbar with wireless subwoofer."
+ },
+ {
+  "id": "ace-chrysanthemum-monoblock-toilet",
+  "name": "Chrysanthemum white monoblock toilet",
+  "nameHe": "אסלה מונובלוק לבנה דגם חרצית",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4500400",
+  "price": 625,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 36,
+   "d": 66.5,
+   "h": 72.5
+  },
+  "type": "toilet",
+  "params": {
+   "variant": "close-coupled",
+   "cistern": "exposed",
+   "color": "#f4f4f2",
+   "material": "ceramic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "toilets",
+  "tags": [
+   "close-coupled",
+   "floor"
+  ],
+  "description": "White close-coupled floor toilet with attached cistern."
+ },
+ {
+  "id": "ace-savyon-monoblock-toilet",
+  "name": "Savyon white monoblock toilet",
+  "nameHe": "אסלה מונובלוק לבנה דגם סביון",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4500401",
+  "price": 985,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 35,
+   "d": 61.4,
+   "h": 79.5
+  },
+  "type": "toilet",
+  "params": {
+   "variant": "close-coupled",
+   "cistern": "exposed",
+   "color": "#f4f4f2",
+   "material": "ceramic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "toilets",
+  "tags": [
+   "close-coupled",
+   "floor",
+   "compact"
+  ],
+  "description": "Compact white close-coupled toilet, 61.4 cm projection."
+ },
+ {
+  "id": "ace-autumn-monoblock-toilet",
+  "name": "Autumn (Stav) white monoblock toilet",
+  "nameHe": "אסלה מונובלוק לבנה דגם סתיו",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4500402",
+  "price": 1099,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 36,
+   "d": 64.5,
+   "h": 76
+  },
+  "type": "toilet",
+  "params": {
+   "variant": "close-coupled",
+   "cistern": "exposed",
+   "color": "#f4f4f2",
+   "material": "ceramic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "toilets",
+  "tags": [
+   "close-coupled",
+   "floor"
+  ],
+  "description": "White close-coupled floor toilet with attached cistern."
+ },
+ {
+  "id": "makina-nevada-wall-hung-rimless-toilet",
+  "name": "NEVADA rimless wall-hung toilet with seat",
+  "nameHe": "אסלה תלויה רימלס NEVADA כולל מושב",
+  "brand": "NEVADA",
+  "retailer": "Makina",
+  "url": "https://makina.co.il/product/%d7%90%d7%a1%d7%9c%d7%94-%d7%aa%d7%9c%d7%95%d7%99%d7%94-%d7%a8%d7%99%d7%9e%d7%9c%d7%a1-nevada-%d7%9b%d7%95%d7%9c%d7%9c-%d7%9e%d7%95%d7%a9%d7%91/",
+  "price": 390.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 36,
+   "d": 54,
+   "h": 38
+  },
+  "type": "toilet",
+  "params": {
+   "variant": "wall-hung",
+   "cistern": "concealed",
+   "color": "#f6f6f4",
+   "material": "ceramic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "toilets",
+  "tags": [
+   "wall-hung",
+   "rimless",
+   "budget",
+   "on-sale"
+  ],
+  "description": "Rimless wall-hung toilet incl. seat; needs a concealed frame (not included). Sale price (list 780)."
+ },
+ {
+  "id": "makina-dakota-wall-hung-toilet",
+  "name": "DAKOTA wall-hung toilet with seat",
+  "nameHe": "אסלה תלויה איכותית DAKOTA כולל מושב",
+  "brand": "DAKOTA",
+  "retailer": "Makina",
+  "url": "https://makina.co.il/product/%d7%90%d7%a1%d7%9c%d7%94-%d7%aa%d7%9c%d7%95%d7%99%d7%94-%d7%90%d7%99%d7%9b%d7%95%d7%aa%d7%99%d7%aa-dakota-%d7%9b%d7%95%d7%9c%d7%9c-%d7%9e%d7%95%d7%a9%d7%91/",
+  "price": 689.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 35,
+   "d": 56,
+   "h": 40
+  },
+  "type": "toilet",
+  "params": {
+   "variant": "wall-hung",
+   "cistern": "concealed",
+   "color": "#f6f6f4",
+   "material": "ceramic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "toilets",
+  "tags": [
+   "wall-hung",
+   "on-sale"
+  ],
+  "description": "Wall-hung toilet incl. seat; needs a concealed frame (not included). Sale price (list 780)."
+ },
+ {
+  "id": "makina-geberit-icon-wall-hung-toilet",
+  "name": "Geberit ICON wall-hung toilet",
+  "nameHe": "אסלה תלויה ICON של חברת GEBERIT",
+  "brand": "Geberit",
+  "retailer": "Makina",
+  "url": "https://makina.co.il/product/%d7%90%d7%a1%d7%9c%d7%94-%d7%aa%d7%9c%d7%95%d7%99%d7%94-icon-%d7%a9%d7%9c-%d7%97%d7%91%d7%a8%d7%aa-geberit/",
+  "price": 1179.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 36,
+   "d": 53,
+   "h": 33
+  },
+  "type": "toilet",
+  "params": {
+   "variant": "wall-hung",
+   "cistern": "concealed",
+   "color": "#fafafa",
+   "material": "ceramic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "toilets",
+  "tags": [
+   "wall-hung",
+   "rimless",
+   "geberit",
+   "premium",
+   "on-sale"
+  ],
+  "description": "Geberit ICON wall-hung toilet (53 x 36 x 33 cm per the shop spec). Sale price (list 1,290)."
+ },
+ {
+  "id": "makina-tornado-flush-wall-hung-toilet",
+  "name": "White wall-hung toilet with tornado flush",
+  "nameHe": "אסלה תלויה צבע לבן שטיפה טורנדו",
+  "brand": "Makina",
+  "retailer": "Makina",
+  "url": "https://makina.co.il/product/%d7%90%d7%a1%d7%9c%d7%94-%d7%aa%d7%9c%d7%95%d7%99%d7%94-%d7%a6%d7%91%d7%a2-%d7%9c%d7%91%d7%9f-%d7%a9%d7%98%d7%99%d7%a4%d7%94-%d7%98%d7%95%d7%a8%d7%a0%d7%93%d7%95/",
+  "price": 689.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 36,
+   "d": 52,
+   "h": 37
+  },
+  "type": "toilet",
+  "params": {
+   "variant": "wall-hung",
+   "cistern": "concealed",
+   "color": "#f6f6f4",
+   "material": "ceramic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "toilets",
+  "tags": [
+   "wall-hung",
+   "tornado",
+   "on-sale"
+  ],
+  "description": "Wall-hung toilet with tornado flush, 52 cm projection. Sale price (list 1,280)."
+ },
+ {
+  "id": "makina-designer-rimless-wall-hung-toilet-53",
+  "name": "Designer rimless wall-hung toilet 53 cm, glossy white",
+  "nameHe": "אסלה תלויה רימלס מעוצב 53 ס\"מ לבן מבריק",
+  "brand": "Makina",
+  "retailer": "Makina",
+  "url": "https://makina.co.il/product/%d7%90%d7%a1%d7%9c%d7%94-%d7%aa%d7%9c%d7%95%d7%99%d7%94-%d7%a8%d7%99%d7%9e%d7%9c%d7%a1-53-%d7%a1%d7%9e-%d7%9c%d7%91%d7%9f-%d7%9e%d7%91%d7%a8%d7%99%d7%a7/",
+  "price": 999.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 36,
+   "d": 53,
+   "h": 36
+  },
+  "type": "toilet",
+  "params": {
+   "variant": "wall-hung",
+   "cistern": "concealed",
+   "color": "#fafafa",
+   "material": "ceramic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "toilets",
+  "tags": [
+   "wall-hung",
+   "rimless",
+   "on-sale"
+  ],
+  "description": "Rimless wall-hung toilet, 53 cm projection. Sale price (list 1,390)."
+ },
+ {
+  "id": "makina-rimless-monoblock-toilet-66",
+  "name": "Rimless monoblock toilet 66.5 x 36 cm with seat, glossy white",
+  "nameHe": "אסלה מונובלוק רימלס לבן מבריק 66.5X36 כולל מושב",
+  "brand": "Makina",
+  "retailer": "Makina",
+  "url": "https://makina.co.il/product/%d7%90%d7%a1%d7%9c%d7%94-%d7%9e%d7%95%d7%a0%d7%95%d7%91%d7%9c%d7%95%d7%a7-%d7%a8%d7%99%d7%9e%d7%9c%d7%a1-%d7%9c%d7%91%d7%9f-%d7%9e%d7%91%d7%a8%d7%99%d7%a7-66-5x36-%d7%9b%d7%95%d7%9c%d7%9c-%d7%9e%d7%95/",
+  "price": 1290.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 36,
+   "d": 66.5,
+   "h": 40.5
+  },
+  "type": "toilet",
+  "params": {
+   "variant": "close-coupled",
+   "cistern": "exposed",
+   "color": "#fafafa",
+   "material": "ceramic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "toilets",
+  "tags": [
+   "close-coupled",
+   "rimless"
+  ],
+  "description": "Close-coupled rimless toilet incl. soft-close seat (height given for the pan)."
+ },
+ {
+  "id": "makina-supera-smart-floor-toilet-white",
+  "name": "SUPERA automatic smart floor toilet, glossy white",
+  "nameHe": "אסלה ריצפתית חכמה סופרה לבן מבריק",
+  "brand": "Supera",
+  "retailer": "Makina",
+  "url": "https://makina.co.il/product/%d7%90%d7%a1%d7%9c%d7%94-%d7%a8%d7%99%d7%a6%d7%a4%d7%aa%d7%99%d7%aa-%d7%97%d7%9b%d7%9e%d7%94-%d7%a1%d7%95%d7%a4%d7%a8%d7%94-%d7%9c%d7%91%d7%9f-%d7%9e%d7%91%d7%a8%d7%99%d7%a7/",
+  "price": 5780.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 41,
+   "d": 68.5,
+   "h": 45
+  },
+  "type": "toilet",
+  "params": {
+   "variant": "smart",
+   "cistern": "exposed",
+   "color": "#fafafa",
+   "material": "ceramic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "toilets",
+  "tags": [
+   "smart",
+   "bidet",
+   "heated-seat",
+   "premium"
+  ],
+  "description": "Automatic smart toilet with built-in cistern, bidet wash and dry; 45 cm high incl. seat."
+ },
+ {
+  "id": "makina-acrylic-bathtub-130x70",
+  "name": "Built-in acrylic bathtub 130 x 70 cm",
+  "nameHe": "אמבטיה אקרילית 130X70",
+  "brand": "Makina",
+  "retailer": "Makina",
+  "url": "https://makina.co.il/product/%d7%90%d7%9e%d7%91%d7%98%d7%99%d7%94-%d7%90%d7%a7%d7%a8%d7%99%d7%9c%d7%99%d7%aa-130x70/",
+  "price": 649.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 130,
+   "d": 70,
+   "h": 39
+  },
+  "type": "bathtub",
+  "params": {
+   "variant": "built-in",
+   "screen": false,
+   "color": "#f7f7f5",
+   "material": "acrylic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "bathtubs",
+  "tags": [
+   "built-in",
+   "acrylic",
+   "compact"
+  ],
+  "description": "Rectangular built-in acrylic bathtub, 39 cm high."
+ },
+ {
+  "id": "ambat4u-mti-71-acrylic-bathtub-180x70",
+  "name": "MTI-71 reinforced acrylic bathtub 180 x 70 cm",
+  "nameHe": "אמבטיה 180/70 MTI-71",
+  "brand": "MTI",
+  "retailer": "Ambat4U",
+  "url": "https://www.ambat4u.co.il/product/%d7%90%d7%9e%d7%91%d7%98%d7%99%d7%94-180-70-mti-71/",
+  "price": 1553.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 180,
+   "d": 70,
+   "h": 41
+  },
+  "type": "bathtub",
+  "params": {
+   "variant": "built-in",
+   "screen": false,
+   "color": "#f7f7f5",
+   "material": "acrylic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "bathtubs",
+  "tags": [
+   "built-in",
+   "acrylic",
+   "on-sale"
+  ],
+  "description": "Reinforced acrylic bathtub, outer size 180 x 70 x 41 cm, 150 L. Frame, overflow and filler sold separately."
+ },
+ {
+  "id": "makina-freestanding-bathtub-160x70",
+  "name": "Freestanding acrylic bathtub 160 x 70 x 55 cm, matt white",
+  "nameHe": "אמבטיה פרי סטנדינג בצבעים 160/70/55 ס\"מ",
+  "brand": "Makina",
+  "retailer": "Makina",
+  "url": "https://makina.co.il/product/%d7%90%d7%9e%d7%91%d7%98%d7%99%d7%94-%d7%a4%d7%a8%d7%99-%d7%a1%d7%98%d7%a0%d7%93%d7%99%d7%a0%d7%92-%d7%91%d7%a6%d7%91%d7%a2%d7%99%d7%9d-160-70-55-%d7%a1%d7%9e/",
+  "price": 6935.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 160,
+   "d": 70,
+   "h": 55
+  },
+  "type": "bathtub",
+  "params": {
+   "variant": "freestanding",
+   "screen": false,
+   "color": "#f2f2ef",
+   "material": "acrylic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "bathtubs",
+  "tags": [
+   "freestanding",
+   "acrylic"
+  ],
+  "description": "Freestanding acrylic bathtub; also available in black, green or grey matt."
+ },
+ {
+  "id": "makina-freestanding-bathtub-170x73",
+  "name": "Freestanding acrylic bathtub 170 x 73 x 55 cm",
+  "nameHe": "אמבטיה פרי סטנדינג בצבעים 170/73/55 ס\"מ",
+  "brand": "Makina",
+  "retailer": "Makina",
+  "url": "https://makina.co.il/product/%d7%90%d7%9e%d7%91%d7%98%d7%99%d7%94-%d7%a4%d7%a8%d7%99-%d7%a1%d7%98%d7%a0%d7%93%d7%99%d7%a0%d7%92-%d7%91%d7%a6%d7%91%d7%a2%d7%99%d7%9d-170-73-55-%d7%a1%d7%9e/",
+  "price": 7639.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 170,
+   "d": 73,
+   "h": 55
+  },
+  "type": "bathtub",
+  "params": {
+   "variant": "freestanding",
+   "screen": false,
+   "color": "#f2f2ef",
+   "material": "acrylic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "bathtubs",
+  "tags": [
+   "freestanding",
+   "acrylic"
+  ],
+  "description": "Freestanding acrylic bathtub in a choice of colours."
+ },
+ {
+  "id": "makina-freestanding-bathtub-180x80",
+  "name": "Freestanding acrylic bathtub 180 x 80 x 57 cm",
+  "nameHe": "אמבטיה פרי סטנדינג בצבעים 180/80/57 ס\"מ",
+  "brand": "Makina",
+  "retailer": "Makina",
+  "url": "https://makina.co.il/product/%d7%90%d7%9e%d7%91%d7%98%d7%99%d7%94-%d7%a4%d7%a8%d7%99-%d7%a1%d7%98%d7%a0%d7%93%d7%99%d7%a0%d7%92-%d7%91%d7%a6%d7%91%d7%a2%d7%99%d7%9d-180-80-57-%d7%a1%d7%9e/",
+  "price": 8749.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 180,
+   "d": 80,
+   "h": 57
+  },
+  "type": "bathtub",
+  "params": {
+   "variant": "freestanding",
+   "screen": false,
+   "color": "#f2f2ef",
+   "material": "acrylic"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "bathtubs",
+  "tags": [
+   "freestanding",
+   "acrylic",
+   "large"
+  ],
+  "description": "Large freestanding acrylic bathtub in a choice of colours."
+ },
+ {
+  "id": "ace-atmor-horizon-plus-5-bar-towel-warmer",
+  "name": "ATMOR Horizon Plus 5-bar heated towel rail",
+  "nameHe": "מחמם מגבות 5 מוטות PLUS HORIZON",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/3031443",
+  "price": 422.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 60,
+   "d": 12.5,
+   "h": 65
+  },
+  "type": "towel-rail",
+  "params": {
+   "variant": "heated",
+   "color": "#c9cccf",
+   "material": "stainless-steel"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "bath-accessories",
+  "tags": [
+   "heated",
+   "electric"
+  ],
+  "description": "Wall-mounted stainless-steel electric towel warmer, 5 bars."
+ },
+ {
+  "id": "makina-rounded-8-bar-towel-warmer-brushed",
+  "name": "Rounded 8-bar electric towel warmer, brushed steel",
+  "nameHe": "מחמם מגבות מעוגל 8 שלבים מוברש",
+  "brand": "Makina",
+  "retailer": "Makina",
+  "url": "https://makina.co.il/product/%d7%9e%d7%97%d7%9e%d7%9d-%d7%9e%d7%92%d7%91%d7%95%d7%aa-%d7%9e%d7%a2%d7%95%d7%92%d7%9c-8-%d7%a9%d7%9c%d7%91%d7%99%d7%9d-%d7%9e%d7%95%d7%91%d7%a8%d7%a9/",
+  "price": 990.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 52,
+   "d": 10,
+   "h": 80
+  },
+  "type": "towel-rail",
+  "params": {
+   "variant": "heated",
+   "color": "#b9bcbf",
+   "material": "stainless-steel"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "bath-accessories",
+  "tags": [
+   "heated",
+   "electric"
+  ],
+  "description": "304 stainless-steel towel warmer 80 x 52 cm, stands 10 cm off the wall, 80 W."
+ },
+ {
+  "id": "ambat4u-omnezza-heated-towel-ladder-160x45",
+  "name": "Omnezza graphite heated towel ladder 160 x 45 cm",
+  "nameHe": "מחמם מגבות אומנזה גרפיט 160/45",
+  "brand": "Omnezza",
+  "retailer": "Ambat4U",
+  "url": "https://www.ambat4u.co.il/product/%d7%9e%d7%97%d7%9e%d7%9d-%d7%9e%d7%92%d7%91%d7%95%d7%aa-%d7%9e%d7%95%d7%a0%d7%96%d7%94-%d7%92%d7%a8%d7%a4%d7%99%d7%98-160-45/",
+  "price": 1817.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 45,
+   "d": 8.5,
+   "h": 160
+  },
+  "type": "towel-rail",
+  "params": {
+   "variant": "ladder",
+   "color": "#3b3c3e",
+   "material": "stainless-steel"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "bath-accessories",
+  "tags": [
+   "heated",
+   "electric",
+   "tall"
+  ],
+  "description": "Tall electric towel ladder with digital temperature control, 110 W, 160 x 45 x 8.5 cm."
+ },
+ {
+  "id": "ambat4u-omnezza-folding-towel-warmer-black",
+  "name": "Omnezza folding heated towel warmer, matt black",
+  "nameHe": "מחמם מגבות אומנזה שחור מט 855/50/70 מתקפל",
+  "brand": "Omnezza",
+  "retailer": "Ambat4U",
+  "url": "https://www.ambat4u.co.il/product/%d7%9e%d7%97%d7%9e%d7%9d-%d7%9e%d7%92%d7%91%d7%95%d7%aa-%d7%9e%d7%95%d7%a0%d7%96%d7%94-%d7%a9%d7%97%d7%95%d7%a8-%d7%9e%d7%98-855-50-70-%d7%9e%d7%aa%d7%a7%d7%a4%d7%9c/",
+  "price": 1460.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 50,
+   "d": 7,
+   "h": 85.5
+  },
+  "type": "towel-rail",
+  "params": {
+   "variant": "heated",
+   "color": "#1f2023",
+   "material": "stainless-steel"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "bath-accessories",
+  "tags": [
+   "heated",
+   "electric",
+   "folding"
+  ],
+  "description": "Folding electric towel warmer, 85.5 cm high open (62.2 closed), 50 cm wide, 7 cm deep."
+ },
+ {
+  "id": "keter-dudim-chromagen-electric-boiler-80",
+  "name": "Chromagen 80 L electric water heater",
+  "nameHe": "דוד חשמל 80 ליטר כרומגן",
+  "brand": "Chromagen",
+  "retailer": "Keter Dudim",
+  "url": "https://www.keter-dudim.co.il/product/%d7%93%d7%95%d7%93-%d7%97%d7%a9%d7%9e%d7%9c-80-%d7%9c%d7%99%d7%98%d7%a8-%d7%9b%d7%a8%d7%95%d7%9e%d7%92%d7%9f/",
+  "price": 1610.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 48,
+   "d": 48,
+   "h": 93
+  },
+  "type": "water-heater",
+  "params": {
+   "variant": "electric",
+   "color": "#f1f1ef",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "laundry",
+  "subcategory": "water-heaters",
+  "tags": [
+   "electric",
+   "80l"
+  ],
+  "description": "80 L electric boiler, 2,500 W, 4-year warranty; 48 cm diameter, 93 cm high."
+ },
+ {
+  "id": "keter-dudim-chromagen-electric-boiler-120-slim",
+  "name": "Chromagen 120 L slim electric water heater",
+  "nameHe": "דוד חשמל 120 ליטר כרומגן",
+  "brand": "Chromagen",
+  "retailer": "Keter Dudim",
+  "url": "https://www.keter-dudim.co.il/product/%d7%93%d7%95%d7%93-%d7%97%d7%a9%d7%9e%d7%9c-120-%d7%9c%d7%99%d7%98%d7%a8-%d7%a6%d7%a8-%d7%9b%d7%a8%d7%95%d7%9e%d7%92%d7%9f/",
+  "price": 1880.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 48,
+   "d": 48,
+   "h": 125
+  },
+  "type": "water-heater",
+  "params": {
+   "variant": "electric",
+   "color": "#f1f1ef",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "laundry",
+  "subcategory": "water-heaters",
+  "tags": [
+   "electric",
+   "120l",
+   "slim"
+  ],
+  "description": "120 L narrow electric boiler, 2,500 W; 48 cm diameter, 125 cm high."
+ },
+ {
+  "id": "keter-dudim-chromagen-electric-boiler-150",
+  "name": "Chromagen 150 L electric water heater",
+  "nameHe": "דוד חשמל 150 ליטר כרומגן",
+  "brand": "Chromagen",
+  "retailer": "Keter Dudim",
+  "url": "https://www.keter-dudim.co.il/product/%d7%93%d7%95%d7%93-%d7%97%d7%a9%d7%9e%d7%9c-150-%d7%9c%d7%99%d7%98%d7%a8-%d7%9b%d7%a8%d7%95%d7%9e%d7%92%d7%9f/",
+  "price": 1990.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 59,
+   "d": 59,
+   "h": 102
+  },
+  "type": "water-heater",
+  "params": {
+   "variant": "electric",
+   "color": "#f1f1ef",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "laundry",
+  "subcategory": "water-heaters",
+  "tags": [
+   "electric",
+   "150l"
+  ],
+  "description": "150 L electric boiler, 2,500 W; 59 cm diameter, 102 cm high."
+ },
+ {
+  "id": "keter-dudim-amisragaz-electric-boiler-120-slim",
+  "name": "Amisragaz 120 L slim electric water heater",
+  "nameHe": "דוד חשמל 120 ליטר צר אמישראגז",
+  "brand": "Amisragaz",
+  "retailer": "Keter Dudim",
+  "url": "https://www.keter-dudim.co.il/product/%d7%93%d7%95%d7%93-%d7%97%d7%a9%d7%9e%d7%9c-120-%d7%9c%d7%99%d7%98%d7%a8-%d7%a6%d7%a8-%d7%90%d7%9e%d7%99%d7%a9%d7%a8%d7%90%d7%92%d7%96/",
+  "price": 1670.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 47,
+   "d": 47,
+   "h": 114
+  },
+  "type": "water-heater",
+  "params": {
+   "variant": "electric",
+   "color": "#f1f1ef",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "laundry",
+  "subcategory": "water-heaters",
+  "tags": [
+   "electric",
+   "120l",
+   "slim"
+  ],
+  "description": "120 L narrow electric boiler; 47 cm diameter, 114 cm high."
+ },
+ {
+  "id": "keter-dudim-chromagen-solar-tank-120",
+  "name": "Chromagen 120 L vertical solar water tank",
+  "nameHe": "דוד שמש כרומגן 120 ליטר",
+  "brand": "Chromagen",
+  "retailer": "Keter Dudim",
+  "url": "https://www.keter-dudim.co.il/product/%d7%93%d7%95%d7%93-%d7%a9%d7%9e%d7%a9-%d7%a2%d7%9e%d7%99%d7%93%d7%94-%d7%9b%d7%a8%d7%95%d7%9e%d7%92%d7%9f-120-%d7%9c%d7%99%d7%98%d7%a8/",
+  "price": 1820.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 56,
+   "d": 56,
+   "h": 79
+  },
+  "type": "water-heater",
+  "params": {
+   "variant": "solar-roof",
+   "color": "#e9e9e6",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "laundry",
+  "subcategory": "water-heaters",
+  "tags": [
+   "solar",
+   "120l"
+  ],
+  "description": "120 L vertical solar tank (dud shemesh) with 2,500 W electric element; 56 cm diameter, 79 cm high. Collectors sold separately."
+ },
+ {
+  "id": "keter-dudim-chromagen-solar-tank-150",
+  "name": "Chromagen 150 L vertical solar water tank",
+  "nameHe": "דוד שמש כרומגן 150 ליטר",
+  "brand": "Chromagen",
+  "retailer": "Keter Dudim",
+  "url": "https://www.keter-dudim.co.il/product/%d7%93%d7%95%d7%93-%d7%a9%d7%9e%d7%a9-%d7%a2%d7%9e%d7%99%d7%93%d7%94-%d7%9b%d7%a8%d7%95%d7%9e%d7%92%d7%9f-150-%d7%9c%d7%99%d7%98%d7%a8/",
+  "price": 1930.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 56,
+   "d": 56,
+   "h": 96
+  },
+  "type": "water-heater",
+  "params": {
+   "variant": "solar-roof",
+   "color": "#e9e9e6",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "laundry",
+  "subcategory": "water-heaters",
+  "tags": [
+   "solar",
+   "150l"
+  ],
+  "description": "150 L vertical solar tank with electric element; 56 cm diameter, 96 cm high. Collectors sold separately."
+ },
+ {
+  "id": "keter-dudim-chromagen-solar-heat-exchanger-150",
+  "name": "Chromagen 150 L solar tank with heat exchanger",
+  "nameHe": "דוד סולארי עם מחליף חום 150 ליטר כרומגן",
+  "brand": "Chromagen",
+  "retailer": "Keter Dudim",
+  "url": "https://www.keter-dudim.co.il/product/%d7%93%d7%95%d7%93-%d7%a1%d7%95%d7%9c%d7%90%d7%a8%d7%99-%d7%a2%d7%9d-%d7%9e%d7%97%d7%9c%d7%99%d7%a3-%d7%97%d7%95%d7%9d-150-%d7%9c%d7%99%d7%98%d7%a8-%d7%9b%d7%a8%d7%95%d7%9e%d7%92%d7%9f/",
+  "price": 2220.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 56,
+   "d": 56,
+   "h": 101
+  },
+  "type": "water-heater",
+  "params": {
+   "variant": "solar-roof",
+   "color": "#e9e9e6",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "laundry",
+  "subcategory": "water-heaters",
+  "tags": [
+   "solar",
+   "heat-exchanger",
+   "150l"
+  ],
+  "description": "150 L solar tank with spiral heat exchanger for pressure systems; 56 cm diameter, 101 cm high."
+ },
+ {
+  "id": "ikea-tornviken-kitchen-island-off-white-oak",
+  "name": "TORNVIKEN kitchen island, off-white/oak",
+  "nameHe": "TORNVIKEN אי עבודה למטבח",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/tornviken-kitchen-island-off-white-oak-40391657/",
+  "price": 2295,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 126,
+   "d": 77,
+   "h": 90
+  },
+  "type": "kitchen-island",
+  "params": {
+   "overhang": 0,
+   "sink": false,
+   "cooktop": false,
+   "counter": "wood",
+   "counterColor": "#b9976b",
+   "drawers": 2,
+   "doors": 0,
+   "color": "#e9e5da",
+   "material": "steel",
+   "material2": "oak"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "kitchen-islands",
+  "tags": [
+   "island",
+   "storage"
+  ],
+  "description": "Free-standing kitchen island, 126 x 77 x 90 cm."
+ },
+ {
+  "id": "ikea-vadholma-kitchen-island-126-black-oak",
+  "name": "VADHOLMA kitchen island 126 cm, black/oak",
+  "nameHe": "VADHOLMA אי עבודה למטבח",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/vadholma-kitchen-island-black-oak-20359154/",
+  "price": 3395,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 126,
+   "d": 79,
+   "h": 90
+  },
+  "type": "kitchen-island",
+  "params": {
+   "overhang": 0,
+   "sink": false,
+   "cooktop": false,
+   "counter": "wood",
+   "counterColor": "#b9976b",
+   "drawers": 0,
+   "doors": 0,
+   "color": "#2a2a2a",
+   "material": "steel",
+   "material2": "oak"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "kitchen-islands",
+  "tags": [
+   "island",
+   "storage"
+  ],
+  "description": "Black steel frame island with oak top, 126 x 79 x 90 cm."
+ },
+ {
+  "id": "ikea-vadholma-kitchen-island-79-black-oak",
+  "name": "VADHOLMA kitchen island 79 cm, black/oak",
+  "nameHe": "VADHOLMA אי עבודה למטבח",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/vadholma-kitchen-island-black-oak-40366115/",
+  "price": 2695,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 79,
+   "d": 62.5,
+   "h": 90
+  },
+  "type": "kitchen-island",
+  "params": {
+   "overhang": 0,
+   "sink": false,
+   "cooktop": false,
+   "counter": "wood",
+   "counterColor": "#b9976b",
+   "drawers": 0,
+   "doors": 0,
+   "color": "#2a2a2a",
+   "material": "steel",
+   "material2": "oak"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "kitchen-islands",
+  "tags": [
+   "island",
+   "compact"
+  ],
+  "description": "Compact black steel frame island with oak top, 79 x 62.5 x 90 cm."
+ },
+ {
+  "id": "ikea-forhoja-kitchen-trolley-birch",
+  "name": "FÖRHÖJA kitchen trolley, birch",
+  "nameHe": "FÖRHÖJA עגלת מטבח",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/foerhoeja-kitchen-trolley-birch-80035920/",
+  "price": 750,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 100,
+   "d": 43,
+   "h": 90
+  },
+  "type": "kitchen-island",
+  "params": {
+   "overhang": 0,
+   "sink": false,
+   "cooktop": false,
+   "counter": "wood",
+   "counterColor": "#d8b98a",
+   "drawers": 0,
+   "doors": 0,
+   "color": "#d8b98a",
+   "material": "wood"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "kitchen-islands",
+  "tags": [
+   "trolley",
+   "wheels"
+  ],
+  "description": "Long birch kitchen trolley on wheels, 100 x 43 x 90 cm."
+ },
+ {
+  "id": "ikea-bekvam-kitchen-trolley-beech",
+  "name": "BEKVÄM kitchen trolley, beech",
+  "nameHe": "BEKVÄM עגלת מטבח",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/bekvaem-kitchen-trolley-beech-70240351/",
+  "price": 450,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 58,
+   "d": 50,
+   "h": 85
+  },
+  "type": "kitchen-island",
+  "params": {
+   "overhang": 0,
+   "sink": false,
+   "cooktop": false,
+   "counter": "wood",
+   "counterColor": "#c9a26b",
+   "drawers": 1,
+   "doors": 0,
+   "color": "#c9a26b",
+   "material": "wood"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "kitchen-islands",
+  "tags": [
+   "trolley",
+   "wheels",
+   "compact"
+  ],
+  "description": "Beech trolley with drawer and shelf, 58 x 50 x 85 cm."
+ },
+ {
+  "id": "ikea-kungsfors-kitchen-trolley-stainless",
+  "name": "KUNGSFORS kitchen trolley, stainless steel",
+  "nameHe": "KUNGSFORS עגלת מטבח",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/kungsfors-kitchen-trolley-stainless-steel-80334924/",
+  "price": 695,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 60,
+   "d": 40,
+   "h": 90
+  },
+  "type": "kitchen-island",
+  "params": {
+   "overhang": 0,
+   "sink": false,
+   "cooktop": false,
+   "counter": "steel",
+   "counterColor": "#c5c7ca",
+   "drawers": 0,
+   "doors": 0,
+   "color": "#c5c7ca",
+   "material": "steel"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "kitchen-islands",
+  "tags": [
+   "trolley",
+   "stainless"
+  ],
+  "description": "Stainless-steel trolley, 60 x 40 x 90 cm."
+ },
+ {
+  "id": "ikea-enhet-mirror-cabinet-60-white",
+  "name": "ENHET mirror cabinet with doors 60 cm, white",
+  "nameHe": "ENHET ארון מראה עם דלתות",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/enhet-mirror-cabinet-with-doors-white-50623044/",
+  "price": 495,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 60,
+   "d": 16.6,
+   "h": 75
+  },
+  "type": "mirror",
+  "params": {
+   "shape": "rect",
+   "frame": "none",
+   "cabinet": true,
+   "color": "#f1f1ef",
+   "material": "wood"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "mirrors",
+  "tags": [
+   "mirror-cabinet"
+  ],
+  "description": "Wall-hung mirror cabinet, 60 x 16.6 x 75 cm."
+ },
+ {
+  "id": "ikea-treasjon-mirror-cabinet-80-led",
+  "name": "TREASJÖN mirror cabinet 2 doors with built-in lighting, 80 cm",
+  "nameHe": "TREASJÖN ארון מראה 2 דלתות/תאורה מובנית",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/treasjoen-mirror-cab-2-door-built-in-lighting-50573906/",
+  "price": 995,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 80,
+   "d": 17,
+   "h": 75
+  },
+  "type": "mirror",
+  "params": {
+   "shape": "rect",
+   "frame": "led",
+   "cabinet": true,
+   "color": "#d9dcdd",
+   "material": "glass"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "mirrors",
+  "tags": [
+   "mirror-cabinet",
+   "led"
+  ],
+  "description": "Mirror cabinet with integrated LED light, 80 x 17 x 75 cm."
+ },
+ {
+  "id": "ikea-faxalven-mirror-cabinet-80-led",
+  "name": "FAXÄLVEN mirror cabinet with built-in lighting, oak effect, 80 cm",
+  "nameHe": "FAXÄLVEN ארון מראה עם תאורה מובנית",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/faxaelven-mirror-cabinet-w-built-in-lighting-oak-effect-s89516712/",
+  "price": 1440,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 80,
+   "d": 15,
+   "h": 95
+  },
+  "type": "mirror",
+  "params": {
+   "shape": "rect",
+   "frame": "led",
+   "cabinet": true,
+   "color": "#c4a77d",
+   "material": "glass"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "mirrors",
+  "tags": [
+   "mirror-cabinet",
+   "led",
+   "tall"
+  ],
+  "description": "Tall mirror cabinet with integrated lighting, 80 x 15 x 95 cm."
+ },
+ {
+  "id": "ikea-hemnes-mirror-cabinet-103-white",
+  "name": "HEMNES mirror cabinet with 2 doors 103 cm, white",
+  "nameHe": "HEMNES ארון מראה 2 דלתות",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/hemnes-mirror-cabinet-with-2-doors-white-80217675/",
+  "price": 1195,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 103,
+   "d": 16,
+   "h": 98
+  },
+  "type": "mirror",
+  "params": {
+   "shape": "rect",
+   "frame": "thin",
+   "cabinet": true,
+   "color": "#f1f1ef",
+   "material": "wood"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "mirrors",
+  "tags": [
+   "mirror-cabinet",
+   "traditional"
+  ],
+  "description": "Wide two-door mirror cabinet, 103 x 16 x 98 cm."
+ },
+ {
+  "id": "ace-mor-mirror-cabinet-80",
+  "name": "Mor mirrored wall cabinet 80 cm",
+  "nameHe": "ארון מעל הכיור עם מראה רוחב 80 ס\"מ דגם Mor",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4414528",
+  "price": 799,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 80,
+   "d": 12,
+   "h": 72
+  },
+  "type": "mirror",
+  "params": {
+   "shape": "rect",
+   "frame": "none",
+   "cabinet": true,
+   "color": "#d9dcdd",
+   "material": "glass"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "mirrors",
+  "tags": [
+   "mirror-cabinet"
+  ],
+  "description": "Wall cabinet with mirror front, 80 x 12 x 72 cm."
+ },
+ {
+  "id": "ace-led-defog-bluetooth-round-mirror-80",
+  "name": "Round LED bathroom mirror 80 cm, defogger and Bluetooth",
+  "nameHe": "מראה לאמבטיה עם לד מפיג אדים ו-Bluetooth קוטר 80 ס\"מ",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4500338",
+  "price": 592.4,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 80,
+   "d": 3,
+   "h": 80
+  },
+  "type": "mirror",
+  "params": {
+   "shape": "round",
+   "frame": "led",
+   "cabinet": false,
+   "color": "#d9dcdd",
+   "material": "glass"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "mirrors",
+  "tags": [
+   "led",
+   "defogger",
+   "bluetooth",
+   "on-sale"
+  ],
+  "description": "Frameless round mirror with LED ring, anti-fog and Bluetooth speaker. Thickness 3 cm is an approximation (not stated)."
+ },
+ {
+  "id": "ace-led-defog-round-mirror-70",
+  "name": "Round LED bathroom mirror 70 cm with defogger",
+  "nameHe": "מראה לאמבטיה עם תאורת לד ומפיג אדים קוטר 70 ס\"מ",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4500334",
+  "price": 507.65,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 70,
+   "d": 3,
+   "h": 70
+  },
+  "type": "mirror",
+  "params": {
+   "shape": "round",
+   "frame": "led",
+   "cabinet": false,
+   "color": "#d9dcdd",
+   "material": "glass"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "mirrors",
+  "tags": [
+   "led",
+   "defogger"
+  ],
+  "description": "Frameless round mirror with LED ring and touch sensor. Thickness 3 cm is an approximation (not stated)."
+ },
+ {
+  "id": "ace-led-defog-bluetooth-rect-mirror-60x100",
+  "name": "Rectangular LED bathroom mirror 60 x 100 cm, defogger and Bluetooth",
+  "nameHe": "מראה לאמבטיה מלבנית עם לד מפיג אדים ו-Bluetooth מידה 60x100 ס\"מ",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4500369",
+  "price": 677.15,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 60,
+   "d": 3,
+   "h": 100
+  },
+  "type": "mirror",
+  "params": {
+   "shape": "rect",
+   "frame": "led",
+   "cabinet": false,
+   "color": "#d9dcdd",
+   "material": "glass"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "mirrors",
+  "tags": [
+   "led",
+   "defogger",
+   "bluetooth"
+  ],
+  "description": "Frameless rectangular mirror with LED, anti-fog and Bluetooth. Thickness 3 cm is an approximation (not stated)."
+ },
+ {
+  "id": "ace-rami-tall-bathroom-cabinet",
+  "name": "Rami tall bathroom cabinet 58 x 31 x 170",
+  "nameHe": "ארון שירות דגם רמי",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4475932",
+  "price": 585.2,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 58,
+   "d": 31,
+   "h": 170
+  },
+  "type": "cabinet",
+  "params": {
+   "doors": 2,
+   "color": "#efefec",
+   "material": "wood"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "bath-accessories",
+  "tags": [
+   "tall",
+   "storage"
+  ],
+  "description": "Tall bathroom / laundry storage cabinet."
+ },
+ {
+  "id": "ace-arin-tall-bathroom-cabinet-white",
+  "name": "Arin tall bathroom cabinet, white",
+  "nameHe": "ארון שירות לחדר אמבטיה דגם ארין גוון לבן",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4432108",
+  "price": 678.3,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 45,
+   "d": 35.5,
+   "h": 173.6
+  },
+  "type": "cabinet",
+  "params": {
+   "doors": 2,
+   "color": "#f3f3f1",
+   "material": "wood"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "bath-accessories",
+  "tags": [
+   "tall",
+   "storage"
+  ],
+  "description": "Slim tall bathroom cabinet, 45 x 35.5 x 173.6 cm."
+ },
+ {
+  "id": "homecenter-jetto-wall-tall-bathroom-cabinet-natural",
+  "name": "JETTO Bari/Palermo wall-hung tall bathroom cabinet, natural",
+  "nameHe": "ארון שירות תלוי מעוצב לאמבטיה, בארי/פאלרמו בצבע טבעי",
+  "brand": "JETTO",
+  "retailer": "Home Center",
+  "url": "https://www.homecenter.co.il/products/8567410623",
+  "price": 499,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 35,
+   "d": 32,
+   "h": 150
+  },
+  "type": "cabinet",
+  "params": {
+   "doors": 1,
+   "legs": "wall",
+   "color": "#c8a97e",
+   "material": "wood"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "bath-accessories",
+  "tags": [
+   "tall",
+   "wall-hung"
+  ],
+  "description": "Wall-hung tall bathroom cabinet, soft-close; 35 x 32 x 150 cm."
  }
 ];
