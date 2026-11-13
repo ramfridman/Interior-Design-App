@@ -398,7 +398,8 @@ export function drawInteriorDims(G, env, boxes) {
     }
     if (!best) continue;
     boxes.add(best.box);
-    if (!G.visible(horiz ? dim.from : best.at - 1, horiz ? best.at - 1 : dim.from, horiz ? dim.to : best.at + 1, horiz ? best.at + 1 : dim.to)) continue;
+    const m = 8 / G.scale;      // arrow heads and the figure reach a few px beside the line
+    if (!G.visible(horiz ? dim.from : best.at - m, horiz ? best.at - m : dim.from, horiz ? dim.to : best.at + m, horiz ? best.at + m : dim.to)) continue;
     const p0 = horiz ? G.RX(dim.from) : G.RY(dim.from), p1 = horiz ? G.RX(dim.to) : G.RY(dim.to);
     const line = horiz ? G.RY(best.at) + 0.5 : G.RX(best.at) + 0.5;
     ctx.beginPath();

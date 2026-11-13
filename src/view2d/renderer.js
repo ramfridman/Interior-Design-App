@@ -115,7 +115,8 @@ export function createRenderer(canvas, env) {
       const x0 = Math.max(0, Math.floor(b.x0 * k + ox) - pad), y0 = Math.max(0, Math.floor(b.y0 * k + oy) - pad);
       const x1 = Math.min(cw, Math.ceil(b.x1 * k + ox) + pad), y1 = Math.min(ch, Math.ceil(b.y1 * k + oy) + pad);
       if (x1 <= x0 || y1 <= y0) continue;
-      const view = { x0: (x0 - ox) / k, y0: (y0 - oy) / k, x1: (x1 - ox) / k, y1: (y1 - oy) / k };
+      // cull against a slightly larger area than the clip, so nothing that rounds onto its edge pixels is skipped
+      const view = { x0: (x0 - 3 - ox) / k, y0: (y0 - 3 - oy) / k, x1: (x1 + 3 - ox) / k, y1: (y1 + 3 - oy) / k };
       for (const target of [uctx, octx]) {
         const G = gfx(target, cam, dpr, ox, oy, cw, ch);
         G.view = view;

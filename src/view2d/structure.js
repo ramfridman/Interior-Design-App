@@ -189,7 +189,8 @@ export function drawChangeMarkers(G, env) {
   if (!d.diff) d.diff = planDiff().items.filter((it) => it.kind in MARK);
   const r = 6.5 * dpr;
   for (const it of d.diff) {
-    if (!G.visible(it.at.x - 40, it.at.y - 40, it.at.x + 40, it.at.y + 40)) continue;
+    const m = 12 / G.scale;
+    if (!G.visible(it.at.x - m, it.at.y - m, it.at.x + m, it.at.y + m)) continue;
     const x = Math.round(G.X(it.at.x)), y = Math.round(G.Y(it.at.y));
     const col = pal.level[it.level] || pal.level.free;
     ctx.beginPath(); ctx.arc(x, y, r + 1.5 * dpr, 0, Math.PI * 2); ctx.fillStyle = pal.paper; ctx.fill();
