@@ -2,6 +2,9 @@
 .app {
   position: relative;
   height: 100%;
+  /* Off-screen drawers and sheets must never make the page itself scrollable (phones would drag the app out of view). */
+  overflow: hidden;
+  overflow: clip;
   display: grid;
   grid-template-columns: var(--left-w) minmax(0, 1fr) var(--right-w);
   grid-template-rows: auto minmax(0, 1fr) auto;

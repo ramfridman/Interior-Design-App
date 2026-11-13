@@ -8,6 +8,21 @@ import { initialLayout } from './core/initial-layout.js';
 import * as catalog from './catalog/index.js';
 import * as models from './models/index.js';
 
+// The app is a fixed, full-window workspace: the page itself must never scroll (a phone browser may still try to
+// scroll it when a field is focused or content is brought into view), so any page scroll is undone at once.
+function pinPage() {
+  const reset = () => {
+    if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+    const b = document.body, d = document.documentElement;
+    if (b && (b.scrollTop || b.scrollLeft)) { b.scrollTop = 0; b.scrollLeft = 0; }
+    if (d.scrollTop || d.scrollLeft) { d.scrollTop = 0; d.scrollLeft = 0; }
+  };
+  window.addEventListener('scroll', reset, { passive: true });
+  document.addEventListener('scroll', (e) => { if (e.target === document || e.target === document.body || e.target === document.documentElement) reset(); }, { passive: true, capture: true });
+  reset();
+}
+pinPage();
+
 async function boot() {
   const status = (msg) => { const el = document.getElementById('boot-status'); if (el) el.textContent = msg; };
   status('Loading catalogue and models…');
