@@ -84,11 +84,11 @@ export function exportPNG(env, { scale = 2 } = {}) {
   const rows = [['DATE', date], ['SCALE', `1:${denom} when printed on A3 (420 × 297 mm)`],
     ['AREAS', [meta.grossFloorArea ? `House ${meta.grossFloorArea} m²` : null, `Lot ${Math.round(areaM2(plan.site.boundary))} m²`].filter(Boolean).join('  ·  ')]];
   rows.forEach(([k, v], i) => {
-    const y = ty + (30 + i * 26) * dpr;
+    const y = ty + (27 + i * 22) * dpr;
     L(k, c1 + pad, y, cap);
     L(v, c1 + pad + 64 * dpr, y, { size: 12, weight: 500 });
   });
-  if (meta.architect) L(`Base drawing: ${meta.architect}`, c1 + pad, ty + 91 * dpr, { size: 10, color: pal.inkFaint });
+  if (meta.architect) L(`Base drawing: ${meta.architect}`, c1 + pad, ty + 93 * dpr, { size: 10, color: pal.inkFaint });
 
   const bw = drawScaleBar(G, pal, c2 + pad, ty + 58 * dpr, ui.units, 150);
   drawNorthArrow(G, pal, Math.max(c2 + pad + bw + 60 * dpr, fx + fw - 64 * dpr), ty + 56 * dpr, meta.northAngle || 0, 20);

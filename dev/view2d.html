@@ -43,7 +43,8 @@ const q = new URLSearchParams(location.search);
 if (q.get('theme')) document.documentElement.dataset.theme = q.get('theme');
 store.persist = false;
 await Promise.all([models.loadModels(), catalog.loadCatalog()]);
-store.load({ items: initialLayout() });
+// initialLayout() items carry no ids and store.load() does not assign any — give them stable ones here.
+store.load({ items: initialLayout().map((it, i) => ({ ...it, id: it.id || `init_${i}` })) });
 
 const view = createView2D(document.getElementById('view'), { store, plan: PLAN, catalog, models });
 window.app = { store, plan: PLAN, catalog, models, view2d: view };

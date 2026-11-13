@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Models · kitchen, bath, appliances &amp; climate — contact sheet</title>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three/three.module.min.js", "three/addons/": "../vendor/three/addons/" } }
+</script>
+<style>
+  body { margin: 0; padding: 14px 16px 50px; font: 12px/1.35 system-ui, -apple-system, 'Segoe UI', sans-serif; background: #f1efec; color: #24262b; }
+  h1 { font-size: 18px; margin: 0 0 4px; } h2 { font-size: 14px; margin: 18px 0 6px; }
+  p.hint { margin: 0 0 8px; color: #6b6e75; }
+  .grid { display: flex; flex-wrap: wrap; gap: 6px; }
+  .card { background: #fff; border: 1px solid #dedad3; border-radius: 5px; padding: 4px; }
+  .card canvas { display: block; border-radius: 3px; }
+  .card b { display: block; font-size: 11px; margin-top: 2px; } .card span { color: #777a80; font-size: 10px; }
+  pre#test { background: #1f2227; color: #e8e6e1; padding: 10px; border-radius: 6px; white-space: pre-wrap; font: 11px/1.4 ui-monospace, Menlo, monospace; }
+</style>
+</head>
+<body>
+<h1>Kitchen · bath · appliances · climate — model contact sheet</h1>
+<p class="hint">Query: <code>?view=3d|2d|scene|test</code> · <code>?group=kitchen|appliances|laundry|bath|misc</code> · <code>?type=fridge,tv</code> · <code>?cell=300</code></p>
+<pre id="test" hidden></pre>
+<div id="out"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { buildModel, drawSymbol, getModel } from '../src/models/registry.js';
+import { MODEL_TYPES } from '../src/models/types.js';
+import { PLAN } from '../src/core/plan.js';
+import { initialLayout } from '../src/core/initial-layout.js';
+import '../src/models/kitchen-bath.js';
+
+const q = new URLSearchParams(location.search);
+const view = q.get('view') || 'all', CELL = Number(q.get('cell')) || 290, out = document.getElementById('out');
+const V = (label, w, d, h, p = {}, o = {}) => ({ label, w, d, h, p, ...o });
+const OAK = '#c8a476', STONE = '#e7e4de', WHITE = '#f3f1ec';
+
+/** type → variants (cm). o.elev lifts wall items, o.below views ceiling items from underneath, o.nobox skips the bbox assertion. */
+const GROUPS = {
+  kitchen: {
+    'kitchen-base': [
+      V('default 60', 60, 60, 90), V('94 · 3 drawers', 94, 60, 90, { drawers: 3 }), V('60 hob gas + drawers', 60, 60, 90, { drawers: 3, cooktop: 'gas' }),
+      V('60 sink, 2 doors', 60, 60, 90, { doors: 2, sink: 'single' }), V('corner blind 60', 60, 60, 90, { corner: true }), V('corner 110', 110, 60, 90, { corner: true }),
+      V('240 sink+induction+oven+dw', 240, 60, 90, { sink: 'single', cooktop: 'induction', oven: true, dishwasher: true, doors: 2, drawers: 3 }),
+      V('180 double sink, oak, no handles', 180, 62, 92, { sink: 'double', color: OAK, handles: 'none', counterColor: '#2e2f33' }),
+      V('120 doors+drawers knobs, wood top', 120, 60, 90, { doors: 2, drawers: 3, handles: 'knob', color: '#5f7466', counter: 'wood' }),
+      V('90 gas 5 + oven, steel top', 90, 60, 90, { cooktop: 'gas', oven: true, counter: 'steel', color: '#34373c' }),
+      V('300 run auto', 300, 60, 90, {}), V('40 narrow', 40, 60, 90, { doors: 1 }),
+    ],
+    'kitchen-wall': [
+      V('default 60', 60, 37, 80, {}, { elev: 145 }), V('120 · 3 doors', 120, 37, 72, { doors: 3 }, { elev: 145 }), V('glass doors 80', 80, 35, 90, { glassDoors: true }, { elev: 145 }),
+      V('open shelf 100', 100, 30, 70, { open: true, color: OAK }, { elev: 145 }), V('flap 90×36 no handles', 90, 37, 36, { handles: 'none' }, { elev: 190 }),
+    ],
+    'kitchen-tall': [
+      V('default 60', 60, 60, 220), V('160 oven+microwave (layout)', 160, 60, 220, { doors: 3, oven: true, microwave: true }),
+      V('120 fridge + pantry', 120, 60, 220, { fridge: true, color: OAK }), V('60 · 2 doors no handles', 60, 60, 240, { doors: 2, handles: 'none' }),
+      V('180 oven + fridge', 180, 60, 210, { oven: true, fridge: true, color: '#34373c' }),
+    ],
+    'kitchen-island': [
+      V('default 200×100', 200, 100, 90), V('280×120 layout', 280, 120, 90, { overhang: 30, color: OAK, counterColor: STONE, drawers: 4 }),
+      V('waterfall + sink + induction', 260, 110, 92, { waterfall: true, sink: true, cooktop: 'induction', overhang: 30, color: '#34373c', counterColor: '#f2f0ec' }),
+      V('no overhang two-sided 180×90', 180, 90, 90, { overhang: 0, doors: 3 }), V('small 120×60 gas', 120, 60, 90, { cooktop: 'gas', drawers: 2 }),
+    ],
+  },
+  appliances: {
+    'fridge': [
+      V('french-door (default)', 91, 72, 178), V('french-door + dispenser', 91, 75, 180, { dispenser: true, color: '#2a2b2e' }), V('side-by-side + dispenser', 92, 70, 178, { variant: 'side-by-side', dispenser: true }),
+      V('top-freezer white', 60, 65, 170, { variant: 'top-freezer', color: '#f4f4f2' }), V('bottom-freezer', 60, 66, 201, { variant: 'bottom-freezer' }), V('single', 60, 65, 185, { variant: 'single' }),
+      V('4-door', 83, 73, 185, { variant: '4-door', color: '#3a3d42' }), V('mini', 48, 50, 84, { variant: 'mini', color: '#f4f4f2' }), V('wine', 60, 57, 82, { variant: 'wine', color: '#26272b' }), V('wine tall', 60, 68, 180, { variant: 'wine' }),
+    ],
+    'range': [
+      V('freestanding gas (default)', 60, 60, 85), V('90 gas black', 90, 60, 90, { color: '#1f2023' }), V('induction white', 60, 60, 85, { cooktop: 'induction', color: '#f4f4f2' }),
+      V('built-in oven', 60, 55, 60, { variant: 'built-in-oven' }), V('double oven', 60, 56, 89, { variant: 'double-oven', color: '#1f2023' }),
+    ],
+    'cooktop': [
+      V('gas (default)', 60, 52, 5), V('gas 5 · 90', 90, 52, 5, { burners: 5, color: '#1f2023' }), V('induction', 60, 52, 5, { variant: 'induction' }),
+      V('ceramic 80', 80, 52, 4, { variant: 'ceramic' }), V('domino', 30, 52, 5, { variant: 'domino' }),
+    ],
+    'hood': [
+      V('chimney (default)', 60, 50, 60, {}, { elev: 150 }), V('chimney classic 90', 90, 50, 80, { style: 'classic' }, { elev: 150 }), V('slanted', 60, 38, 75, { variant: 'slanted' }, { elev: 150 }),
+      V('built-in', 60, 30, 18, { variant: 'built-in' }, { elev: 160 }), V('island', 90, 60, 90, { variant: 'island' }, { below: 0.6, elev: 150 }), V('downdraft', 86, 12, 40, { variant: 'downdraft' }),
+    ],
+    'dishwasher': [V('freestanding (default)', 60, 60, 85), V('integrated', 60, 57, 82, { variant: 'integrated' }), V('slim white', 45, 60, 85, { variant: 'slim', color: '#f4f4f2' })],
+    'microwave': [
+      V('microwave (default)', 50, 38, 30), V('toaster-oven', 52, 40, 32, { variant: 'toaster-oven', color: '#26272b' }), V('coffee-machine', 26, 42, 36, { variant: 'coffee-machine' }),
+      V('kettle', 24, 16, 25, { variant: 'kettle' }), V('mixer', 24, 38, 36, { variant: 'mixer', color: '#b5483a' }), V('air-fryer', 30, 36, 33, { variant: 'air-fryer' }), V('water-bar', 26, 40, 42, { variant: 'water-bar' }),
+    ],
+  },
+  laundry: {
+    'washer': [V('washer (default)', 60, 60, 85), V('dryer', 60, 60, 85, { variant: 'dryer' }), V('washer-dryer graphite', 60, 60, 85, { variant: 'washer-dryer', color: '#55585e' }), V('top-load', 68, 70, 110, { variant: 'top-load' }), V('stacked', 60, 62, 172, { variant: 'stacked' })],
+    'water-heater': [V('electric (default)', 60, 60, 150), V('electric horizontal', 120, 48, 50, {}), V('solar-roof', 200, 190, 170, { variant: 'solar-roof' }), V('solar-roof small', 80, 150, 180, { variant: 'solar-roof' }), V('gas', 40, 22, 70, { variant: 'gas' }), V('heat-pump', 62, 62, 190, { variant: 'heat-pump' })],
+    'sink': [
+      V('kitchen-single (default)', 60, 45, 20), V('kitchen-single + drainer', 100, 50, 20, {}), V('kitchen-double', 80, 50, 20, { variant: 'kitchen-double' }), V('vessel', 42, 42, 14, { variant: 'vessel' }),
+      V('vessel modern', 55, 38, 12, { variant: 'vessel', style: 'modern' }), V('pedestal', 56, 46, 85, { variant: 'pedestal' }), V('wall-hung 40×25 (layout)', 40, 25, 85, { variant: 'wall-hung', faucet: true }, { float: true }),
+      V('wall-hung 60', 60, 46, 85, { variant: 'wall-hung' }, { float: true }), V('utility', 60, 50, 30, { variant: 'utility' }),
+    ],
+  },
+  bath: {
+    'toilet': [
+      V('wall-hung (default)', 37, 54, 42, {}, { float: true }), V('floor', 36, 56, 42, { variant: 'floor' }), V('close-coupled', 38, 66, 78, { variant: 'close-coupled' }),
+      V('bidet', 36, 55, 40, { variant: 'bidet' }), V('smart', 40, 68, 46, { variant: 'smart' }), V('wall-hung black', 36, 52, 40, { color: '#2a2b2e', color2: '#232427' }, { float: true }),
+    ],
+    'vanity': [
+      V('default 80', 80, 46, 85, {}, { float: true }), V('100 oak + mirror (layout)', 100, 50, 85, { basins: 1, variant: 'wall-hung', color: OAK, counterColor: STONE, mirror: true }, { float: true }),
+      V('130 oak + mirror (layout)', 130, 50, 85, { basins: 1, variant: 'wall-hung', color: OAK, counterColor: STONE, mirror: true }, { float: true }),
+      V('floor 120 · 2 basins vessel gold', 120, 48, 88, { variant: 'floor', basins: 2, basin: 'vessel', faucet: 'gold', color: '#39424d', counter: 'stone', counterColor: '#f0eeea', mirror: true }),
+      V('console black undermount', 90, 48, 86, { variant: 'console', basin: 'undermount', faucet: 'black', counterColor: '#d8d4cc' }),
+      V('floor 60 doors', 60, 40, 85, { variant: 'floor', doors: 2, faucet: 'nickel' }), V('wall-hung 160 double', 160, 50, 85, { basins: 2, drawers: 4, basin: 'undermount', faucet: 'black', counterColor: '#2e2f33' }, { float: true }),
+    ],
+    'shower': [
+      V('default 90 walk-in', 90, 90, 200), V('walk-in 160×95 black (layout)', 160, 95, 200, { variant: 'walk-in', glass: 'clear', frame: 'black', head: 'rain' }),
+      V('walk-in 110×160 black (layout)', 110, 160, 200, { variant: 'walk-in', glass: 'clear', frame: 'black', head: 'rain' }), V('walk-in open right', 140, 90, 200, { open: 'right', frame: 'gold' }),
+      V('corner', 90, 90, 200, { variant: 'corner' }), V('corner open left smoked', 100, 80, 195, { variant: 'corner', open: 'left', glass: 'smoked', frame: 'black', head: 'column' }),
+      V('sliding 140', 140, 80, 200, { variant: 'sliding', head: 'hand' }), V('hinged 90', 90, 90, 200, { variant: 'hinged', frame: 'none' }), V('hinged 120 frosted', 120, 80, 200, { variant: 'hinged', glass: 'frosted' }),
+      V('quadrant', 90, 90, 195, { variant: 'quadrant' }), V('quadrant open left', 100, 100, 200, { variant: 'quadrant', open: 'left', frame: 'black' }),
+      V('tray-only + column', 100, 80, 200, { variant: 'tray-only' }), V('tray-only flat', 120, 80, 4, { variant: 'tray-only' }), V('wet-room', 150, 100, 210, { variant: 'wet-room', frame: 'black' }),
+    ],
+    'bathtub': [
+      V('built-in (default)', 170, 75, 58), V('built-in + screen', 160, 70, 56, { screen: true }), V('freestanding', 170, 80, 58, { variant: 'freestanding' }), V('freestanding black', 160, 75, 60, { variant: 'freestanding', color: '#2a2b2e', finish: 'gold' }),
+      V('clawfoot', 170, 76, 62, { variant: 'clawfoot', color: '#3f5b46' }), V('corner', 140, 140, 60, { variant: 'corner' }), V('whirlpool', 180, 90, 62, { variant: 'whirlpool' }),
+    ],
+  },
+  misc: {
+    'mirror': [
+      V('rect (default)', 60, 3, 80, {}, { elev: 100 }), V('round metal', 70, 3, 70, { shape: 'round', frame: 'metal' }, { elev: 110 }), V('oval thin', 50, 3, 90, { shape: 'oval', frame: 'thin' }, { elev: 100 }),
+      V('arch wood', 60, 4, 120, { shape: 'arch', frame: 'wood' }, { elev: 60 }), V('pill led', 50, 4, 100, { shape: 'pill', frame: 'led' }, { elev: 90 }), V('organic', 80, 3, 60, { shape: 'organic' }, { elev: 110 }),
+      V('cabinet 90', 90, 14, 70, { cabinet: true }, { elev: 110 }), V('floor leaning', 70, 30, 170, { floor: true, frame: 'wood' }), V('floor arch', 60, 20, 160, { floor: true, shape: 'arch' }),
+    ],
+    'towel-rail': [
+      V('ladder (default)', 60, 12, 80, {}, { elev: 80 }), V('heated white', 50, 10, 120, { variant: 'heated', color: '#f4f4f2' }, { elev: 50 }), V('heated anthracite', 60, 10, 160, { variant: 'heated', color: '#3a3d42' }, { elev: 30 }),
+      V('bar + towel', 60, 8, 45, { variant: 'bar' }, { elev: 80 }), V('bar only', 60, 7, 5, { variant: 'bar', color: '#1f2023' }, { elev: 110 }), V('hooks', 45, 6, 5, { variant: 'hooks' }, { elev: 150 }),
+      V('hooks + robe', 60, 10, 110, { variant: 'hooks', color: '#c9a657' }, { elev: 60 }), V('shelf', 60, 22, 14, { variant: 'shelf' }, { elev: 150 }), V('shelf + towel', 60, 24, 55, { variant: 'shelf' }, { elev: 110 }),
+      V('paper-holder', 15, 11, 11, { variant: 'paper-holder' }, { elev: 70 }), V('laundry-basket', 45, 35, 60, { variant: 'laundry-basket' }),
+    ],
+    'ac-unit': [
+      V('split (default)', 90, 22, 30, {}, { elev: 210 }), V('split 110', 110, 24, 32, {}, { elev: 210 }), V('floor console', 70, 22, 60, { variant: 'floor' }), V('cassette', 84, 84, 25, { variant: 'cassette' }, { below: 0.7, elev: 215 }),
+      V('portable', 45, 38, 75, { variant: 'portable' }), V('grille (wall)', 80, 4, 25, { variant: 'mini-central-grille' }, { elev: 230 }), V('grille (ceiling)', 60, 60, 4, { variant: 'mini-central-grille' }, { below: 0.7, elev: 236 }),
+    ],
+    'ac-outdoor': [V('default', 85, 35, 60), V('large', 95, 40, 80, { color: '#d9d6cc' })],
+    'tv': [
+      V('tv 65" (layout)', 145, 6, 84, { variant: 'tv' }, { elev: 95 }), V('tv on feet', 123, 26, 78, { stand: true }), V('frame', 124, 3, 71, { variant: 'frame' }, { elev: 110 }), V('frame white', 97, 3, 56, { variant: 'frame', color: '#f1eee8' }, { elev: 110 }),
+      V('monitor', 61, 20, 45, { variant: 'monitor' }), V('projector-screen', 220, 8, 150, { variant: 'projector-screen' }, { elev: 90 }), V('soundbar', 100, 10, 6, { variant: 'soundbar' }),
+      V('speaker bookshelf', 20, 26, 34, { variant: 'speaker', color: OAK }), V('speaker floor', 22, 30, 100, { variant: 'speaker' }), V('speaker wide', 35, 16, 18, { variant: 'speaker' }),
+    ],
+  },
+};
+const onlyTypes = q.get('type') ? q.get('type').split(',') : null, onlyGroup = q.get('group');
+const eachType = (fn) => { for (const [gname, types] of Object.entries(GROUPS)) { if (onlyGroup && onlyGroup !== gname) continue; for (const [type, vars] of Object.entries(types)) if (!onlyTypes || onlyTypes.includes(type)) fn(type, vars, gname); } };
+const itemOf = (type, v, i = 0) => ({ id: `${type}-${i}`, type, w: v.w, d: v.d, h: v.h, params: v.p });
+
+// ───────── 3D plumbing ─────────
+let R3 = null;
+function three() {
+  if (R3) return R3;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.85;
+  const scene = new THREE.Scene(); scene.background = new THREE.Color('#e9e6e1');
+  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.42;
+  scene.add(new THREE.HemisphereLight('#ffffff', '#b9b2a6', 0.35));
+  const sun = new THREE.DirectionalLight('#fff4e2', 1.5); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02; sun.shadow.radius = 4;
+  scene.add(sun, sun.target);
+  return (R3 = { renderer, scene, sun });
+}
+function setSun(center, radius) {
+  const { sun } = three();
+  sun.position.set(center.x + radius * 1.2, center.y + radius * 2.2, center.z + radius * 1.6); sun.target.position.copy(center);
+  const c = sun.shadow.camera; c.left = c.bottom = -radius * 1.6; c.right = c.top = radius * 1.6; c.near = 0.1; c.far = radius * 8; c.updateProjectionMatrix();
+}
+const floorMat = new THREE.MeshStandardMaterial({ color: '#bfb5a6', roughness: 0.8 }), wallMat = new THREE.MeshStandardMaterial({ color: '#e3dfd8', roughness: 0.92 });
+function plane(w, h, mat) { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); m.receiveShadow = true; return m; }
+function grab(wPx, hPx) { const c = document.createElement('canvas'); c.width = wPx; c.height = hPx; c.getContext('2d').drawImage(three().renderer.domElement, 0, 0, wPx, hPx); return c; }
+
+function renderCell(type, v, i, wPx, hPx) {
+  const { renderer, scene } = three(), stage = new THREE.Group(), obj = buildModel(itemOf(type, v, i));
+  const elev = (v.elev || 0) / 100, wallish = v.elev != null && !v.below;
+  obj.position.y = elev; stage.add(obj);
+  const fl = plane(30, 30, floorMat); fl.rotation.x = -Math.PI / 2; stage.add(fl);
+  if (wallish || (['toilet', 'vanity', 'shower', 'sink', 'mirror', 'kitchen-base', 'kitchen-tall', 'fridge'].includes(type) && v.h > 30 && !v.p.corner)) { const wl = plane(30, 12, wallMat); wl.position.set(0, 6, -v.d / 200 - 0.001); stage.add(wl); }
+  if (v.below) { const cl = plane(30, 30, wallMat); cl.rotation.x = Math.PI / 2; cl.position.y = elev + v.h / 100 + 0.001; stage.add(cl); }
+  scene.add(stage);
+  const box = new THREE.Box3().setFromObject(obj), c = box.getCenter(new THREE.Vector3()), r = box.getSize(new THREE.Vector3()).length() / 2;
+  const cam = new THREE.PerspectiveCamera(26, wPx / hPx, 0.05, 100), dir = new THREE.Vector3(0.62, v.below ? -v.below : 0.46, 1).normalize();
+  cam.position.copy(c).addScaledVector(dir, (r / Math.sin((13 * Math.PI) / 180)) * 1.02); cam.lookAt(c);
+  setSun(c, Math.max(r, 0.4));
+  renderer.setPixelRatio(1); renderer.setSize(wPx, hPx, false); renderer.render(scene, cam);
+  const img = grab(wPx, hPx);
+  scene.remove(stage);
+  return img;
+}
+function card(parent, canvas, title, sub) { const el = document.createElement('div'); el.className = 'card'; el.append(canvas); const b = document.createElement('b'); b.textContent = title; const s = document.createElement('span'); s.textContent = sub; el.append(b, s); parent.append(el); }
+function section(title) { const h = document.createElement('h2'); h.textContent = title; const g = document.createElement('div'); g.className = 'grid'; out.append(h, g); return g; }
+
+function sheet3d() {
+  eachType((type, vars) => {
+    const g = section(`${type} — 3D`);
+    vars.forEach((v, i) => card(g, renderCell(type, v, i, CELL, Math.round(CELL * 0.86)), v.label, `${v.w}×${v.d}×${v.h}`));
+  });
+}
+
+// ───────── 2D ─────────
+function symbolCanvas(items, scale, pad = 14, bounds = null) {
+  // items: [{ item, x, y, rot }] in cm; scale = px per cm
+  const b = bounds || items.reduce((a, s) => { const r = Math.hypot(s.item.w, s.item.d) / 2; return { x0: Math.min(a.x0, s.x - r), y0: Math.min(a.y0, s.y - r), x1: Math.max(a.x1, s.x + r), y1: Math.max(a.y1, s.y + r) }; }, { x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9 });
+  const c = document.createElement('canvas'), dpr = 2; c.width = ((b.x1 - b.x0) * scale + 2 * pad) * dpr; c.height = ((b.y1 - b.y0) * scale + 2 * pad) * dpr;
+  c.style.width = c.width / dpr + 'px'; c.style.height = c.height / dpr + 'px';
+  const ctx = c.getContext('2d'); ctx.scale(dpr, dpr); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.translate(pad, pad); ctx.scale(scale, scale); ctx.translate(-b.x0, -b.y0);
+  return { c, ctx, px: 1 / scale };
+}
+function drawItems(ctx, items, px) { for (const s of items) { ctx.save(); ctx.translate(s.x, s.y); ctx.rotate((s.rot || 0) * Math.PI / 180); drawSymbol(ctx, s.item, px); ctx.restore(); } }
+function sheet2d() {
+  for (const [scale, title] of [[1.5, '2D symbols — 1.5 px/cm'], [0.45, '2D symbols — 0.45 px/cm (plan overview zoom)']]) {
+    const g = section(title);
+    eachType((type, vars) => vars.forEach((v, i) => {
+      const item = itemOf(type, v, i), { c, ctx, px } = symbolCanvas([{ item, x: 0, y: 0 }], scale, scale > 1 ? 12 : 6, { x0: -v.w / 2, x1: v.w / 2, y0: -v.d / 2, y1: v.d / 2 + (type === 'fridge' || type === 'shower' ? Math.min(v.w, 90) * 0.6 : 0) });
+      drawItems(ctx, [{ item, x: 0, y: 0 }], px);
+      if (scale > 1) card(g, c, `${type}`, v.label); else { c.title = `${type} · ${v.label}`; g.append(c); }
+    }));
+  }
+}
+
+// ───────── composed scenes from the architect's layout ─────────
+const SCENES = [
+  { name: 'Kitchen (architect layout)', rect: [340, 0, 930, 360], cam: [9.3, 2.9, 5.2], look: [5.9, 0.85, 1.2], extra: [
+    { type: 'hood', w: 60, d: 50, h: 70, x: 530, y: 45, rot: 0, elev: 160, params: {} },
+    { type: 'kitchen-wall', w: 80, d: 35, h: 75, x: 460, y: 37.5, rot: 0, elev: 150, params: { doors: 2 } }, { type: 'kitchen-wall', w: 95, d: 35, h: 75, x: 607.5, y: 37.5, rot: 0, elev: 150, params: { doors: 2 } },
+    { type: 'ac-unit', w: 90, d: 22, h: 30, x: 870, y: 131, rot: 90, elev: 245, params: {} }, { type: 'microwave', w: 26, d: 40, h: 40, x: 390, y: 300, rot: 270, elev: 90, params: { variant: 'water-bar' } },
+  ] },
+  { name: 'Master bathroom (architect layout)', rect: [0, 1180, 360, 1380], cam: [4.4, 2.5, 10.4], look: [1.7, 0.8, 13.2], extra: [{ type: 'towel-rail', w: 50, d: 10, h: 110, x: 215, y: 1355, rot: 180, elev: 60, params: { variant: 'heated', color: '#2a2b2e' } }] },
+  { name: 'Family bathroom + laundry (architect layout)', rect: [665, 1040, 1000, 1380], cam: [10.4, 2.7, 10.3], look: [7.9, 0.8, 12.9], extra: [] },
+];
+function sceneItems(sc) {
+  const [x0, y0, x1, y1] = sc.rect;
+  return initialLayout().filter((it) => getModel(it.type) && it.x > x0 && it.x < x1 && it.y > y0 && it.y < y1).concat(sc.extra.map((e, i) => ({ id: 'x' + i, ...e })));
+}
+function scenes() {
+  for (const sc of SCENES) {
+    const g = section(sc.name), { renderer, scene } = three(), stage = new THREE.Group(), items = sceneItems(sc), [x0, y0, x1, y1] = sc.rect;
+    const cx = (x0 + x1) / 200, cz = (y0 + y1) / 200, camP = new THREE.Vector3(...sc.cam);
+    const fl = plane(40, 40, floorMat); fl.rotation.x = -Math.PI / 2; fl.position.set(cx, 0, cz); stage.add(fl);
+    for (const wl of PLAN.walls) {
+      if (wl.x + wl.w < x0 - 5 || wl.x > x1 + 5 || wl.y + wl.h < y0 - 5 || wl.y > y1 + 5) continue;
+      const wx = (wl.x + wl.w / 2) / 100, wz = (wl.y + wl.h / 2) / 100;
+      if ((wx - cx) * (camP.x - cx) + (wz - cz) * (camP.z - cz) > 0.25 * Math.hypot(camP.x - cx, camP.z - cz)) continue;   // cut away walls on the camera side
+      const m = new THREE.Mesh(new THREE.BoxGeometry(wl.w / 100, 2.7, wl.h / 100), wallMat); m.position.set(wx, 1.35, wz); m.castShadow = m.receiveShadow = true; stage.add(m);
+    }
+    for (const it of items) { const o = buildModel(it); o.position.set(it.x / 100, (it.elev || 0) / 100, it.y / 100); o.rotation.y = -(it.rot || 0) * Math.PI / 180; stage.add(o); }
+    scene.add(stage);
+    const W = 1500, H = 900, cam = new THREE.PerspectiveCamera(38, W / H, 0.05, 100); cam.position.copy(camP); cam.lookAt(...sc.look);
+    setSun(new THREE.Vector3(cx, 0.5, cz), 4);
+    renderer.setPixelRatio(1); renderer.setSize(W, H, false); renderer.render(scene, cam);
+    card(g, grab(W, H), sc.name, `${items.length} items`); scene.remove(stage);
+    for (const scale of [1.6, 0.5]) {
+      const { c, ctx, px } = symbolCanvas([], scale, 10, { x0, y0, x1, y1 });
+      ctx.fillStyle = '#4a4d53'; for (const wl of PLAN.walls) ctx.fillRect(wl.x, wl.y, wl.w, wl.h);
+      drawItems(ctx, items.map((it) => ({ item: it, x: it.x, y: it.y, rot: it.rot })), px);
+      card(g, c, `${sc.name} — plan`, `${scale} px/cm`);
+    }
+  }
+}
+
+// ───────── assertions ─────────
+function bodyBox(root) {
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3(); let meshes = 0, tris = 0;
+  (function walk(o, skip) {
+    const ex = skip || o.userData.extra === true;
+    if (o.isMesh) { meshes++; tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3; if (!ex) box.union(new THREE.Box3().setFromObject(o, true)); }
+    for (const ch of o.children) walk(ch, ex);
+  })(root, false);
+  return { box, meshes, tris };
+}
+const JUNK = { variant: 42, color: 'zzz', color2: '#12', color3: {}, material: 'unobtanium', style: 9, doors: 'abc', drawers: -5, sink: {}, cooktop: [], counter: 5, counterColor: '#12', plinth: 'q', handles: 0, oven: 'x', dishwasher: null, corner: 0, glassDoors: 'q', open: null, microwave: 3, fridge: {}, overhang: 1e9, waterfall: 'maybe', dispenser: 'q', burners: -3, faucet: 12, cistern: 4, basins: NaN, basin: false, mirror: 'yes', glass: 'x', frame: {}, tray: 'x', head: 7, screen: [], shape: 3, cabinet: {}, floor: 'x', stand: [] };
+function runTests() {
+  const fails = [], lines = []; let builds = 0, maxMesh = ['', 0], maxTri = ['', 0];
+  const ctx = document.createElement('canvas').getContext('2d');
+  const check = (type, label, w, d, h, p, opts = {}) => {
+    const def = getModel(type); let root;
+    try { root = def.build({ w: w / 100, d: d / 100, h: h / 100, p, item: { id: 't', type } }); builds++; } catch (e) { fails.push(`${type} [${label}] build threw: ${e.message}`); return; }
+    try { ctx.save(); def.draw2d(ctx, { w, d, h, p, px: 0.5, item: { id: 't', type } }); ctx.restore(); ctx.save(); def.draw2d(ctx, { w, d, h, p, px: 8, item: null }); ctx.restore(); } catch (e) { fails.push(`${type} [${label}] draw2d threw: ${e.message}`); }
+    if (!root || !root.isObject3D) { fails.push(`${type} [${label}] build returned no Object3D`); return; }
+    const { box, meshes, tris } = bodyBox(root);
+    if (meshes > maxMesh[1]) maxMesh = [`${type} [${label}]`, meshes]; if (tris > maxTri[1]) maxTri = [`${type} [${label}]`, Math.round(tris)];
+    if (opts.nobox) return;
+    const e = 0.0101, W = w / 100, D = d / 100, H = h / 100, bad = [];
+    if (Math.abs(box.min.x + W / 2) > e || Math.abs(box.max.x - W / 2) > e) bad.push(`x ${box.min.x.toFixed(3)}..${box.max.x.toFixed(3)} want ±${(W / 2).toFixed(3)}`);
+    if (Math.abs(box.min.z + D / 2) > e || Math.abs(box.max.z - D / 2) > e) bad.push(`z ${box.min.z.toFixed(3)}..${box.max.z.toFixed(3)} want ±${(D / 2).toFixed(3)}`);
+    if ((opts.float ? box.min.y < -e : Math.abs(box.min.y) > e) || Math.abs(box.max.y - H) > e) bad.push(`y ${box.min.y.toFixed(3)}..${box.max.y.toFixed(3)} want 0..${H.toFixed(3)}`);
+    if (bad.length) fails.push(`${type} [${label}] bbox ${bad.join(' | ')}`);
+  };
+  const FLOAT = { toilet: ['wall-hung'], vanity: ['wall-hung'], sink: ['wall-hung'] };
+  for (const [type, vars] of Object.entries(Object.assign({}, ...Object.values(GROUPS)))) {
+    const T = MODEL_TYPES[type], s = T.size, first = (/'([^']+)'/.exec(T.params.variant || '') || [])[1];
+    check(type, 'default {}', s.w, s.d, s.h, {}, { float: (FLOAT[type] || []).includes(first) });
+    vars.forEach((v) => check(type, v.label, v.w, v.d, v.h, v.p, v));
+    for (const key of ['variant', 'shape', 'frame', 'head', 'open', 'glass', 'basin', 'counter', 'handles', 'cooktop', 'sink', 'faucet']) {
+      const en = T.params[key]; if (!en) continue;
+      for (const m of String(en).matchAll(/'([^']+)'/g)) check(type, `${key}=${m[1]}`, s.w, s.d, s.h, { [key]: m[1] }, { float: (FLOAT[type] || []).includes(key === 'variant' ? m[1] : first), nobox: type === 'shower' && (m[1] === 'none' && key === 'head') });
+    }
+    for (const key of Object.keys(T.params)) if (/boolean/.test(T.params[key])) check(type, `${key}=true`, s.w, s.d, s.h, { [key]: true }, { float: (FLOAT[type] || []).includes(first) });
+    check(type, 'junk params', s.w, s.d, s.h, JUNK, { nobox: true });
+    for (const [w, d, h] of [[1, 1, 1], [1000, 3, 2], [3, 900, 400], [NaN, undefined, -5], [25, 25, 25], [300, 300, 300]]) check(type, `junk size ${w}×${d}×${h}`, w, d, h, {}, { nobox: true });
+    for (const junkP of [null, 'str', 7, [1, 2]]) check(type, `p=${JSON.stringify(junkP)}`, s.w, s.d, s.h, junkP, { nobox: true });
+    try { const it = { id: 'j', type, w: s.w, d: s.d, h: s.h, params: {} }; buildModel(it); drawSymbol(ctx, it, 1); } catch (e) { fails.push(`${type} registry path threw ${e.message}`); }
+  }
+  lines.push(`${builds} builds over ${Object.keys(Object.assign({}, ...Object.values(GROUPS))).length} types`, `max meshes: ${maxMesh[1]} (${maxMesh[0]})`, `max triangles: ${maxTri[1]} (${maxTri[0]})`, fails.length ? `FAILURES (${fails.length}):\n` + fails.join('\n') : 'ALL OK — bbox within 1 cm, no throws');
+  const pre = document.getElementById('test'); pre.hidden = false; pre.textContent = lines.join('\n');
+  window.__RESULT__ = { ok: !fails.length, fails, lines };
+}
+
+const errors = []; const origErr = console.error; console.error = (...a) => { errors.push(a.map(String).join(' ')); origErr(...a); };
+try {
+  if (view === 'test') runTests();
+  if (view === '3d' || view === 'all') sheet3d();
+  if (view === 'scene' || view === 'all') scenes();
+  if (view === '2d' || view === 'all') sheet2d();
+} catch (e) { errors.push('page: ' + (e.stack || e.message)); }
+window.__ERRORS__ = errors; window.__DONE__ = true;
+</script>
+</body>
+</html>

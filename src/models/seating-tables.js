@@ -51,17 +51,17 @@ const noShadow = (m) => { m.userData.noShadow = true; return m; };
  * Soft cushion: plan-rounded slab (w × t × l, thickness along Y) with rounded edges (r), rounded plan corners (rp)
  * and a crowned top (+Y). Total height including the crown is exactly t. Centred on the origin.
  */
-function cushionGeo(w, t, l, r, rp, crown) {
+function cushionGeo(w, t, l, r, rp, crown, lite = false) {
   w = Math.max(w, 0.004); t = Math.max(t, 0.004); l = Math.max(l, 0.004);
   crown = clamp(crown, 0, t * 0.4);
   const T = t - crown;
   r = clamp(r, 0.001, Math.min(T, w, l) / 2 - 0.0002);
   rp = clamp(rp, r, Math.min(w, l) / 2 - 0.0001);
-  return memo(`cu|${mm(w)}|${mm(t)}|${mm(l)}|${mm(r)}|${mm(rp)}|${mm(crown)}`, () => {
-    const dome = crown > 0.0005, CS = clamp(Math.ceil(rp / 0.03), 2, 6), ES = dome ? 2 : 0, AS = 2, M = 4 * (CS + 1 + ES), rings = [];
+  return memo(`cu|${mm(w)}|${mm(t)}|${mm(l)}|${mm(r)}|${mm(rp)}|${mm(crown)}|${lite ? 1 : 0}`, () => {
+    const dome = crown > 0.0005, CS = clamp(Math.ceil(rp / 0.03), 2, 6), ES = dome ? (lite ? 1 : 2) : 0, AS = 2, M = 4 * (CS + 1 + ES), rings = [];
     for (let j = 0; j <= 1; j++) rings.push([r * (1 - j) * 0.6, -t / 2 + r * j * 0.6 + (j ? r * 0.4 : 0), 1]);      // chamfered underside
     for (let j = AS; j >= 0; j--) { if (j === AS && T - 2 * r < 2e-4) continue; const f = (j / AS) * PI / 2; rings.push([r * (1 - Math.sin(f)), -t / 2 + T - r * (1 - Math.cos(f)), 1]); }
-    if (dome) for (const s of [0.74, 0.4]) rings.push([r, -t / 2 + T, s]);
+    if (dome) for (const s of lite ? [0.56] : [0.74, 0.4]) rings.push([r, -t / 2 + T, s]);
     const pos = [], uv = [], idx = [], hw = w / 2, hl = l / 2, X = Math.max(hw - r, 1e-4), Z = Math.max(hl - r, 1e-4);
     for (const [inset, y, s] of rings) for (let c = 0; c < 4; c++) {
       const arc = [];
@@ -83,7 +83,7 @@ function cushionGeo(w, t, l, r, rp, crown) {
     return g;
   });
 }
-const cush = (w, t, l, material, x = 0, y = 0, z = 0, r = 0.03, rp = 0.05, crown = 0.01) => at(cushionGeo(w, t, l, r, rp, crown), material, x, y, z);
+const cush = (w, t, l, material, x = 0, y = 0, z = 0, r = 0.03, rp = 0.05, crown = 0.01, lite = false) => at(cushionGeo(w, t, l, r, rp, crown, lite), material, x, y, z);
 
 /** Round cushion / drum (lathe): radius R, height t (incl. crown), edge radius r, optional side bulge. Centred. */
 function puckGeo(R, t, r, crown, bulge = 0) {
@@ -241,7 +241,7 @@ function sledLegs(g, x, y1, zb, zf, r, material) {
   for (const s of [-1, 1]) g.add(tube(roundPath([[s * x, y1, zf - r - 0.02], [s * x, r, zf - r], [s * x, r, zb + r], [s * x, y1, zb + r + 0.03]], 0.045, 3), r, material));
 }
 /** Leaning rounded cushion standing on its edge: returns the mesh; crown faces +Z, `lean` tips the top towards -Z. */
-function leaned(w, t, l, material, x, y, z, lean, r, rp, crown) { const m = cush(w, t, l, material, x, y, z, r, rp, crown); m.rotation.x = PI / 2 - lean; return m; }
+function leaned(w, t, l, material, x, y, z, lean, r, rp, crown, lite = false) { const m = cush(w, t, l, material, x, y, z, r, rp, crown, lite); m.rotation.x = PI / 2 - lean; return m; }
 /** Vertical and depth half-extents of a leaned cushion (rounded-box support function). */
 const leanExt = (t, l, lean, r, crown) => ({ y: (l / 2 - r) * Math.cos(lean) + (t / 2 - crown - r) * Math.sin(lean) + r, z: (l / 2 - r) * Math.sin(lean) + (t / 2 - r) * Math.cos(lean) + r });
 
@@ -387,10 +387,10 @@ function sofaLayout(w, d, h, p, o = {}) {
 function runCushions(g, L, r) {
   const { xL, xR, zA, zF, n } = r, M = L.M, gap = 0.006, mw = (xR - xL) / n, bc = L.bc, ch = r.chaise;
   const zS = zA + Math.min(L.bcDepth * 0.35, 0.07), er = Math.min(L.frame ? 0.03 : 0.045, L.cushT * 0.42), sy = L.seatTop - L.cushT / 2, crown = L.loose ? 0.014 : 0.008;
-  const mods = L.loose ? n : 1, cw = (xR - xL) / mods;
+  const mods = L.loose ? n : 1, cw = (xR - xL) / mods, lite = L.corner || n > 4;      // lighter cushions on very large pieces (triangle budget)
   for (let k = 0; k < mods; k++) {
     const isCh = ch && L.loose && (ch.side < 0 ? k === 0 : k === mods - 1), z1 = zF + (isCh ? ch.extra : 0);
-    g.add(cush(cw - gap, L.cushT, z1 - zS, M.seat, xL + cw * (k + 0.5), sy, (zS + z1) / 2, er, er * 1.3, crown));
+    g.add(cush(cw - gap, L.cushT, z1 - zS, M.seat, xL + cw * (k + 0.5), sy, (zS + z1) / 2, er, er * 1.3, crown, lite));
   }
   if (ch && !L.loose) g.add(cush(mw - gap, L.cushT, ch.extra - gap, M.seat, ch.side < 0 ? xL + mw / 2 : xR - mw / 2, sy, zF + ch.extra / 2, er, er * 1.3, crown));
   const [b0, b1] = r.bcZone || [xL, xR], nb = Math.max(1, Math.round((b1 - b0) / mw)), bw = (b1 - b0) / nb;
@@ -398,7 +398,7 @@ function runCushions(g, L, r) {
   const tiers = bc.tiers === 2 ? [[-0.5, 0.62], [0.12, 0.38]] : bc.tiers === 3 ? [[-0.5, 0.34], [-0.16, 0.33], [0.17, 0.33]] : [[-0.5, 1]];
   for (let k = 0; k < nb; k++) for (const [s0, f] of tiers) {
     const s = (s0 + f / 2) * bc.H, c = bc.tiers > 1 ? bc.crown * 1.5 : bc.crown;
-    g.add(leaned(bw - gap, bc.t, bc.H * f - (bc.tiers > 1 ? 0.004 : 0), M.seat, b0 + bw * (k + 0.5), cy + s * cl, cz - s * sl, bc.lean, Math.min(bc.r, bc.H * f * 0.3), bc.r * 1.6, c));
+    g.add(leaned(bw - gap, bc.t, bc.H * f - (bc.tiers > 1 ? 0.004 : 0), M.seat, b0 + bw * (k + 0.5), cy + s * cl, cz - s * sl, bc.lean, Math.min(bc.r, bc.H * f * 0.3), bc.r * 1.6, c, lite));
   }
   if (r.pillows) {
     const base = matHex(M.seat), cols = [L.accent || K.shade(base, -0.28), K.shade(base, 0.35)], ps = clamp(L.seatTop * 0.95, 0.3, 0.44), pl = 0.42;
@@ -448,7 +448,7 @@ function sofaRun(L, r) {
 /** Open-frame straight run (teak / aluminium / metal / plastic, or the timber frame of a lounge chair). Same local frame as sofaRun. */
 function frameRun(L, r) {
   const g = new THREE.Group(), { len, dep, endL, endR } = r, M = L.M, m = L.m;
-  const zB = -dep / 2, zF = dep / 2, deckTop = L.seatTop - L.cushT, railH = Math.min(0.07, deckTop * 0.5), armT = Math.min(0.03, m), woody = WOODY.has(L.frame);
+  const zB = -dep / 2, zF = dep / 2, deckTop = L.seatTop - L.cushT, railH = Math.min(0.07, deckTop * 0.5), armT = Math.min(0.03, m);
   const px = (e, s) => s * (len / 2 - (e && !e.wall ? L.aw / 2 : m / 2)), xl = px(endL, -1), xr = px(endR, 1);
   const xL = -len / 2 + (endL ? endL.w : 0), xR = len / 2 - (endR ? endR.w : 0), mw = (xR - xL) / r.n, ch = r.chaise;
   const run = L.runner, yAt = (z) => (run ? run.rise * (z / (dep / 2)) ** 2 + run.r : 0);
@@ -627,7 +627,7 @@ registerModel('pouf', {
 // ═════════════════════════ BENCH ═════════════════════════
 function benchLayout(w, d, h, p) {
   const back = flag(p.back), uph = flag(p.upholstered), storage = flag(p.storage), hard = hardOf(p.material), soft = softOf(p.material);
-  const frameKind = hard || (hardOf(p.material2) && !uph ? null : null) || 'wood';
+  const frameKind = hard || 'wood';
   const frame = hard ? hardMat(hard, C(p.color)) : soft || uph ? hardMat(hardOf(p.material2) || 'wood', C(p.color2)) : hardMat('wood', C(p.color));
   const pad = softMat(soft || softOf(p.material2), hard ? C(p.color2, '#d9d3c7') : C(p.color, '#b9b0a2'));
   const metalLegs = !hard && !soft && !uph && (p.material2 === 'metal' || p.material2 === 'aluminium');
@@ -784,7 +784,7 @@ function chairShell(g, w, d, h, L) {                           // moulded shell 
   else {
     const metal = L.legs === 'metal', rb = metal ? 0.008 : 0.011, rt = metal ? 0.009 : 0.017;
     splayLegs(g, { x: xt, z: zt }, { x: lerp(xt, w / 2 - rb - 0.004, 0.7), z: [zB + Math.max(rb + 0.03, d * 0.1), zF - rb - 0.004] }, y1, rt, rb, L.frame);
-    if (!metal) { const m = K.metal('#26272b'), yb = y1 * 0.72, k = 1 - yb / y1; for (const s of [-1, 1]) g.add(strut([-lerp(xt, w / 2, k * 0.9), yb, lerp(zt[0], zB + 0.04, k * 0.9) * 1], [lerp(xt, w / 2, k * 0.9) * 1, yb, lerp(zt[1], zF, k * 0.9)], 0.003, 0.003, m, 6).translateX(0)); }
+    if (!metal) { const m = K.metal('#26272b'), yb = y1 * 0.72, k = 1 - yb / y1; const bx = lerp(xt, w / 2, k * 0.6), bz = [lerp(zt[0], zB + d * 0.1, k * 0.9), lerp(zt[1], zF, k * 0.9)]; for (const s of [-1, 1]) g.add(strut([-s * bx, yb, bz[0]], [s * bx, yb, bz[1]], 0.003, 0.003, m, 6)); }
     g.add(K.box(xt * 2 + 0.03, 0.012, zt[1] - zt[0] + 0.03, metal ? L.frame : K.metal('#26272b'), 0, y1 - 0.006, (zt[0] + zt[1]) / 2));
   }
 }
@@ -926,7 +926,7 @@ function stoolLayout(w, d, h, p) {
   const st = woodSeat ? clamp(seatH * 0.045, 0.02, 0.035) : clamp(seatH * 0.1, 0.03, 0.075);
   const round = legs === 'pedestal' || Math.abs(w - d) < 0.035;
   const sw = legs === 'pedestal' ? w : w - clamp(w * 0.12, 0.01, 0.06), sd = (legs === 'pedestal' ? d : d - clamp(d * 0.12, 0.01, 0.06)) - (back ? clamp(d * 0.06, 0, 0.03) : 0);
-  return { legs, back, seatH, woodSeat, seat, frame, st, round, sw, sd, zc: (d - sd) / 2 - (legs === 'pedestal' ? 0 : (d - sd) / 2 - clamp(d * 0.06, 0, 0.03) * (back ? 1 : 0) / 1) * 0 };
+  return { legs, back, seatH, woodSeat, seat, frame, st, round, sw, sd };
 }
 registerModel('bar-stool', {
   build({ w, d, h, p }) {
@@ -951,7 +951,7 @@ registerModel('bar-stool', {
     if (L.back) {
       const bh = clamp((h - seatH) * 0.55, 0.04, 0.2), sag = clamp(sw * 0.1, 0.01, 0.04), hw = sw / 2 - 0.02, zr = zB + sag + 0.008, soft = !L.woodSeat;
       const bp = backPad(hw, sag, soft ? 0.035 : 0.014, bh, L.seat, soft ? 0.015 : 0.006, 0.03); bp.position.set(0, h - bh, zr); g.add(bp);
-      const postM = L.legs === 'wood' ? frame : frame, zs = zc - sd / 2 + 0.03;
+      const postM = frame, zs = zc - sd / 2 + 0.03;
       for (const s of [-1, 1]) g.add(strut([s * (hw - 0.03), y1 + 0.004, zs], [s * (hw - 0.025), h - bh * 0.5, zr - sag * 0.2 + 0.004], L.legs === 'wood' ? 0.011 : 0.008, L.legs === 'wood' ? 0.011 : 0.008, postM, 8));
     }
     return fit(g, w, d, h);
@@ -1170,9 +1170,8 @@ function oneTable(g, L, w, d, h, cx, cz, primary) {
       if (L.round) {
         const k = 0.36, kb = metal ? 0.36 : 0.43, three = Math.max(w, d) < 0.62, n = three ? 3 : 4, rtp = metal ? lt * 0.45 : lt * 0.55;
         for (let i = 0; i < n; i++) { const a = (i / n) * PI * 2 + (three ? PI / 2 : PI / 4), c = Math.cos(a), s = Math.sin(a), tilt = (kb - k) * Math.max(w, d) / Math.max(yT, 0.01); add(strut([c * w * kb, rtp * 0.7 * Math.min(tilt, 1), s * d * kb], [c * w * k, yT, s * d * k], rtp * (metal ? 1 : 0.7), rtp, baseM, 12)); }
-        if (!glass) add(K.cylOn(Math.min(w, d) * (k + 0.03), Math.min(w, d) * (k + 0.03), Math.min(0.03, h * 0.06), baseM, 0, yT - Math.min(0.03, h * 0.06), 0, 28).translateX(0));
+        if (!glass) { const th = Math.min(0.03, h * 0.06), disc = K.cylOn(w * (k + 0.03), w * (k + 0.03), th, baseM, 0, yT - th, 0, 28); disc.scale.z = d / w; add(disc); }
         else for (let i = 0; i < n; i++) { const a = (i / n) * PI * 2 + (three ? PI / 2 : PI / 4), b = ((i + 1) / n) * PI * 2 + (three ? PI / 2 : PI / 4); add(strut([Math.cos(a) * w * k, yT - rtp, Math.sin(a) * d * k], [Math.cos(b) * w * k, yT - rtp, Math.sin(b) * d * k], rtp * 0.7, rtp * 0.7, baseM, 8)); }
-        if (g.children.length && !glass) g.children[g.children.length - 1].scale.z = d / w > 1 ? 1 : d / w;
         shelf = [w * 0.62, d * 0.62];
       } else {
         const x0 = w / 2 - lt / 2 - inset, z0 = d / 2 - lt / 2 - inset, ah = glass || L.low ? clamp(h * 0.08, 0.02, 0.04) : clamp(h * 0.11, 0.03, metal ? 0.05 : 0.09), at2 = metal ? Math.min(lt * 0.6, 0.02) : 0.02;

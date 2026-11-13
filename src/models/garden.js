@@ -237,7 +237,7 @@ function tubeG(pts, radii, seg = 7, o = {}) {
     for (let j = 0; j < seg; j++) {
       const ang = (j / seg) * TAU;
       let rr = r;
-      if (o.flute) rr *= 1 + o.flute * Math.sin(ang * (o.lobes || 5) + i * (o.spin || 0));
+      if (o.flute) rr *= 1 + o.flute * Math.sin(ang * (o.lobes || 5) + i * (o.spin || 0) + (o.phase || 0));
       if (o.rough && o.rnd) rr *= 1 + (o.rnd() - 0.5) * o.rough;
       const cx = Math.cos(ang) * rr, sx = Math.sin(ang) * rr;
       pos.push(pts[i][0] + N.x * cx + B.x * sx, pts[i][1] + N.y * cx + B.y * sx, pts[i][2] + N.z * cx + B.z * sx);

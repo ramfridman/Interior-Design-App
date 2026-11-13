@@ -6,6 +6,7 @@ import { polygonBounds, pointInPolygon, areaM2, itemAABB, clamp } from '../core/
 import { css } from './color.js';
 import { exteriorChains, interiorDims, dimText, spanThrough } from './dimensions.js';
 import { isBelowWalls, isFloating } from './items.js';
+import { boundaryEdge } from './site.js';
 
 const chainCache = new WeakMap();
 function plansDims(plan) {
@@ -176,9 +177,16 @@ export function drawExteriorDims(G, env, boxes) {
     const A = (v) => (horiz ? G.RX(v) : G.RY(v));
     let off = DIM_ROW0;
     let lastPos = base;
+    // a chain must not run along the property line: step over it
+    let lotLine = null;
+    if (ui.showSite) {
+      const [pa, pb] = boundaryEdge(plan.site.boundary, side);
+      lotLine = horiz ? G.Y((pa[1] + pb[1]) / 2) : G.X((pa[0] + pb[0]) / 2);
+    }
     rows.forEach((row, ri) => {
       if (ri > 0) off += ri === 1 && subOutward ? DIM_GAP_SUB : DIM_GAP;
-      const pos = base + sign * Math.round(off * d);
+      let pos = base + sign * Math.round(off * d);
+      if (lotLine != null && Math.abs(pos - sign * 6 * d - lotLine) < 13 * d) { off += 22; pos = base + sign * Math.round(off * d); }
       lastPos = pos;
       const a0 = A(row[0].from), a1 = A(row[row.length - 1].to);
       // line

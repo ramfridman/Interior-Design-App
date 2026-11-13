@@ -202,9 +202,10 @@ export function initViewport(app) {
   const hint = h('div', { class: 'ovl walk__hint' },
     h('span', null, kbd('W', 'A', 'S', 'D'), ' move'), h('span', null, kbd('Mouse'), ' look'), h('span', null, kbd('Shift'), ' run'), h('span', null, kbd('Esc'), ' exit'));
   const walkHud = h('div', { class: 'ov__layer', hidden: true },
-    h('div', { class: 'ov__tl' }, h('div', { class: 'ovl walk__where' }, icon('pin', { size: 16 }), walkRoom)),
-    h('div', { class: 'ov__tc' }, hint),
-    h('div', { class: 'ov__tr' }, btn('Exit walk', { icon: 'close', small: true, onClick: () => actions.setMode('3d') })),
+    h('div', { class: 'walk__top' },
+      h('div', { class: 'ovl walk__where' }, icon('pin', { size: 16 }), walkRoom),
+      hint,
+      btn('Exit walk', { icon: 'close', small: true, onClick: () => actions.setMode('3d') })),
     h('div', { class: 'ov__br' }, h('div', { class: 'ovl minimap' }, mini)));
   ov3d.append(orbitHud, walkHud);
 

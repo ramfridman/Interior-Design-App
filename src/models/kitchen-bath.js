@@ -379,7 +379,8 @@ function burnerLayout(kind, hw, hd, burners) {
   const n = clamp(Math.round(num(burners, 0)) || (narrow ? 2 : hw >= 0.72 ? 5 : 4), 1, 6);
   const zs = gas ? 0.82 : 0.92, zo = gas ? -hd * 0.055 : -hd * 0.02;
   const base = Math.min(narrow ? hw : hw / (n >= 5 ? 3 : 2), hd / 2) * 0.33;
-  if (narrow) return Array.from({ length: Math.min(n, 3) }, (_, i, a) => ({ x: 0, z: zo + (i - (a.length - 1) / 2) * hd * 0.42 * zs, r: Math.min(base, hd * 0.16) * (i ? 0.85 : 1) }));
+  const nn = Math.min(n, 3);
+  if (narrow) return Array.from({ length: nn }, (_, i) => ({ x: 0, z: zo + (i - (nn - 1) / 2) * hd * 0.42 * zs, r: Math.min(base, hd * 0.16) * (i ? 0.85 : 1) }));
   return BURNERS[n].map(([fx, fz, s]) => ({ x: fx * hw, z: zo + fz * hd * zs, r: base * s }));
 }
 /**
@@ -799,7 +800,7 @@ function buildFridge({ w, d, h, p }) {
     g.add(K.box(w - 0.044, top - foot, 0.002, dark, 0, (top + foot) / 2, zi + 0.001));
     const rows = clamp(Math.round((H - 0.12) / 0.105), 1, 18), pitch = (H - 0.12) / rows, per = clamp(Math.floor((w - 0.1) / 0.09), 1, 8);
     g.add(at(slats(rows, w - 0.05, 0.014, 0.02, pitch, K.wood('#b98a5e')), 0, y0 + H / 2 - 0.035, zi + nook - 0.012));
-    g.add(merged(`wb|${rows}|${per}|${mm(pitch)}|${mm(w)}`, () => Array.from({ length: rows * per }, (_, i) => gCyl(0.036, 0.03, ((i % per) - (per - 1) / 2) * ((w - 0.1) / per), (Math.floor(i / per) - (rows - 1) / 2) * pitch, 0, 'z', 12)), K.mat('#20301f', { roughness: 0.2 }), 0, y0 + H / 2 + 0.012, zi + nook - 0.03));
+    g.add(merged(`wb|${rows}|${per}|${mm(pitch)}|${mm(w)}`, () => Array.from({ length: rows * per }, (_, i) => gCyl(0.036, 0.03, ((i % per) - (per - 1) / 2) * ((w - 0.1) / per), (Math.floor(i / per) - (rows - 1) / 2) * pitch, 0, 'z', 8)), K.mat('#20301f', { roughness: 0.2 }), 0, y0 + H / 2 + 0.012, zi + nook - 0.03));
     const s = rrShape(w - G, H - G, 0.006, 0, y0 + H / 2);
     s.holes.push(rrShape(w - G - 2 * fr, H - G - 2 * fr, 0.004, 0, y0 + H / 2, THREE.Path));
     g.add(upright(s, DTw, bm, zD - DTw));
@@ -1151,9 +1152,10 @@ function buildHeater({ w, d, h, p }) {
   }
   if (v === 'gas') {
     const pipes = Math.min(0.1, h * 0.14), fl = Math.min(0.08, h * 0.12), bh = h - pipes - fl;
-    g.add(K.rbox(w, bh, d, white, 0, pipes + bh / 2, 0, 0.012, 2));
-    g.add(K.box(w * 0.5, bh * 0.12, 0.003, blackGlass(), 0, pipes + bh * 0.3, d / 2 + 0.0005), cylZ(Math.min(0.03, w * 0.08), 0.014, greyPlastic(), w * 0.28, pipes + bh * 0.14, d / 2 + 0.004, 16));
-    g.add(noShadow(K.box(w * 0.16, bh * 0.06, 0.001, lcd('#ffb35c'), 0, pipes + bh * 0.3, d / 2 + 0.0022)));
+    const zf = d / 2 - 0.012;
+    g.add(K.rbox(w, bh, d - 0.012, white, 0, pipes + bh / 2, -0.006, 0.012, 2));
+    g.add(K.box(w * 0.5, bh * 0.12, 0.003, blackGlass(), 0, pipes + bh * 0.3, zf + 0.0005), cylZ(Math.min(0.03, w * 0.08), 0.012, greyPlastic(), w * 0.28, pipes + bh * 0.14, zf + 0.006, 16));
+    g.add(noShadow(K.box(w * 0.16, bh * 0.06, 0.001, lcd('#ffb35c'), 0, pipes + bh * 0.3, zf + 0.0022)));
     g.add(K.cylOn(Math.min(0.06, w * 0.2), Math.min(0.06, w * 0.2), fl, frame, 0, h - fl, -d * 0.1, 16));
     g.add(merged(`gp|${mm(w)}|${mm(pipes)}`, () => [-0.3, -0.1, 0.1, 0.3].map((f) => gCyl(0.011, pipes, f * w, 0, 0, 'y', 8)), K.mat('#b87a52', { roughness: 0.3, metalness: 0.85 }), 0, pipes / 2, 0));
     return g;
@@ -1161,7 +1163,7 @@ function buildHeater({ w, d, h, p }) {
   // Israeli "dud shemesh": tilted collector in front, tank on a galvanised frame behind it.
   const horiz = w >= 0.9, r = horiz ? Math.min(0.26, d * 0.3, h * 0.3) : Math.min(w / 2, d * 0.3, 0.3), zt = -d / 2 + r, ft = 0.02;
   const cw = horiz ? Math.max(0.3, w - 0.08) : w, ct = Math.min(0.09, h * 0.08);
-  const zTop = horiz ? zt + r * 0.3 : zt + r + 0.03, yTop = horiz ? h - 2 * r - 0.02 : h * 0.72, zBot = d / 2 - 0.03, yBot = Math.min(0.12, h * 0.1);
+  const zTop = horiz ? zt + r * 0.3 : zt + r + 0.03, yTop = horiz ? h - 2 * r - 0.02 : h * 0.72, zBot = d / 2 - 0.055, yBot = Math.min(0.12, h * 0.1);
   const len = Math.hypot(zBot - zTop, yTop - yBot), ang = Math.atan2(yTop - yBot, zBot - zTop);
   const panel = new THREE.Group();
   panel.add(K.box(cw, ct, len, K.mat('#c9ccd0', { roughness: 0.4, metalness: 0.6 }), 0, ct / 2, 0));
@@ -1474,12 +1476,12 @@ function showerSpec(w, d, h, p) {
   }
   const armLen = Math.min(0.38, Math.max(0.12, d - 0.2));
   const head = !tall ? 'none' : pick(p.head, ['rain', 'hand', 'column', 'none'], v === 'tray-only' ? 'column' : 'rain');
-  const drain = { x: headX, z: tray ? B + Math.min(0.28, d * 0.3) : B + Math.min(0.08, d * 0.15) };
+  const drain = { x: tray ? headX : 0, z: tray ? B + Math.min(0.28, d * 0.3) : B + Math.min(0.08, d * 0.15) };
   return { v, open, tall, tray, th, gi, F, Rx, panels, headX, brace, quadR, framed, mirror, armLen, head, drain };
 }
 /** Wall-mounted shower fittings; origin on the wall at floor level, facing +Z. */
 function showerSet(kind, fin, h, armLen) {
-  const g = new THREE.Group(), m = finish(fin), ya = h - 0.03, my = Math.min(1.1, h * 0.55);
+  const g = new THREE.Group(), m = finish(fin), ya = h - (kind === 'column' ? 0.012 : 0.03), my = Math.min(1.1, h * 0.55);
   const handset = (x, y, z) => {
     g.add(K.bar([x, y - 0.1, z], [x, y + 0.07, z + 0.03], 0.011, m, 10));
     const hd = K.cyl(0.042, 0.042, 0.014, m, x, y + 0.085, z + 0.045, 20); hd.rotation.x = Math.PI / 3; g.add(hd);
@@ -1637,7 +1639,7 @@ function buildBathtub({ w, d, h, p }) {
     const t = tap('bath', fin); t.rotation.y = S.tapRot; g.add(extra(at(t, S.tap[0], h, S.tap[1])));
     if (v === 'whirlpool') {
       g.add(merged(`jets|${mm(S.rx)}|${mm(S.rz)}`, () => [-0.5, 0, 0.5].flatMap((f) => [-1, 1].map((k) => gCyl(0.02, 0.012, f * S.rx, 0, k * S.rz * 0.86, 'z', 14))), ch, S.cx, h - depth * 0.55, 0));
-      g.add(merged('wpk', () => [-0.05, 0.05].map((x) => gCyl(0.018, 0.02, x, 0.01, 0, 'y', 14)), ch, S.cx - S.rx * 0.5, h, -d / 2 + S.rim * 0.5));
+      g.add(extra(merged('wpk', () => [-0.05, 0.05].map((x) => gCyl(0.018, 0.02, x, 0.01, 0, 'y', 14)), ch, S.cx - S.rx * 0.5, h, -d / 2 + S.rim * 0.5)));
       g.add(K.rbox(0.05, 0.1, Math.min(0.32, d * 0.4), K.mat('#55585e', { roughness: 0.7 }), S.cx - S.rx + 0.04, h - 0.06, 0, 0.02));
     }
   } else {
@@ -1773,7 +1775,7 @@ function buildRail({ w, d, h, p }) {
     if (heated) { for (const k of [-1, 1]) g.add(K.cylOn(tr * 0.9, tr * 0.9, y0, K.chrome(), k * (w / 2 - tr), 0, zc, 10)); g.add(cylX(0.016, 0.04, enamel('#f2f2f0'), w / 2 - tr - 0.035, y0 * 0.6, zc, 12)); }
     if (h > 0.5 && ys.length > 2) { const y = ys[Math.floor(ys.length * 0.62)]; towel(-w * 0.06, y + 0.012, Math.min(0.36, y - 0.02), w * 0.6, zc); }
   } else if (v === 'bar') {
-    const r = Math.min(0.01, d * 0.2), yb = h > 0.25 ? h - 0.022 : h / 2, zc = d / 2 - (h > 0.25 ? 0.03 : r);
+    const r = Math.min(0.01, d * 0.2), yb = h > 0.25 ? h - 0.022 : h / 2, zc = d / 2 - (h > 0.25 ? 0.019 : r);
     g.add(cylX(r, w, m, 0, yb, zc, 12));
     g.add(merged(`bp|${mm(w)}|${mm(d)}|${mm(h)}`, () => [-1, 1].flatMap((k) => [gCyl(r * 0.9, zc - z0, k * (w / 2 - 0.03), 0, (zc + z0) / 2, 'z', 8), gCyl(Math.min(0.022, h / 2), 0.006, k * (w / 2 - 0.03), 0, z0 + 0.003, 'z', 14)]), m, 0, yb, 0));
     if (h > 0.25) towel(-w * 0.08, yb + 0.008, yb + 0.008, w * 0.55, zc);
@@ -1781,13 +1783,13 @@ function buildRail({ w, d, h, p }) {
     const ph = Math.min(h, 0.06), n = clamp(Math.round(w / 0.13), 2, 10), yb = h - ph / 2;
     g.add(K.rbox(w, ph, Math.min(0.016, d * 0.3), m, 0, yb, z0 + Math.min(0.016, d * 0.3) / 2, 0.005, 2));
     g.add(merged(`hk|${n}|${mm(w)}|${mm(d)}`, () => Array.from({ length: n }, (_, i) => (i + 0.5) / n * w - w / 2).flatMap((x) => [gCyl(0.006, d - 0.012, x, 0, 0.006, 'z', 8), gCyl(0.011, 0.012, x, 0.004, d / 2 - 0.006, 'z', 10)]), m, 0, yb, 0));
-    if (h > 0.3) g.add(K.rbox(Math.min(0.2, w * 0.3), h - ph * 0.5, Math.min(0.05, d * 0.5), towelM, (0.5 / n) * w - w / 2, (h - ph * 0.5) / 2, d / 2 - Math.min(0.05, d * 0.5) / 2 - 0.006, 0.02));
+    if (h > 0.3) g.add(K.rbox(Math.min(0.2, w * 0.3), h - ph * 0.5, Math.min(0.05, d * 0.5), towelM, clamp((1.5 / n) * w - w / 2, -w / 2 + Math.min(0.2, w * 0.3) / 2, w / 2 - Math.min(0.2, w * 0.3) / 2), (h - ph * 0.5) / 2, d / 2 - Math.min(0.05, d * 0.5) / 2 - 0.006, 0.02));
   } else if (v === 'shelf') {
     const tall = h > 0.2, ys = tall ? h - Math.min(0.14, h * 0.4) : h - 0.008;
     g.add(noShadow(K.box(w - 0.02, 0.008, d - 0.01, K.glass('#d6e6ea', 0.4), 0, ys + 0.004, 0.005)));
-    g.add(merged(`sh|${mm(w)}|${mm(d)}`, () => [-1, 1].flatMap((k) => [gBox(0.012, 0.03, d, k * (w / 2 - 0.006), -0.011, 0), gCyl(0.006, d * 0.8, k * (w / 2 - 0.006), -0.05, d * 0.1, 'z', 8)]).concat([gCyl(0.007, w, 0, -0.05, d / 2 - 0.007, 'x', 10)]), m, 0, ys, 0));
+    g.add(merged(`sh|${mm(w)}|${mm(d)}`, () => [-1, 1].flatMap((k) => [gBox(0.012, 0.03, d, k * (w / 2 - 0.006), -0.011, 0), gCyl(0.006, d * 0.8, k * (w / 2 - 0.006), -0.05, d * 0.1, 'z', 8)]).concat([gCyl(0.007, w, 0, -0.05, d / 2 - 0.019, 'x', 10)]), m, 0, ys, 0));
     if (tall) { g.add(K.rbox(w * 0.42, (h - ys - 0.008) * 0.5, d * 0.7, towelM, -w * 0.2, ys + 0.008 + (h - ys - 0.008) * 0.25, 0, 0.012), K.rbox(w * 0.4, (h - ys - 0.008) * 0.5, d * 0.66, K.fabric(hex(p.color3, '#cfd8d6')), -w * 0.2, ys + 0.008 + (h - ys - 0.008) * 0.75, 0, 0.012)); }
-    if (h > 0.35) towel(w * 0.15, ys - 0.043, ys - 0.043, w * 0.4, d / 2 - 0.007); else g.add(K.box(w, 0.004, 0.004, m, 0, 0.002, z0 + 0.002));
+    if (h > 0.35) towel(w * 0.15, ys - 0.043, ys - 0.043, w * 0.4, d / 2 - 0.019); else g.add(K.box(w, 0.004, 0.004, m, 0, 0.002, z0 + 0.002));
   } else if (v === 'paper-holder') {
     const r = Math.min(h, d) / 2 * 0.98, zc = d / 2 - r, rl = Math.min(0.1, w * 0.8);
     g.add(cylX(r, rl, K.mat('#fbfaf6', { roughness: 0.95 }), -(w - rl) / 2 + 0.004, r, zc, 24), cylX(r * 0.38, rl + 0.002, K.mat('#b9a98f', { roughness: 0.9 }), -(w - rl) / 2 + 0.004, r, zc, 12));
@@ -1943,11 +1945,11 @@ function buildTV({ w, d, h, p }) {
     g.add(noShadow(K.box(0.02, 0.003, 0.001, lcd('#ffffff'), w / 2 - Math.min(0.08, w * 0.1), h / 2, d / 2 + 0.0008)));
   } else {
     const c = hex(p.color, '#1e1f22'), cab = isWoody(c) ? K.wood(c) : K.mat(c, { roughness: 0.45 }), floor = h / w > 2.2, wide = h / w < 0.8;
-    const ft = floor ? Math.min(0.03, h * 0.03) : 0, cone = K.mat('#2b2c30', { roughness: 0.6 }), capM = K.mat('#55585e', { roughness: 0.3, metalness: 0.5 }), zf = d / 2 - 0.004;
-    g.add(K.rbox(w, h - ft, d - 0.004, cab, 0, ft + (h - ft) / 2, -0.002, 0.008, 2));
+    const ft = floor ? Math.min(0.03, h * 0.03) : 0, cone = K.mat('#2b2c30', { roughness: 0.6 }), capM = K.mat('#55585e', { roughness: 0.3, metalness: 0.5 }), zf = d / 2 - 0.012;
+    g.add(K.rbox(w, h - ft, d - 0.012, cab, 0, ft + (h - ft) / 2, -0.006, 0.008, 2));
     if (ft) g.add(K.box(w * 0.9, ft, d * 0.9, darkPlastic(), 0, ft / 2, 0));
     g.add(K.box(w - 0.02, h - ft - 0.02, 0.002, K.mat('#141518', { roughness: 0.7 }), 0, ft + (h - ft) / 2, zf));
-    const drv = (x, y, r) => g.add(merged(`drv|${mm(r)}`, () => [new THREE.TorusGeometry(r * 0.92, r * 0.08, 6, 28), gCyl(r * 0.86, 0.002, 0, 0, -0.001, 'z', 28), gCyl(r * 0.3, 0.004, 0, 0, 0, 'z', 16)], cone, x, y, zf + 0.003), cylZ(r * 0.28, 0.002, capM, x, y, zf + 0.005, 16));
+    const drv = (x, y, r) => g.add(merged(`drv|${mm(r)}`, () => [new THREE.TorusGeometry(r * 0.92, Math.min(r * 0.08, 0.005), 6, 28), gCyl(r * 0.86, 0.002, 0, 0, -0.001, 'z', 28), gCyl(r * 0.3, 0.004, 0, 0, 0, 'z', 16)], cone, x, y, zf + 0.005), cylZ(r * 0.28, 0.002, capM, x, y, zf + 0.008, 16));
     const H = h - ft;
     if (wide) { const r = Math.min(H * 0.36, w * 0.2); drv(-w * 0.25, ft + H / 2, r); drv(w * 0.25, ft + H / 2, r); }
     else {
