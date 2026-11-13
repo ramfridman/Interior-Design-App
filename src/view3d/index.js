@@ -184,7 +184,9 @@ export function createView3D(container, ctx) {
     const t0 = performance.now();
     call(env, 'update', camera);
     const dlBusy = call(daylight, 'update', camera, daylightView());
-    items.updateLamps(camera, mode === 'walk' || !sunInfo || sunInfo.elevation < LAMPS_ON_BELOW);
+    // lamps: on at dusk / night; walking they used to stay on all day — with the solved daylight they follow the sun too
+    const dayLit = daylight && daylight.isActive();
+    items.updateLamps(camera, (mode === 'walk' && !dayLit) || !sunInfo || sunInfo.elevation < LAMPS_ON_BELOW);
     renderer.render(scene, camera);
     if (dlBusy) { dirty = true; schedule(); }
     interaction.renderOverlay(renderer);

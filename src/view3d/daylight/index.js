@@ -85,8 +85,15 @@ const indirect = (W, E) => /* glsl */`
 function patchLightmapShader(shader, U) {
   Object.assign(shader.uniforms, { dlMapA: U.dlMapA, dlMapB: U.dlMapB, dlMix: U.dlMix, dlOn: U.dlOn, dlGain: U.dlGain, dlSpec: U.dlSpec });
   shader.vertexShader = LM_VERTEX_DECL + shader.vertexShader.replace('#include <uv_vertex>', '#include <uv_vertex>\n\tvDlUv = dlUv;');
-  shader.fragmentShader = COMMON_FRAG_DECL + LM_FRAG_DECL + shader.fragmentShader.replace('#include <lights_fragment_maps>',
-    '#include <lights_fragment_maps>\n' + indirect('dlOn', 'mix(texture2D(dlMapA, vDlUv).rgb, texture2D(dlMapB, vDlUv).rgb, dlMix) * dlGain'));
+  // lightmap alpha = fraction of the texel the solver found in the sun. Shadow maps leak a little light along the
+  // wall / ceiling junctions (normal bias); the eye-adapted interior exposure would show those leaks as bright lines,
+  // so on lit-by-lightmap surfaces the sun is masked where the solver says no sun can reach.
+  const begin = THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );',
+    'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= dlSunMask;');
+  shader.fragmentShader = COMMON_FRAG_DECL + LM_FRAG_DECL + shader.fragmentShader
+    .replace('#include <lights_fragment_begin>', 'vec4 dlTexel = mix(texture2D(dlMapA, vDlUv), texture2D(dlMapB, vDlUv), dlMix);\n'
+      + 'float dlSunMask = mix(1.0, smoothstep(0.0, 0.2, dlTexel.a), dlOn);\n' + begin)
+    .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n' + indirect('dlOn', 'dlTexel.rgb * dlGain'));
 }
 function patchFieldShader(shader, U) {
   Object.assign(shader.uniforms, { dlFieldA: U.dlFieldA, dlFieldB: U.dlFieldB, dlFieldBox: U.dlFieldBox, dlFieldN: U.dlFieldN, dlFieldH: U.dlFieldH, dlMix: U.dlFieldMix, dlOn: U.dlOn, dlGain: U.dlGain, dlSpec: U.dlSpec });

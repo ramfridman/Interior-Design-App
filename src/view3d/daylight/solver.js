@@ -895,7 +895,7 @@ export function relight(S, vis, L) {
   }
 
   // ── patches: direct sun, cached outdoor light ──
-  const direct = new Float32Array(nP * 3), outside = new Float32Array(nP * 3);
+  const direct = new Float32Array(nP * 3), outside = new Float32Array(nP * 3), sunFrac = new Float32Array(nP);
   const linkOf = (r) => (vis.owner[r] >= 0 ? vis.owner[r] : r);
   const sources = (r, cb) => { const o = linkOf(r); for (let q = vis.start[o]; q < vis.start[o + 1]; q++) cb(vis.idx[q], vis.w[q]); };
   const samples = L.sunSamples || S.opts.sunSamples;
@@ -936,7 +936,8 @@ export function relight(S, vis, L) {
       const u = ((k + 0.5) / samples - 0.5) * du * 0.8, w = ((((k * 7) % samples) + 0.5) / samples - 0.5) * dv * 0.8;
       let x = S.patch.pos[p3] + nx * 0.003, y = S.patch.pos[p3 + 1] + ny * 0.003, z = S.patch.pos[p3 + 2] + nz * 0.003;
       if (ch.type === 'h') { x += u; z += w; } else if (ch.side < 2) { z += u; y += w; } else { x += u; y += w; }
-      v += sunVis(x, y, z);
+      const tv = sunVis(x, y, z);
+      v += tv; if (tv > 0) sunFrac[p] += 1 / samples;
     }
     v *= cos / samples;
     direct[p3] = sunE[0] * v; direct[p3 + 1] = sunE[1] * v; direct[p3 + 2] = sunE[2] * v;
@@ -970,6 +971,8 @@ export function relight(S, vis, L) {
     const r = iterations[bounces - 1] / Math.max(1e-9, iterations[bounces - 2]);
     if (r > 0 && r < 0.95) { const k = r / (1 - r); for (let q = 0; q < nP * 3; q++) ind[q] += Math.max(0, ind[q] - nxt[q]) * k; }
   }
+  // hemisphere sampling of small bright sources (sun patches) is noisy: smooth the bounce term inside each chart
+  if (L.filter !== false) ind = filterCharts(S, ind, L.filterRadius || 2, L.filterSigma || 1.1);
   // after the last pass, B for the probes (radiosity of every patch)
   for (let k = 0; k < nP * 3; k++) B[k] = rho[k] * (direct[k] + outside[k] + ind[k]);
 
@@ -978,19 +981,19 @@ export function relight(S, vis, L) {
   const regionSum = new Float64Array(S.nRegions * 4);
   for (let p = 0; p < nP; p++) {
     const t = S.texelOf[p] * 4, p3 = p * 3;
-    lightmap[t] = outside[p3] + ind[p3]; lightmap[t + 1] = outside[p3 + 1] + ind[p3 + 1]; lightmap[t + 2] = outside[p3 + 2] + ind[p3 + 2]; lightmap[t + 3] = 1;
+    lightmap[t] = outside[p3] + ind[p3]; lightmap[t + 1] = outside[p3 + 1] + ind[p3 + 1]; lightmap[t + 2] = outside[p3 + 2] + ind[p3 + 2]; lightmap[t + 3] = sunFrac[p];
     const r4 = S.patch.region[p] * 4, a = S.patch.area[p];
     regionSum[r4] += lightmap[t] * a; regionSum[r4 + 1] += lightmap[t + 1] * a; regionSum[r4 + 2] += lightmap[t + 2] * a; regionSum[r4 + 3] += a;
   }
   for (let r = 0; r < S.nRegions; r++) {
     const t = S.avgTexel[r] * 4, r4 = r * 4, a = regionSum[r4 + 3] || 1;
-    lightmap[t] = regionSum[r4] / a; lightmap[t + 1] = regionSum[r4 + 1] / a; lightmap[t + 2] = regionSum[r4 + 2] / a; lightmap[t + 3] = 1;
+    lightmap[t] = regionSum[r4] / a; lightmap[t + 1] = regionSum[r4 + 1] / a; lightmap[t + 2] = regionSum[r4 + 2] / a; lightmap[t + 3] = 1;   // unknown faces: never mask the sun
   }
   for (let k = 0; k < A.fillDst.length; k++) {
     const d = A.fillDst[k] * 4, s0 = A.fillSrcStart[k], s1 = A.fillSrcStart[k + 1], inv = 1 / (s1 - s0);
-    let r = 0, g = 0, b = 0;
-    for (let q = s0; q < s1; q++) { const s = A.fillSrc[q] * 4; r += lightmap[s]; g += lightmap[s + 1]; b += lightmap[s + 2]; }
-    lightmap[d] = r * inv; lightmap[d + 1] = g * inv; lightmap[d + 2] = b * inv; lightmap[d + 3] = 1;
+    let r = 0, g = 0, b = 0, a = 0;
+    for (let q = s0; q < s1; q++) { const s = A.fillSrc[q] * 4; r += lightmap[s]; g += lightmap[s + 1]; b += lightmap[s + 2]; a = Math.max(a, lightmap[s + 3]); }
+    lightmap[d] = r * inv; lightmap[d + 1] = g * inv; lightmap[d + 2] = b * inv; lightmap[d + 3] = a;
   }
 
   // ── probes: ambient cubes (6 × RGB), no direct sun (the 3D view's sun light adds it) ──
@@ -1005,7 +1008,27 @@ export function relight(S, vis, L) {
     probes[q * 3] = r; probes[q * 3 + 1] = g; probes[q * 3 + 2] = b;
   }
   const field = fieldTexture(S, probes);
-  return { direct, outside, indirect: ind, lightmap, probes, field, sky, sunE, ms: Date.now() - t0, iterations, outdoorE: outE };
+  return { direct, sunFraction: sunFrac, outside, indirect: ind, lightmap, probes, field, sky, sunE, ms: Date.now() - t0, iterations, outdoorE: outE };
+}
+/** Gaussian filter of a per-patch RGB array over each chart's texel grid (never across charts / regions). */
+function filterCharts(S, src, radius, sigma) {
+  const out = new Float32Array(src.length), k = [];
+  for (let d = -radius; d <= radius; d++) k.push(Math.exp(-(d * d) / (2 * sigma * sigma)));
+  for (let p = 0; p < S.patch.count; p++) {
+    const ch = S.charts[S.patch.chart[p]], t = S.patch.texel[p], col = t % ch.cols, row = (t - col) / ch.cols;
+    let r = 0, g = 0, b = 0, w = 0;
+    for (let dr = -radius; dr <= radius; dr++) {
+      const rr = row + dr; if (rr < 0 || rr >= ch.rows) continue;
+      for (let dc = -radius; dc <= radius; dc++) {
+        const cc = col + dc; if (cc < 0 || cc >= ch.cols) continue;
+        const q = ch.texPatch[rr * ch.cols + cc]; if (q < 0) continue;
+        const ww = k[dr + radius] * k[dc + radius] * Math.sqrt(S.patch.area[q] / (S.patch.area[p] || 1e-9) > 1 ? 1 : S.patch.area[q] / (S.patch.area[p] || 1e-9));
+        r += ww * src[q * 3]; g += ww * src[q * 3 + 1]; b += ww * src[q * 3 + 2]; w += ww;
+      }
+    }
+    out[p * 3] = r / w; out[p * 3 + 1] = g / w; out[p * 3 + 2] = b / w;
+  }
+  return out;
 }
 const sunNormal = (alt) => {
   const m = 1 / (Math.sin(alt * Math.PI / 180) + 0.50572 * Math.pow(alt + 6.07995, -1.6364));

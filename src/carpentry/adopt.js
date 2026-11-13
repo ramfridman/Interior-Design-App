@@ -155,12 +155,12 @@ export function adoptArchitectLayout(opts = {}, mopts) {
       const wardrobeH = carpItems.find((it) => it.type === 'wardrobe');
       if (wardrobeH) spec.heights.body = wardrobeH.h;
       const kindL = VOCAB.runKind[kind];
-      const roomName = room ? L(room.name, room.nameHe || room.name) : L('', '');
       runCount[kind] = (runCount[kind] || 0) + 1;
       const id = newId('run');
       const run = {
-        id, code: '', kind, name: `${kindL.en}${roomName.en && kind !== 'kitchen' && kind !== 'island' ? ' — ' + roomName.en : ''}${side && kind === 'kitchen' ? ' — ' + side.en : ''}`,
-        nameHe: `${kindL.he}${roomName.he && kind !== 'kitchen' && kind !== 'island' ? ' — ' + roomName.he : ''}${side && kind === 'kitchen' ? ' — ' + side.he : ''}`,
+        id, code: '', kind,
+        name: kind === 'kitchen' ? `${kindL.en} — ${side.en}` : kind === 'island' ? kindL.en : `${first.name}${room && room.id !== 'main' ? ' — ' + room.name : ''}`,
+        nameHe: kind === 'kitchen' ? `${kindL.he} — ${side.he}` : kind === 'island' ? kindL.he : `${kindL.he}${room ? ' — ' + (room.nameHe || room.name) : ''}`,
         roomId: roomId || null, anchor, length, levels: [...KIND_LEVELS[kind]], freeStanding: kind === 'island', spec, unitIds: [], worktops: [], ends, notes: '', source: 'architect',
       };
       const used = new Set(Object.values(d.carpentry.runs).map((r) => r.code));
@@ -179,6 +179,8 @@ export function adoptArchitectLayout(opts = {}, mopts) {
         if (fr) specs.push({ module: 'filler', width: fr, level: 'full' });
       } else {
         let cursor = 0;
+        const lead = sorted[0].it.type === 'fridge' ? 0 : localA(sorted[0]);
+        if (lead >= RULES.fillerMin) { specs.push({ module: 'filler', width: r1(lead), level: MODULES[unitsForItem(sorted[0].it, kind, 60)[0]?.module || 'base-door'].level }); cursor = r1(lead); }
         for (const e of sorted) {
           const a = Math.max(cursor, localA(e)), it = e.it;
           let w = r1(e.k.b - e.k.a);
@@ -199,7 +201,9 @@ export function adoptArchitectLayout(opts = {}, mopts) {
           specs.push(...unitsForItem(it, kind, w));
           cursor = r1(cursor + w);
         }
-        if (length - cursor > 0.5 && specs.length) specs[specs.length - 1].width = r1(specs[specs.length - 1].width + length - cursor);
+        const tail = r1(length - cursor);
+        if (tail >= RULES.fillerMin) specs.push({ module: 'filler', width: tail, level: MODULES[specs[specs.length - 1].module].level === 'any' ? 'base' : MODULES[specs[specs.length - 1].module].level });
+        else if (tail > 0.05 && specs.length) specs[specs.length - 1].width = r1(specs[specs.length - 1].width + tail);
         // finished end panels on open ends of kitchen / utility runs
         if (kind === 'kitchen' || kind === 'pantry') {
           for (const s of ['left', 'right']) {
