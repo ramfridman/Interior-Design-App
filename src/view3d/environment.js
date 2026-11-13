@@ -16,10 +16,17 @@
  * the camera, so shadows cannot swim while orbiting or walking, and it is snapped to whole shadow-map texels so the
  * edges do not crawl while the time slider moves.
  * The module configures the renderer it is given: soft shadow maps, ACES tone mapping, sRGB output, exposure.
+ *
+ * Direct-beam strength follows the same illuminance model as the daylight solver (daylight/sky.js sunNormalLux:
+ * Kasten–Young air mass, single-coefficient extinction — ≈ 103 klux at the zenith, 15 klux at 5°), so sunrise and
+ * sunset are as dim as the solver assumes; colours, sky fill and exposure still come from the KEYS table.
+ * Sky 'overcast' (setSky): no direct sun, a grey CIE-overcast-like dome, sky fill scaled by the overcast / clear
+ * diffuse illuminance ratio of the same model, and +0.7 EV of camera exposure.
  */
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { sunPosition, sunTimes, sunDirectionWorld, compassPoint, todayAt, DEFAULT_SITE } from './sun.js';
+import { sunNormalLux, diffuseHorizontalLux, LUX_PER_UNIT } from './daylight/sky.js';
 
 const DEG = Math.PI / 180;
 const MIN_LIGHT_ELEVATION = 2;                                   // degrees — the shadow frustum never goes flatter than this
@@ -40,7 +47,11 @@ const KEYS = [
   { alt: 90, zenith: '#3278d0', horizon: '#d2e3f1', sun: '#fff7ec', sunI: 2.1, hemiI: 0.42, ambI: 0.05, envI: 0.14, exposure: 1.0, glow: 0 },
 ].map((k) => ({ ...k, zenith: new THREE.Color(k.zenith), horizon: new THREE.Color(k.horizon), sun: new THREE.Color(k.sun) }));
 
-const STUDY = { sun: 1.25, fill: 0.9 };                             // sun-study dollhouse: sun / sky-fill multipliers
+const STUDY = { sun: 1.25, fill: 0.9 };
+const SUN_SCALE = 2.1 / (sunNormalLux(90) / LUX_PER_UNIT);           // ≈ 1.015: the model's zenith sun = the old table's 2.1
+/** Direct sun on a surface facing it (renderer units) for a solar altitude — the solver's model. */
+export const sunIntensityAt = (alt) => (sunNormalLux(alt) / LUX_PER_UNIT) * SUN_SCALE;
+const OVERCAST = { zenith: new THREE.Color('#c3c8ce'), horizon: new THREE.Color('#a9aeb4'), exposure: 1.6 };                             // sun-study dollhouse: sun / sky-fill multipliers
 const MOON = { color: new THREE.Color('#93a9e6'), intensity: 0.22, azimuth: 150, altitude: 48 };
 
 const SKY_VERTEX = /* glsl */`
@@ -202,6 +213,7 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
   const S = { zenith: new THREE.Color(), horizon: new THREE.Color(), sun: new THREE.Color() };
   const state = {
     hours: 13, date: todayAt(where.timeZone), interior: false, study: false, night: 0, day: 1, exposure: 1, k: 0, texel: 0, daylight: 0,
+    sky: 'clear', moon: 0,
     fillColor: new THREE.Color(), fillIntensity: 0, info: null,
   };
   const hb = plan.bounds, houseBox = { x0: hb.x / 100, x1: (hb.x + hb.w) / 100, z0: hb.y / 100, z1: (hb.y + hb.h) / 100 };
@@ -230,6 +242,14 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
     const times = state.info && state.info.date === state.date ? state.info : sunTimes(state.date, where);
     const altitude = pos.elevation, azimuth = pos.azimuth;
     sample(altitude, S);
+    const overcast = state.sky === 'overcast';
+    if (overcast) {                                                     // grey dome; at night the night colours stay
+      const d = smooth(-6, 4, altitude);
+      S.zenith.lerp(OVERCAST.zenith, d); S.horizon.lerp(OVERCAST.horizon, d); S.glow = 0;
+      const ratio = diffuseHorizontalLux(altitude, 'overcast') / Math.max(1e-6, diffuseHorizontalLux(altitude, 'clear'));
+      S.hemiI *= Math.max(0.4, Math.min(1.4, ratio)) * (1 + 0.25 * d);   // no sun: the sky is the only light
+      S.exposure *= 1 + (OVERCAST.exposure - 1) * d;
+    }
     direction(azimuth, altitude, sunDir);
     const night = smooth(-3, -9, altitude), day = smooth(-6, 8, altitude);
     state.night = night; state.day = day;
@@ -243,9 +263,12 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
     if (altitude > -3.5) {
       const floor = Math.sin(MIN_LIGHT_ELEVATION * DEG);
       lightDir.copy(sunDir); if (lightDir.y < floor) { lightDir.y = floor; lightDir.normalize(); }
-      sun.color.copy(S.sun); sun.intensity = S.sunI * smooth(0, 3, altitude) * (state.study ? STUDY.sun : 1);
+      sun.color.copy(S.sun); sun.intensity = overcast ? 0 : sunIntensityAt(altitude) * (state.study ? STUDY.sun : 1);
+      state.moon = 0;
     } else {
-      lightDir.copy(moonDir); sun.color.copy(MOON.color); sun.intensity = MOON.intensity * smooth(-4.5, -10, altitude);
+      lightDir.copy(moonDir); sun.color.copy(MOON.color);
+      state.moon = overcast ? 0 : MOON.intensity * smooth(-4.5, -10, altitude);
+      sun.intensity = state.moon * (1 - 0.8 * state.daylight);          // solved (lamp-lit) interiors: a dimmer, truer moon
     }
     fitShadow(lightDir);
 
@@ -271,7 +294,7 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
     const u = skyMaterial.uniforms;
     u.uZenith.value.copy(S.zenith); u.uHorizon.value.copy(S.horizon); u.uSunColor.value.copy(S.sun);
     u.uSunDir.value.copy(sunDir); u.uMoonDir.value.copy(moonDir);
-    u.uGlow.value = S.glow; u.uNight.value = night; u.uSunDisc.value = smooth(-2.5, 1.5, altitude);
+    u.uGlow.value = S.glow; u.uNight.value = night; u.uSunDisc.value = overcast ? 0 : smooth(-2.5, 1.5, altitude);
     scene.fog.color.copy(S.horizon);
   }
 
@@ -331,8 +354,19 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
       const v = Math.max(0, Math.min(1, Number(w) || 0));
       if (Math.abs(v - state.daylight) < 1e-4) return;
       state.daylight = v;
+      if (state.moon > 0) sun.intensity = state.moon * (1 - 0.8 * v);
       if (state.interior) state.forceBlend = true;
     },
+    /** Sky model: 'clear' (sun + blue sky) or 'overcast' (no direct sun, grey sky). */
+    setSky(type) {
+      const next = type === 'overcast' ? 'overcast' : 'clear';
+      if (next === state.sky) return;
+      state.sky = next;
+      apply();
+    },
+    getSky: () => state.sky,
+    /** Night weight 0…1 (1 = the sun more than 9° below the horizon). */
+    getNight: () => state.night,
     /** Exposure of the current outdoor / indoor look (before the daylight eye adaptation). */
     getExposure: () => state.exposure,
     /** Per-frame hook: keeps the sky centred on the camera and moves the fill lights to the rooms around it. */

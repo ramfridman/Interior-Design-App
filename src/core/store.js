@@ -87,6 +87,7 @@ const DEFAULT_UI = {
   sunStudy: true,          // 3D: a hidden roof / cut-away walls still block the sun, so rooms show the true sun patches
   daylight: true,          // 3D: diffuse daylight solver (sky + bounced light through the real openings); false = simple fill lights
   daylightSky: 'clear',    // 3D daylight sky model: 'clear' (CIE clear sky + sun) | 'overcast' (CIE overcast, no sun)
+  lights: 'auto',          // 3D placed lamps: 'auto' (on when the sun is down) | 'on' | 'off' — lit lamps are solved with the daylight
   leftPanel: 'catalog',    // which left panel tab is open
   rightPanel: 'inspector', // 'inspector' | 'budget' | 'checks' | 'rooms'
   catalogZone: 'indoor',   // 'indoor' | 'outdoor'

@@ -3,13 +3,17 @@
  * chosen date; a play button that runs the day; and — expanded — the date with solstice / equinox presets, where the
  * sun is, and the "true shadows" switch.
  *
+ * Light options (expanded panel): Sky clear / overcast (store.ui.daylightSky), Lights auto / on / off (store.ui.lights —
+ * auto = on when it is dark), and Realistic daylight on / off (store.ui.daylight — the radiosity solver; off = the
+ * simple fill lights). All live in store.ui, so they are saved with the design like the other view options.
+ *
  * It writes store.ui.timeOfDay (decimal hours), store.ui.date ('YYYY-MM-DD') and store.ui.sunStudy; the sun's
  * position and the day's key times come from the 3D view (`view3d.on('sun', info)`). Without that event (a view
  * that does not send it) the slider still works; the marks and the position read-out stay empty.
  */
 import { h, listen, setKids, nextId } from './dom.js';
 import { icon } from './icons.js';
-import { iconBtn, toggle } from './components.js';
+import { iconBtn, toggle, segmented } from './components.js';
 import { fmtClock } from './format.js';
 
 const DAY_SECONDS = 20;      // one played day
@@ -73,10 +77,20 @@ export function createSunControl(app) {
   const times = h('p', { class: 'sunctl__times num' });
   const study = toggle({ label: 'True shadows (sun study)', checked: store.ui.sunStudy !== false, onChange: (v) => store.setUI({ sunStudy: v }),
     hint: 'A hidden roof and cut-away walls still block the sun, so rooms show their real sun patches.' });
+  const sky = segmented({ label: 'Sky', cls: 'seg--block', value: store.ui.daylightSky === 'overcast' ? 'overcast' : 'clear', onChange: (v) => store.setUI({ daylightSky: v }),
+    options: [{ value: 'clear', label: 'Clear', tip: 'Clear sky with direct sun' }, { value: 'overcast', label: 'Overcast', tip: 'Overcast sky: soft light, no sun patches' }] });
+  const lightsMode = () => (store.ui.lights === 'on' || store.ui.lights === 'off' ? store.ui.lights : 'auto');
+  const lights = segmented({ label: 'Lights', cls: 'seg--block', value: lightsMode(), onChange: (v) => store.setUI({ lights: v }),
+    options: [{ value: 'auto', label: 'Auto', tip: 'Placed lamps switch on when it gets dark' }, { value: 'on', label: 'On', tip: 'Placed lamps always on' }, { value: 'off', label: 'Off', tip: 'Placed lamps off' }] });
+  const opt = (name, control) => h('div', { class: 'sunctl__opt' }, h('span', { class: 'sunctl__optlabel' }, name), control);
+  const realistic = toggle({ label: 'Realistic daylight', checked: store.ui.daylight !== false, onChange: (v) => store.setUI({ daylight: v }),
+    hint: 'Light from the windows and lamps bounces through the rooms. Off: simple, faster lighting.' });
   const panel = h('div', { class: 'sunctl__panel', id: panelId, hidden: true },
     h('div', { class: 'sunctl__daterow' }, h('label', { class: 'field sunctl__datefield' }, date),
       h('div', { class: 'sunctl__presets', role: 'group', 'aria-label': 'Quick dates' }, presetBtns)),
     h('div', { class: 'sunctl__info' }, readout, times),
+    h('div', { class: 'sunctl__opts' }, opt('Sky', sky), opt('Lights', lights)),
+    realistic,
     study);
   const el = h('div', { class: 'ovl sunctl', role: 'group', 'aria-label': 'Sun' }, panel, bar);
 
@@ -179,6 +193,9 @@ export function createSunControl(app) {
     if (e.keys.includes('timeOfDay')) paintTime();
     if (e.keys.includes('date')) paintDay();
     if (e.keys.includes('sunStudy')) study.set(store.ui.sunStudy !== false);
+    if (e.keys.includes('daylightSky')) sky.set(store.ui.daylightSky === 'overcast' ? 'overcast' : 'clear');
+    if (e.keys.includes('lights')) lights.set(lightsMode());
+    if (e.keys.includes('daylight')) realistic.set(store.ui.daylight !== false);
     if (e.keys.includes('mode') && store.ui.mode === '2d') pause();   // nothing to watch in the plan
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });

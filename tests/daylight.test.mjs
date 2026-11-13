@@ -6,6 +6,7 @@ import * as E from '../src/core/plan-edit.js';
 import { sunPosition, sunDirectionWorld } from '../src/view3d/sun.js';
 import * as D from '../src/view3d/daylight/solver.js';
 import { skyRadiance, LUX_PER_UNIT } from '../src/view3d/daylight/sky.js';
+import { lampSpec, lampEmitters, occluderBox, kelvinColor } from '../src/view3d/daylight/lamps.js';
 
 store.persist = false;
 let failed = 0, passed = 0;
@@ -273,6 +274,21 @@ group('Furniture blocks bounced light and sun (item boxes as occluders, incremen
   const other = mean(S, L1, roomFloor(S, 'bedroom-2')), other0 = mean(S, L0, roomFloor(S, 'bedroom-2'));
   check('the neighbouring bedroom is (all but) unchanged', Math.abs(other / other0 - 1) < 0.01, `${lux(other0)} → ${lux(other)}`);
   D.setOccluders(S, []);
+}
+
+group('Lamp photometry and occluder boxes (lamps.js)');
+{
+  const spots = lampSpec({ type: 'ceiling-light', params: { variant: 'spot', count: 4 } }), pend = lampSpec({ type: 'pendant', params: { lumens: 800 } });
+  check('lumen class per type / variant, product params override', spots.lm === 1800 && spots.down && pend.lm === 800 && lampSpec({ type: 'table-lamp', params: {} }).lm === 450, `spots ${spots.lm} lm, pendant ${pend.lm} lm`);
+  check('switched-off lamps and non-lamps emit nothing', lampSpec({ type: 'pendant', params: { on: false } }) === null && lampSpec({ type: 'sofa', params: {} }) === null);
+  const c = kelvinColor(2700), c6 = kelvinColor(6500), L = (v) => 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+  check('2700 K is warm (r > g > b), 6500 K near neutral, both unit luminance', c[0] > c[1] && c[1] > c[2] && Math.abs(L(c) - 1) < 1e-6 && Math.abs(c6[0] / c6[2] - 1) < 0.15, c.map((v) => v.toFixed(2)).join(' '));
+  const em = lampEmitters({ id: 'x', type: 'pendant', params: { variant: 'cluster', count: 4 } }, [[1, 2, 3], [1.2, 2, 3]]);
+  check('flux is split between bulb positions', em.length === 2 && em[0].lm + em[1].lm === 1600);
+  const wd = occluderBox({ id: 'w', type: 'wardrobe', x: 100, y: 100, w: 160, d: 60, h: 240, rot: 90 }), bedB = occluderBox({ id: 'b', type: 'bed', x: 0, y: 0, w: 160, d: 200, h: 105 });
+  check('wardrobe → rotated full-height box; bed → body only; chairs / outdoor items → none',
+    wd && Math.abs(wd.corners[0][0] - 130) < 0.01 && wd.y1 === 2.4 && bedB.y1 === 0.55 && occluderBox({ type: 'chair', x: 0, y: 0, w: 50, d: 50, h: 90 }) === null && occluderBox({ type: 'cabinet', x: 0, y: 0, w: 100, d: 50, h: 80 }, -0.15) === null,
+    JSON.stringify(wd.corners));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

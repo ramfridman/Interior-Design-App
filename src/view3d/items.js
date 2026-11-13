@@ -6,6 +6,8 @@
  * - A model is rebuilt only when type / params / size / product changed; moves and rotations just re-pose it.
  * - Lamp lights inside models (userData.isLampLight) are never rendered directly: a fixed pool of point lights
  *   is moved onto the lamps nearest to the camera, so the light count (and therefore the shader set) stays stable.
+ *   When the daylight solver lights the interior, indoor lamps are solved there (lampPoints()) and the pool only
+ *   serves the lamps it does not cover (garden lights). setLampsLit() switches the glowing shades / bulbs.
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -15,6 +17,7 @@ import { spaceAt, isIndoors, itemCorners } from '../core/geometry.js';
 export const LAYER_SELECTED = 1;
 export const LAYER_HOVER = 2;
 const LAMP_POOL = 8;
+const LAMP_TYPES = new Set(['floor-lamp', 'table-lamp', 'pendant', 'ceiling-light', 'wall-light', 'ceiling-fan', 'outdoor-light']);
 
 /** World Y (m) of the walkable ground under a plan point: 0 on the house floor and slabs, garden level elsewhere. */
 export function groundY(x, y, plan) {
@@ -122,7 +125,11 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
 
   // ───────────── lamp light pool ─────────────
   const pool = [];
-  let lampsOn = false, lampGain = 1;
+  let lampsOn = false, lampGain = 1, lampsLit = true;
+  /** Glowing materials of lamp models: emissiveIntensity follows the lights switch (base kept in userData). */
+  function applyGlow(entry) {
+    for (const m of entry.glow) m.emissiveIntensity = lampsLit ? m.userData.lampEmissive : 0;
+  }
   for (let i = 0; i < LAMP_POOL; i++) {
     const l = new THREE.PointLight(0xffe2b8, 0, 5, 2);
     l.visible = false; l.castShadow = false;
@@ -142,13 +149,23 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
     root.userData.itemId = item.id;
     const v = variantOf(item);
     const model = bakeModel(models.buildModel(v && v.view ? { ...item, view: v.view } : item));
-    const lamps = [];
+    const lamps = [], glow = new Set();
     model.traverse((o) => {
       if (o.isLight && o.userData.isLampLight) { lamps.push({ light: o, intensity: o.intensity }); o.visible = false; }
     });
+    if (LAMP_TYPES.has(item.type)) model.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (!m || !('emissiveIntensity' in m)) continue;
+        if (m.userData.lampEmissive === undefined) { if (!(m.emissiveIntensity > 0) || !m.emissive || m.emissive.getHex() === 0) continue; m.userData.lampEmissive = m.emissiveIntensity; }
+        glow.add(m);
+      }
+    });
     root.add(model);
     if (materialHook) root.traverse((o) => { if (o.isMesh && o.material) materialHook(o.material); });
-    return { id: item.id, root, sig: signature(item, v && v.key), lamps, box: new THREE.Box3() };
+    const entry = { id: item.id, type: item.type, root, sig: signature(item, v && v.key), lamps, glow: [...glow], box: new THREE.Box3() };
+    applyGlow(entry);
+    return entry;
   }
 
   function pose(entry, item) {
@@ -270,14 +287,35 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
       materialHook = typeof fn === 'function' ? fn : null;
       if (materialHook) for (const entry of entries.values()) entry.root.traverse((o) => { if (o.isMesh && o.material) materialHook(o.material); });
     },
-    /** Enable / disable lamp lighting and move the pool onto the lamps nearest to the camera. */
-    updateLamps(camera, enabled) {
+    /** Lights switched on (true) or off: the glowing parts of every lamp model follow. */
+    setLampsLit(on) {
+      if (lampsLit === !!on) return;
+      lampsLit = !!on;
+      for (const entry of entries.values()) applyGlow(entry);
+      invalidate();
+    },
+    /** Bulb positions (world m) of every visible, switched-on lamp model: [{ id, points: [[x, y, z], …] }]. */
+    lampPoints() {
+      const out = [];
+      if (!group.visible) return out;
+      for (const entry of entries.values()) {
+        if (!entry.root.visible || !entry.lamps.length) continue;
+        out.push({ id: entry.id, points: entry.lamps.map((l) => l.light.getWorldPosition(_p).toArray()) });
+      }
+      return out;
+    },
+    /**
+     * Enable / disable lamp lighting and move the pool onto the lamps nearest to the camera.
+     * `skip(id, x, y, z)` → true leaves a lamp to another renderer (the daylight solver lights indoor lamps).
+     */
+    updateLamps(camera, enabled, skip = null) {
       const cands = [];
       if (enabled && group.visible) {
         for (const entry of entries.values()) {
           if (!entry.root.visible) continue;
           for (const lamp of entry.lamps) {
             lamp.light.getWorldPosition(_p);
+            if (skip && skip(entry.id, _p.x, _p.y, _p.z)) continue;
             cands.push({ lamp, x: _p.x, y: _p.y, z: _p.z, d: _p.distanceToSquared(camera.position) });
           }
         }

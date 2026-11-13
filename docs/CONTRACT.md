@@ -70,7 +70,8 @@ Everything a view or panel needs is passed as one context object:
 store.items            // Item[]   (draw order = array order)
 store.selection        // string[] item ids
 store.ui               // { mode:'2d'|'3d'|'walk'|'split', tool, units, snap, gridStep, showGrid, showDimensions,
-                       //   showRoomLabels, showSite, showItems, showRoof, wallsCutaway, timeOfDay, leftPanel, rightPanel, catalogZone }
+                       //   showRoomLabels, showSite, showItems, showRoof, wallsCutaway, timeOfDay, leftPanel, rightPanel, catalogZone,
+                       //   date, sunStudy, daylight, daylightSky:'clear'|'overcast', lights:'auto'|'on'|'off' }
 store.project          // { name, ceilingHeight (cm, 300), roof:'flat', wallColor, exteriorColor, frameColor }
 store.finishes         // { [spaceId]: { floor?: productId, wall?: productId } }
 store.addItem(partial) / addItems([...]) / updateItem(id, patch, {transient}) / updateItems(ids, patch|fn)
@@ -168,6 +169,29 @@ Internal 3D modules (same team): `view3d/house.js` (`buildHouse(ctx) → { group
 export function getThumbnail(productOrItem, size = 176) → Promise<string>   // cached PNG data URL, rendered from the 3D model
 ```
 Both views show the same store state live (move in 2D → moves in 3D, and vice-versa).
+
+#### 3D lighting: sky, lamps, furniture (additive)
+* `store.ui.daylightSky: 'clear' | 'overcast'` — read by `environment.js` (`env.setSky(type)`: overcast = no direct sun, grey
+  dome, sky fill scaled by the overcast / clear diffuse ratio, +0.7 EV) and by the daylight solver (CIE overcast sky, no sun).
+* `store.ui.daylight: boolean` — the radiosity daylight solver on / off (off = the simple fill lights).
+* `store.ui.lights: 'auto' | 'on' | 'off'` (default `'auto'`: lamps on below 2° of sun elevation, 7° when overcast). Lit,
+  switched-on (`params.on !== false`) lighting items glow (emissive) and, indoors, are **emitters of the daylight solve**
+  (`view3d/daylight/lamps.js`: `lampSpec(item) → { lm, lobe, down, color, kelvin } | null`, typical lumen class per type /
+  variant, 2700 K unless `params.lumens|lm`, `params.cct|kelvin` or `params.lightColor` say otherwise). Garden lamps (and
+  every lamp when the solver is off / failed) use the fixed 8-light real-time pool.
+* Big furniture blocks bounced light, sky and sun in the solver: `lamps.js` `occluderBox(item, baseY) → { id, corners, y0, y1 } | null`
+  for `OCCLUDER_TYPES` (wardrobes, cabinets, kitchen units, appliances, beds and sofas by their body height, …). Boxes are
+  sent to the worker 300 ms after the last item change; only the rooms whose boxes changed are gathered again.
+* Direct sun: `environment.js` takes the beam strength from the solver's model (`daylight/sky.js` `sunNormalLux`, exported as
+  `sunIntensityAt(alt)`); indoors (lightmapped surfaces, furniture in the probe field) it is × the glazing transmittance the
+  solver uses for sky light (`DEFAULTS.glass`, 0.78).
+* All three options are in the sun panel (`src/ui/sun.js`, expanded) and are saved with the design like the other `store.ui` view options.
+* Items layer (internal, additive): `items.setLampsLit(bool)`, `items.lampPoints() → [{ id, points: [[x, y, z] m] }]`,
+  `items.updateLamps(camera, enabled, skip?)` (`skip(id, x, y, z)` → leave that lamp to the solver).
+* Solver (internal, additive): `setOccluders(S, boxes)`, `occluderRegions(S, box, set)`, `receiversFor(S, regions)`,
+  `createVisibilityJob(S, { base, redo })` (incremental pass), `relight(S, vis, { …, lamps: [{ x, y, z, lm, color, lobe?, down? }] })`
+  → adds `lamp` (direct lamp irradiance per patch) and `lampStats`; engine message `{ type: 'occluders', boxes }`.
+  Daylight controller: `setLampsLit(bool)`, `solvesLamp(id)`, `onItems()`; `debug.state()` adds lamp / occluder / gain fields.
 
 ## 5. UI (`index.html`, `src/styles/*`, `src/ui/*`) — UX/UI team
 `index.html` provides the shell with mount points `#view2d` and `#view3d`, a boot splash `#boot` containing

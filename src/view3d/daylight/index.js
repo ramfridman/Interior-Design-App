@@ -7,6 +7,8 @@
  *   daylight.relight();                            // date / hour / finishes changed
  *   daylight.onPlan();                             // the plan was edited (after house.rebuildPlan())
  *   daylight.update(camera, { mode, dollhouse });  // per frame: cross-fades, eye adaptation, exposure
+ *   daylight.setLampsLit(true);                    // lamps on: indoor lamps become emitters of the same solve
+ *   daylight.solvesLamp(id, x, y, z)               // true → this bulb is lit by the solver (no real-time light)
  *
  * How the result is drawn
  *   • Building interior (floors, walls, reveals, ceilings, skirting): every material is a clone of the finish
@@ -19,16 +21,31 @@
  *     The field's alpha is 0 outdoors, so garden items and the exterior keep their normal sun / sky lighting.
  *   • Exposure: walking, the eye adapts (τ ≈ 0.45 s) to the luminance predicted by the solution around the camera
  *     (no GPU read-back). The roofless dollhouse uses a fixed interior display gain so rooms stay readable.
- *   • Night: the daylight weight fades out with the sun below −3…−8°; the original night look (lamps, warm fill)
- *     takes over. Everything degrades to the original lighting if the solver fails.
+ *   • Lamps: indoor lighting items (lamps.js: lumen class, distribution, colour temperature per type) are point
+ *     emitters of the same radiosity solve (cached visibility per lamp, in the worker): their direct light AND its
+ *     bounces are in the lightmap / probe field, so light spills through open doors and furniture is lit by the
+ *     probes — no real-time lights indoors (the 8-light pool only serves garden lights). Shades glow while lit.
+ *   • Furniture: big items (wardrobes, beds, sofas, kitchen units …) are occluder boxes in the visibility pass,
+ *     sent 300 ms after the last move; the worker re-gathers only the rooms whose boxes changed.
+ *   • Direct sun through glass: interior surfaces and indoor furniture receive the real-time sun × the glazing
+ *     transmittance the solver applies to sky light (normal-incidence 0.78).
+ *   • Night: with the lamps lit the solution stays on (eye adaptation moves into a display gain of the solved
+ *     interior, up to ×500, so a lamp-lit room reads as lit and unlit rooms stay dark, while the exterior keeps its
+ *     night exposure); lamps off → the daylight weight fades out with the sun below −3…−8° and the original night
+ *     look takes over. Everything degrades to the original lighting if the solver fails.
  */
 import * as THREE from 'three';
-import { buildScene, sceneInputFromPlan, chartFor, chartUV, transferLightmap, toHalf, roomAt, airRegionAt, hexToLinear, PROBE_HEIGHTS } from './solver.js';
+import { buildScene, sceneInputFromPlan, chartFor, chartUV, transferLightmap, toHalf, roomAt, airRegionAt, hexToLinear, PROBE_HEIGHTS, DEFAULTS } from './solver.js';
+import { lampEmitters, occluderBox } from './lamps.js';
 import { createEngine } from './engine.js';
 import { finishParams } from '../house.js';
 
 const DOLL_TARGET = 0.3;                         // renderer units (≈ 15 klux): mean interior irradiance shown in the dollhouse
 const ADAPT_KEY = 0.13, ADAPT_POWER = 0.75, MAX_ADAPT = 20;   // eye adaptation: target luminance, partial adaptation, cap
+const MAX_ADAPT_NIGHT = 500;                     // night (lamp light ≈ 50–300 lx vs ≈ 1–20 klux by day): the eye opens up much further
+const DOLL_TARGET_NIGHT = 0.12, DOLL_MAX_NIGHT = 600;  // dollhouse at night: lamp-lit rooms (not the dark ones) set the gain
+const WINDOW_GAIN_NIGHT = 60;                    // orbit view, roof on, at night: lit windows glow (the eye is adapted to the dark garden)
+const OCCLUDER_DEBOUNCE_MS = 300;
 const FADE_S = 0.45, SLIDER_FADE_S = 0.12, ADAPT_S = 0.45;
 const smooth = (a, b, v) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
 const INTERIOR = (name) => name.startsWith('floor:') || name.startsWith('wall:room:') || name === 'ceilings' || name === 'wall:skirting';
@@ -37,7 +54,7 @@ const INTERIOR = (name) => name.startsWith('floor:') || name.startsWith('wall:ro
 const LM_VERTEX_DECL = 'attribute vec2 dlUv;\nattribute vec4 dlBox;\nvarying vec2 vDlUv;\nvarying vec4 vDlBox;\n';
 const FIELD_VERTEX_DECL = 'varying vec3 vDlW;\n';
 const COMMON_FRAG_DECL = /* glsl */`
-uniform float dlMix; uniform float dlOn; uniform float dlGain; uniform float dlSpec;
+uniform float dlMix; uniform float dlOn; uniform float dlGain; uniform float dlSpec; uniform float dlGlass;
 float dlLum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 `;
 const LM_FRAG_DECL = /* glsl */`
@@ -85,7 +102,7 @@ const indirect = (W, E) => /* glsl */`
 `;
 
 function patchLightmapShader(shader, U) {
-  Object.assign(shader.uniforms, { dlMapA: U.dlMapA, dlMapB: U.dlMapB, dlMix: U.dlMix, dlOn: U.dlOn, dlGain: U.dlGain, dlSpec: U.dlSpec });
+  Object.assign(shader.uniforms, { dlMapA: U.dlMapA, dlMapB: U.dlMapB, dlMix: U.dlMix, dlOn: U.dlOn, dlGain: U.dlGain, dlSpec: U.dlSpec, dlGlass: U.dlGlass });
   shader.vertexShader = LM_VERTEX_DECL + shader.vertexShader.replace('#include <uv_vertex>', '#include <uv_vertex>\n\tvDlUv = dlUv;\n\tvDlBox = dlBox;');
   // lightmap alpha = fraction of the texel the solver found in the sun. Shadow maps leak a little light along the
   // wall / ceiling junctions (normal bias); the eye-adapted interior exposure would show those leaks as bright lines,
@@ -94,11 +111,12 @@ function patchLightmapShader(shader, U) {
     'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= dlSunMask;');
   shader.fragmentShader = COMMON_FRAG_DECL + LM_FRAG_DECL + shader.fragmentShader
     .replace('#include <lights_fragment_begin>', 'vec2 dlUvC = clamp(vDlUv, vDlBox.xy, vDlBox.zw);\nvec4 dlTexel = mix(texture2D(dlMapA, dlUvC), texture2D(dlMapB, dlUvC), dlMix);\n'
-      + 'float dlSunMask = mix(1.0, smoothstep(0.0, 0.2, dlTexel.a), dlOn);\n' + begin)
+      // indoor sun patches came through glazing: the same transmittance the solver applies to sky light
+      + 'float dlSunMask = mix(1.0, smoothstep(0.0, 0.2, dlTexel.a) * dlGlass, dlOn);\n' + begin)
     .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n' + indirect('dlOn', 'dlTexel.rgb * dlGain'));
 }
 function patchFieldShader(shader, U) {
-  Object.assign(shader.uniforms, { dlFieldA: U.dlFieldA, dlFieldB: U.dlFieldB, dlFieldBox: U.dlFieldBox, dlFieldN: U.dlFieldN, dlFieldH: U.dlFieldH, dlMix: U.dlFieldMix, dlOn: U.dlOn, dlGain: U.dlGain, dlSpec: U.dlSpec });
+  Object.assign(shader.uniforms, { dlFieldA: U.dlFieldA, dlFieldB: U.dlFieldB, dlFieldBox: U.dlFieldBox, dlFieldN: U.dlFieldN, dlFieldH: U.dlFieldH, dlMix: U.dlFieldMix, dlOn: U.dlOn, dlGain: U.dlGain, dlSpec: U.dlSpec, dlGlass: U.dlGlass });
   shader.vertexShader = FIELD_VERTEX_DECL + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
 	vec4 dlWp = vec4( transformed, 1.0 );
 	#ifdef USE_BATCHING
@@ -108,7 +126,12 @@ function patchFieldShader(shader, U) {
 		dlWp = instanceMatrix * dlWp;
 	#endif
 	vDlW = ( modelMatrix * dlWp ).xyz;`);
-  shader.fragmentShader = COMMON_FRAG_DECL + FIELD_FRAG_DECL + shader.fragmentShader.replace('#include <lights_fragment_maps>',
+  // indoors (field alpha 1) the sun reaches furniture only through glazing: × its transmittance
+  const begin = THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );',
+    'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= dlSunGlass;');
+  shader.fragmentShader = COMMON_FRAG_DECL + FIELD_FRAG_DECL + shader.fragmentShader
+    .replace('#include <lights_fragment_begin>', 'float dlSunGlass = mix(1.0, dlGlass, dlOn * clamp(dlTap(dlFieldB, (vDlW.xz - dlFieldBox.xy) / dlFieldBox.z, 2.0, 0.0).a, 0.0, 1.0));\n' + begin)
+    .replace('#include <lights_fragment_maps>',
     '#include <lights_fragment_maps>\nvec4 dlF = dlField(vDlW, normalize(inverseTransformDirection(normal, viewMatrix)));\n' + indirect('dlOn * clamp(dlF.a, 0.0, 1.0)', 'dlF.rgb * dlGain'));
 }
 
@@ -159,7 +182,7 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
     dlMapA: { value: null }, dlMapB: { value: null }, dlMix: { value: 1 },
     dlFieldA: { value: null }, dlFieldB: { value: null }, dlFieldMix: { value: 1 },
     dlFieldBox: { value: new THREE.Vector4() }, dlFieldN: { value: new THREE.Vector2(1, 1) }, dlFieldH: { value: new THREE.Vector2(PROBE_HEIGHTS[0], PROBE_HEIGHTS[1]) },
-    dlOn: { value: 0 }, dlGain: { value: 1 }, dlSpec: { value: 1 },
+    dlOn: { value: 0 }, dlGain: { value: 1 }, dlSpec: { value: 1 }, dlGlass: { value: DEFAULTS.glass },
   };
   const lm = new FadePair(U.dlMapA, U.dlMapB, U.dlMix), fieldTex = new FadePair(U.dlFieldA, U.dlFieldB, U.dlFieldMix);
   const state = {
@@ -168,6 +191,8 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
     lastLightmap: null, probes: null, fieldProbe: null, fieldWeight: null, fieldAlpha: null,
     timings: { scene: 0, uv: 0, coarse: null, fine: null, relight: null, relights: 0, upload: 0, firstResultMs: null },
     patches: 0, links: 0, facades: 0, coarse: true, sentAt: 0, workerMode: 'none', error: null,
+    lampsLit: false, lamps: [], lampIds: new Set(), lampKey: '[]', lampStats: null, dollGainLit: 1, night: 0,
+    occKey: '[]', occluders: 0, occSentAt: 0, occTimings: [], visIncremental: false, redone: 0,
   };
   let house = null, env = null, items = null, S = null;
   const lmMaterials = new Map();                                            // base material → patched clone
@@ -332,7 +357,7 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
       const sunE = up ? [sun.color.r * sun.intensity, sun.color.g * sun.intensity, sun.color.b * sun.intensity] : [0, 0, 0];
       state.sunElevation = info.elevation;
       state.relightAt = performance.now();
-      send({ type: 'light', lighting: { sunDir, sunE, sky: store.ui.daylightSky === 'overcast' ? 'overcast' : 'clear', albedo: albedoTable() } });
+      send({ type: 'light', lighting: { sunDir, sunE, sky: store.ui.daylightSky === 'overcast' ? 'overcast' : 'clear', albedo: albedoTable(), lamps: state.lampsLit ? state.lamps : [] } });
     });
   }
 
@@ -345,6 +370,8 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
       const ms = Math.round(performance.now() - state.sentAt);
       if (msg.coarse) state.timings.coarse = ms; else state.timings.fine = ms;
       state.visMs = msg.ms; state.links = msg.links; state.facades = msg.facades;
+      state.visIncremental = !!msg.incremental; state.redone = msg.redone || 0;
+      if (msg.incremental && state.occSentAt) { state.occTimings.push(Math.round(performance.now() - state.occSentAt)); state.occTimings = state.occTimings.slice(-8); state.occSentAt = 0; }
       state.fieldProbe = msg.fieldProbe; state.fieldWeight = msg.fieldWeight; state.fieldAlpha = msg.fieldAlpha;
       return;
     }
@@ -361,7 +388,13 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
         for (let k = 0; k < S.probes.length; k++) if (S.probes[k].layer === 0) { sum += lum3(msg.probes, k * 18 + 6); n++; }
         const mean = n ? sum / n : 0;
         state.dollGain = mean > 1e-5 ? Math.min(30, Math.max(1, DOLL_TARGET / mean)) : 1;
+        // night: the mean of the lit probes (≥ 5 % of the brightest) — lamp-lit rooms read as lit, dark rooms stay dark
+        let max = 0; for (let k = 0; k < S.probes.length; k++) if (S.probes[k].layer === 0) max = Math.max(max, lum3(msg.probes, k * 18 + 6));
+        let ls = 0, ln = 0; for (let k = 0; k < S.probes.length; k++) if (S.probes[k].layer === 0) { const v = lum3(msg.probes, k * 18 + 6); if (v >= 0.05 * max && v > 0) { ls += v; ln++; } }
+        const lit = ln ? ls / ln : 0;
+        state.dollGainLit = lit > 1e-8 ? Math.min(DOLL_MAX_NIGHT, Math.max(1, DOLL_TARGET_NIGHT / lit)) : 1;
       }
+      state.lampStats = msg.lampStats || null;
       state.timings.upload = performance.now() - t0;
       state.timings.relight = msg.ms; state.timings.relights++;
       state.iterations = msg.iterations;
@@ -401,7 +434,13 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
     busy = lm.step(dt) || busy;
     busy = fieldTex.step(dt) || busy;
     const elev = state.sunElevation == null ? 30 : state.sunElevation;
-    const target = state.enabled && state.ready && !state.failed && S && !view.suppress ? smooth(-8, -3, elev) : 0;
+    // with indoor lamps placed the solution is the interior's light at any hour (lit → lamp light, switched off →
+    // honestly dark); a house without lamps falls back to the original night look after dusk
+    const lampsSolved = state.lamps.length > 0;
+    const target = state.enabled && state.ready && !state.failed && S && !view.suppress ? (lampsSolved ? 1 : smooth(-8, -3, elev)) : 0;
+    // night weight: adaptation moves from the camera exposure (day) into the interior display gain (night)
+    const n = (overcastNow() ? smooth(4, -6, elev) : smooth(-2, -9, elev)) * (lampsSolved ? 1 : 0);
+    state.night = n;
     if (Math.abs(target - state.on) > 1e-3) { state.on += (target - state.on) * Math.min(1, dt / 0.35 || 1); busy = true; } else state.on = target;
     U.dlOn.value = state.on;
     if (env && env.setDaylight) env.setDaylight(state.on);
@@ -426,18 +465,22 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
         eView = d[0] * d[0] * lum3(cube, (d[0] >= 0 ? 0 : 1) * 3) + d[1] * d[1] * lum3(cube, (d[1] >= 0 ? 2 : 3) * 3) + d[2] * d[2] * lum3(cube, (d[2] >= 0 ? 4 : 5) * 3);
         const L = (0.5 / Math.PI) * (0.6 * eView + 0.4 * eAvg);
         // partial adaptation (the eye never fully compensates: interiors still read darker than the garden)
-        key = Math.min(MAX_ADAPT, Math.max(1, Math.pow(ADAPT_KEY / Math.max(1e-4, L), ADAPT_POWER))) * envExposure;
+        const cap = Math.exp(Math.log(MAX_ADAPT) + (Math.log(MAX_ADAPT_NIGHT) - Math.log(MAX_ADAPT)) * n);
+        key = Math.min(cap, Math.max(1, Math.pow(ADAPT_KEY / Math.max(1e-7, L), ADAPT_POWER))) * envExposure;
       }
       if (state.adapted == null) state.adapted = key;
       const k = 1 - Math.exp(-dt / ADAPT_S);
       state.adapted = Math.exp(Math.log(state.adapted) + (Math.log(key) - Math.log(state.adapted)) * k);
       if (Math.abs(state.adapted - key) / key > 0.01) busy = true;
-      exposure = state.adapted;
+      // day: the camera exposure adapts; night: only the solved interior is gained, the dark garden keeps its exposure
+      const ratio = state.adapted / envExposure, viaExposure = Math.pow(ratio, 1 - n);
+      exposure = envExposure * viaExposure; gain = ratio / viaExposure;
     } else {
       state.adapted = null;
       // roofless dollhouse: a display gain (local tone mapping of the interior) maps the mean solved work-plane
       // irradiance to a readable level; sun patches stay brighter than the shade, the garden keeps its exposure
-      if (view.dollhouse) { gain = state.dollGain; exposure = envExposure * 1.1; }
+      if (view.dollhouse) { gain = Math.exp(Math.log(state.dollGain) * (1 - n) + Math.log(state.dollGainLit) * n); exposure = envExposure * 1.1; }
+      else gain = 1 + (WINDOW_GAIN_NIGHT - 1) * n;                       // roof on: lamp-lit windows glow at night
     }
     U.dlGain.value = 1 + (gain - 1) * state.on;
     const e = envExposure + (exposure - envExposure) * state.on;
@@ -446,8 +489,62 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
     return busy;
   }
 
+  // ── lamps and furniture from the items layer ──
+  const overcastNow = () => store.ui.daylightSky === 'overcast';
+  /** Indoor, switched-on lamp models → solver emitters (world m). Lamps outside the rooms stay real-time lights. */
+  function refreshLamps() {
+    if (!items || !items.lampPoints || !S) return;
+    const list = [], ids = new Set();
+    for (const { id, points } of items.lampPoints()) {
+      const item = store.getItem ? store.getItem(id) : (store.items || []).find((i) => i.id === id);
+      if (!item) continue;
+      const inside = points.filter(([x, y, z]) => roomAt(S, x * 100, z * 100) >= 0 && y > -0.05 && y < state.H + 0.3);
+      if (!inside.length) continue;
+      for (const e of lampEmitters(item, inside)) list.push({ x: +e.x.toFixed(3), y: +e.y.toFixed(3), z: +e.z.toFixed(3), lm: e.lm, lobe: e.lobe, down: e.down, color: e.color.map((v) => +v.toFixed(4)) });
+      ids.add(id);
+    }
+    const key = JSON.stringify(list);
+    state.lampIds = ids;
+    if (key === state.lampKey) return;
+    state.lampKey = key; state.lamps = list;
+    if (state.lampsLit) relight();
+  }
+  /** Big furniture → occluder boxes; sent (debounced) only when they changed. */
+  let occTimer = 0;
+  function refreshOccluders(now = false) {
+    clearTimeout(occTimer); occTimer = 0;
+    const go = () => {
+      occTimer = 0;
+      if (state.failed) return;
+      const boxes = [];
+      for (const item of store.items || []) {
+        const b = items && items.boxOf ? items.boxOf(item.id) : null;
+        const box = occluderBox(item, b && Number.isFinite(b.min.y) ? b.min.y - (item.elev || 0) / 100 : 0);
+        if (box) boxes.push(box);
+      }
+      const key = JSON.stringify(boxes);
+      if (key === state.occKey) return;
+      state.occKey = key; state.occluders = boxes.length; state.occSentAt = performance.now();
+      send({ type: 'occluders', boxes });
+    };
+    if (now) go(); else occTimer = setTimeout(go, OCCLUDER_DEBOUNCE_MS);
+  }
+  let offItems = null;
+
   return {
     uniforms: U,
+    /** Lamps switched on / off (view3d: Lights auto / on / off). */
+    setLampsLit(on) {
+      if (state.lampsLit === !!on) return;
+      state.lampsLit = !!on;
+      refreshLamps();
+      relight();
+      invalidate();
+    },
+    /** True when the solver lights this lamp model (so the real-time lamp pool must skip it). */
+    solvesLamp: (id) => state.lampsLit && !state.failed && state.enabled && state.on > 0.001 && state.lampIds.has(id),
+    /** Items changed (moved, added, removed, rebuilt): lamps now, occluders after a pause. */
+    onItems() { refreshLamps(); refreshOccluders(); },
     /** Connect the house (lightmaps), the environment (sun / exposure) and the items layer (probe field). */
     attach(parts) {
       ({ house, env, items } = { house, env, items, ...parts });
@@ -455,7 +552,10 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
         rebuildScene();
         if (house && house.setDaylight) house.setDaylight({ prepareMesh, lightmapMaterial, fieldMaterial, patchTree, active: () => state.on > 0.5 });
         if (items && items.setMaterialHook) items.setMaterialHook(fieldMaterial);
+        if (items && items.onChange && !offItems) offItems = items.onChange(() => { try { refreshLamps(); refreshOccluders(); } catch (e) { fail(e); } });
+        refreshOccluders(true);
         sendScene();
+        refreshLamps();
       } catch (e) { fail(e); }
     },
     /** Walk mode opens the interior doors: new visibility (cached per state, so switching back is instant). */
@@ -472,7 +572,7 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
       if (state.failed) return;
       clearTimeout(planTimer);
       // a wall / door being dragged sends a transient 'plan' per mouse move: re-solve once the drag pauses
-      const go = () => { planTimer = 0; try { rebuildScene(); sendScene(); } catch (err) { fail(err); } };
+      const go = () => { planTimer = 0; try { rebuildScene(); sendScene(); refreshLamps(); refreshOccluders(); } catch (err) { fail(err); } };
       if (e && e.transient) planTimer = setTimeout(go, 250); else go();
     },
     /** store 'project': a new ceiling height changes the geometry; colours only need a relight. */
@@ -489,7 +589,8 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
     isActive: () => state.on > 0.001,
     dispose() {
       if (lightTimer) cancelAnimationFrame(lightTimer);
-      clearTimeout(planTimer);
+      clearTimeout(planTimer); clearTimeout(occTimer);
+      if (offItems) offItems(); offItems = null;
       if (worker) worker.terminate(); worker = null;
       if (local) local.dispose(); local = null;
       if (house && house.setDaylight) house.setDaylight(null);
@@ -506,7 +607,10 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
         on: state.on, exposure: state.exposure, coarse: state.coarse, doorsOpen: state.doorsOpen,
         patches: state.patches, links: state.links, facades: state.facades, probes: S ? S.probes.length : 0,
         atlas: S ? [S.atlas.width, S.atlas.height] : null, field: S ? [S.field.nx * 6, S.field.nz * 2] : null,
-        timings: { ...state.timings, visWorkerMs: state.visMs }, iterations: state.iterations,
+        timings: { ...state.timings, visWorkerMs: state.visMs, occluderUpdatesMs: state.occTimings.slice() }, iterations: state.iterations,
+        lampsLit: state.lampsLit, lamps: state.lamps.length, lampLumens: state.lamps.reduce((a, l) => a + l.lm, 0), lampStats: state.lampStats,
+        occluders: state.occluders, visIncremental: state.visIncremental, redone: state.redone, night: state.night, gain: U.dlGain.value,
+        dollGain: state.dollGain, dollGainLit: state.dollGainLit,
       }),
       /** Irradiance (renderer units and lux) at a plan point (cm) and height (cm, default 80): ambient cube + floor patch. */
       sampleAt(xcm, ycm, hcm = 80) {

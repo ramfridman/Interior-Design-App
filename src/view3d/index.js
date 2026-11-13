@@ -22,7 +22,8 @@ const ROOF_OFF_PRESETS = new Set(['top', 'interior']);
 const ROOF_ON_PRESETS = new Set(['front', 'garden']);
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-const LAMPS_ON_BELOW = 5;   // degrees of sun elevation under which lamps are lit in orbit mode
+// Lights 'auto': lamps switch on below this sun elevation (degrees) — later under an overcast sky, which is darker
+const LAMPS_AUTO_CLEAR = 2, LAMPS_AUTO_OVERCAST = 7;
 
 /**
  * @param {HTMLElement} container mount point (#view3d)
@@ -184,6 +185,7 @@ export function createView3D(container, ctx) {
         daylight.attach({ house, env, items });
       } catch (e) { console.warn('[view3d] daylight unavailable — using the standard lighting', e); daylight = null; }
     }
+    call(env, 'setSky', store.ui.daylightSky);
     applyHouseState();
     ready = true;
     applySun();
@@ -191,14 +193,23 @@ export function createView3D(container, ctx) {
   }
 
   // ───────────── rendering ─────────────
+  function lampsLit() {
+    const m = store.ui.lights === 'on' || store.ui.lights === 'off' ? store.ui.lights : 'auto';
+    if (m !== 'auto') return m === 'on';
+    const elev = sunInfo && Number.isFinite(sunInfo.elevation) ? sunInfo.elevation : 30;
+    return elev < (store.ui.daylightSky === 'overcast' ? LAMPS_AUTO_OVERCAST : LAMPS_AUTO_CLEAR);
+  }
   function renderNow() {
     if (destroyed || contextLost || !canvas.width || !canvas.height) return;
     const t0 = performance.now();
     call(env, 'update', camera);
+    // lamps: store.ui.lights 'auto' (on when it is dark) | 'on' | 'off'. Indoor lamps are emitters of the daylight
+    // solve (lightmap + probes); the real-time pool only lights what the solver does not (garden lights, fallback)
+    const lit = lampsLit();
+    items.setLampsLit(lit);
+    call(daylight, 'setLampsLit', lit);
     const dlBusy = call(daylight, 'update', camera, daylightView());
-    // lamps: on at dusk / night; walking they used to stay on all day — with the solved daylight they follow the sun too
-    const dayLit = daylight && daylight.isActive();
-    items.updateLamps(camera, (mode === 'walk' && !dayLit) || !sunInfo || sunInfo.elevation < LAMPS_ON_BELOW);
+    items.updateLamps(camera, lit, daylight ? (id) => !!call(daylight, 'solvesLamp', id) : null);
     const undoStudio = carpentry.beginFrame(camera, { env });   // carpentry 3D tab "Studio light": this render only
     renderer.render(scene, camera);
     if (undoStudio) undoStudio();
@@ -342,7 +353,7 @@ export function createView3D(container, ctx) {
       if (keys.includes('timeOfDay') || keys.includes('date')) applySun();
       if (keys.includes('showItems')) items.group.visible = store.ui.showItems !== false;
       if (keys.includes('daylight')) call(daylight, 'setEnabled', store.ui.daylight !== false);
-      if (keys.includes('daylightSky')) call(daylight, 'relight');
+      if (keys.includes('daylightSky')) { call(env, 'setSky', store.ui.daylightSky); call(daylight, 'relight'); }
       if (keys.includes('showRoof') || keys.includes('wallsCutaway') || keys.includes('sunStudy')) applyHouseState();
       if (keys.includes('mode')) {
         if (store.ui.mode === 'walk' && mode !== 'walk') enterWalk();
