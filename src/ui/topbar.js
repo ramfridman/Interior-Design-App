@@ -160,9 +160,9 @@ export function initTopbar(root, app) {
 
   /*
    * Fit: the bar holds more in Structure mode and once the plan is modified. When it gets cramped the least important
-   * things give way first — classes fit1 … fit6 on the bar, cumulative (see layout.css) — instead of anything overlapping.
+   * things give way first — classes fit1 … fit10 on the bar, cumulative (see layout.css) — instead of anything overlapping.
    */
-  const FIT_STEPS = 6;
+  const FIT_STEPS = 10;
   const cramped = () => (name.offsetParent !== null && name.offsetWidth < 96)
     || views.offsetWidth > center.clientWidth + 0.5 || root.lastElementChild.getBoundingClientRect().right > root.getBoundingClientRect().right + 0.5;
   const fit = rafThrottle(() => {

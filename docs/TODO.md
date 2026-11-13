@@ -14,7 +14,8 @@ Last updated: 13 Nov 2026. Published preview: https://claude.ai/artifact/8ZvK3RL
 - [x] **Realistic interior daylight** — published in version 4 (13 Nov). Follow-ups: furniture does not block bounced light; low-sun brightness and glass transmittance of the direct beam are not physically matched; lamps are not light sources at night; add a daylight on / off and clear / overcast toggle in the UI.
 
 ## Next
-- [ ] **Stretched display reported by the owner in the artifact viewer** — not reproduced locally; waiting for a screenshot and viewing details.
+- [x] **Stretched display on a phone** — fixed in version 6 (13 Nov): off-screen sheets made the page itself scrollable, so the app could slide up and out of view. The root and the app shell are now clipped and page scroll is reset; the top bar fits down to 360 px wide (at 320 px the File menu is still cut off).
+- [ ] **Carpentry in 3D** — true 3D shapes for all units, a 3D tab in the carpentry workbench, open-fronts toggle, fit warnings in 3D [in progress, Opus].
 - [ ] Lead's UX review pass (known: finishes cannot be dropped onto the 3D view; tablet side panels have no scrim; wall length has no inspector field; the Bedroom 1 / Bedroom 2 partition cannot be dragged until a bedroom door is moved away from its end; the removed-wall ghost is faint in dark theme; touch gestures for structure tools untested).
 - [ ] Performance check on a real graphics card (only a software renderer has been measured).
 - [ ] Catalogue gaps: long linear pendants, fountains / bird baths, composite decking, concrete pavers, date palms, heat-pump water heaters, clotheslines / composters.
@@ -46,7 +47,7 @@ Today a design lives in one browser (plus Save / Open file). Goal: sign in, proj
 ## Carpentry studio — STARTED 13 Nov 2026 (owner: "important, must be done perfectly, a professional tool")
 
 **Status 13 Nov: published in version 5.** Engine (128 tests), bespoke units / door operations / corner pantry / special requirements, market-rate estimate, carpenter directory (45), bilingual vector PDF (104 tests), Carpentry mode workspace and panels are all in.
-Follow-ups: wider quotation dialog; island move / rotate in the plan; left-edge resize should follow the cursor; phone top bar is ~40 px too wide; furniture resize handles still show on carpentry units in Furnish mode; colours / hardware names are English-only inside the Hebrew PDF; 3D shows corner pantries and bespoke units as simple shapes; price book confidence is mostly low — tune it with real quotes.
+Follow-ups: wider quotation dialog; island move / rotate in the plan; left-edge resize should follow the cursor; furniture resize handles still show on carpentry units in Furnish mode; colours / hardware names are English-only inside the Hebrew PDF; 3D shows corner pantries and bespoke units as simple shapes; price book confidence is mostly low — tune it with real quotes.
 
 Decisions: quotation PDF in **English and Hebrew** (chosen at export); **cost estimates** shown as sourced ranges; **carpenter directory sorted by distance from the house**.
 
