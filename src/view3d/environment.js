@@ -19,7 +19,7 @@
  */
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { sunPosition as ephemeris, sunTimes, sunDirectionWorld, compassPoint, todayAt, DEFAULT_SITE } from './sun.js';
+import { sunPosition, sunTimes, sunDirectionWorld, compassPoint, todayAt, DEFAULT_SITE } from './sun.js';
 
 const DEG = Math.PI / 180;
 const MIN_LIGHT_ELEVATION = 2;                                   // degrees — the shadow frustum never goes flatter than this
@@ -85,17 +85,6 @@ function sample(alt, out) {
   for (const k of ['sunI', 'hemiI', 'ambI', 'envI', 'exposure', 'glow']) out[k] = a[k] + (b[k] - a[k]) * t;
   out.zenith.copy(a.zenith).lerp(b.zenith, t); out.horizon.copy(a.horizon).lerp(b.horizon, t); out.sun.copy(a.sun).lerp(b.sun, t);
   return out;
-}
-
-/**
- * Sun position for a clock hour at the site (kept for older callers; see sun.js for the full ephemeris).
- * @param {number} hours local clock time
- * @param {string} [date] 'YYYY-MM-DD' (default: today at the site)
- * @returns {{ altitude: number, azimuth: number }} degrees; azimuth clockwise from true north
- */
-export function sunPosition(hours, date = todayAt(DEFAULT_SITE.timeZone)) {
-  const p = ephemeris({ date, hours });
-  return { altitude: p.elevation, azimuth: p.azimuth };
 }
 
 /**
@@ -237,7 +226,7 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
   }
 
   function apply() {
-    const pos = ephemeris({ date: state.date, hours: state.hours, ...where });
+    const pos = sunPosition({ date: state.date, hours: state.hours, ...where });
     const times = state.info && state.info.date === state.date ? state.info : sunTimes(state.date, where);
     const altitude = pos.elevation, azimuth = pos.azimuth;
     sample(altitude, S);

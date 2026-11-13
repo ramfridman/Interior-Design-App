@@ -260,29 +260,35 @@ function buildOutline(m) {
 
 const KIND_OF = { mamad: 'mamad', exterior: 'exterior', thick: 'interior', partition: 'interior' };
 
-/** Clean wall rectangles: collinear segment tiles of one class merged, split only by openings. */
+/**
+ * Clean wall rectangles. A wall that runs straight through T-junctions is ONE run (junction squares go to the
+ * through wall), split only where its class changes and by openings; corner squares follow their segment.
+ */
 function buildWalls(m, prevWalls) {
-  const { nx, cell, cores } = m;
-  const tiles = cores.map((c) => ({ axis: c.axis, cls: c.cls, ...c.t })).sort((a, b) => (a.axis === b.axis ? 0 : a.axis === 'h' ? -1 : 1)
-    || (a.axis === 'h' ? a.j0 - b.j0 || a.j1 - b.j1 || a.i0 - b.i0 : a.i0 - b.i0 || a.i1 - b.i1 || a.j0 - b.j0));
-  const runs = [];
-  for (const t of tiles) {
-    const p = runs[runs.length - 1];
-    if (p && p.axis === t.axis && p.cls === t.cls && (t.axis === 'h' ? p.j0 === t.j0 && p.j1 === t.j1 && p.i1 === t.i0 : p.i0 === t.i0 && p.i1 === t.i1 && p.j1 === t.j0)) { if (t.axis === 'h') p.i1 = t.i1; else p.j1 = t.j1; } else runs.push({ ...t });
-  }
-  const rects = [];
-  for (const r of runs) {
-    const horizontal = r.axis === 'h', a0 = horizontal ? r.i0 : r.j0, a1 = horizontal ? r.i1 : r.j1, c0 = horizontal ? r.j0 : r.i0, c1 = horizontal ? r.j1 : r.i1;
-    const at = (a, c) => cell[horizontal ? c * nx + a : a * nx + c];
-    const emit = (s, e, cs, ce) => rects.push({ ...(horizontal ? cellRect(m, s, e, cs, ce) : cellRect(m, cs, ce, s, e)), kind: KIND_OF[r.cls], cls: r.cls });
-    let start = -1;
-    for (let a = a0; a <= a1; a++) {
-      let walls = 0;
-      if (a < a1) for (let c = c0; c < c1; c++) if (at(a, c) === WALL) walls++;
-      if (walls === c1 - c0) { if (start < 0) start = a; continue; }
-      if (start >= 0) { emit(start, a, c0, c1); start = -1; }
-      if (walls) for (let c = c0; c < c1; c++) if (at(a, c) === WALL) emit(a, a + 1, c, c + 1);   // degenerate: opening narrower than the wall
-    }
+  const { nx, ny, cell, cores, core0, type } = m;
+  const parent = cores.map((c, i) => i), find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const own = m.owner.slice();
+  cores.forEach((c, idx) => {
+    if (c.junction) return;
+    const v = c.axis === 'v', K = v ? (u, a) => a * nx + u : (u, a) => u * nx + a, u0 = v ? c.i0 : c.j0, u1 = v ? c.i1 : c.j1, lim = v ? ny : nx, gap = [];
+    const junction = (a) => { for (let u = u0; u < u1; u++) if (type[K(u, a)] !== T_J) return false; return true; };
+    let a = v ? c.j1 : c.i1;
+    while (a < lim && junction(a)) gap.push(a++);
+    const j = gap.length && a < lim ? core0[K(u0, a)] : -1, o = j >= 0 ? cores[j] : null;
+    if (!o || o.axis !== c.axis || o.cls !== c.cls || (v ? o.i0 !== c.i0 || o.i1 !== c.i1 || o.j0 !== a : o.j0 !== c.j0 || o.j1 !== c.j1 || o.i0 !== a)) return;
+    parent[find(j)] = find(idx);
+    for (const g of gap) for (let u = u0; u < u1; u++) own[K(u, g)] = idx;
+  });
+  const seen = new Uint8Array(nx * ny), rects = [];
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    if (cell[j * nx + i] !== WALL || seen[j * nx + i]) continue;
+    const run = find(own[j * nx + i]), c = cores[run], same = (q) => cell[q] === WALL && !seen[q] && find(own[q]) === run;
+    let i1 = i + 1, j1 = j + 1;
+    const rowOk = (jj) => { for (let t = i; t < i1; t++) if (!same(jj * nx + t)) return false; return true; };
+    const colOk = (ii) => { for (let t = j; t < j1; t++) if (!same(t * nx + ii)) return false; return true; };
+    if (c.axis === 'h') { while (i1 < nx && same(j * nx + i1)) i1++; while (j1 < ny && rowOk(j1)) j1++; } else { while (j1 < ny && same(j1 * nx + i)) j1++; while (i1 < nx && colOk(i1)) i1++; }
+    for (let jj = j; jj < j1; jj++) seen.fill(1, jj * nx + i, jj * nx + i1);
+    rects.push({ ...cellRect(m, i, i1, j, j1), kind: KIND_OF[c.cls], cls: c.cls });
   }
   rects.sort((a, b) => a.y - b.y || a.x - b.x);
   const key = (r) => `${r.x},${r.y},${r.w},${r.h}`, old = new Map(), used = new Set();
@@ -402,7 +408,7 @@ function buildRooms(m, prevRooms) {
     comp[k0] = cid;
     while (stack.length) {
       const k = stack.pop(); cells.push(k);
-      for (const q of [k - 1, k + 1, k - nx, k + nx]) if (!cell[q] && !out[q] && comp[q] < 0) { comp[q] = cid; stack.push(q); }
+      for (let n = 0; n < 4; n++) { const q = n === 0 ? k - 1 : n === 1 ? k + 1 : n === 2 ? k - nx : k + nx; if (!cell[q] && !out[q] && comp[q] < 0) { comp[q] = cid; stack.push(q); } }
     }
     comps.push({ cells, overlap: new Map(), area: 0 });
   }
@@ -411,18 +417,30 @@ function buildRooms(m, prevRooms) {
     for (const [x, y] of r.polygon) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
     return { room: r, x0, y0, x1, y1, best: -1, bestArea: 0 };
   });
-  comps.forEach((c, cid) => {
-    for (const k of c.cells) {
-      const i = k % nx, j = (k - i) / nx, a = (xs[i + 1] - xs[i]) * (ys[j + 1] - ys[j]), cx = (xs[i] + xs[i + 1]) / 2, cy = (ys[j] + ys[j + 1]) / 2;
-      c.area += a;
-      for (let p = 0; p < prev.length; p++) {
-        const q = prev[p];
-        if (cx < q.x0 || cx > q.x1 || cy < q.y0 || cy > q.y1 || !pointInPolygon(cx, cy, q.room.polygon)) continue;
-        c.overlap.set(p, (c.overlap.get(p) || 0) + a); break;
+  for (const c of comps) for (const k of c.cells) { const i = k % nx, j = (k - i) / nx; c.area += (xs[i + 1] - xs[i]) * (ys[j + 1] - ys[j]); }
+  // overlap of every component with every previous room: one scanline per grid row (cell centres)
+  for (let j = 0; j < ny; j++) {
+    const cy = (ys[j] + ys[j + 1]) / 2, dy = ys[j + 1] - ys[j];
+    for (let p = 0; p < prev.length; p++) {
+      const q = prev[p];
+      if (cy < q.y0 || cy > q.y1) continue;
+      const poly = q.room.polygon, cuts = [];
+      for (let e = 0; e < poly.length; e++) {
+        const a = poly[e], b = poly[(e + 1) % poly.length];
+        if ((a[1] > cy) !== (b[1] > cy)) cuts.push(a[0] + ((cy - a[1]) * (b[0] - a[0])) / (b[1] - a[1]));
+      }
+      cuts.sort((a, b) => a - b);
+      for (let t = 0; t + 1 < cuts.length; t += 2) {
+        for (let i = Math.max(0, lowerBound(xs, cuts[t]) - 1); i < nx && xs[i] < cuts[t + 1]; i++) {
+          const cx = (xs[i] + xs[i + 1]) / 2, cid = comp[j * nx + i];
+          if (cid < 0 || cx <= cuts[t] || cx >= cuts[t + 1]) continue;
+          const o = comps[cid].overlap;
+          o.set(p, (o.get(p) || 0) + (xs[i + 1] - xs[i]) * dy);
+        }
       }
     }
-    for (const [p, a] of c.overlap) if (a > prev[p].bestArea) { prev[p].bestArea = a; prev[p].best = cid; }
-  });
+  }
+  comps.forEach((c, cid) => { for (const [p, a] of c.overlap) if (a > prev[p].bestArea) { prev[p].bestArea = a; prev[p].best = cid; } });
   const zones = prevRooms.flatMap((r) => r.zones || []);
   const taken = new Set(prevRooms.map((r) => r.id));
   const kept = new Array(prev.length).fill(null), fresh = [], roomOf = new Array(comps.length);
