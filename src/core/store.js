@@ -80,6 +80,12 @@ const DEFAULT_UI = {
   rightPanel: 'inspector', // 'inspector' | 'budget' | 'checks' | 'rooms'
   catalogZone: 'indoor',   // 'indoor' | 'outdoor'
   activeSpace: null,       // id of the room / outdoor area the user last clicked (target for finishes)
+  // ── structure editing (walls / doors / windows) — see docs/CONTRACT.md § 7 ──
+  //   ui.tool also takes 'structure' (select / move walls & openings), 'wall' (draw a partition),
+  //   'door' | 'window' | 'passage' (place an opening).
+  structureSel: null,      // { type: 'segment' | 'opening', id } — the wall segment / opening selected in the plan
+  wallThickness: 10,       // cm, for the draw-wall tool (7–20)
+  showPlanChanges: true,   // highlight differences from the architect's plan
 };
 
 const DEFAULT_PROJECT = {

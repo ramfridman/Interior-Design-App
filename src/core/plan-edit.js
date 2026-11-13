@@ -537,7 +537,7 @@ function derive(solids, openings, prevRooms, prevWalls) {
 
 // ---------------------------------------------------------------- live state
 let host = { record() {}, changed() {} };
-let modified = false, revision = 0, analysis = null, stateKey = null;
+let modified = false, analysis = null, stateKey = null;
 const foreign = new WeakMap();
 
 /** Called once by the store: `record(opts)` takes the undo snapshot BEFORE a change, `changed(payload)` announces it. */
@@ -582,7 +582,7 @@ function install(d) {
   const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
   if (isArchitectPlan(d)) setBase();
   else { PLAN.walls = d.walls; PLAN.openings = d.openings; PLAN.rooms = d.rooms; PLAN.wallOutline = d.wallOutline; modified = true; analysis = d; }
-  revision++; stateKey = null; invalidatePlanCaches();
+  stateKey = null; invalidatePlanCaches();
   const after = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
   return { walls: before[0] !== after[0], openings: before[1] !== after[1], rooms: before[2] !== after[2] };
 }
@@ -605,7 +605,7 @@ function commit(d, reason, res, opts = {}) {
 // ---------------------------------------------------------------- persistence / history hooks (used by the store)
 /** `{ walls, openings, rooms }` of an edited plan, or null while the plan is the architect's. */
 export function planState() { return modified ? { walls: PLAN.walls, openings: PLAN.openings, rooms: PLAN.rooms } : null; }
-/** JSON of planState(), cached per revision (cheap to compare in history snapshots). */
+/** JSON of planState(), cached until the plan changes (cheap to compare in history snapshots). */
 export function planStateKey() { return stateKey || (stateKey = JSON.stringify(planState())); }
 
 const validRect = (r) => r && num(r.x) && num(r.y) && num(r.w) && num(r.h) && r.w > 0 && r.h > 0;
@@ -621,7 +621,7 @@ export function applyPlanState(state) {
   const toBase = (reason) => {
     if (!modified) return { ok: !reason, reason, changed: none };
     const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
-    setBase(); revision++; stateKey = null; invalidatePlanCaches();
+    setBase(); stateKey = null; invalidatePlanCaches();
     const base = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
     return { ok: !reason, reason, changed: { walls: before[0] !== base[0], openings: before[1] !== base[1], rooms: before[2] !== base[2] } };
   };
@@ -855,7 +855,8 @@ export function moveWallSegment(segmentId, delta, opts) {
   for (const end of [{ v: va0 - 1, dir: -1 }, { v: va1, dir: 1 }]) {
     const across = (v, u0, u1, test) => { for (let u = u0; u < u1; u++) if (!test(K(u, v))) return false; return true; };
     if (across(end.v, uc0, uc1, (k) => !m.cell[k])) continue;                                    // free end
-    if (!across(end.v, uc0, uc1, (k) => m.cell[k] === WALL)) return fail('That wall end meets a door or window — it cannot move.');
+    if (!across(end.v, uc0, uc1, (k) => m.cell[k] !== GAP)) return fail('That wall end meets a door or window — it cannot move.');
+    if (!across(end.v, uc0, uc1, (k) => m.cell[k] === WALL)) return fail('That wall is only partly joined to its neighbour — remove it and draw it again instead.');
     if (across(end.v, uc0, uc1, (k) => m.type[k] === T_J)) {
       const rows = [];
       let v = end.v;
