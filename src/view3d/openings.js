@@ -424,6 +424,7 @@ export function buildOpenings(plan, opts) {
         };
         if (o.kind === 'window') buildWindow(P, o, place(front), G);
         else if (o.kind === 'sliding-door') buildSlidingDoor(P, o, place(front), G, doorsOpen);
+        else if (o.kind === 'opening') { /* door-less passage: just the gap — the wall reveal comes from the house grid */ }
         else {
           const inner = o.innerDoor && typeof o.innerDoor === 'object' ? o.innerDoor : null;
           // two doors in one doorway: the main frame keeps to the front 0.5 cm+ of the wall centre, the inner one to the back
