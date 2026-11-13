@@ -357,3 +357,195 @@ resetPlan()                                   // back to the architect's plan (u
 * Heights are checked against `PLAN.heights.ceiling` (300), not `store.project.ceilingHeight`.
 * Tests: `node tests/plan-edit.test.mjs` (also the reference for typical calls).
 
+
+## 8. Carpentry API (`src/carpentry/`) — core, pure logic (no DOM, no THREE)
+
+Made-to-measure carpentry (kitchen, island, wardrobes, closets, pantry, vanities, laundry, TV wall, shelving, desks) as
+editable **runs** of **units**, with validation, a carpenter's take-off, a price-book estimate, shop drawings as vector data
+and schedules. Everything runs under plain `node` (tests: `node tests/carpentry.test.mjs`, also the reference for calls).
+```js
+import * as Carp from './carpentry/index.js';
+```
+Price data and the carpenter directory are researched separately: `src/carpentry/pricebook.js` (`export default` a price
+book, shape below) and `src/carpentry/carpenters.js` (`export default` an array, shape below). The engine never imports them —
+the UI passes them in.
+
+### Data model (single source of truth = the store)
+* `store.carpentry = { runs: { [runId]: Run }, settings: {} }` — part of undo / redo / `begin…commit`, `serialize().carpentry`
+  and `load()` (a file without it → no runs; unreadable → no runs, never throws). Every engine change is ONE undo step and
+  emits **`'carpentry' { reason, runIds, transient? }`** (plus the usual `'items'` events for the unit items). `reason`:
+  `'create-run' | 'update-run' | 'remove-run' | 'duplicate-run' | 'layout' | 'fit' | 'add-unit' | 'update-unit' |
+  'remove-unit' | 'move-unit' | 'adopt' | 'history' | 'load'`. Views re-render carpentry panels / drawings on `'carpentry'`.
+* **Run** `{ id, code, name, nameHe, kind, roomId, anchor: { x, y, dir }, length, levels: string[], freeStanding, spec: RunSpec,
+  unitIds: string[], worktops: WorktopPiece[] (derived, refreshed by every layout), ends: { left: End, right: End }, notes, source: 'architect'|'user' }`
+  * `kind` ∈ `kitchen | island | wardrobe | pantry | vanity | utility | media | entry | shelving | desk | custom` (`VOCAB.runKind` labels).
+  * `code`: `K1 K2…` kitchen, `KI1` island, `WR` wardrobe, `PN` pantry, `VN` vanity, `UT` utility, `MW` media, `EN` entry, `SH`, `DK`, `CU`.
+  * **Frame**: `anchor` = the LEFT end of the run's BACK line (wall face) as seen standing in front of it, plan cm; `dir` = the
+    units' `rot`. Along = (cos dir, sin dir), front = (−sin dir, cos dir). Run on the north wall: `dir 0`, runs west → east;
+    west wall: `dir 270`, runs south → north. Island: anchor = back-left corner of the worktop on the WORKING side; its item
+    front (+y local) is the seating side. Helpers: `toPlan(anchor, along, depth)`, `toLocal(anchor, x, y)`, `frame(dir)`.
+  * `End` = `{ type: 'wall' | 'open' | 'run', runId?, at?: 'left'|'right' }` — `'run'`: this end butts into another run's front
+    (L corner; that run's worktop runs through, this one butts into it).
+  * `levels`: which rows the kind uses (`KIND_LEVELS`): `base`, `wall`, `tall`, `full` (wardrobe-type, floor to top box), `island`.
+* **Unit** = an ordinary `store.items` entry (so 2D, 3D and walk-through draw it) with `fixture: true, generic: false, price: null`
+  and `carp: { runId, module, level, width, at, internals, fronts, spec, handed, note, … }`:
+  `width` (cm, the only size the user sets), `at` (cm along the run, written by layout), `level` (resolved), `internals`
+  (module specific, e.g. `{ drawers: 3 }`, `{ preset: 'double-hanging' }`, `{ pantry: 'larder' }`, `{ corner: 'lemans' }`,
+  `{ shelves: 2 }`, island `{ bays: [{ w, kind: 'drawers'|'doors', drawers }] }`), `fronts` (`{ doors, drawers, hinge: 'L'|'R', mirror }`),
+  `spec` (RunSpec overrides for this unit), optional `appliance { label, w, h, d, make, model, itemId }`, `hob: 'gas'|'induction'`,
+  `cutout { w, d, fromFront }`, wall row `offset` (absolute along position), `elev`, `h`, `depth`, `cornerSide`, `blind`, `worktop: bool`.
+  **Never move / resize a unit item directly** (drag, inspector, `store.updateItem`, `duplicateItems`, `removeItems`): use the
+  engine calls below — `layoutRun()` writes `x, y, rot, w, d, h, elev, type, params, name, placement, hidden` from the run.
+  A selected unit's run: `Carp.runOfItem(item)`. Units of virtual modules (free wall, appliance space) are `hidden: true`.
+* **RunSpec** (`DEFAULT_SPEC` ⊕ `KIND_SPEC[kind]`; units inherit, `carp.spec` overrides; lengths in cm, board / worktop thickness in mm):
+  `carcass { material: mfc|plywood|mdf, thickness 18, color, colorHex, back { material: hdf|mfc|plywood, thickness 3 } }`,
+  `fronts { material: melamine|laminate|lacquer-matt|lacquer-gloss|veneer|solid-frame|glass|fenix, thickness 18, color, colorHex, style: flat|shaker|j-profile|gola, drawerPattern: equal|graded }`,
+  `handles { type: bar|knob|edge-pull|push|none, finish, length (cm) }`, `edge { carcass, fronts: abs-1|abs-2|pvc-0.4|laser|painted }`,
+  `plinth { height 10, setback 5, finish: matching-fronts|aluminium|carcass }`, `hardware { grade: standard|soft-close|premium, hinge, drawers, liftUp }`,
+  `worktop { material: quartz|porcelain|granite|solid-wood|laminate|stainless|none, thickness 12|20|30|40, color, colorHex, edge: eased|bevel|bullnose|mitred,
+  upstand (cm), depth 60, overhangEnd, maxSlab 300, slabDepth; island: overhangSeat 30, waterfall, backPanel }`,
+  `splashback { material: same-as-worktop|tiles|glass|none, height 55 }`, `lighting { underWall, inCabinet }`, `appliances [{ label, make, model, niche }]`,
+  `heights { worktop 90, wallBottom 145, topLine 220, aboveTop: open|filler|cabinet, body 240 (full-height units incl. plinth), scribe 2 }`,
+  `depths { base 56, wall 33, tall 56, full 58, island 56 }` (CARCASS depths; item depth = carcass + front, base units = worktop depth),
+  `sliding { doors, mirror }` (sliding wardrobes). All labels: `VOCAB.<group>[key] = { en, he }`, `vocab(group, key)`.
+  Derived heights: `derivedHeights(spec)` → `{ plinth, wt, worktop, baseCarcass, wallBottom, topLine, wallH, tallH, body, … }`.
+  Kind defaults: wardrobes / entry / utility `aboveTop: 'cabinet'` (top boxes to the 3.00 m ceiling: unit h = 300 − scribe).
+
+### Module library — `MODULES[id]`, `modulesFor(kind, level)`
+Each: `{ id, level, code, name { en, he }, kinds, w { min, max, std }, appliance?, virtual?, carcass, worktop?, cutout?, corner?, internals { default, options, group } }`.
+| level | modules (→ 3D `type`) |
+| --- | --- |
+| base | `base-door` doors + shelf 30–120, `base-drawers` 2/3/4 drawers 30–120, `base-sink` 60–120, `base-hob` 60–120, `base-oven` 60 (appliance), `base-dishwasher` 45–60 (appliance), `base-pullout` 15–40, `base-bin` 30–60, `base-corner-blind` 60–130 (`cornerSide`, `blind`, internals none/shelf/lemans/magic-corner), `base-corner-carousel` 80–100, `base-open` 15–90, `base-space` free-standing appliance space 45–120 (virtual) → `kitchen-base` (`doors, drawers, sink, cooktop, oven, dishwasher, corner, plinth, counter, counterColor, counterThickness, handles, color`); `vanity` 40–180 wall-hung → `vanity`; `media-low` wall-hung 40–120 → `cabinet {legs:'wall'}`; `entry-bench` → `bench {storage}`; `desk` → `desk`; `custom` → `cabinet` |
+| wall | `wall-door`, `wall-liftup`, `wall-glass`, `wall-open` 15–120, `wall-hood` 60–90, `wall-microwave` 60, `wall-corner` 60–100 → `kitchen-wall` (`doors, glassDoors, open, handles, color`); `wall-void` free wall (virtual); `media-shelf`, `shelf` → `shelf-wall {variant:'floating'}`; `media-panel` → `cabinet` |
+| tall | `tall-pantry` 30–100 (shelves / drawers / larder), `tall-oven` 60, `tall-fridge` 60 (integrated), `tall-utility` 30–70 → `kitchen-tall` (`doors, oven, microwave, fridge`); `tall-fridge-niche` 60–110 (free-standing fridge: the item is the top box above the fridge → `kitchen-wall` at `elev` = fridge h + 5) |
+| island | `island` 90–400 (bays auto ≈ 70 cm or `internals.bays`) → `kitchen-island` (`overhang, waterfall, drawers, doors, sink, cooktop, counter…`) |
+| full | `wardrobe-hinged` 30–120 (doors 1 ≤ 60 cm < 2), `wardrobe-sliding` 40–120 (run-level sliding doors), `laundry-tower` 65–75, `entry-closet` 30–120, `bookcase` 30–100 → `wardrobe` (`doors, sliding, mirror, handles`) / `bookcase` |
+| any | `filler` 2–15 (`carp.level` = row it sits in), `panel` end panel 1.2–8 (its width is its thickness) |
+Wardrobe internals presets: `hanging, double-hanging, shelves, drawers, shoes, trousers, mixed`. Appliance modules keep their width in `fitRun`.
+
+### Mutations — `{ ok: true, ids, runIds, warnings, changed, runId?, unitId? }` or `{ ok: false, reason: { en, he } }`
+A refused call changes nothing; a call that changes nothing returns `ok: true, changed: false` (no undo step, no event).
+Last optional argument everywhere: `{ transient: true }` inside `store.begin() … commit()`.
+```js
+createRun({ kind, x, y })                     // click a wall: the free stretch around the point (between doors; windows too for tall/full-only kinds)
+createRun({ kind, x, y, from, to } | { kind, x, y, length })   // part of the stretch (cm from its left end) — refused across a door for base/tall/full runs
+createRun({ kind, anchor: { x, y, dir }, length })             // explicit
+createRun({ kind: 'island', x, y, rot, length, depth })        // free-standing, (x, y) = centre
+//   + name, nameHe, roomId, spec (deep-merged), ends: { left: 'wall'|'open'|End, right }, levels, notes, units: [{ module, …addUnit opts }]
+updateRun(runId, { name, nameHe, notes, roomId, kind, levels, spec /*deep merge*/, length, anchor, ends })
+removeRun(runId)  ·  duplicateRun(runId, { anchor } | { x, y } | {})  ·  layoutRun(runId)
+addUnit(runId, moduleId, { index | at, width, level, internals, fronts, spec, handed, appliance, hob, cutout, offset, elev, h, depth, note })
+//   refused: width outside min / max; the unit would block a door or a tall / full unit would cover a window
+updateUnit(unitId, { module, width, level, internals, fronts, spec, handed, appliance, hob, cutout, offset, elev, h, depth, note, worktop, cornerSide, blind })  // null deletes a key
+setUnitWidth(unitId, w)  ·  removeUnit(unitId)  ·  moveUnit(unitId, indexInItsRow)
+fitRun(runId, { mode: 'fillers' | 'stretch' | 'units', unitIds, length, toSpan })
+//   'fillers' (default): a 5 cm filler (3 cm handle-less) at every end against a wall / another run, adjustable units absorb the rest,
+//   then fillers (2–15). 'stretch': no new fillers. 'units': only `unitIds`. `toSpan`: first set the run to the free wall between
+//   walls / doors. Never leaves a module's min / max, never changes appliance modules or panels; refused if impossible.
+adoptArchitectLayout({ includeMedia })        // generic kitchen / island / tall / wardrobes / hall & entry closets / vanities / utility
+//   → runs with the right modules (sink, hob, corner, oven tower, pantries, fridge niche, washer / dryer spaces), positions and
+//   footprints preserved, fillers in wardrobe niches, end panels on open kitchen ends, L corners linked. Fridge / washer items stay.
+//   Idempotent, one undo step.
+```
+Layout rules: the floor row (base, tall, full, island, wall-hung base) is laid back to back from `at 0` in `unitIds` order; the
+wall row in order from 0, skipping the extent of tall / full units (or from `carp.offset`). Positions: `positions(run, units)`;
+codes: `unitCodes(run, units)` → `B1… W1… T1… C1… I1 V1 S1 D1 F1 (fillers) P1 (panels) X1 (spaces)`, left to right per letter;
+row extents: `rowExtents(run, units)`. Full geometry of a unit: `geometryOf(run, unit)` → `{ w, h, d, dc, elev, level, zone {y0,y1}, top?, carcassY, fronts, inner, model, spec, H }`.
+
+### Queries
+```js
+listRuns() · getRun(runId) → { run, units } · runOfItem(item | id)
+wallSpanAt(x, y) → { anchor {x,y,dir}, length, a, b, normal, roomId, at, ends {left,right: 'wall'|'open'},
+                     openings: [{ id, kind, style, from, to, width, sill, height, top, hinge, swing }] } | null
+spanOfRun(run) → span + { runFrom, runTo }     ·  openingConflicts(run, units)
+checkRun(runId | 'all') → Finding[]   // { severity: 'error'|'warning'|'info', code, text { en, he }, unitIds, runId }, errors first
+```
+Finding codes: `overflow, underfill, width-range, above-ceiling, no-wall, outside-wall, door-crossing, window-base, window-wall,
+window-tall, mamad, wall-filler, corner-filler, end-panel, corner-dead, corner-access, hob-tall, hob-wall, hob-window, hob-landing,
+wall-over-hob, sink-landing, sink-corner, prep-zone, no-dishwasher, dishwasher-sink, appliance-door, fridge-niche, fridge-landing,
+slab-length, joint-cutout, worktop-joints, overhang-support, overhang-knees, end-overhang, wall-low, wall-reach, hanging-depth,
+hanging-height, sliding-min, sliding-max, aisle, door-swing, clash`. Re-run checks on `'carpentry'`, `'items'` and `'plan'`.
+
+### Take-off — `takeoff(runId | 'all')`
+`{ runs: RunTakeoff[], totals, units: { panels: 'mm', area: 'm2', lengths: 'm' } }`. **Panel sizes in mm**, areas m², lengths m.
+* `RunTakeoff = { runId, code, name, nameHe, kind, length, units: UnitTakeoff[], extraFronts (sliding doors), hardware (run level),
+  worktops: WorktopPiece[], sliding, plinth { m, height, finish, pieces (3 m stock) }, lighting { underWallM, inCabinetM },
+  splashback { m2, material, height, lengthM }, appliances }`
+* `UnitTakeoff = { unitId, code, module, name, level, w, h, d, elev, panels: Panel[], fronts: Panel[], hardware: Hw[], appliances, notes }`
+* `Panel = { part { en, he }, group: 'carcass'|'back'|'front'|'glass', material, thickness (mm), length, width (mm), qty,
+  edges { long, short } (banded edges per piece), edgeType, areaM2, edgeM }` (totals for `qty` pieces).
+* `Hw = { kind, label { en, he }, qty, unit: 'unit'|'m', variant?, length? (mm), grade? }`, kinds: `hinge, drawer, liftup, flap-stay,
+  handle, push-latch, profile (m), leg, hanger, wall-fixing, shelf-support, rail, rail-support, pullout (variant spice|bin|lemans|
+  magic-corner|carousel), larder, trouser-rack, sliding-set, sliding-track (m), appliance-kit, worktop-bracket`.
+* `WorktopPiece = { id 'WT1', s, e (cm along the run), length, depth, thickness (mm), material, color, edge, ends { left, right:
+  'wall'|'polished'|'joint'|'butt'|'tall'|'waterfall' }, cutouts [{ kind: sink|hob|basin, unitId, x (from the piece's left end), w, d,
+  fromFront }], polishedM, upstandM, areaM2, overSlab, jointWarning, waterfall? }`. Pieces ≤ `maxSlab`; joints at unit boundaries
+  ≥ 10 cm clear of cut-outs, otherwise moved clear of them.
+* Construction rules (cm → mm, t = carcass thickness): base carcass = 2 sides H×D, bottom (W−2t)×D, front + back rail (W−2t)×100,
+  back (W−4)×(H−4); wall / tall / full = 2 sides, top + bottom (W−2t)×D, back; top boxes = a second wall-type carcass; shelves
+  (inner − 2)×(D−20); carcass edges banded on the front edge, fronts all round; fronts from the front layout with 3 mm gaps (3 mm under
+  the worktop); hinges per door 2 / 3 / 4 / 5 for ≤ 900 / 1600 / 2200 / more mm; one drawer system per drawer, runner = longest
+  standard ≤ D − 10 mm; legs 4 per carcass (6 over 100 cm); hangers 2 per wall unit. Example (tested): a 60 cm 3-drawer base =
+  sides 780×560 ×2, bottom 564×560, rails 564×100 ×2, back 596×776, 3 fronts 597×257, 3 × 550 mm drawers, 3 handles, 4 legs.
+* `totals = { materials [{ group, material, thickness, label, areaM2, pieces, edgeM }], edges [{ type, label, m }], fronts { count, areaM2 },
+  hardware Hw[], worktops [{ material, thickness, label, areaM2, pieces, polishedM, upstandM, cutouts {sink, hob, basin} }], plinthM, lightingM, splashbackM2 }`.
+
+### Estimate — `estimate(runId | 'all', { tier, pricebook })`
+Price book (`src/carpentry/pricebook.js`): `{ currency: 'ILS', vat: 0.18, asOf: 'YYYY-MM', tiers: ['basic','mid','premium'],
+tierFactor?: { basic, mid, premium }, rates: { [key]: { unit: 'm'|'m2'|'unit'|'percent', low, typical, high, tierFactor?, label { en, he },
+source { name, url } } }, notes: [] }`. Rate keys the engine looks up (missing → 0 and listed in `missingRates`):
+`carcass.<mfc|plywood|mdf>` m2 · `back.<hdf|mfc|plywood>` m2 · `edge.<abs-1|abs-2|pvc-0.4|laser|painted>` m · `plinth.<matching-fronts|aluminium|carcass>` m ·
+`fronts.<frontMaterial>` m2 · `fronts.glass` m2 · `fronts.mirror` m2 · `worktop.<worktopMaterial>` m2 or m (per running metre ≤ 65 cm deep; deeper = area / 0.6) ·
+`worktop.cutout.<sink|hob|basin>` unit · `worktop.edge` m · `worktop.upstand` m · `worktop.waterfall` unit · `hardware.<Hw kind>` unit (`hardware.rail`,
+`hardware.profile`, `hardware.sliding-track` per m) · `internal.pullout.<variant>` · `internal.larder` · `internal.trouser-rack` unit ·
+`install.<runKind>` or `install` (percent of the run's material subtotal, or per m of run, or per unit) · `lighting.led` m · `splashback.<material>` m2.
+Price = qty × rate × tierFactor (rate's, else the book's, else 1). Result: `{ isEstimate: true, label { en, he }, disclaimer { en, he },
+currency, vat, asOf, tier, tiers, runs: [{ runId, code, name, components: [{ key: carcass|fronts|worktop|hardware|internal|installation|lighting|splashback,
+label, optional, low, typical, high, rateKeys, lines: [{ rateKey, label, unit, qty, low, typical, high, source }] }], total, totalIncVat, rateKeys }],
+total, totalIncVat, missingRates, notes, pricebookMissing }` — whole ILS, `total` before VAT; total = Σ runs = Σ components = Σ lines.
+**Always present it as an estimate** (show `label` / `disclaimer`, the `asOf`, and each line's source).
+
+### Drawings — `drawings(runId)` → `Drawing[]` (plan, elevation, section, worktop if any, internal if tall / full units)
+`Drawing = { id, kind: 'plan'|'elevation'|'section'|'worktop'|'internal', runId, title { en, he }, scale (1:scale, from 10/20/25/50/100 to
+fit A3 landscape), bounds { x, y, w, h } (real cm incl. dimensions), yUp: true, ops: Op[], dims: DimChain[] }`.
+* Coordinates: **real cm, y UP in every drawing** (flip once). `lw` = line weight and `size` = text height, both **paper mm**
+  (`LW = { heavy .5, medium .35, thin .18, hair .13 }`, `TEXT = { code 3, label 2.2, dim 2, small 1.8 }`); paper mm = cm × 10 / scale.
+* `Op`: `{ t:'line', x1,y1,x2,y2, lw, dash? }` · `{ t:'rect', x,y,w,h, lw, fill?, hatch? }` · `{ t:'poly', pts, close, lw, fill?, dash? }` ·
+  `{ t:'arc', cx,cy,r, a0,a1 (deg CCW from +x, drawn CCW a0→a1), lw, dash? }` · `{ t:'text', x,y, text: string | { en, he }, size, anchor:
+  'start'|'middle'|'end', rot? (deg CCW), weight? }` — text `(x, y)` is the anchor point at the text's VERTICAL CENTRE. `dash` ∈
+  `dash | dot | center`. `fill` / `hatch` are semantic: `wall, plinth, worktop, appliance, glass, blind, splashback, void, section` (`FILL`).
+  Ops carry `role` (`dim, dim-text, code, label, wall, opening, unit, front, plinth, worktop, cutout, joint, edge-polished, swing,
+  splashback, internal, context, note, floor, ceiling`) and `unitId` (unit outlines / codes) for styling and hit-testing.
+* Frames: **elevation / internal**: x along the run (0 = left end seen from the front), y up from the floor (ceiling line at 300); island
+  elevations are seen from the working side (mirrored). **plan**: x along, y = −depth (wall at the top, room below). **worktop**: same as
+  plan. **section**: x = distance from the wall face (island: from the working edge), y up.
+* Content: plan — walls (cut, `fill:'wall'`), windows, doors with swing arcs, units (floor solid, wall dashed), fronts' door swings,
+  worktop outline + cut-outs, neighbouring carpentry dashed; elevation — floor, ceiling, side walls, windows / doors behind (dashed +
+  `W 180/100(+110)`), plinth, carcasses, every front (door / flap opening symbols, handles, drawer lines, glass, appliances outlined and
+  labelled), worktop, splashback (cut at windows), bulkhead filler / top boxes, sliding doors, unit codes; internal — carcass,
+  shelves, rails, drawers, pull-outs with per-unit height chains; worktop — pieces (`WT1…`), joints (dash-dot + JOINT), L-corner joint,
+  cut-outs with position / size chains, polished edges heavy; section — wall, plinth + setback, carcass, front, worktop + overhang,
+  splashback, wall unit, top box, hanging rail.
+* `DimChain = { id, axis: 'x'|'y', pts, values, total, at, lanes }` mirrors the drawn chains (`units`, `overall`, `wall-units`,
+  `heights`, `ceiling`, `depth*`, `cutouts`, `pieces`, `inner-<code>`…). Unit chains sum to the run length. Texts that do not fit their
+  segment are moved to an outer lane with a leader, so **no two dimension texts overlap**; `textBox(op, scale)` gives the real-cm box
+  used for that test (`textWidthMm` ≈ 0.6 em per character) — keep the renderer's font metrics close to it.
+
+### Schedules — `schedules(runId | 'all')`
+`{ headers, units, materials, hardware, worktops, appliances, questions, totals }`; `headers[table] = [[key, { en, he }]…]` gives column
+order and titles. Rows (all text bilingual): `units { ref 'K1·B3', run, code, unitId, module, level, size { w,h,d }, sizeText, elev, fronts,
+internals, hardware, notes }` · `materials { run, element, material, thickness, colour, finish }` · `hardware { item, spec, qty, unit, kind }`
+· `worktops { ref, material, thickness, size, sizeText, cutouts, edges, area, waterfall }` · `appliances { ref, appliance, make, niche }` ·
+`questions { run, topic, text }` (auto-generated: site measurements, ceiling / floor checks, appliance models, cut-out templates, services,
+hardware choice, corner, wardrobe interiors, mamad fixing, tolerances). Codes match the drawings.
+
+### Carpenters — `sortCarpentersByDistance(list, { latitude, longitude } = house)`
+`list` items `{ id, name, nameHe?, city, region, lat, lon, specialties: [], website, phone?, email?, address?, source { url, checkedAt }, notes? }`
+→ new array with `distanceKm` (haversine, 1 decimal; `null` without coordinates), nearest first, no-coordinate entries last.
+`haversineKm(lat1, lon1, lat2, lon2)`.
+
+### Notes for the UI / PDF teams
+* Use `checkRun` severities: errors block "send to carpenter", warnings are shown, info is advice.
+* The estimate is not a quotation; show the price book's `asOf` and sources. Fridge / washer / dryer stay ordinary catalogue items.
+* Store hook used by the engine only: `store._applyCarpentry(change, opts)`. `Carp.bindStore(otherStore)` for workers / tests;
+  read-only functions also take a `src = { carpentry, items }` (e.g. a parsed design file): `checkRun / takeoff / drawings / schedules (runId, src)`, `estimate(runId, { …, src })`, `listRuns(src)`, `getRun(runId, src)`.

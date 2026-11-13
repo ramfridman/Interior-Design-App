@@ -270,6 +270,17 @@ function buildFloorSoups(grid, plan) {
     floors.get(id).quad([[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1]], [0, 1, 0], uv);
     if (kind[k] === ROOM) ceilings.quad([[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1]], [0, -1, 0], uv);
   }
+  // the ceiling also runs over the wall heads (hidden inside the walls): the hair-line cracks of the wall / ceiling
+  // T-junctions then show ceiling, not the exterior roof soffit above it (visible indoors once the eye adapts)
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const k = j * nx + i;
+    if (kind[k] !== WALL && kind[k] !== OPENING) continue;
+    const xs = [X[i] / 100, (X[i] + X[i + 1]) / 200, X[i + 1] / 100], zs = [Y[j] / 100, (Y[j] + Y[j + 1]) / 200, Y[j + 1] / 100];
+    for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) {             // halves: each takes the room on its own side
+      const x0 = xs[a], x1 = xs[a + 1], z0 = zs[b], z1 = zs[b + 1];
+      ceilings.quad([[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1]], [0, -1, 0], [[x0, z0], [x1, z0], [x1, z1], [x0, z1]]);
+    }
+  }
   return { floors, ceilings };
 }
 

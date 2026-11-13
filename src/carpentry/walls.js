@@ -36,6 +36,19 @@ function distToSeg(px, py, f) {
   return Math.hypot(px - (f.x1 + t * vx), py - (f.y1 + t * vy));
 }
 
+/** Wall faces plus the room-side edges of openings collinear with a face (so a click in a doorway finds its wall). */
+function facesWithOpenings(plan) {
+  const faces = wallFaces(plan), out = [...faces];
+  for (const o of plan.openings) {
+    const edges = o.axis === 'h' ? [[o.x, o.y, o.x + o.w, o.y], [o.x, o.y + o.h, o.x + o.w, o.y + o.h]] : [[o.x, o.y, o.x, o.y + o.h], [o.x + o.w, o.y, o.x + o.w, o.y + o.h]];
+    for (const [x1, y1, x2, y2] of edges) {
+      const f = faces.find((g) => (o.axis === 'h' ? g.y1 === y1 && g.y2 === y1 && g.ny !== 0 && (g.ny > 0 ? y1 === o.y + o.h : y1 === o.y) : g.x1 === x1 && g.x2 === x1 && g.nx !== 0 && (g.nx > 0 ? x1 === o.x + o.w : x1 === o.x)));
+      if (f) out.push({ x1, y1, x2, y2, nx: f.nx, ny: f.ny, opening: o.id });
+    }
+  }
+  return out;
+}
+
 /**
  * The free straight wall stretch at (x, y): the nearest wall face (≤ maxDist cm, point on the room side), merged with the
  * collinear faces across the openings in it, up to where the wall turns or ends.
@@ -46,7 +59,7 @@ function distToSeg(px, py, f) {
 export function wallSpanAt(x, y, opts = {}) {
   const plan = opts.plan || PLAN, maxDist = opts.maxDist ?? 40;
   let best = null;
-  for (const f of wallFaces(plan)) {
+  for (const f of facesWithOpenings(plan)) {
     if ((x - f.x1) * f.nx + (y - f.y1) * f.ny < -1) continue;           // behind the face
     const dd = distToSeg(x, y, f);
     if (dd <= maxDist && (!best || dd < best.dd)) best = { f, dd };

@@ -23,17 +23,18 @@
  *     takes over. Everything degrades to the original lighting if the solver fails.
  */
 import * as THREE from 'three';
-import { buildScene, sceneInputFromPlan, chartFor, chartUV, transferLightmap, toHalf, roomAt, hexToLinear, PROBE_HEIGHTS } from './solver.js';
+import { buildScene, sceneInputFromPlan, chartFor, chartUV, transferLightmap, toHalf, roomAt, airRegionAt, hexToLinear, PROBE_HEIGHTS } from './solver.js';
 import { createEngine } from './engine.js';
 import { finishParams } from '../house.js';
 
 const DOLL_TARGET = 0.3;                         // renderer units (≈ 15 klux): mean interior irradiance shown in the dollhouse
+const ADAPT_KEY = 0.13, ADAPT_POWER = 0.75, MAX_ADAPT = 20;   // eye adaptation: target luminance, partial adaptation, cap
 const FADE_S = 0.45, SLIDER_FADE_S = 0.12, ADAPT_S = 0.45;
 const smooth = (a, b, v) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
 const INTERIOR = (name) => name.startsWith('floor:') || name.startsWith('wall:room:') || name === 'ceilings' || name === 'wall:skirting';
 
 // ───────────────────────── shader patches ─────────────────────────
-const LM_VERTEX_DECL = 'attribute vec2 dlUv;\nvarying vec2 vDlUv;\n';
+const LM_VERTEX_DECL = 'attribute vec2 dlUv;\nattribute vec4 dlBox;\nvarying vec2 vDlUv;\nvarying vec4 vDlBox;\n';
 const FIELD_VERTEX_DECL = 'varying vec3 vDlW;\n';
 const COMMON_FRAG_DECL = /* glsl */`
 uniform float dlMix; uniform float dlOn; uniform float dlGain; uniform float dlSpec;
@@ -42,6 +43,7 @@ float dlLum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 const LM_FRAG_DECL = /* glsl */`
 uniform sampler2D dlMapA; uniform sampler2D dlMapB;
 varying vec2 vDlUv;
+varying vec4 vDlBox;     // lookup clamp: keeps bilinear filtering from reaching texels behind a wall
 `;
 const FIELD_FRAG_DECL = /* glsl */`
 uniform sampler2D dlFieldA; uniform sampler2D dlFieldB;
@@ -84,14 +86,14 @@ const indirect = (W, E) => /* glsl */`
 
 function patchLightmapShader(shader, U) {
   Object.assign(shader.uniforms, { dlMapA: U.dlMapA, dlMapB: U.dlMapB, dlMix: U.dlMix, dlOn: U.dlOn, dlGain: U.dlGain, dlSpec: U.dlSpec });
-  shader.vertexShader = LM_VERTEX_DECL + shader.vertexShader.replace('#include <uv_vertex>', '#include <uv_vertex>\n\tvDlUv = dlUv;');
+  shader.vertexShader = LM_VERTEX_DECL + shader.vertexShader.replace('#include <uv_vertex>', '#include <uv_vertex>\n\tvDlUv = dlUv;\n\tvDlBox = dlBox;');
   // lightmap alpha = fraction of the texel the solver found in the sun. Shadow maps leak a little light along the
   // wall / ceiling junctions (normal bias); the eye-adapted interior exposure would show those leaks as bright lines,
   // so on lit-by-lightmap surfaces the sun is masked where the solver says no sun can reach.
   const begin = THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );',
     'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= dlSunMask;');
   shader.fragmentShader = COMMON_FRAG_DECL + LM_FRAG_DECL + shader.fragmentShader
-    .replace('#include <lights_fragment_begin>', 'vec4 dlTexel = mix(texture2D(dlMapA, vDlUv), texture2D(dlMapB, vDlUv), dlMix);\n'
+    .replace('#include <lights_fragment_begin>', 'vec2 dlUvC = clamp(vDlUv, vDlBox.xy, vDlBox.zw);\nvec4 dlTexel = mix(texture2D(dlMapA, dlUvC), texture2D(dlMapB, dlUvC), dlMix);\n'
       + 'float dlSunMask = mix(1.0, smoothstep(0.0, 0.2, dlTexel.a), dlOn);\n' + begin)
     .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n' + indirect('dlOn', 'dlTexel.rgb * dlGain'));
 }
@@ -225,20 +227,42 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
     if (!S || !mesh || !mesh.geometry) return;
     const g = mesh.geometry, pos = g.getAttribute('position'), nor = g.getAttribute('normal');
     if (!pos || !nor) return;
-    let uv = g.getAttribute('dlUv');
+    let uv = g.getAttribute('dlUv'), box = g.getAttribute('dlBox');
     if (!uv || uv.count !== pos.count) { uv = new THREE.BufferAttribute(new Float32Array(pos.count * 2), 2); g.setAttribute('dlUv', uv); }
+    if (!box || box.count !== pos.count) { box = new THREE.BufferAttribute(new Float32Array(pos.count * 4), 4); g.setAttribute('dlBox', box); }
     const idx = g.index ? g.index.array : null, n = idx ? idx.length : pos.count, out = [0, 0];
+    const W = S.atlas.width, AH = S.atlas.height;
     const dy = mesh.name === 'ceilings' ? state.H : 0;                       // the ceiling soup sits at y = 0, moved up by its mesh
     for (let t = 0; t < n; t += 3) {
       const a = idx ? idx[t] : t, b = idx ? idx[t + 1] : t + 1, c = idx ? idx[t + 2] : t + 2;
       const cx = (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3, cy = (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3 + dy, cz = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
       const ch = chartFor(S, cx, cy, cz, nor.getX(a), nor.getY(a), nor.getZ(a));
+      let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
       for (const v of [a, b, c]) {
         if (ch >= 0) chartUV(S, ch, pos.getX(v), pos.getY(v) + dy, pos.getZ(v), out); else { out[0] = 0; out[1] = 0; }
         uv.setXY(v, out[0], out[1]);
+        u0 = Math.min(u0, out[0]); u1 = Math.max(u1, out[0]); v0 = Math.min(v0, out[1]); v1 = Math.max(v1, out[1]);
       }
+      // floors / ceilings: on every edge that borders a wall (not open floor of the same room), clamp the lookup to
+      // the centre of the edge texel, so bilinear filtering never mixes in the texel on the other side of the wall
+      let bx0 = -1, by0 = -1, bx1 = 2, by1 = 2;
+      const C = ch >= 0 ? S.charts[ch] : null;
+      if (C && C.type === 'h') {
+        let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+        for (const v of [a, b, c]) { x0 = Math.min(x0, pos.getX(v)); x1 = Math.max(x1, pos.getX(v)); z0 = Math.min(z0, pos.getZ(v)); z1 = Math.max(z1, pos.getZ(v)); }
+        const yy = C.normal[1] > 0 ? C.y + 0.01 : C.y - 0.01, mx = (x0 + x1) / 2, mz = (z0 + z1) / 2, e = 0.025;
+        const open = (x, z) => airRegionAt(S, x, yy, z) === C.region;
+        const centre = (t, size) => (Math.floor(t * size) + 0.5) / size;
+        if (!open(x0 - e, mz)) bx0 = centre(u0 + 1e-6, W);
+        if (!open(x1 + e, mz)) bx1 = centre(u1 - 1e-6, W);
+        if (!open(mx, z0 - e)) by0 = centre(v0 + 1e-6, AH);
+        if (!open(mx, z1 + e)) by1 = centre(v1 - 1e-6, AH);
+        if (bx1 < bx0) bx0 = bx1 = (bx0 + bx1) / 2;
+        if (by1 < by0) by0 = by1 = (by0 + by1) / 2;
+      }
+      for (const v of [a, b, c]) box.setXYZW(v, bx0, by0, bx1, by1);
     }
-    uv.needsUpdate = true;
+    uv.needsUpdate = true; box.needsUpdate = true;
   }
   function applyUVs() {
     const t0 = performance.now();
@@ -402,7 +426,7 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
         eView = d[0] * d[0] * lum3(cube, (d[0] >= 0 ? 0 : 1) * 3) + d[1] * d[1] * lum3(cube, (d[1] >= 0 ? 2 : 3) * 3) + d[2] * d[2] * lum3(cube, (d[2] >= 0 ? 4 : 5) * 3);
         const L = (0.5 / Math.PI) * (0.6 * eView + 0.4 * eAvg);
         // partial adaptation (the eye never fully compensates: interiors still read darker than the garden)
-        key = Math.min(28, Math.max(1, Math.pow(0.16 / Math.max(1e-4, L), 0.8))) * envExposure;
+        key = Math.min(MAX_ADAPT, Math.max(1, Math.pow(ADAPT_KEY / Math.max(1e-4, L), ADAPT_POWER))) * envExposure;
       }
       if (state.adapted == null) state.adapted = key;
       const k = 1 - Math.exp(-dt / ADAPT_S);

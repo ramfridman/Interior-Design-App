@@ -1088,8 +1088,18 @@ export function chartFor(S, x, y, z, nx, ny, nz) {
   const cell = (px, pz) => { const i = Math.floor((px - S.ox) / CS), j = Math.floor((pz - S.oz) / CS); return i < 0 || j < 0 || i >= S.nx || j >= S.ny ? -1 : j * S.nx + i; };
   const avg = (c) => { const r = c >= 0 ? (S.kind[c] === ROOM ? S.reg[c] : S.kind[c] === OPEN ? S.nR + S.reg[c] : -1) : -1; return r >= 0 ? S.chartByKey.get(`a:${r}`).id : -1; };
   if (Math.abs(ny) > 0.7) {
-    const c = cell(x, z); if (c < 0) return -1;
-    if (S.kind[c] !== ROOM && S.kind[c] !== OPEN) return -1;
+    let c = cell(x, z); if (c < 0) return -1;
+    if (S.kind[c] !== ROOM && S.kind[c] !== OPEN) {
+      if (ny > 0 || S.kind[c] !== WALL && S.kind[c] !== OPEN) return -1;
+      // ceiling over a wall head (only ever seen through hair-line cracks): use the nearest room's ceiling
+      let best = -1, bd = Infinity;
+      for (let dj = -4; dj <= 4; dj++) for (let di = -4; di <= 4; di++) {
+        const q = cell(x + di * CS, z + dj * CS); if (q < 0 || S.kind[q] !== ROOM) continue;
+        const d = di * di + dj * dj; if (d < bd) { bd = d; best = q; }
+      }
+      if (best < 0) return -1;
+      c = best;
+    }
     const ch = ny > 0 ? S.floorChart[c] : S.ceilChart[c];
     return ch >= 0 ? ch : avg(c);
   }
@@ -1116,6 +1126,16 @@ export function chartUV(S, chId, x, y, z, out = [0, 0]) {
   u = Math.min(C.cols + PAD - 0.5, Math.max(-PAD + 0.5, u)); v = Math.min(C.rows + PAD - 0.5, Math.max(-PAD + 0.5, v));
   out[0] = (C.ax + PAD + u) / W; out[1] = (C.ay + PAD + v) / Hh;
   return out;
+}
+
+/** Region (room index, or nR + opening index) of the air at a world point, or -1 (solid / outdoors). */
+export function airRegionAt(S, x, y, z) {
+  const i = Math.floor((x - S.ox) / CS), j = Math.floor((z - S.oz) / CS);
+  if (i < 0 || j < 0 || i >= S.nx || j >= S.ny) return -1;
+  const c = j * S.nx + i;
+  if (S.kind[c] === ROOM) return y >= 0 && y <= S.H ? S.reg[c] : -1;
+  if (S.kind[c] === OPEN) return y >= S.oSill[S.reg[c]] - 1e-6 && y <= S.oHead[S.reg[c]] + 1e-6 ? S.nR + S.reg[c] : -1;
+  return -1;
 }
 
 /** Room index of a plan point (cm), or -1. */

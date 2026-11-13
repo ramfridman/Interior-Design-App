@@ -6,9 +6,8 @@
 import { PLAN } from '../core/plan.js';
 import { itemAABB } from '../core/geometry.js';
 import { view } from './state.js';
-import { MODULES } from './modules.js';
 import { RULES } from './spec.js';
-import { unitsOf, positions, geometryOf, levelOf, unitCodes, isFloorLevel } from './layout.js';
+import { unitsOf, positions, geometryOf, unitCodes, isFloorLevel } from './layout.js';
 import { spanOfRun, openingConflicts, toPlan, frame } from './walls.js';
 import { computeWorktops } from './worktop.js';
 
@@ -117,7 +116,7 @@ function findingsFor(run, v) {
     }
     if (span) for (const o of span.openings.filter((q) => q.kind === 'window')) {
       const a = span.runFrom + hb.at, b = span.runFrom + hb.end, gap = Math.max(o.from - b, a - o.to);
-      if (gap < RULES.hobToWindow) add('warning', 'hob-window', `Hob ${C(hb)} is ${gap <= 0 ? 'under' : r1(gap) + ' cm from'} the window ${o.id} — wind blows out gas flames, curtains are a fire risk and a hood cannot be fitted; move the hob ≥ ${RULES.hobToWindow} cm from the window.`,
+      if (gap < RULES.hobToWindow) add('warning', 'hob-window', `Hob ${C(hb)} is ${gap <= 0 ? 'under' : r1(gap) + ' cm from'} the window ${o.id} — wind blows out gas flames, curtains are a fire risk and no wall hood can be fitted; move the hob ≥ ${RULES.hobToWindow} cm from the window.`,
         `הכיריים ${C(hb)} ${gap <= 0 ? 'מתחת ל' : 'במרחק ' + r1(gap) + ' ס״מ מ'}חלון ${o.id} — רוח מכבה להבת גז, וילון מהווה סכנת אש ולא ניתן להתקין קולט; יש להרחיק ≥ ${RULES.hobToWindow} ס״מ מהחלון.`, [hb]);
     }
     const st = contig(hb);
@@ -203,14 +202,16 @@ function findingsFor(run, v) {
   // ── room: aisle, door swings, clashes ──
   const runIds = new Set(list.map((x) => x.id)), markers = new Set(list.map((x) => x.u.carp.appliance && x.u.carp.appliance.itemId).filter(Boolean));
   const others = v.items.filter((it) => !it.hidden && !runIds.has(it.id) && !markers.has(it.id) && it.zone !== 'outdoor' && !NOT_CLASHING.has(it.type) && !(it.carp && it.carp.runId === run.id));
+  const linked = new Set();
+  for (const r of v.runs()) for (const sd of ['left', 'right']) { const e = r.ends && r.ends[sd]; if (e && e.type === 'run') { if (r.id === run.id) linked.add(e.runId); if (e.runId === run.id) linked.add(r.id); } }
   const aisleNeed = ['kitchen', 'island'].includes(run.kind) ? RULES.aisleMin : ['wardrobe', 'entry', 'utility', 'pantry'].includes(run.kind) ? RULES.wardrobeAisle : 70;
   if (run.kind !== 'island') {
     const f = frame(run.anchor.dir);
     let worst = null;
-    for (const x of floor.filter((y) => !y.virtual)) {
+    for (const x of floor.filter((y) => !y.virtual && !y.mod.corner)) {
       for (let s = x.at + 5; s <= x.end - 5 + 0.01; s += Math.max(5, (x.w - 10) / 2 || 5)) {
         const [px, py] = toPlan(run.anchor, s, x.g.d + 0.5);
-        const dist = rayClear(px, py, f.nx, f.ny, others.filter((o) => (o.elev || 0) < 120 && o.h > 30), 400);
+        const dist = rayClear(px, py, f.nx, f.ny, others.filter((o) => (o.elev || 0) < 120 && o.h > 30 && !(o.carp && linked.has(o.carp.runId))), 400);
         if (dist != null && (!worst || dist.d < worst.d)) worst = { ...dist, x };
       }
     }
