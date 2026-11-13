@@ -6,9 +6,17 @@
  *   ox/oy  device px position of the plan origin (always integers)
  */
 const HALO = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
+/** requested font string → the form the browser reports back (to tell whether the context still has it). */
+const fonts = new Map();
 
 export function createGfx(ctx, { scale, dpr, ox, oy, width, height, font }) {
   const k = scale * dpr;
+  const hasSpacing = 'letterSpacing' in ctx;
+  const setSpacing = (px) => {
+    if (!hasSpacing) return;
+    const want = px ? `${px}px` : '0px';
+    if (ctx.letterSpacing !== want) ctx.letterSpacing = want;
+  };
   const G = {
     ctx, k, scale, dpr, ox, oy, width, height, font,
     /** Visible plan rectangle (cm). */
@@ -55,9 +63,13 @@ export function createGfx(ctx, { scale, dpr, ox, oy, width, height, font }) {
         else { ctx.fillStyle = stroke; ctx.fillRect(x0, y0, w, h); }
       }
     },
-    /** Set the font: size in CSS px. */
+    /** Set the font: size in CSS px. (Assigning ctx.font / letterSpacing is slow — only done when it changes.) */
     setFont(size, weight = 400, style = '') {
-      ctx.font = `${style ? style + ' ' : ''}${weight} ${Math.round(size * dpr * 100) / 100}px ${font}`;
+      const want = `${style ? style + ' ' : ''}${weight} ${Math.round(size * dpr * 100) / 100}px ${font}`;
+      const known = fonts.get(want);
+      if (known !== undefined && ctx.font === known) return;
+      ctx.font = want;
+      if (known === undefined) fonts.set(want, ctx.font);
     },
     /**
      * Draw text at a DEVICE-px anchor. opts: { size, weight, color, halo, align, baseline, angle (rad), spacing (em) }.
@@ -66,7 +78,7 @@ export function createGfx(ctx, { scale, dpr, ox, oy, width, height, font }) {
       const { size = 11, weight = 400, color = '#000', halo = null, align = 'center', baseline = 'middle', angle = 0, spacing = 0 } = opts;
       G.setFont(size, weight);
       ctx.textAlign = align; ctx.textBaseline = baseline;
-      if ('letterSpacing' in ctx) ctx.letterSpacing = spacing ? `${spacing * size * dpr}px` : '0px';
+      setSpacing(spacing ? spacing * size * dpr : 0);
       ctx.save();
       ctx.translate(Math.round(x), Math.round(y));
       if (angle) ctx.rotate(angle);
@@ -79,14 +91,14 @@ export function createGfx(ctx, { scale, dpr, ox, oy, width, height, font }) {
       ctx.fillStyle = color;
       ctx.fillText(str, 0, 0);
       ctx.restore();
-      if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+      setSpacing(0);
     },
     /** Text width in device px for the given style. */
     measure(str, size = 11, weight = 400, spacing = 0) {
       G.setFont(size, weight);
-      if ('letterSpacing' in ctx) ctx.letterSpacing = spacing ? `${spacing * size * dpr}px` : '0px';
+      setSpacing(spacing ? spacing * size * dpr : 0);
       const w = ctx.measureText(str).width;
-      if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+      setSpacing(0);
       return w;
     },
   };

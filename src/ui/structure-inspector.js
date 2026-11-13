@@ -147,7 +147,7 @@ export function createStructureInspector(app) {
 
     patch = (now) => {
       const x = now.opening;
-      meta.textContent = [x.rooms && x.rooms.length === 2 ? `${spaceName(x.rooms[0], plan)} / ${spaceName(x.rooms[1], plan)}` : '', dims(x)].filter(Boolean).join(', ');
+      meta.textContent = now.seg ? segmentSides(now.seg, plan) : x.rooms && x.rooms.length === 2 ? `Between ${spaceName(x.rooms[0], plan)} and ${spaceName(x.rooms[1], plan)}` : dims(x);
       force(fields.width, x.width); force(fields.height, x.height);
       if (fields.sill) force(fields.sill, x.sill);
       force(fields.offset, openingOffset(x, now.seg));

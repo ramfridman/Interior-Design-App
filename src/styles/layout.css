@@ -24,7 +24,7 @@
 }
 .topbar__group { display: flex; align-items: center; gap: 2px; flex: none; }
 .topbar__group + .topbar__group::before, .topbar__center + .topbar__group::before { content: ''; width: 1px; height: 20px; background: var(--line); margin-right: calc(var(--s-3) - 2px); }
-.topbar__center { flex: 1 1 auto; display: flex; justify-content: center; min-width: 0; }
+.topbar__center { flex: 1 0 auto; display: flex; justify-content: center; min-width: 0; }   /* the project name gives way first */
 .topbar__center + .topbar__group::before { display: none; }
 .topbar__end { gap: var(--s-1); }
 .topbar__end::before { display: none; }
@@ -67,6 +67,7 @@
 .sbar { display: flex; align-items: center; gap: var(--s-1); }
 .sbar__thick { display: flex; align-items: center; gap: 5px; margin-left: var(--s-1); color: var(--ink-3); }
 .sbar__unit { font-size: var(--fs-11); color: var(--ink-3); }
+.sbar__plan { display: flex; align-items: center; gap: 2px; }
 .sbar__sep { flex: none; width: 1px; height: 20px; margin: 0 var(--s-1); background: var(--line); }
 /* Narrow screens: the same bar floats over the plan. */
 .sbar-float { display: none; max-width: calc(100% - var(--s-3) * 2); }
@@ -209,4 +210,6 @@
   .projname, .budget, .planchip { display: none; }   /* the Structure button carries the change count as a badge */
   .topbar__group + .topbar__group::before { display: none; }
   .seg--views .seg__label { display: none; }
+  /* Phone: tools and thickness only. Highlighting changes is in the plan-display menu, reset in the changes lists. */
+  .sbar-float .sbar__plan, .sbar-float .sbar__sep, .sbar-float .sbar__thick > .icon { display: none; }
 }

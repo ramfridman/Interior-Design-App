@@ -15,11 +15,15 @@
   #bar > * { pointer-events: auto; }
   button, select { font: inherit; padding: 4px 9px; border-radius: 6px; border: 1px solid var(--line-strong, #0003); background: var(--raised, #fff); color: inherit; cursor: pointer; }
   button.on { background: var(--accent, #1d4e89); color: var(--accent-ink, #fff); border-color: transparent; }
+  .sep { width: 8px; }
+  #toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); max-width: 70vw; padding: 7px 12px; border-radius: 8px; background: #22262b; color: #fff; z-index: 3; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.on { opacity: .95; }
   #status { margin-left: auto; padding: 4px 9px; border-radius: 6px; background: var(--overlay-bg, #fffc); font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
 <div id="view"></div>
+<div id="toast"></div>
 <div id="bar">
   <button data-fit="lot">Lot</button><button data-fit="house">House</button><button data-fit="selection">Selection</button>
   <button data-zoom="1.5">+</button><button data-zoom="0.667">−</button>
@@ -28,6 +32,12 @@
   <button data-ui="showRoomLabels">Labels</button><button data-ui="showSite">Site</button><button data-ui="showItems">Items</button>
   <button id="units">Units</button><button id="theme">Theme</button>
   <button id="place-sofa">Place sofa</button><button id="place-art">Place wall art</button><button id="place-tree">Place tree</button>
+  <span class="sep"></span>
+  <button data-tool="structure" title="Select / move walls and openings">Structure</button><button data-tool="wall">Wall</button>
+  <button data-tool="door">Door</button><button data-tool="window">Window</button><button data-tool="passage">Passage</button>
+  <select id="thickness" title="New wall thickness"><option>7</option><option selected>10</option><option>12</option><option>15</option><option>20</option></select>
+  <button data-ui="showPlanChanges">Changes</button><button id="remove-sel">Remove</button><button id="flip-sel">Flip</button><button id="reset-plan">Reset plan</button>
+  <span class="sep"></span>
   <button id="stress">150 items</button><button id="undo">Undo</button><button id="redo">Redo</button><button id="export">Export PNG</button>
   <span id="status"></span>
 </div>
@@ -38,6 +48,7 @@ import { initialLayout } from '../src/core/initial-layout.js';
 import * as catalog from '../src/catalog/index.js';
 import * as models from '../src/models/index.js';
 import { createView2D } from '../src/view2d/index.js';
+import * as planEdit from '../src/core/plan-edit.js';
 
 const q = new URLSearchParams(location.search);
 if (q.get('theme')) document.documentElement.dataset.theme = q.get('theme');
@@ -47,7 +58,7 @@ await Promise.all([models.loadModels(), catalog.loadCatalog()]);
 store.load({ items: initialLayout().map((it, i) => ({ ...it, id: it.id || `init_${i}` })) });
 
 const view = createView2D(document.getElementById('view'), { store, plan: PLAN, catalog, models });
-window.app = { store, plan: PLAN, catalog, models, view2d: view };
+window.app = { store, plan: PLAN, catalog, models, view2d: view, planEdit };
 
 const $ = (s) => document.querySelector(s), status = $('#status');
 let cursor = '', zoom = '';
@@ -57,6 +68,15 @@ view.on('zoom', (e) => { zoom = `${e.scale.toFixed(3)} px/cm`; show(); });
 view.on('contextmenu', (e) => { status.textContent = `context menu: ${e.item ? e.item.name : 'empty'}`; });
 view.on('item-dblclick', (e) => { status.textContent = `double-click: ${e.item.name}`; });
 window.events = [];
+// structure editing: what the real UI turns into toasts / an inspector
+window.structureEvents = [];
+const toast = document.getElementById('toast');
+let toastTimer = 0;
+view.on('structure', (e) => {
+  window.structureEvents.push(e);
+  toast.textContent = `${e.type} · ${e.op}${e.text ? ' — ' + e.text : ''}`; toast.classList.add('on');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('on'), 3500);
+});
 for (const n of ['placing', 'contextmenu', 'item-dblclick']) view.on(n, (e) => window.events.push([n, e.state || (e.item && e.item.name) || null]));
 
 const sync = () => {
@@ -74,6 +94,18 @@ $('#theme').addEventListener('click', () => { const r = document.documentElement
 $('#place-sofa').addEventListener('click', () => view.startPlacing({ type: 'sofa', name: 'Sofa', w: 220, d: 95, h: 82, params: { seats: 3, color: '#8c9aa3' }, generic: true }));
 $('#place-art').addEventListener('click', () => view.startPlacing({ type: 'wall-art', name: 'Wall art', w: 100, d: 4, h: 70, placement: 'wall', elev: 115, params: {} }));
 $('#place-tree').addEventListener('click', () => view.startPlacing({ type: 'tree', name: 'Olive tree', w: 300, d: 300, h: 400, zone: 'outdoor', params: { species: 'olive' } }));
+$('#thickness').addEventListener('change', (e) => store.setUI({ wallThickness: +e.target.value }));
+$('#remove-sel').addEventListener('click', () => {
+  const sel = store.ui.structureSel;
+  if (!sel) return;
+  const res = sel.type === 'segment' ? planEdit.removeWallSegment(sel.id) : planEdit.removeOpening(sel.id);
+  status.textContent = res.ok ? `removed (${res.level})` : res.reason;
+});
+$('#flip-sel').addEventListener('click', () => {
+  const sel = store.ui.structureSel;
+  if (sel && sel.type === 'opening') { const res = planEdit.flipDoor(sel.id, 'swing'); if (!res.ok) status.textContent = res.reason; }
+});
+$('#reset-plan').addEventListener('click', () => planEdit.resetPlan());
 $('#undo').addEventListener('click', () => store.undo());
 $('#redo').addEventListener('click', () => store.redo());
 $('#stress').addEventListener('click', () => window.stress(150));

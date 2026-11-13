@@ -337,7 +337,7 @@
 .walk__top > .walk__where { flex: 0 1 auto; min-width: 0; }
 .walk__top > .btn { height: calc(var(--ctl) + 2px); box-shadow: var(--shadow-1); }
 .walk__room { overflow: hidden; text-overflow: ellipsis; }
-@container (max-width: 700px) { .walk__hint { display: none; } }
+@container (max-width: 700px) { .walk__top > .walk__hint { display: none; } }
 @container (max-width: 600px) {
   .ov__bc { left: var(--s-3); transform: none; }
   .sunhost { width: auto; max-width: none; right: calc(var(--s-3) + var(--ctl) + 4px + var(--s-2)); }

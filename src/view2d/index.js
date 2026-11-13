@@ -6,6 +6,12 @@
  * Modules: camera (pan / zoom / fit), theme (palette from CSS custom properties), renderer (cached layers:
  * site, floors, walls, openings, items, annotations), overlay (selection, guides, read-outs), snapping,
  * interaction (pointer / wheel / keys), dimensions (chains derived from the plan) and export (PNG sheet).
+ * Editing the building itself (docs/CONTRACT.md § 7): structure (per-revision data + cached tints / changes),
+ * structure-tools (gestures → core/plan-edit.js) and structure-overlay (hover, grips, ghosts, read-outs).
+ *
+ * The plan engine REPLACES plan.walls / openings / rooms on every edit and the store emits 'plan'. Nothing in
+ * this view keeps those arrays: every layer reads `plan` when it paints, per-revision data is cached on the
+ * arrays' identity, and a 'plan' event only has to invalidate the layer caches.
  */
 import { itemAABB, polygonBounds, clamp } from '../core/geometry.js';
 import { Camera } from './camera.js';
@@ -15,7 +21,7 @@ import { createSnapper } from './snapping.js';
 import { attachInteraction } from './interaction.js';
 import { drawOverlay } from './overlay.js';
 import { exportPNG } from './export.js';
-import { houseEnvelope, dimensionMargin } from './annotations.js';
+import { houseEnvelope, dimensionOverhang } from './annotations.js';
 
 /**
  * @param {HTMLElement} container  mount point; the view fills it
@@ -33,7 +39,7 @@ export function createView2D(container, ctx) {
   const cam = new Camera();
   const env = { store, plan, catalog, models, pal: null, font: 'sans-serif', ui: store.ui };
   const listeners = new Map();
-  const state = { hoverId: null, gesture: null, placing: null, feedback: null, marquee: null, measures: [], measureDraft: null, spaceDown: false, live: new Set() };
+  const state = { hoverId: null, gesture: null, placing: null, feedback: null, marquee: null, measures: [], measureDraft: null, spaceDown: false, live: new Set(), struct: null, flash: null };
   const V = { container, canvas, cam, env, state, active: true, selfWrite: false, dpr: 1, renderer: null, snapper: null, theme: null };
 
   let raf = 0, lastTime = 0, lastScale = NaN, fitted = false, destroyed = false;
@@ -66,7 +72,8 @@ export function createView2D(container, ctx) {
     const zooming = cam.scale !== lastScale;
     V.renderer.render(cam, { dpr: V.dpr, live: state.live, direct: zooming && Number.isFinite(lastScale), overlay: (G) => drawOverlay(G, V) });
     if (zooming) { lastScale = cam.scale; V.emit('zoom', { scale: cam.scale }); }
-    if (moving) V.invalidate(); else lastTime = 0;
+    if (state.flash && now - state.flash.t0 > 1500) state.flash = null;
+    if (moving || state.flash) V.invalidate(); else lastTime = 0;
   }
 
   // ───────────── sizing ─────────────
@@ -111,23 +118,50 @@ export function createView2D(container, ctx) {
     }
     if (target === 'house') {
       const h = houseEnvelope(plan);
-      return { rect: { x: h.x0, y: h.y0, w: h.x1 - h.x0, h: h.y1 - h.y0 }, extra: store.ui.showDimensions ? dimensionMargin(plan) : 14 };
+      return { rect: { x: h.x0, y: h.y0, w: h.x1 - h.x0, h: h.y1 - h.y0 }, extra: 14, dims: true, nearOnly: true };
     }
     const b = plan.site.bounds || polygonBounds(plan.site.boundary);
-    return { rect: { x: b.x, y: b.y, w: b.w, h: b.h }, extra: 26 };
+    return { rect: { x: b.x, y: b.y, w: b.w, h: b.h }, extra: 26, dims: true };
   }
   /**
-   * Frame a target in the view.
+   * Frame a target in the view. With dimensions on, the lot / the house are framed together with their exterior
+   * dimension chains (whose distance from the house depends on the zoom, hence the short iteration); for the
+   * house only the chains that sit right beside it count.
    * @param {'lot'|'house'|'selection'|{x:number,y:number,w:number,h:number}} target
    * @param {{ animate?: boolean, padding?: number }} opts
    */
   function fit(target = 'lot', opts = {}) {
     if (cam.w < 2 || cam.h < 2) return;
-    const { rect, extra, maxScale } = targetRect(target);
-    const base = clamp(Math.min(cam.w, cam.h) * 0.045, 10, 44) + (opts.padding ?? extra);
+    const { rect, extra, maxScale, dims, nearOnly } = targetRect(target);
+    const edge = clamp(Math.min(cam.w, cam.h) * 0.045, 10, 44), own = opts.padding ?? extra;
     const ins = V.theme.insets;
-    const pad = { top: base + ins.top, right: base + ins.right, bottom: base + ins.bottom, left: base + ins.left };
+    const pads = (over) => ({
+      top: edge + ins.top + Math.max(own, over.top), right: edge + ins.right + Math.max(own, over.right),
+      bottom: edge + ins.bottom + Math.max(own, over.bottom), left: edge + ins.left + Math.max(own, over.left),
+    });
+    let pad = pads({ top: 0, right: 0, bottom: 0, left: 0 });
+    if (dims && store.ui.showDimensions && opts.padding == null) {
+      for (let i = 0; i < 3; i++) {
+        const over = dimensionOverhang(plan, store.ui, cam.frame(rect, pad, maxScale).scale, rect, nearOnly);
+        pad = pads({ top: over.top + 6, right: over.right + 6, bottom: over.bottom + 6, left: over.left + 6 });
+      }
+    }
     cam.goTo(cam.frame(rect, pad, maxScale), opts.animate === false ? 0 : 420);
+    V.invalidate();
+  }
+  /**
+   * Bring a plan point to the middle of the view (animated) and pulse it — used by the "changes" list.
+   * @param {number} x  plan cm
+   * @param {number} y  plan cm
+   * @param {{ zoom?: number, animate?: boolean }} opts  zoom = CSS px per cm (default: at least 0.9, never zooming out)
+   */
+  function focusPlanPoint(x, y, opts = {}) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || cam.w < 2 || cam.h < 2) return;
+    const scale = clamp(Number(opts.zoom) > 0 ? Number(opts.zoom) : Math.max(cam.scale, 0.9), cam.minScale, cam.maxScale);
+    const ins = V.theme.insets;
+    const cx = ins.left + (cam.w - ins.left - ins.right) / 2, cy = ins.top + (cam.h - ins.top - ins.bottom) / 2;
+    cam.goTo({ scale, tx: cx - x * scale, ty: cy - y * scale }, opts.animate === false ? 0 : 420);
+    state.flash = { x, y, t0: performance.now() + (opts.animate === false ? 0 : 260) };
     V.invalidate();
   }
   V.fit = fit;
@@ -146,6 +180,13 @@ export function createView2D(container, ctx) {
     store.on('selection', () => V.invalidate()),
     store.on('ui', (e) => {
       if (e.keys && e.keys.includes('tool')) interaction.toolChanged();
+      if (e.keys && e.keys.includes('structureSel')) interaction.structureSelChanged();
+      V.renderer.invalidate(); V.invalidate();
+    }),
+    // walls / openings / rooms were replaced: repaint every layer from the new plan (snapping, hit-testing and
+    // the dimension chains re-derive themselves from the new arrays the next time they are used)
+    store.on('plan', (e) => {
+      interaction.planChanged(e);
       V.renderer.invalidate(); V.invalidate();
     }),
     store.on('project', () => { V.renderer.invalidate(); V.invalidate(); }),
@@ -180,7 +221,13 @@ export function createView2D(container, ctx) {
     /** One-shot snapped placement at a client position (HTML5 drag-and-drop). */
     dropAt: (clientX, clientY, partial) => interaction.dropAt(clientX, clientY, partial),
     exportPNG: (opts) => exportPNG({ store, plan, catalog, models, font: env.font }, opts),
-    /** Events: 'cursor' {x,y,space}, 'zoom' {scale}, 'placing' {state,…}, 'contextmenu' {item,clientX,clientY}, 'item-dblclick' {item}. */
+    focusPlanPoint,
+    /** Wall segment / opening under the cursor while the 'structure' tool is active: `{ type, id, level, reason }` or null. */
+    getStructureHover: () => interaction.getStructureHover(),
+    /**
+     * Events: 'cursor' {x,y,space}, 'zoom' {scale}, 'placing' {state,…}, 'contextmenu' {item,structure?,clientX,clientY},
+     * 'item-dblclick' {item}, 'structure' {type:'done'|'refused'|'locked'|'warning', op, level, text, clientX, clientY}.
+     */
     on(name, fn) {
       if (!listeners.has(name)) listeners.set(name, new Set());
       listeners.get(name).add(fn);

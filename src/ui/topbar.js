@@ -60,8 +60,8 @@ export function initTopbar(root, app) {
   editBtn.append(editBadge);
   const tools = segmented({ options: TOOLS, value: store.ui.tool, iconOnly: true, label: 'Tool', cls: 'seg--tools', onChange: (tool) => store.setUI({ tool }) });
 
-  const sTools = segmented({ options: STRUCTURE_TOOL_LIST.map((t) => ({ value: t.value, label: t.long, icon: t.icon, kbd: t.kbd })), value: store.ui.tool, iconOnly: true,
-    label: 'Structure tool', cls: 'seg--tools', onChange: (tool) => structure.setTool(tool) });
+  const sTools = segmented({ options: STRUCTURE_TOOL_LIST.map((t) => ({ value: t.value, label: t.long, icon: t.icon, kbd: t.kbd })), value: store.ui.tool, iconOnly: true, iconSize: 18,
+    label: 'Structure tool', cls: 'seg--tools seg--stools', onChange: (tool) => structure.setTool(tool) });
   const thickness = segmented({ options: WALL_THICKNESSES.map((v) => ({ value: v, label: String(v), tip: `Draw ${v} cm walls` })), value: store.ui.wallThickness,
     label: 'Thickness of new walls, in centimetres', cls: 'seg--thick', onChange: (v) => { store.setUI({ wallThickness: v }); structure.setTool('wall'); } });
   const showChanges = iconBtn('changes', 'Highlight changes to the architect’s plan', { pressed: !!store.ui.showPlanChanges, onClick: () => store.setUI({ showPlanChanges: !store.ui.showPlanChanges }) });
@@ -70,7 +70,7 @@ export function initTopbar(root, app) {
     sTools,
     h('div', { class: 'sbar__thick', 'data-tip': 'Thickness of new walls' }, icon('wall', { size: 16 }), thickness, h('span', { class: 'sbar__unit' }, 'cm')),
     h('span', { class: 'sbar__sep', 'aria-hidden': 'true' }),
-    showChanges, resetPlanBtn);
+    h('div', { class: 'sbar__plan' }, showChanges, resetPlanBtn));
   const structureHost = h('div', { class: 'topbar__group topbar__structure' });
   const structureFloat = h('div', { class: 'ov__tc sbar-float' });
   document.getElementById('ov2d')?.append(structureFloat);
@@ -86,8 +86,11 @@ export function initTopbar(root, app) {
     b.dataset.key = t.key;
     return b;
   });
-  const togglesMenuBtn = iconBtn('site', 'Plan display', { class: 'only-compact toggles-menu', onClick: () => openMenu(togglesMenuBtn,
-    TOGGLES.map((t) => ({ label: t.label, checked: !!store.ui[t.key], kbd: t.kbd, onSelect: () => store.setUI({ [t.key]: !store.ui[t.key] }) })), { placement: 'bottom-end' }) });
+  const togglesMenuBtn = iconBtn('site', 'Plan display', { class: 'only-compact toggles-menu', onClick: () => openMenu(togglesMenuBtn, [
+    ...TOGGLES.map((t) => ({ label: t.label, checked: !!store.ui[t.key], kbd: t.kbd, onSelect: () => store.setUI({ [t.key]: !store.ui[t.key] }) })),
+    { separator: true },
+    { label: 'Changes to the architect’s plan', checked: !!store.ui.showPlanChanges, onSelect: () => store.setUI({ showPlanChanges: !store.ui.showPlanChanges }) },
+  ], { placement: 'bottom-end' }) });
   togglesMenuBtn.setAttribute('aria-haspopup', 'menu');
 
   /* Budget */
@@ -155,7 +158,8 @@ export function initTopbar(root, app) {
    * things give way first — classes fit1 … fit6 on the bar, cumulative (see layout.css) — instead of anything overlapping.
    */
   const FIT_STEPS = 6;
-  const cramped = () => views.offsetWidth > center.clientWidth + 0.5 || (name.offsetParent !== null && name.offsetWidth < 72);
+  const cramped = () => (name.offsetParent !== null && name.offsetWidth < 96)
+    || views.offsetWidth > center.clientWidth + 0.5 || root.lastElementChild.getBoundingClientRect().right > root.getBoundingClientRect().right + 0.5;
   const fit = rafThrottle(() => {
     for (let i = 1; i <= FIT_STEPS; i++) root.classList.remove(`fit${i}`);
     for (let i = 1; i <= FIT_STEPS && cramped(); i++) root.classList.add(`fit${i}`);

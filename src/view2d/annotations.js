@@ -227,12 +227,16 @@ export function exteriorDimLayout(plan, ui, scale) {
 
 /**
  * CSS px the exterior chains stick out beyond a plan rectangle on each side at zoom `scale` — used to frame
- * the lot / the house so the dimensions stay in view.
+ * the lot / the house so the dimensions stay in view. `nearOnly` ignores the groups that were moved out past
+ * the site features (framing the house should not zoom out to the street for them).
  */
-export function dimensionOverhang(plan, ui, scale, rect) {
+export function dimensionOverhang(plan, ui, scale, rect, nearOnly = false) {
   const lay = exteriorDimLayout(plan, ui, scale);
   const edge = { n: rect.y, s: rect.y + rect.h, w: rect.x, e: rect.x + rect.w };
-  const over = (side) => (lay[side] ? Math.max(0, lay[side].reach - lay[side].sign * (edge[side] - lay[side].base) * scale) : 0);
+  const over = (side) => {
+    const l = lay[side];
+    return l && !(nearOnly && l.far) ? Math.max(0, l.reach - l.sign * (edge[side] - l.base) * scale) : 0;
+  };
   return { top: over('n'), bottom: over('s'), left: over('w'), right: over('e') };
 }
 

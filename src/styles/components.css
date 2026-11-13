@@ -61,6 +61,7 @@
 .seg__btn[aria-checked='true'] { background: var(--raised); color: var(--ink); box-shadow: var(--shadow-1); }
 .seg--tools .seg__btn { padding: 0; }
 .seg--tools .seg__btn[aria-checked='true'] { color: var(--accent); }
+.seg--stools .seg__btn { min-width: var(--ctl); }
 .seg--block { display: flex; }
 .seg--block .seg__btn { flex: 1 1 0; }
 .seg--mode .seg__btn { padding: 0 12px; }

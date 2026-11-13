@@ -3184,5 +3184,2018 @@ export default [
    "medium"
   ],
   "description": "Planter 44 cm diameter, 42 cm high."
+ },
+ {
+  "id": "ikea-kinnahult-floor-lamp-ash-white",
+  "name": "KINNAHULT floor lamp, ash/white, 150 cm",
+  "nameHe": "KINNAHULT מנורה עומדת, עץ מילה/לבן, 150 ס\"מ",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/kinnahult-floor-lamp-ash-white-10559257/",
+  "price": 295.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 37,
+   "d": 37,
+   "h": 150
+  },
+  "type": "floor-lamp",
+  "params": {
+   "variant": "shade",
+   "shade": "#f3f1ea",
+   "on": false,
+   "color": "#cdb48c",
+   "color2": "#f3f1ea",
+   "material": "ash",
+   "style": "scandinavian"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "floor-lamps",
+  "tags": [
+   "ash",
+   "white-shade",
+   "living-room"
+  ],
+  "description": "Floor lamp 150 cm high, shade 37 cm, base 30 cm, 3.5 m cord."
+ },
+ {
+  "id": "ikea-mossplym-floor-uplighter-reading-opal-oak",
+  "name": "MOSSPLYM floor uplighter/reading lamp, opal white glass/oak, 180 cm",
+  "nameHe": "MOSSPLYM מנורה עומדת עם תאורה עילית/קריאה, חלבי זכוכית/אלון, 180 ס\"מ",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/mossplym-floor-uplighter-reading-lamp-opal-white-glass-oak-90597203/",
+  "price": 450.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 32,
+   "d": 32,
+   "h": 180
+  },
+  "type": "floor-lamp",
+  "params": {
+   "variant": "torchiere",
+   "shade": "#f1efe8",
+   "on": false,
+   "color": "#cfb88f",
+   "color2": "#f1efe8",
+   "material": "oak",
+   "style": "scandinavian"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "floor-lamps",
+  "tags": [
+   "uplighter",
+   "reading",
+   "oak",
+   "glass"
+  ],
+  "description": "Floor lamp 180 cm high with opal glass uplight (21 cm) and reading lamp, base 32 cm."
+ },
+ {
+  "id": "ikea-isjakt-led-floor-uplighter-reading-nickel",
+  "name": "ISJAKT LED floor uplighter/reading lamp, dimmable, nickel-plated, 180 cm",
+  "nameHe": "ISJAKT מנורת קריאה/עומדת לד, ניתן לעמעם/ציפוי ניקל, 180 ס\"מ",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/isjakt-led-floor-uplighter-reading-lamp-dimmable-nickel-plated-40459708/",
+  "price": 395.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 50,
+   "d": 24,
+   "h": 180
+  },
+  "type": "floor-lamp",
+  "params": {
+   "variant": "torchiere",
+   "on": false,
+   "color": "#b9bdc2",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "floor-lamps",
+  "tags": [
+   "uplighter",
+   "reading",
+   "dimmable",
+   "led"
+  ],
+  "description": "LED floor lamp 180 cm high, width 50 cm (uplight and reading arm), base 24 cm."
+ },
+ {
+  "id": "ikea-akterspring-floor-lamp-opal-brass",
+  "name": "AKTERSPRING floor lamp, opal white glass/brass-plated, 162 cm",
+  "nameHe": "AKTERSPRING מנורה עומדת, חלבי זכוכית/ציפוי פליז, 162 ס\"מ",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/akterspring-floor-lamp-opal-white-glass-brass-plated-30614314/",
+  "price": 245.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 30,
+   "d": 30,
+   "h": 162
+  },
+  "type": "floor-lamp",
+  "params": {
+   "variant": "globe",
+   "shade": "#f4f1e8",
+   "on": false,
+   "color": "#c9a24d",
+   "color2": "#f4f1e8",
+   "material": "brass",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "floor-lamps",
+  "tags": [
+   "brass",
+   "glass",
+   "globe",
+   "living-room"
+  ],
+  "description": "Floor lamp 162 cm high, glass globe shade 13.5 cm, overall width 30 cm, base 25 cm."
+ },
+ {
+  "id": "ikea-flyghojd-floor-lamp-brass-beige",
+  "name": "FLYGHÖJD floor lamp, brass/beige, 143 cm",
+  "nameHe": "FLYGHÖJD מנורה עומדת, פליז/בז'",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/flyghoejd-floor-lamp-brass-beige-50574473/",
+  "price": 245.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 36,
+   "d": 36,
+   "h": 143
+  },
+  "type": "floor-lamp",
+  "params": {
+   "variant": "shade",
+   "shade": "#d8c7a6",
+   "on": false,
+   "color": "#c2a35a",
+   "color2": "#d8c7a6",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "floor-lamps",
+  "tags": [
+   "brass",
+   "fabric-shade",
+   "bedroom"
+  ],
+  "description": "Floor lamp 143 cm high, shade diameter 36 cm, base 24 cm."
+ },
+ {
+  "id": "ikea-arstid-floor-lamp-nickel-white",
+  "name": "ÅRSTID floor lamp, nickel-plated/white, 155 cm",
+  "nameHe": "ÅRSTID מנורה עומדת, ציפוי ניקל/לבן",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/arstid-floor-lamp-nickel-plated-white-60163862/",
+  "price": 295.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 36,
+   "d": 36,
+   "h": 155
+  },
+  "type": "floor-lamp",
+  "params": {
+   "variant": "shade",
+   "shade": "#f4f4f1",
+   "on": false,
+   "color": "#b9bdc2",
+   "color2": "#f4f4f1",
+   "material": "metal",
+   "style": "classic"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "floor-lamps",
+  "tags": [
+   "nickel",
+   "dome-shade",
+   "classic"
+  ],
+  "description": "Floor lamp 155 cm high, shade 36 cm, base 28 cm."
+ },
+ {
+  "id": "ikea-vindkraft-table-lamp-white-paper-pulp",
+  "name": "VINDKRAFT table lamp, white moulded paper pulp, 46 cm",
+  "nameHe": "VINDKRAFT מנורת שולחן, לבן עיסת נייר יצוקה, 46 ס\"מ",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/vindkraft-table-lamp-white-moulded-paper-pulp-20492803/",
+  "price": 145.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 35,
+   "d": 35,
+   "h": 46
+  },
+  "type": "table-lamp",
+  "params": {
+   "variant": "shade",
+   "shade": "#f3f1ec",
+   "on": false,
+   "color": "#f3f1ec",
+   "material": "paper",
+   "style": "scandinavian"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "table-lamps",
+  "tags": [
+   "paper",
+   "white",
+   "living-room"
+  ],
+  "description": "Table lamp 46 cm high, shade 35 cm, base 16 cm."
+ },
+ {
+  "id": "ikea-stockholm-2025-table-lamp-yellow",
+  "name": "STOCKHOLM 2025 table lamp, yellow textile, 35 cm",
+  "nameHe": "STOCKHOLM 2025 מנורת שולחן, צהוב/בד, 35 ס\"מ",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/stockholm-2025-table-lamp-yellow-textile-40586216/",
+  "price": 295.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 33,
+   "d": 33,
+   "h": 35
+  },
+  "type": "table-lamp",
+  "params": {
+   "variant": "shade",
+   "shade": "#e3b830",
+   "on": false,
+   "color": "#e3b830",
+   "material": "fabric",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "table-lamps",
+  "tags": [
+   "yellow",
+   "fabric",
+   "statement"
+  ],
+  "description": "Table lamp 35 cm high, shade diameter 33 cm."
+ },
+ {
+  "id": "ikea-nymane-table-lamp-white",
+  "name": "NYMÅNE table lamp, white, 33 cm",
+  "nameHe": "NYMÅNE מנורת שולחן, לבן, 33 ס\"מ",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/nymane-table-lamp-white-40593071/",
+  "price": 195.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 24,
+   "d": 24,
+   "h": 33
+  },
+  "type": "table-lamp",
+  "params": {
+   "variant": "dome",
+   "shade": "#f4f4f2",
+   "on": false,
+   "color": "#f4f4f2",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "table-lamps",
+  "tags": [
+   "white",
+   "dome",
+   "bedside"
+  ],
+  "description": "Table lamp 33 cm high, shade 24 cm, base width 18 cm."
+ },
+ {
+  "id": "ikea-manalg-wall-lamp-sedge",
+  "name": "MÅNALG wall lamp, sedge handmade",
+  "nameHe": "MÅNALG מנורת קיר, גומא/עבודת יד",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/manalg-wall-lamp-wired-in-installation-sedge-handmade-60484698/",
+  "price": 125.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 35,
+   "d": 18,
+   "h": 29
+  },
+  "type": "wall-light",
+  "params": {
+   "variant": "sconce",
+   "on": false,
+   "color": "#c8b48a",
+   "material": "sedge",
+   "style": "boho"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "wall-lights",
+  "tags": [
+   "sedge",
+   "handmade",
+   "natural"
+  ],
+  "description": "Wired-in wall lamp, width 35 cm, depth 18 cm, height 29 cm."
+ },
+ {
+  "id": "ikea-havsdun-led-wall-lamp-white",
+  "name": "HAVSDUN LED wall lamp, dimmable, white/frosted glass",
+  "nameHe": "HAVSDUN מנורת קיר LED, ניתן לעמעם לבן/זכוכית חלבית לבן",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/havsdun-led-wall-lamp-dimmable-white-frosted-glass-white-30499253/",
+  "price": 195.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 9,
+   "d": 11,
+   "h": 27
+  },
+  "type": "wall-light",
+  "params": {
+   "variant": "sconce",
+   "on": false,
+   "color": "#f1f1ee",
+   "material": "glass",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "wall-lights",
+  "tags": [
+   "led",
+   "dimmable",
+   "bedside"
+  ],
+  "description": "LED wall lamp 26.5 cm high, 9.2 cm wide, 10.6 cm deep."
+ },
+ {
+  "id": "ikea-kabomba-led-wall-lamp-black",
+  "name": "KABOMBA LED wall lamp, dimmable, matt black, 47x14 cm",
+  "nameHe": "KABOMBA מנורת קיר LED, ניתן לעמעם מט/שחור, 47x14 ס\"מ",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/kabomba-led-wall-lamp-dimmable-matt-black-80485282/",
+  "price": 295.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 14,
+   "d": 14,
+   "h": 47
+  },
+  "type": "wall-light",
+  "params": {
+   "variant": "strip",
+   "on": false,
+   "color": "#1c1c1c",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "wall-lights",
+  "tags": [
+   "led",
+   "dimmable",
+   "black",
+   "vertical"
+  ],
+  "description": "Vertical LED wall lamp, 47 cm high, 14 cm diameter (depth taken equal to diameter)."
+ },
+ {
+  "id": "ikea-trubbrufse-ceiling-lamp-sedge-45",
+  "name": "TRUBBRUFSE ceiling lamp, sedge, 45 cm",
+  "nameHe": "TRUBBRUFSE מנורת תקרה, גומא, 45 ס\"מ",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/trubbrufse-ceiling-lamp-sedge-90601337/",
+  "price": 145.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 45,
+   "d": 45,
+   "h": 15
+  },
+  "type": "ceiling-light",
+  "params": {
+   "variant": "semi-flush",
+   "on": false,
+   "color": "#c9b78a",
+   "material": "sedge",
+   "style": "boho"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-lights",
+  "tags": [
+   "sedge",
+   "woven",
+   "natural"
+  ],
+  "description": "Ceiling lamp, diameter 45 cm, height 15 cm."
+ },
+ {
+  "id": "ikea-nosund-ceiling-lamp-birch-44",
+  "name": "NÖSUND ceiling lamp, birch, 44 cm",
+  "nameHe": "NÖSUND מנורת תקרה, ליבנה, 44 ס\"מ",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/noesund-ceiling-lamp-birch-20404887/",
+  "price": 395.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 44,
+   "d": 44,
+   "h": 13
+  },
+  "type": "ceiling-light",
+  "params": {
+   "variant": "flush",
+   "on": false,
+   "color": "#e0c9a0",
+   "material": "birch",
+   "style": "scandinavian"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-lights",
+  "tags": [
+   "birch",
+   "wood",
+   "scandinavian"
+  ],
+  "description": "Ceiling lamp, shade diameter 44 cm, height 13 cm."
+ },
+ {
+  "id": "ikea-barlast-led-ceiling-wall-lamp-white-25",
+  "name": "BARLAST LED ceiling/wall lamp, white, 25 cm",
+  "nameHe": "BARLAST מנורת לד לתקרה/קיר, לבן, 25 ס\"מ",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/barlast-led-ceiling-wall-lamp-white-00525908/",
+  "price": 39.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 25,
+   "d": 25,
+   "h": 7
+  },
+  "type": "ceiling-light",
+  "params": {
+   "variant": "flush",
+   "on": false,
+   "color": "#f4f4f4",
+   "material": "plastic",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-lights",
+  "tags": [
+   "led",
+   "flush",
+   "budget",
+   "hallway"
+  ],
+  "description": "LED flush lamp, diameter 25 cm, height 6.7 cm, 900 lm."
+ },
+ {
+  "id": "ikea-krusnate-ceiling-spotlight-4-white",
+  "name": "KRUSNATE ceiling spotlight with 4 spots, white",
+  "nameHe": "KRUSNATE רביעיית ספוטים לתקרה, לבן",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/krusnate-ceiling-spotlight-with-4-spots-white-70564190/",
+  "price": 59.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 52,
+   "d": 13,
+   "h": 9
+  },
+  "type": "ceiling-light",
+  "params": {
+   "variant": "spot",
+   "count": 4,
+   "on": false,
+   "color": "#f4f4f4",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-lights",
+  "tags": [
+   "spots",
+   "bar",
+   "budget"
+  ],
+  "description": "Ceiling spot bar with 4 heads, length 52 cm, head diameter 13 cm, height 9 cm."
+ },
+ {
+  "id": "ikea-kransalg-pendant-5-lamps-black-113",
+  "name": "KRANSALG pendant lamp with 5 lamps, black, 113 cm",
+  "nameHe": "KRANSALG מנורת תלייה ל-5 נורות, שחור, 113 ס\"מ",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/kransalg-pendant-lamp-with-5-lamps-black-00539972/",
+  "price": 245.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 113,
+   "d": 7,
+   "h": 160
+  },
+  "type": "pendant",
+  "params": {
+   "variant": "linear",
+   "count": 5,
+   "shade": "#1c1c1c",
+   "color": "#1c1c1c",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "pendants",
+  "tags": [
+   "linear",
+   "dining-table",
+   "kitchen-island",
+   "black"
+  ],
+  "description": "Linear 5-light pendant, rail 113 cm; cord adjustable from 20 to 160 cm overall height (h = stated maximum 160 cm)."
+ },
+ {
+  "id": "ace-dream-flush-black-40",
+  "name": "Dream flush ceiling plafon, black, 40 cm LED CCT",
+  "nameHe": "פלפון חלום שחור קוטר 40",
+  "brand": "ACE (various)",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/7404794",
+  "price": 169.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 40,
+   "d": 40,
+   "h": 4
+  },
+  "type": "ceiling-light",
+  "params": {
+   "variant": "flush",
+   "on": false,
+   "color": "#1c1c1c",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-lights",
+  "tags": [
+   "led",
+   "cct",
+   "black",
+   "flush"
+  ],
+  "description": "Round LED CCT flush plafon, diameter 40 cm, height 4 cm."
+ },
+ {
+  "id": "ace-moonlight-round-60-white",
+  "name": "Moonlight round flush LED CCT ceiling light, white, 60 cm",
+  "nameHe": "פלפון מונלייט עגול קוטר 60 לבן LED CCT",
+  "brand": "ACE (various)",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/7404199",
+  "price": 399.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 60,
+   "d": 60,
+   "h": 4
+  },
+  "type": "ceiling-light",
+  "params": {
+   "variant": "panel",
+   "on": false,
+   "color": "#f4f4f4",
+   "material": "aluminium",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-lights",
+  "tags": [
+   "led",
+   "cct",
+   "large",
+   "living-room"
+  ],
+  "description": "Round surface-mounted LED CCT 60 W, diameter 60 cm, height 4 cm."
+ },
+ {
+  "id": "ace-tamar-led-60w-square-brass",
+  "name": "Tamar square LED flush ceiling light, brass finish, 42.5 cm",
+  "nameHe": "פלפון תמר LED 60W",
+  "brand": "ACE (various)",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/7401952",
+  "price": 499.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 42.5,
+   "d": 42.5,
+   "h": 6.5
+  },
+  "type": "ceiling-light",
+  "params": {
+   "variant": "flush",
+   "on": false,
+   "color": "#c9a24d",
+   "color2": "#f4f4f4",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-lights",
+  "tags": [
+   "led",
+   "brass",
+   "square"
+  ],
+  "description": "Square LED 60 W flush light with brass finish, 42.5 x 42.5 cm, height 6.5 cm."
+ },
+ {
+  "id": "ace-ice-rectangle-flush",
+  "name": "Ice rectangular glass flush LED ceiling light, 50x17 cm",
+  "nameHe": "צמוד תקרה קרח מלבן",
+  "brand": "ACE (various)",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/7403812",
+  "price": 299.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 50,
+   "d": 17,
+   "h": 10
+  },
+  "type": "ceiling-light",
+  "params": {
+   "variant": "flush",
+   "on": false,
+   "color": "#e9eef0",
+   "material": "glass",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-lights",
+  "tags": [
+   "led",
+   "glass",
+   "hallway",
+   "rectangular"
+  ],
+  "description": "Rectangular glass flush LED 36 W, 50 x 17 cm, height 10 cm."
+ },
+ {
+  "id": "ace-hitech-rect-black-120x30",
+  "name": "Hi-Tech rectangular surface LED panel, black, 120x30 cm",
+  "nameHe": "הייטק מלבן שחור 120*30 משודרג LED CCT",
+  "brand": "ACE (various)",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/7403216",
+  "price": 249.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 120,
+   "d": 30,
+   "h": 4
+  },
+  "type": "ceiling-light",
+  "params": {
+   "variant": "panel",
+   "on": false,
+   "color": "#1c1c1c",
+   "material": "aluminium",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-lights",
+  "tags": [
+   "led",
+   "panel",
+   "linear",
+   "kitchen",
+   "black"
+  ],
+  "description": "Rectangular surface-mounted LED CCT 60 W, 120 x 30 cm, height 4 cm."
+ },
+ {
+  "id": "ace-umbrella-wall-white",
+  "name": "Umbrella wall light, white, LED 12 W",
+  "nameHe": "מטריה קיר לבן",
+  "brand": "ACE (various)",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/7405548",
+  "price": 199.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 30,
+   "d": 6,
+   "h": 30
+  },
+  "type": "wall-light",
+  "params": {
+   "variant": "sconce",
+   "on": false,
+   "color": "#f2efe9",
+   "material": "wood",
+   "style": "kids"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "wall-lights",
+  "tags": [
+   "led",
+   "kids-room",
+   "heart",
+   "warm-light"
+  ],
+  "description": "Wall light, width 30 cm, height 30 cm, depth 6 cm, 12 W LED 3000 K."
+ },
+ {
+  "id": "ace-lotus-wall-cct-4130",
+  "name": "Lotus wall light with crystal ring, LED CCT",
+  "nameHe": "לוטוס קיר CCT 4130 (27475)",
+  "brand": "ACE (various)",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/7405305",
+  "price": 199.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 27,
+   "d": 6,
+   "h": 31
+  },
+  "type": "wall-light",
+  "params": {
+   "variant": "sconce",
+   "on": false,
+   "color": "#d8dce0",
+   "color2": "#e9f0f4",
+   "material": "aluminium",
+   "style": "classic"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "wall-lights",
+  "tags": [
+   "led",
+   "cct",
+   "crystal",
+   "decorative"
+  ],
+  "description": "Wall light 27 cm wide, 31 cm high, 6 cm deep."
+ },
+ {
+  "id": "ace-straight-wall-60-black",
+  "name": "Straight wall light, matt black, LED CCT 20 W, 60 cm",
+  "nameHe": "ישר קיר 60 שחור LED CCT",
+  "brand": "ACE (various)",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/7405516",
+  "price": 179.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 60,
+   "d": 7.8,
+   "h": 5
+  },
+  "type": "wall-light",
+  "params": {
+   "variant": "strip",
+   "on": false,
+   "color": "#1c1c1c",
+   "material": "aluminium",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "wall-lights",
+  "tags": [
+   "led",
+   "strip",
+   "over-mirror",
+   "hallway"
+  ],
+  "description": "Linear LED wall light, 60 cm long, 7.8 cm deep, 5 cm high."
+ },
+ {
+  "id": "ace-table-lamp-wood-rope-shade-43x24",
+  "name": "Table lamp, stacked-sphere wood base with woven rope shade, 43x24 cm",
+  "nameHe": "מנורת שולחן עץ אהיל חבלים 43×24 סמ",
+  "brand": "ACE (various)",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4502863",
+  "price": 449.25,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 24,
+   "d": 24,
+   "h": 43
+  },
+  "type": "table-lamp",
+  "params": {
+   "variant": "shade",
+   "shade": "#cdb98f",
+   "on": false,
+   "color": "#4a3626",
+   "color2": "#cdb98f",
+   "material": "wood",
+   "style": "boho"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "table-lamps",
+  "tags": [
+   "rope",
+   "boho",
+   "wood",
+   "living-room"
+  ],
+  "description": "Table lamp 43 cm high, 24 cm wide, dark wood sphere base with sand-coloured rope cylinder shade."
+ },
+ {
+  "id": "ace-hat-led-table-lamp-black",
+  "name": "HAT LED desk table lamp (silver shade)",
+  "nameHe": "מנורת שולחן לד שחור דגם HAT",
+  "brand": "ACE (various)",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/332915",
+  "price": 110.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 32,
+   "d": 17,
+   "h": 40.4
+  },
+  "type": "table-lamp",
+  "params": {
+   "variant": "desk",
+   "on": false,
+   "color": "#c0c3c7",
+   "color2": "#2a2a2a",
+   "material": "plastic",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "table-lamps",
+  "tags": [
+   "led",
+   "desk",
+   "study"
+  ],
+  "description": "LED table lamp 14 W, height 40.4 cm, length 31.6 cm, width 12.2 cm, base 17.1 cm; listed as black, body silver per spec."
+ },
+ {
+  "id": "ace-boni-floor-lamp-led-shelf",
+  "name": "BONI LED floor lamp with shelf, white",
+  "nameHe": "מנורת עמידה לד לבן עם מגש דגם BONI",
+  "brand": "ACE (various)",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/332907",
+  "price": 219.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 27,
+   "d": 27,
+   "h": 149
+  },
+  "type": "floor-lamp",
+  "params": {
+   "variant": "reading",
+   "on": false,
+   "color": "#e8e8e8",
+   "color2": "#c0c3c7",
+   "material": "aluminium",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "floor-lamps",
+  "tags": [
+   "led",
+   "shelf",
+   "slim",
+   "reading"
+  ],
+  "description": "Slim LED floor lamp 148.8 cm high, base 27.2 cm, 15 W, with a small shelf."
+ },
+ {
+  "id": "ace-medusa-pendant-80-nickel",
+  "name": "Medusa LED pendant, nickel, 80 cm",
+  "nameHe": "מדוזה תלוי ניקל קוטר LED 80",
+  "brand": "ACE (various)",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/7402886",
+  "price": 799.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 80,
+   "d": 80,
+   "h": 122
+  },
+  "type": "pendant",
+  "params": {
+   "variant": "cluster",
+   "on": false,
+   "shade": "#d0d3d6",
+   "color": "#c0c3c7",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "pendants",
+  "tags": [
+   "led",
+   "large",
+   "living-room",
+   "statement"
+  ],
+  "description": "Pendant diameter 80 cm, overall height 122 cm, 110 W LED 4000 K."
+ },
+ {
+  "id": "homecenter-ora-flush-50-black",
+  "name": "ORA flush LED CCT ceiling light, black, 50 cm 50 W",
+  "nameHe": "צמוד תקרה צבע שחור קוטר 50 ס\"מ ORA CCT 50W",
+  "brand": "Home Center",
+  "retailer": "Home Center",
+  "url": "https://www.homecenter.co.il/products/1723541019801",
+  "price": 179.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 50,
+   "d": 50,
+   "h": 4.5
+  },
+  "type": "ceiling-light",
+  "params": {
+   "variant": "panel",
+   "on": false,
+   "color": "#1c1c1c",
+   "material": "aluminium",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-lights",
+  "tags": [
+   "led",
+   "cct",
+   "black",
+   "flush"
+  ],
+  "description": "Round surface-mounted LED CCT 50 W, diameter 50 cm, height 4.5 cm."
+ },
+ {
+  "id": "homecenter-sapir-floor-lamp-black-142",
+  "name": "Sapir floor lamp, black metal, E27, 142 cm",
+  "nameHe": "מנורת רצפה/עמידה ספיר E27 שחור",
+  "brand": "Home Center",
+  "retailer": "Home Center",
+  "url": "https://www.homecenter.co.il/products/1770213647309",
+  "price": 299.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 32,
+   "d": 32,
+   "h": 142
+  },
+  "type": "floor-lamp",
+  "params": {
+   "variant": "shade",
+   "shade": "#1c1c1c",
+   "on": false,
+   "color": "#1c1c1c",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "floor-lamps",
+  "tags": [
+   "black",
+   "budget",
+   "e27"
+  ],
+  "description": "Floor lamp 142 cm high with 32 cm shade (width/depth taken from shade diameter; base not stated), sold without bulb."
+ },
+ {
+  "id": "homecenter-led-table-lamp-sand-14x31",
+  "name": "LED table lamp, sand colour, 14x31 cm",
+  "nameHe": "מנורת שולחן LED בגוון חול 14X31 סמ",
+  "brand": "Home Center",
+  "retailer": "Home Center",
+  "url": "https://www.homecenter.co.il/products/1781611896638",
+  "price": 99.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 14,
+   "d": 14,
+   "h": 31
+  },
+  "type": "table-lamp",
+  "params": {
+   "variant": "desk",
+   "on": false,
+   "color": "#d8c8a8",
+   "material": "plastic",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "table-lamps",
+  "tags": [
+   "led",
+   "usb",
+   "compact",
+   "bedside"
+  ],
+  "description": "Compact LED table lamp, 31 cm high, 14 cm wide (depth taken equal to width)."
+ },
+ {
+  "id": "foxhome-lenni-ceramic-stone",
+  "name": "Lenni table lamp, grooved ceramic base, stone colour",
+  "nameHe": "מנורת שולחן עם בסיס קרמיקה מחורץ בגוון אבן Lenni",
+  "brand": "Fox Home",
+  "retailer": "Fox Home",
+  "url": "https://www.foxhome.co.il/products/0336802400",
+  "price": 209.93,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 27.5,
+   "d": 27.5,
+   "h": 42.5
+  },
+  "type": "table-lamp",
+  "params": {
+   "variant": "shade",
+   "shade": "#e8e2d6",
+   "on": false,
+   "color": "#b8b0a2",
+   "color2": "#e8e2d6",
+   "material": "ceramic",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "table-lamps",
+  "tags": [
+   "ceramic",
+   "stone",
+   "living-room"
+  ],
+  "description": "Ceramic table lamp 42.5 cm high, 27.5 cm wide."
+ },
+ {
+  "id": "foxhome-donna-ceramic-cream",
+  "name": "Donna table lamp, ceramic base, cream",
+  "nameHe": "מנורת שולחן עם בסיס קרמי בגוון שמנת Donna",
+  "brand": "Fox Home",
+  "retailer": "Fox Home",
+  "url": "https://www.foxhome.co.il/products/0334036361",
+  "price": 188.93,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 24,
+   "d": 24,
+   "h": 41
+  },
+  "type": "table-lamp",
+  "params": {
+   "variant": "shade",
+   "shade": "#efe8da",
+   "on": false,
+   "color": "#eadfca",
+   "color2": "#efe8da",
+   "material": "ceramic",
+   "style": "classic"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "table-lamps",
+  "tags": [
+   "ceramic",
+   "cream",
+   "bedroom"
+  ],
+  "description": "Ceramic table lamp 41 cm high, 24 cm wide."
+ },
+ {
+  "id": "foxhome-troy-textured-light",
+  "name": "Troy table lamp, light textured ceramic",
+  "nameHe": "מנורת שולחן בגוון בהיר ובטקסטורה עדינה Troy",
+  "brand": "Fox Home",
+  "retailer": "Fox Home",
+  "url": "https://www.foxhome.co.il/products/0336569401",
+  "price": 174.93,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 23,
+   "d": 23,
+   "h": 37
+  },
+  "type": "table-lamp",
+  "params": {
+   "variant": "shade",
+   "shade": "#ece6da",
+   "on": false,
+   "color": "#d9d0c1",
+   "color2": "#ece6da",
+   "material": "ceramic",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "table-lamps",
+  "tags": [
+   "ceramic",
+   "textured",
+   "bedside"
+  ],
+  "description": "Ceramic table lamp 37 cm high, 23 cm wide."
+ },
+ {
+  "id": "foxhome-lake-led-sphere",
+  "name": "Lake LED table lamp with spherical head, metal and wood",
+  "nameHe": "מנורת לד שולחנית בעיצוב מודרני עם ראש כדורי Lake",
+  "brand": "Fox Home",
+  "retailer": "Fox Home",
+  "url": "https://www.foxhome.co.il/products/0335555800",
+  "price": 90.93,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 15,
+   "d": 15,
+   "h": 22
+  },
+  "type": "table-lamp",
+  "params": {
+   "variant": "globe",
+   "on": false,
+   "color": "#7a5c3e",
+   "color2": "#2b2b2b",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "table-lamps",
+  "tags": [
+   "led",
+   "wood",
+   "small",
+   "bedside"
+  ],
+  "description": "LED table lamp 22 cm high, 15 cm wide, 50 % metal / 50 % wood (colours estimated)."
+ },
+ {
+  "id": "soferavi-westinghouse-talia-dc-52-white",
+  "name": "Westinghouse Talia 52\" DC ceiling fan with light, white (reversible oak blades)",
+  "nameHe": "מאוורר תקרה WESTINGHOUSE ווסטינגהאוס 52″ TALIA DC – 73179",
+  "brand": "Westinghouse",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%9e%d7%90%d7%95%d7%95%d7%a8%d7%a8-%d7%aa%d7%a7%d7%a8%d7%94-%d7%95%d7%95%d7%a1%d7%98%d7%99%d7%a0%d7%92%d7%94%d7%90%d7%95%d7%a1-73179-52-talia-dc-%d7%9c%d7%91%d7%9f/",
+  "price": 829.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 132,
+   "d": 132,
+   "h": 36
+  },
+  "type": "ceiling-fan",
+  "params": {
+   "light": true,
+   "variant": "modern",
+   "color": "#f2f2f2",
+   "color2": "#b8935a",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-fans",
+  "tags": [
+   "dc-motor",
+   "light",
+   "remote",
+   "52-inch",
+   "winter-mode"
+  ],
+  "description": "DC-motor fan with 28 W dimmable 6-CCT light and remote; blade span 132 cm, max drop from ceiling 36 cm; blades white/oak reversible."
+ },
+ {
+  "id": "soferavi-westinghouse-talia-dc-42-black",
+  "name": "Westinghouse Talia 42\" DC ceiling fan with light, black (reversible oak blades)",
+  "nameHe": "מאוורר תקרה WESTINGHOUSE ווסטינגהאוס 42″ TALIA DC – 73176",
+  "brand": "Westinghouse",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%9e%d7%90%d7%95%d7%95%d7%a8%d7%a8-%d7%aa%d7%a7%d7%a8%d7%94-%d7%95%d7%95%d7%a1%d7%98%d7%99%d7%a0%d7%92%d7%94%d7%90%d7%95%d7%a1-73176-42-talia-dc-%d7%a9%d7%97%d7%95%d7%a8/",
+  "price": 640.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 105,
+   "d": 105,
+   "h": 36
+  },
+  "type": "ceiling-fan",
+  "params": {
+   "light": true,
+   "variant": "modern",
+   "color": "#222222",
+   "color2": "#b8935a",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-fans",
+  "tags": [
+   "dc-motor",
+   "light",
+   "remote",
+   "42-inch",
+   "small-room"
+  ],
+  "description": "DC-motor fan with 28 W dimmable 6-CCT light and remote; blade span 105 cm, max drop 36 cm; for rooms up to 20 m2."
+ },
+ {
+  "id": "soferavi-westinghouse-montana-52-white",
+  "name": "Westinghouse Montana 52\" DC ceiling fan with light, white / oak-look blades",
+  "nameHe": "מאוורר תקרה WESTINGHOUSE ווסטינגהאוס Montana 52",
+  "brand": "Westinghouse",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%9e%d7%90%d7%95%d7%95%d7%a8%d7%a8-%d7%aa%d7%a7%d7%a8%d7%94-%d7%95%d7%95%d7%a1%d7%98%d7%99%d7%a0%d7%92%d7%94%d7%90%d7%95%d7%a1-%e2%81%a6montana%e2%81%a9-52-%d7%9c%d7%91%d7%9f/",
+  "price": 1399.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 132,
+   "d": 132,
+   "h": 33
+  },
+  "type": "ceiling-fan",
+  "params": {
+   "blades": 3,
+   "light": true,
+   "variant": "modern",
+   "color": "#f4f4f4",
+   "color2": "#b8935a",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-fans",
+  "tags": [
+   "dc-motor",
+   "light",
+   "remote",
+   "52-inch",
+   "3-blades"
+  ],
+  "description": "DC fan with 28 W dimmable 3-CCT light and remote, 3 blades; span 132 cm, max drop from ceiling 33 cm; interior use."
+ },
+ {
+  "id": "soferavi-westinghouse-sacramento-52-white-oak",
+  "name": "Westinghouse Sacramento 52\" DC ceiling fan with light, white body / solid oak blades",
+  "nameHe": "מאוורר תקרה WESTINGHOUSE ווסטינגהאוס Sacramento 52",
+  "brand": "Westinghouse",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%9e%d7%90%d7%95%d7%95%d7%a8%d7%a8-%d7%aa%d7%a7%d7%a8%d7%94-%d7%95%d7%95%d7%a1%d7%98%d7%99%d7%a0%d7%92%d7%94%d7%90%d7%95%d7%a1-%e2%81%a6sacramento%e2%81%a9-52-%d7%9c%d7%91%d7%9f/",
+  "price": 1999.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 132,
+   "d": 132,
+   "h": 36
+  },
+  "type": "ceiling-fan",
+  "params": {
+   "blades": 3,
+   "light": true,
+   "variant": "classic",
+   "color": "#f4f4f4",
+   "color2": "#c9a06a",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-fans",
+  "tags": [
+   "dc-motor",
+   "light",
+   "solid-wood-blades",
+   "52-inch",
+   "premium"
+  ],
+  "description": "DC fan with solid natural oak blades and 28 W dimmable light, remote; span 132 cm, max drop 36 cm."
+ },
+ {
+  "id": "soferavi-westinghouse-carla-48-black",
+  "name": "Westinghouse Carla 48\" DC ceiling fan with light, matt black / oak-look blades",
+  "nameHe": "מאוורר תקרה WESTINGHOUSE ווסטינגהאוס CARLA 48",
+  "brand": "Westinghouse",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%9e%d7%90%d7%95%d7%95%d7%a8%d7%a8-%d7%aa%d7%a7%d7%a8%d7%94-%d7%95%d7%95%d7%a1%d7%98%d7%99%d7%a0%d7%92%d7%94%d7%90%d7%95%d7%a1-%e2%81%a6carla%e2%81%a9-48-%d7%a9%d7%97%d7%95%d7%a8-2/",
+  "price": 1099.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 122,
+   "d": 122,
+   "h": 24
+  },
+  "type": "ceiling-fan",
+  "params": {
+   "blades": 3,
+   "light": true,
+   "variant": "modern",
+   "color": "#1c1c1c",
+   "color2": "#b8935a",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-fans",
+  "tags": [
+   "dc-motor",
+   "light",
+   "low-profile",
+   "48-inch",
+   "bedroom"
+  ],
+  "description": "Low-profile DC fan with 28 W dimmable light, 3 blades; span 122 cm, max drop from ceiling 24 cm; rooms up to 25 m2."
+ },
+ {
+  "id": "soferavi-westinghouse-spring-52-black-nolight",
+  "name": "Westinghouse Spring 52\" DC ceiling fan without light, black, IP44",
+  "nameHe": "מאוורר תקרה WESTINGHOUSE ווסטינגהאוס SPRING 52",
+  "brand": "Westinghouse",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%9e%d7%90%d7%95%d7%95%d7%a8%d7%a8-%d7%aa%d7%a7%d7%a8%d7%94-%d7%95%d7%95%d7%a1%d7%98%d7%99%d7%a0%d7%92%d7%94%d7%90%d7%95%d7%a1-%e2%81%a6spring-52%e2%81%a9/",
+  "price": 999.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 132,
+   "d": 132,
+   "h": 36.8
+  },
+  "type": "ceiling-fan",
+  "params": {
+   "blades": 3,
+   "light": false,
+   "variant": "industrial",
+   "color": "#1c1c1c",
+   "color2": "#1c1c1c",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-fans",
+  "tags": [
+   "dc-motor",
+   "no-light",
+   "ip44",
+   "outdoor-rated",
+   "52-inch"
+  ],
+  "description": "DC fan, no light, IP44 (indoor/pergola), 3 black blades; span 132 cm, max drop 36.8 cm without light; remote."
+ },
+ {
+  "id": "bug-venta-60-black-nolight",
+  "name": "Venta 60\" ceiling fan with remote, no light, black",
+  "nameHe": "מאוורר תקרה 60\" כולל שלט Venta",
+  "brand": "Venta",
+  "retailer": "Bug",
+  "url": "https://www.bug.co.il/מאוורר-תקרה-60-כולל-שלט-venta-9677356099062",
+  "price": 1149.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 152,
+   "d": 152,
+   "h": 31
+  },
+  "type": "ceiling-fan",
+  "params": {
+   "blades": 3,
+   "light": false,
+   "variant": "modern",
+   "color": "#1c1c1c",
+   "color2": "#1c1c1c",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-fans",
+  "tags": [
+   "no-light",
+   "large",
+   "60-inch",
+   "remote"
+  ],
+  "description": "Light-free 60\" fan with remote; blade span 152 cm, total height ceiling to fan bottom 31 cm (rod 15 cm)."
+ },
+ {
+  "id": "bug-midea-46-led-dc-white",
+  "name": "Midea 46\" DC ceiling fan with 18 W LED light and remote, white",
+  "nameHe": "מאוורר תקרה 46\" כולל תאורת 18W LED ושלט Midea",
+  "brand": "Midea",
+  "retailer": "Bug",
+  "url": "https://www.bug.co.il/מאוורר-תקרה-46-כולל-תאורת-18w-led-ושלט-midea-967798545",
+  "price": 629.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 116.8,
+   "d": 116.8,
+   "h": 36
+  },
+  "type": "ceiling-fan",
+  "params": {
+   "blades": 3,
+   "light": true,
+   "variant": "modern",
+   "color": "#f2f2f2",
+   "color2": "#f2f2f2",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-fans",
+  "tags": [
+   "dc-motor",
+   "light",
+   "46-inch",
+   "budget"
+  ],
+  "description": "DC fan with 18 W LED light and remote; span 46\" (116.8 cm), hangs about 36 cm from the ceiling."
+ },
+ {
+  "id": "bug-gold-line-56-led-white",
+  "name": "Gold Line 56\" ceiling fan with variable LED light and remote, white",
+  "nameHe": "מאוורר תקרה 56\" כולל שלט ותאורת LED משתנה Gold Line",
+  "brand": "Gold Line",
+  "retailer": "Bug",
+  "url": "https://www.bug.co.il/מאוורר-תקרה-56-כולל-שלט-ותאורת-led-משתנה-gold-line-915804890",
+  "price": 404.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 140,
+   "d": 140,
+   "h": 36
+  },
+  "type": "ceiling-fan",
+  "params": {
+   "blades": 4,
+   "light": true,
+   "variant": "classic",
+   "color": "#f2f2f2",
+   "color2": "#f2f2f2",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-fans",
+  "tags": [
+   "dc-motor",
+   "light",
+   "4-blades",
+   "56-inch",
+   "budget"
+  ],
+  "description": "DC-motor 4-blade fan, span 56\" (140 cm), height 36 cm; variable-colour LED light and remote."
+ },
+ {
+  "id": "bug-semicom-42-3tone-black",
+  "name": "Semicom 42\" DC ceiling fan with 3-tone 20 W light and remote, black",
+  "nameHe": "מאוורר תקרה בעל 3 גווני הארה 20W כולל שלט 42\" Semicom",
+  "brand": "Semicom",
+  "retailer": "Bug",
+  "url": "https://www.bug.co.il/מאוורר-תקרה-בעל-3-גווני-הארה-20w-כולל-שלט-42-semicom-915740100",
+  "price": 599.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 107,
+   "d": 107,
+   "h": 44.5
+  },
+  "type": "ceiling-fan",
+  "params": {
+   "light": true,
+   "variant": "modern",
+   "color": "#222222",
+   "color2": "#222222",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-fans",
+  "tags": [
+   "dc-motor",
+   "light",
+   "42-inch",
+   "small-room"
+  ],
+  "description": "DC fan 42\" (107 cm) with 20 W light in 3 tones and remote; hanging distance from ceiling 44.5 cm (rod 12.5 cm)."
+ },
+ {
+  "id": "bug-venta-48-led-white",
+  "name": "Venta 48\" DC ceiling fan with LED light and remote",
+  "nameHe": "מאוורר תקרה 48\" כולל שלט ותאורת Venta LED",
+  "brand": "Venta",
+  "retailer": "Bug",
+  "url": "https://www.bug.co.il/מאוורר-תקרה-48-כולל-שלט-ותאורת-venta-led-9677543454",
+  "price": 799.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 137.5,
+   "d": 137.5,
+   "h": 44
+  },
+  "type": "ceiling-fan",
+  "params": {
+   "blades": 3,
+   "light": true,
+   "variant": "modern",
+   "color": "#f2f2f2",
+   "color2": "#f2f2f2",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "ceiling-fans",
+  "tags": [
+   "dc-motor",
+   "light",
+   "48-inch",
+   "remote"
+  ],
+  "description": "DC fan with LED light and remote; blade span 137.5 cm, height 44 cm (colour estimated)."
+ },
+ {
+  "id": "neta-monstera-xl",
+  "name": "Monstera deliciosa, size XL in grower pot (stated height 70-90 cm)",
+  "nameHe": "מונסטרה נאה - גודל XL",
+  "brand": "neta",
+  "retailer": "neta plants",
+  "url": "https://netaplants.co.il/product/%d7%9e%d7%95%d7%a0%d7%a1%d7%98%d7%a8%d7%94-%d7%a0%d7%90%d7%94/",
+  "price": 139.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 70,
+   "d": 70,
+   "h": 80
+  },
+  "type": "plant",
+  "params": {
+   "species": "monstera",
+   "pot": "plastic",
+   "potColor": "#2a2a2a",
+   "artificial": false,
+   "color": "#3f6b3a"
+  },
+  "zone": "indoor",
+  "category": "decor",
+  "subcategory": "plants",
+  "tags": [
+   "monstera",
+   "large-leaf",
+   "statement",
+   "live-plant",
+   "spread-estimated",
+   "height-range"
+  ],
+  "description": "Live potted plant, size XL with grower pot; the shop states a plant height of 70-90 cm measured from the floor incl. pot (midpoint 80 used); pot diameter not stated so spread 70 cm is an estimate."
+ },
+ {
+  "id": "neta-ficus-lyrata-xxl",
+  "name": "Fiddle-leaf fig (Ficus lyrata), size XXL in grower pot (stated height 130-150 cm)",
+  "nameHe": "פיקוס כינורי - גודל XXL",
+  "brand": "neta",
+  "retailer": "neta plants",
+  "url": "https://netaplants.co.il/product/%d7%a4%d7%99%d7%a7%d7%95%d7%a1-%d7%9b%d7%99%d7%a0%d7%95%d7%a8%d7%99/",
+  "price": 299.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 60,
+   "d": 60,
+   "h": 140
+  },
+  "type": "plant",
+  "params": {
+   "species": "fiddle-leaf",
+   "pot": "plastic",
+   "potColor": "#2a2a2a",
+   "artificial": false,
+   "color": "#3f6b3a"
+  },
+  "zone": "indoor",
+  "category": "decor",
+  "subcategory": "plants",
+  "tags": [
+   "fiddle-leaf-fig",
+   "tall",
+   "statement",
+   "live-plant",
+   "spread-estimated",
+   "height-range"
+  ],
+  "description": "Live potted plant, size XXL with grower pot; the shop states a plant height of 130-150 cm measured from the floor incl. pot (midpoint 140 used); pot diameter not stated so spread 60 cm is an estimate."
+ },
+ {
+  "id": "neta-kentia-xl",
+  "name": "Kentia palm (Howea forsteriana), size XL in grower pot (stated height 70-100 cm)",
+  "nameHe": "קנציה - גודל XL",
+  "brand": "neta",
+  "retailer": "neta plants",
+  "url": "https://netaplants.co.il/product/%d7%a7%d7%a0%d7%a6%d7%99%d7%94/",
+  "price": 199.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 60,
+   "d": 60,
+   "h": 85
+  },
+  "type": "plant",
+  "params": {
+   "species": "palm",
+   "pot": "plastic",
+   "potColor": "#2a2a2a",
+   "artificial": false,
+   "color": "#3f6b3a"
+  },
+  "zone": "indoor",
+  "category": "decor",
+  "subcategory": "plants",
+  "tags": [
+   "kentia",
+   "palm",
+   "low-light",
+   "live-plant",
+   "spread-estimated",
+   "height-range"
+  ],
+  "description": "Live potted plant, size XL with grower pot; the shop states a plant height of 70-100 cm measured from the floor incl. pot (midpoint 85 used); pot diameter not stated so spread 60 cm is an estimate."
+ },
+ {
+  "id": "neta-zamioculcas-xl",
+  "name": "Zamioculcas (ZZ plant), size XL in grower pot (stated height 60-70 cm)",
+  "nameHe": "זמיה קוקוס - גודל XL",
+  "brand": "neta",
+  "retailer": "neta plants",
+  "url": "https://netaplants.co.il/product/%d7%96%d7%9e%d7%99%d7%94-%d7%a7%d7%95%d7%a7%d7%95%d7%a1/",
+  "price": 259.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 55,
+   "d": 55,
+   "h": 65
+  },
+  "type": "plant",
+  "params": {
+   "species": "zz",
+   "pot": "plastic",
+   "potColor": "#2a2a2a",
+   "artificial": false,
+   "color": "#3f6b3a"
+  },
+  "zone": "indoor",
+  "category": "decor",
+  "subcategory": "plants",
+  "tags": [
+   "zz-plant",
+   "low-maintenance",
+   "live-plant",
+   "spread-estimated",
+   "height-range"
+  ],
+  "description": "Live potted plant, size XL with grower pot; the shop states a plant height of 60-70 cm measured from the floor incl. pot (midpoint 65 used); pot diameter not stated so spread 55 cm is an estimate."
+ },
+ {
+  "id": "neta-sansevieria-xl",
+  "name": "Variegated snake plant (Sansevieria), size XL in grower pot (stated height 50-60 cm)",
+  "nameHe": "סנסיווריה מגוונת - גודל XL",
+  "brand": "neta",
+  "retailer": "neta plants",
+  "url": "https://netaplants.co.il/product/%d7%a1%d7%a0%d7%a1%d7%99%d7%95%d7%95%d7%a8%d7%99%d7%94-%d7%9e%d7%92%d7%95%d7%95%d7%a0%d7%aa/",
+  "price": 149.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 25,
+   "d": 25,
+   "h": 55
+  },
+  "type": "plant",
+  "params": {
+   "species": "snake",
+   "pot": "plastic",
+   "potColor": "#2a2a2a",
+   "artificial": false,
+   "color": "#3f6b3a"
+  },
+  "zone": "indoor",
+  "category": "decor",
+  "subcategory": "plants",
+  "tags": [
+   "snake-plant",
+   "low-maintenance",
+   "upright",
+   "live-plant",
+   "spread-estimated",
+   "height-range"
+  ],
+  "description": "Live potted plant, size XL with grower pot; the shop states a plant height of 50-60 cm measured from the floor incl. pot (midpoint 55 used); pot diameter not stated so spread 25 cm is an estimate."
+ },
+ {
+  "id": "neta-olive-bonsai-large",
+  "name": "Olive bonsai, size L in grower pot (stated height 35-40 cm)",
+  "nameHe": "זית בונסאי - גודל L",
+  "brand": "neta",
+  "retailer": "neta plants",
+  "url": "https://netaplants.co.il/product/%d7%96%d7%99%d7%aa-%d7%91%d7%95%d7%a0%d7%a1%d7%90%d7%99/",
+  "price": 129.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 30,
+   "d": 30,
+   "h": 37
+  },
+  "type": "plant",
+  "params": {
+   "species": "olive",
+   "pot": "plastic",
+   "potColor": "#2a2a2a",
+   "artificial": false,
+   "color": "#3f6b3a"
+  },
+  "zone": "indoor",
+  "category": "decor",
+  "subcategory": "plants",
+  "tags": [
+   "olive",
+   "bonsai",
+   "mediterranean",
+   "live-plant",
+   "spread-estimated",
+   "height-range"
+  ],
+  "description": "Live potted plant, size L with grower pot; the shop states a plant height of 35-40 cm measured from the floor incl. pot (midpoint 37 used); pot diameter not stated so spread 30 cm is an estimate."
+ },
+ {
+  "id": "plants4u-ficus-lyrata-10l",
+  "name": "Fiddle-leaf fig (Ficus lyrata), 10 L pot, about 100 cm",
+  "nameHe": "פיקוס כינורי - 10 L",
+  "brand": "Plants4u",
+  "retailer": "Plants4u (Galilot nursery)",
+  "url": "https://www.plants4u.co.il/product/%d7%a4%d7%99%d7%a7%d7%95%d7%a1-%d7%9b%d7%99%d7%a0%d7%95%d7%a8%d7%99/",
+  "price": 175.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 50,
+   "d": 50,
+   "h": 100
+  },
+  "type": "plant",
+  "params": {
+   "species": "fiddle-leaf",
+   "pot": "plastic",
+   "potColor": "#2a2a2a",
+   "artificial": false,
+   "color": "#3f6b3a"
+  },
+  "zone": "indoor",
+  "category": "decor",
+  "subcategory": "plants",
+  "tags": [
+   "fiddle-leaf-fig",
+   "statement",
+   "live-plant",
+   "spread-estimated"
+  ],
+  "description": "Live potted plant in 10 L pot; the shop states a height of about 100 cm; pot diameter not stated for litre pots so spread 50 cm is an estimate."
+ },
+ {
+  "id": "plants4u-areca-10l",
+  "name": "Areca palm, 10 L pot, about 90 cm",
+  "nameHe": "דקל אריקה - 10 L",
+  "brand": "Plants4u",
+  "retailer": "Plants4u (Galilot nursery)",
+  "url": "https://www.plants4u.co.il/product/%d7%93%d7%a7%d7%9c-%d7%90%d7%a8%d7%99%d7%a7%d7%94/",
+  "price": 175.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 70,
+   "d": 70,
+   "h": 90
+  },
+  "type": "plant",
+  "params": {
+   "species": "palm",
+   "pot": "plastic",
+   "potColor": "#2a2a2a",
+   "artificial": false,
+   "color": "#3f6b3a"
+  },
+  "zone": "indoor",
+  "category": "decor",
+  "subcategory": "plants",
+  "tags": [
+   "areca",
+   "palm",
+   "tropical",
+   "live-plant",
+   "spread-estimated"
+  ],
+  "description": "Live potted plant in 10 L pot; the shop states a height of about 90 cm; pot diameter not stated for litre pots so spread 70 cm is an estimate."
+ },
+ {
+  "id": "plants4u-triangle-palm-10l",
+  "name": "Triangle palm (Dypsis decaryi), 10 L pot, about 90 cm",
+  "nameHe": "דקל משולש - 10 L",
+  "brand": "Plants4u",
+  "retailer": "Plants4u (Galilot nursery)",
+  "url": "https://www.plants4u.co.il/product/%d7%93%d7%a7%d7%9c-%d7%9e%d7%a9%d7%95%d7%9c%d7%a9/",
+  "price": 167.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 70,
+   "d": 70,
+   "h": 90
+  },
+  "type": "plant",
+  "params": {
+   "species": "palm",
+   "pot": "plastic",
+   "potColor": "#2a2a2a",
+   "artificial": false,
+   "color": "#3f6b3a"
+  },
+  "zone": "indoor",
+  "category": "decor",
+  "subcategory": "plants",
+  "tags": [
+   "palm",
+   "triangle-palm",
+   "live-plant",
+   "spread-estimated"
+  ],
+  "description": "Live potted plant in 10 L pot; the shop states a height of about 90 cm; pot diameter not stated for litre pots so spread 70 cm is an estimate."
+ },
+ {
+  "id": "plants4u-schefflera-variegated-pot18",
+  "name": "Variegated schefflera, 18 cm pot, about 65 cm",
+  "nameHe": "שפלרה מגוונת - 18 cm",
+  "brand": "Plants4u",
+  "retailer": "Plants4u (Galilot nursery)",
+  "url": "https://www.plants4u.co.il/product/%d7%a9%d7%a4%d7%9c%d7%a8%d7%94-%d7%a2%d7%9c%d7%94-%d7%a7%d7%98%d7%9f-%d7%9e%d7%92%d7%95%d7%95%d7%a0%d7%aa-%d7%a2%d7%a6%d7%99%d7%a5-18/",
+  "price": 94.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 45,
+   "d": 45,
+   "h": 65
+  },
+  "type": "plant",
+  "params": {
+   "species": "rubber",
+   "pot": "plastic",
+   "potColor": "#2a2a2a",
+   "artificial": false,
+   "color": "#3f6b3a"
+  },
+  "zone": "indoor",
+  "category": "decor",
+  "subcategory": "plants",
+  "tags": [
+   "schefflera",
+   "variegated",
+   "live-plant",
+   "spread-estimated"
+  ],
+  "description": "Live potted plant in 18 cm pot; the shop states a height of about 65 cm; pot diameter not stated for litre pots so spread 45 cm is an estimate."
+ },
+ {
+  "id": "plants4u-ficus-elastica-black-15l",
+  "name": "Black rubber fig (Ficus elastica), 15 L pot, about 130 cm",
+  "nameHe": "פיקוס גומי שחור - 15 L",
+  "brand": "Plants4u",
+  "retailer": "Plants4u (Galilot nursery)",
+  "url": "https://www.plants4u.co.il/product/%d7%a4%d7%99%d7%a7%d7%95%d7%a1-%d7%92%d7%95%d7%93%d7%9c-10/",
+  "price": 370.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 55,
+   "d": 55,
+   "h": 130
+  },
+  "type": "plant",
+  "params": {
+   "species": "rubber",
+   "pot": "plastic",
+   "potColor": "#2a2a2a",
+   "artificial": false,
+   "color": "#3f6b3a"
+  },
+  "zone": "indoor",
+  "category": "decor",
+  "subcategory": "plants",
+  "tags": [
+   "rubber-plant",
+   "tall",
+   "live-plant",
+   "spread-estimated"
+  ],
+  "description": "Live potted plant in 15 L pot; the shop states a height of about 130 cm; pot diameter not stated for litre pots so spread 55 cm is an estimate."
  }
 ];

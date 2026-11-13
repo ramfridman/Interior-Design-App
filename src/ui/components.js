@@ -47,14 +47,14 @@ export function extLink(label, url, cls = '') {
  * Segmented control (radio group). options: [{ value, label, icon?, tip?, kbd? }]
  * @returns {HTMLElement & { set(value): void }}
  */
-export function segmented({ options, value, onChange, label, iconOnly = false, cls = '' }) {
+export function segmented({ options, value, onChange, label, iconOnly = false, iconSize = 16, cls = '' }) {
   const root = h('div', { class: `seg ${cls}`, role: 'radiogroup', 'aria-label': label });
   const buttons = options.map((opt) => h('button', {
     type: 'button', class: 'seg__btn', role: 'radio', 'aria-checked': 'false', tabindex: '-1',
     'aria-label': iconOnly ? opt.label : null, 'data-tip': opt.tip || (iconOnly ? opt.label : null), 'data-kbd': opt.kbd,
     dataset: { value: String(opt.value) },
     onClick: () => { if (current !== opt.value) { root.set(opt.value); onChange && onChange(opt.value); } },
-  }, opt.icon && icon(opt.icon, { size: 16 }), !iconOnly && h('span', { class: 'seg__label' }, opt.label)));
+  }, opt.icon && icon(opt.icon, { size: iconSize }), !iconOnly && h('span', { class: 'seg__label' }, opt.label)));
   let current;
   root.set = (v) => {
     current = v;
