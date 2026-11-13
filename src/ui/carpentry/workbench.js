@@ -118,6 +118,7 @@ export function initWorkbench(app, C) {
   setCollapsed(collapsed);
   function setSheet(open) {
     el.classList.toggle('is-open', open);
+    if (!open) leave3d();                                          // phone: closing the sheet gives the plan back
     if (open) { requestAnimationFrame(() => { S.userView = false; render(true); }); }
   }
   grip.addEventListener('pointerdown', (e) => {
@@ -610,10 +611,13 @@ export function initWorkbench(app, C) {
       // Carpentry lives in Plan and Split: show the 3D view beside a narrow key plan while the tab is open, then give the plan back.
       if (store.ui.mode === '2d') { T3.prevMode = '2d'; store.setUI({ mode: 'split' }); }
       stageEl()?.classList.add('is-carp3d');
+      window.addEventListener('resize', fitPhone3d);
     }
+    fitPhone3d();
     const first = T3.runId !== runId;
     T3.runId = runId;
-    if (first || changedRun) requestAnimationFrame(() => call(app.view3d, 'showCarpentry', { runId, open: T3.open, cut: T3.cut, studio: T3.studio, frame: true }));
+    // two frames: the 3D canvas has picked up its new size (split / phone sheet) before the camera frames the run
+    if (first || changedRun) requestAnimationFrame(() => requestAnimationFrame(() => call(app.view3d, 'showCarpentry', { runId, open: T3.open, cut: T3.cut, studio: T3.studio, frame: true })));
     const codes = Carp.unitCodes(cur.run, cur.units), list = C.findings(runId).filter((f) => f.severity !== 'info');
     setKids(c3dList, list.length ? list.map((f) => h('button', { type: 'button', role: 'listitem', class: `c3d__check c3d__check--${f.severity}`, onClick: () => { const id = (f.unitIds || [])[0]; if (id) { C.select(runId, id); C.flash(f.unitIds); } } },
       icon(f.severity === 'error' ? 'fail' : 'warn', { size: 14 }),
@@ -621,10 +625,21 @@ export function initWorkbench(app, C) {
       h('span', { class: 'c3d__text' }, (f.text && f.text.en) || f.code)))
       : [h('p', { class: 'c3d__ok' }, icon('check', { size: 14 }), h('span', null, 'No fit problems: the run fits the room.'))]);
   }
+  /** Phone: the 3D tab's sheet covers the bottom of the stage — shorten the viewport by that overlap (cleared on leaving). */
+  function fitPhone3d() {
+    const vp = stageEl();
+    if (!vp) return;
+    vp.style.removeProperty('max-height');
+    if (!T3.on || !el.classList.contains('is-open') || !window.matchMedia('(max-width: 699px)').matches) return;
+    const over = vp.getBoundingClientRect().bottom - el.getBoundingClientRect().top;
+    if (over > 1) vp.style.maxHeight = `calc(100% - ${Math.round(over)}px)`;   // the stage is a flex column in Carpentry mode
+  }
   /** Leave the 3D tab state: clear the 3D overlays and go back to the view the user had before the tab opened. */
   function leave3d() {
     if (!T3.on) return;
     T3.on = false; T3.runId = null;
+    window.removeEventListener('resize', fitPhone3d);
+    stageEl()?.style.removeProperty('max-height');
     el.classList.remove('is-3d');
     p3d.hidden = true;
     call(app.view3d, 'showCarpentry', { runId: null });

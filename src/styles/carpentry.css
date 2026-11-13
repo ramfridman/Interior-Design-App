@@ -421,3 +421,15 @@
 /* 3D tab: the 3D view takes most of the stage, the plan stays as a narrow key plan. */
 .viewport.is-carp3d[data-mode='split'] .pane-2d { flex: 0 0 26%; }
 .viewport.is-carp3d .split-handle { pointer-events: none; }
+/* Phone: the 3D tab is a bottom sheet (its controls scroll inside it) under a full-width 3D view; the key plan is
+   dropped and the stage is shortened by the sheet's overlap (workbench.js fitPhone3d), so the run is framed in sight. */
+@media (max-width: 699px) {
+  .app.is-carpentry .cwb.is-open.is-3d {
+    top: auto; height: min(46vh, 380px); height: min(46dvh, 380px); max-height: calc(100% - 140px);
+    border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; box-shadow: var(--shadow-2);
+  }
+  .cwb.is-open.is-3d .cwb__strip { display: none; }
+  .c3d { padding: var(--s-2) var(--s-3); gap: var(--s-2); overscroll-behavior: contain; }
+  .c3d__bar .chip, .c3d__bar .btn { min-height: 40px; }
+  .viewport.is-carp3d[data-mode='split'] .pane-2d, .viewport.is-carp3d .split-handle { display: none; }
+}
