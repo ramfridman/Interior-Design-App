@@ -294,14 +294,14 @@ export function largestInnerRect(poly) {
   };
   for (let i0 = 0; i0 < nx; i0++) for (let j0 = 0; j0 < ny; j0++) {
     for (let i1 = i0; i1 < nx; i1++) {
-      let ok = true;
-      for (let j1 = j0; j1 < ny && ok; j1++) {
+      if (!inside[j0 * nx + i1]) break;
+      for (let j1 = j0; j1 < ny; j1++) {
+        let ok = true;
         for (let i = i0; i <= i1; i++) if (!inside[j1 * nx + i]) { ok = false; break; }
         if (!ok) break;
         const w = xs[i1 + 1] - xs[i0], h = ys[j1 + 1] - ys[j0];
         if (better(w, h)) best = { x: xs[i0], y: ys[j0], w, h };
       }
-      if (!inside[j0 * nx + i1]) break;
     }
   }
   return best;

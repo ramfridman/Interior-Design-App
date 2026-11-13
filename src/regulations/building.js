@@ -1,0 +1,436 @@
+/**
+ * Checks that depend only on the building and the lot (plan data + ceiling height + mamad wall finish).
+ * Everything is computed from `plan` — no coordinates are hard-coded.
+ */
+import { areaM2, pointInPolygon, polygonBounds, pointInRect } from '../core/geometry.js';
+import { ruleById, refString } from './rules.js';
+import { m, num, rectPoly, largestInnerRect, narrowPassages, overshoot, segDist, polyInside } from './geom.js';
+
+/** Build one finding; category / kind / reference come from the rule. */
+export function finding(ruleId, severity, key, title, detail, extra) {
+  const r = ruleById(ruleId);
+  return { id: `${ruleId}:${key}`, ruleId, severity, category: r.category, kind: r.kind, title, detail, reference: refString(r), ...extra };
+}
+
+const HABITABLE = new Set(['bedroom', 'living', 'mamad', 'study', 'dining']);
+const SERVICE = new Set(['bathroom', 'wc']);
+const pct = (v) => (v * 100).toFixed(1) + '%';
+const centre = (poly) => { const b = polygonBounds(poly); return { x: b.x + b.w / 2, y: b.y + b.h / 2 }; };
+const spot = (space) => (space.label ? { x: space.label[0], y: space.label[1] } : centre(space.polygon));
+const openingCentre = (o) => ({ x: o.x + o.w / 2, y: o.y + o.h / 2 });
+const isDoor = (o) => o.kind === 'door' || o.kind === 'sliding-door';
+const isGlazed = (o) => o.kind === 'window' || o.kind === 'sliding-door' || /glass/.test(o.style || '');
+export const roomById = (plan, id) => plan.rooms.find((r) => r.id === id) || plan.outdoorAreas.find((r) => r.id === id) || null;
+const roomAt = (plan, x, y) => plan.rooms.find((r) => pointInPolygon(x, y, r.polygon)) || null;
+
+/** Exterior glazed openings (windows and glazed doors) of a room. */
+export const roomGlazing = (plan, roomId) => plan.openings.filter((o) => o.exterior && isGlazed(o) && (o.rooms || []).includes(roomId));
+const openingArea = (o) => (o.width * o.height) / 1e4;
+const dimsOf = (o) => `${m(o.width)} × ${m(o.height)} m`;
+
+// ───────────────────────── rooms ─────────────────────────
+
+function checkRooms(plan, H, out) {
+  let big = null;
+  const mismatches = [];
+  for (const r of plan.rooms) {
+    const area = areaM2(r.polygon);
+    const rect = largestInnerRect(r.polygon);
+    const width = Math.min(rect.w, rect.h);
+    const at = spot(r);
+    const size = `${area.toFixed(2)} m², clear width ${m(width)} m`;
+    if (r.drawnArea && Math.abs(area - r.drawnArea) > 0.35) mismatches.push(`${r.name}: ${area.toFixed(2)} m² computed vs ${r.drawnArea} m² written`);
+    if (HABITABLE.has(r.type)) {
+      if (!big || area > big.area) big = { r, area };
+      const ok = area >= 8 && width >= 260;
+      out.push(finding('room-size-habitable', ok ? 'pass' : 'fail', r.id, `${r.name}: ${size}`,
+        ok ? `${r.name} is ${area.toFixed(2)} m² with ${m(width)} m between walls — meets the minimum for a habitable room (8.0 m² and 2.60 m).`
+          : `${r.name} is ${area.toFixed(2)} m² with ${m(width)} m between walls — a habitable room needs at least 8.0 m² and 2.60 m.`,
+        { spaceId: r.id, at }));
+      if (r.type === 'living') {
+        out.push(finding('room-size-kitchen', 'pass', r.id, `Open kitchen inside ${r.name}`,
+          `The kitchen is part of the open ${area.toFixed(1)} m² living space (largest clear rectangle ${m(rect.w)} × ${m(rect.h)} m), far above the 6.0 m² / 1.70 m required for a kitchen.`,
+          { spaceId: r.id, at }));
+      }
+    } else if (r.type === 'bathroom') {
+      const ok = area >= 2.5 && width >= 145;
+      out.push(finding('room-size-bathroom', ok ? 'pass' : (area >= 1.8 && width >= 90 ? 'info' : 'fail'), r.id, `${r.name}: ${size}`,
+        ok ? `${r.name} is ${area.toFixed(2)} m² and ${m(width)} m wide — above the bathroom minimum of 2.5 m² and 1.45 m.`
+          : `${r.name} is ${area.toFixed(2)} m² and ${m(width)} m wide. A bathroom needs 2.5 m² and 1.45 m; a shower-and-toilet room 1.8 m² and 0.90 m.`,
+        { spaceId: r.id, at }));
+    } else if (r.type === 'wc') {
+      const ok = area >= 1.1 && width >= 80;
+      out.push(finding('room-size-wc', ok ? 'pass' : 'fail', r.id, `${r.name}: ${size}`,
+        `${r.name} is ${area.toFixed(2)} m² and ${m(width)} m wide — ${ok ? 'meets' : 'below'} the minimum of 1.1 m² and 0.80 m for a toilet room.`,
+        { spaceId: r.id, at }));
+    } else {
+      out.push(finding('room-size-service', 'pass', r.id, `${r.name}: ${size}`,
+        `${r.name} is ${area.toFixed(2)} m² and ${m(width)} m wide. The regulations set no minimum area for a laundry / service room.`,
+        { spaceId: r.id, at }));
+    }
+  }
+  if (big) {
+    out.push(finding('room-size-habitable', big.area >= 12 ? 'pass' : 'fail', 'largest', `Largest room: ${big.r.name}, ${big.area.toFixed(1)} m²`,
+      `A dwelling with two or more rooms needs at least one habitable room of 12.0 m²; ${big.r.name} has ${big.area.toFixed(1)} m².`, { spaceId: big.r.id, at: spot(big.r) }));
+  }
+  const habit = H >= 250, serv = H >= 205;
+  out.push(finding('ceiling-height', habit ? 'pass' : serv ? 'fail' : 'fail', 'all', `Ceiling height ${m(H)} m`,
+    habit ? `The ${m(H)} m ceiling is above the 2.50 m minimum for habitable rooms and the 2.05 m minimum for bathrooms, service rooms and corridors.`
+      : `A ${m(H)} m ceiling is below the 2.50 m minimum for habitable rooms${serv ? ' (it would only be acceptable in bathrooms, service rooms and internal corridors, minimum 2.05 m)' : ''}.`));
+  out.push(finding('plan-consistency', mismatches.length ? 'info' : 'pass', 'areas', mismatches.length ? 'Room areas differ from the drawing' : 'Room areas match the drawing',
+    mismatches.length ? mismatches.join('; ') + '.' : 'Every room area computed from the digitised plan is within 0.35 m² of the area written on the drawing.'));
+}
+
+// ───────────────────────── light & ventilation ─────────────────────────
+
+function checkLight(plan, out) {
+  for (const r of plan.rooms) {
+    const area = areaM2(r.polygon);
+    const wins = roomGlazing(plan, r.id);
+    const total = wins.reduce((s, o) => s + openingArea(o), 0);
+    const ratio = area ? total / area : 0;
+    const list = wins.length ? wins.map((o) => `${o.kind === 'window' ? 'window' : 'glazed door'} ${dimsOf(o)}`).join(', ') : 'no window';
+    const assumed = wins.some((o) => (o.assumed || []).some((f) => f === 'height' || f === 'width'));
+    const extra = { spaceId: r.id, at: wins[0] ? openingCentre(wins[0]) : spot(r) };
+    if (HABITABLE.has(r.type)) {
+      const ok = ratio >= 0.08;
+      out.push(finding('light-habitable', ok ? 'pass' : 'fail', r.id, `${r.name}: windows ${pct(ratio)} of the floor`,
+        `${r.name} window area is ${total.toFixed(2)} m² (${list}) = ${pct(ratio)} of the ${area.toFixed(2)} m² floor — ${ok ? 'meets' : 'below'} the 8% minimum${r.type === 'living' ? ' (the open kitchen needs 5%)' : ''}.`
+        + (ok ? '' : ` At least ${(area * 0.08).toFixed(2)} m² is required.`), extra));
+    } else if (SERVICE.has(r.type)) {
+      const need = Math.max(area * 0.1, 0.3);
+      const ok = total >= need - 1e-6;
+      out.push(finding('light-service', ok ? 'pass' : 'warn', r.id,
+        ok ? `${r.name}: window ${total.toFixed(2)} m² ventilates the room` : `${r.name}: window too small to ventilate alone — plan an extractor fan`,
+        ok ? `${r.name} has ${total.toFixed(2)} m² of window (${list}); the minimum for natural ventilation is ${need.toFixed(2)} m² (10% of the ${area.toFixed(2)} m² floor, not less than 0.3 m²).`
+          : `${r.name} has ${total.toFixed(2)} m² of window (${list}) but natural ventilation needs ${need.toFixed(2)} m² (10% of the ${area.toFixed(2)} m² floor, not less than 0.3 m²). `
+            + 'This is allowed if a mechanical extractor or vent duct (at least 3 air changes per hour) is installed — make sure one is on the electrical and HVAC plans.'
+            + (assumed ? ' The window height is an assumption (not written on the drawing); confirm it.' : ''), extra));
+    } else {
+      out.push(finding('vent-laundry', total > 0 ? 'pass' : 'info', r.id, total > 0 ? `${r.name}: has a window` : `${r.name}: no window — add an extractor`,
+        total > 0 ? `${r.name} has ${total.toFixed(2)} m² of window.` : `${r.name} has no window (its outside door is solid). With a washer and dryer, plan a mechanical extractor or a louvred door to remove moisture and heat.`, extra));
+    }
+  }
+
+  // window sills / fall protection
+  const drop = num(plan.heights && plan.heights.floorAboveGround, 0);
+  const windows = plan.openings.filter((o) => o.kind === 'window' && o.exterior);
+  if (windows.length) {
+    const lowest = windows.reduce((a, b) => (b.sill < a.sill ? b : a));
+    if (drop < 60) {
+      out.push(finding('sill-guard', 'pass', 'all', `Window sills ${Math.min(...windows.map((o) => o.sill))}–${Math.max(...windows.map((o) => o.sill))} cm: no guards needed`,
+        `The floor is only ${drop} cm above the garden, so no window has a fall of 60 cm or more and no guard rail is required. Lowest sill: ${lowest.sill} cm. (On an upper storey, sills below 1.05 m would need a guard.)`));
+    } else {
+      for (const o of windows.filter((w) => w.sill < 105)) {
+        out.push(finding('sill-guard', 'warn', o.id, `Window sill ${o.sill} cm above a ${drop} cm drop`,
+          `This window has a sill ${o.sill} cm above the floor and the ground outside is ${drop} cm lower — a guard to 1.05 m (SI 1142) or fixed safety glazing is needed.`, { at: openingCentre(o), spaceId: (o.rooms || [])[0] }));
+      }
+    }
+  }
+  const glazedDoors = plan.openings.filter((o) => o.exterior && o.kind !== 'window' && isGlazed(o));
+  for (const o of glazedDoors) {
+    out.push(finding('glazing-safety', 'info', o.id, `Glazed door ${dimsOf(o)}: specify safety glass`,
+      `The ${dimsOf(o)} glazed door reaches the floor. Glazing must follow SI 1099 — ask for laminated or tempered safety glass and a visible marking at eye level.`, { at: openingCentre(o), spaceId: (o.rooms || [])[0] }));
+  }
+}
+
+// ───────────────────────── doors & corridors ─────────────────────────
+
+function checkDoors(plan, out) {
+  const doors = plan.openings.filter(isDoor);
+  let wideToiletDoor = false;
+  const serviceDoors = [];
+  for (const o of doors) {
+    const rooms = (o.rooms || []).map((id) => roomById(plan, id)).filter(Boolean);
+    const inner = rooms.filter((r) => plan.rooms.includes(r));
+    const at = openingCentre(o);
+    const size = `${o.width} × ${o.height} cm`;
+    const hOk = o.height >= 198;
+    const assumed = (o.assumed || []).includes('height') ? ' (height assumed — not written on the drawing)' : '';
+    if (o.style === 'mamad') continue;                                   // checked with the safe room
+    if (o.style === 'entry') {
+      const ok = o.width >= 80 && hOk && o.kind === 'door';
+      out.push(finding('door-entry', ok ? 'pass' : 'fail', o.id, `Entrance door ${size}`,
+        ok ? `The entrance door is ${o.width} cm wide and ${o.height} cm high — above the 80 cm clear width and 1.98 m height required for the exit door of a dwelling, and it is hinged (a sliding door may not be the main entrance).`
+          : `The entrance door is ${size}; the exit door of a dwelling needs 80 cm clear width, 1.98 m height and may not be a sliding door.`, { at, spaceId: inner[0] && inner[0].id }));
+      continue;
+    }
+    if (o.kind === 'sliding-door') {
+      out.push(finding('door-room', 'pass', o.id, `Sliding door ${size}`,
+        `The ${m(o.width)} m sliding glass door is a secondary door — sliding doors are allowed inside a dwelling as long as they are not the main entrance.`, { at, spaceId: inner[0] && inner[0].id }));
+      continue;
+    }
+    const svc = inner.find((r) => SERVICE.has(r.type));
+    const other = inner.find((r) => r.type !== 'living') || inner[0];
+    const name = svc ? svc.name : other ? other.name : 'Door';
+    if (svc) {
+      serviceDoors.push({ o, svc });
+      if (o.width >= 70) wideToiletDoor = true;
+      const ok = o.width >= 60 && hOk;
+      out.push(finding('door-service', ok ? 'pass' : 'fail', o.id, `${name} door ${size}`,
+        `The door to ${name} is ${o.width} cm wide and ${o.height} cm high${assumed} — ${ok ? 'above' : 'below'} the minimum (70 cm for at least one room with a toilet, 60 cm for the others, 1.98 m high).`, { at, spaceId: svc.id }));
+    } else {
+      const ok = o.width >= 70 && hOk;
+      out.push(finding('door-room', ok ? 'pass' : 'fail', o.id, `${name} door ${size}`,
+        `The door to ${name} is ${o.width} cm wide and ${o.height} cm high${assumed} — ${ok ? 'above' : 'below'} the 70 cm clear width and 1.98 m height required for room doors.`, { at, spaceId: other && other.id }));
+    }
+  }
+  if (serviceDoors.length && !wideToiletDoor) {
+    out.push(finding('door-service', 'fail', 'one-wide', 'No bathroom door of 70 cm', 'At least one room with a toilet must have a door 70 cm wide.'));
+  }
+
+  // corridors: narrow parts of the open living space
+  for (const r of plan.rooms.filter((x) => x.type === 'living')) {
+    const seen = [];
+    for (const p of narrowPassages(r.polygon)) {
+      if (seen.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 60)) continue;
+      seen.push(p);
+      const zone = (r.zones || []).reduce((best, z) => {
+        const d = Math.hypot(z.label[0] - p.x, z.label[1] - p.y);
+        return !best || d < best.d ? { z, d } : best;
+      }, null);
+      const name = zone && zone.d < Math.max(p.length, 150) ? zone.z.name : 'Passage';
+      const ok = p.width >= 90;
+      out.push(finding('corridor-width', ok ? 'pass' : 'fail', `${r.id}:${Math.round(p.x)}:${Math.round(p.y)}`, `${name}: ${m(p.width)} m wide`,
+        `The ${name.toLowerCase()} is ${m(p.width)} m wide over ${m(p.length)} m — ${ok ? 'above' : 'below'} the 0.90 m minimum for a corridor inside a dwelling (1.00 m where it is the main entrance).`
+        + (ok ? ' Keep it free of furniture: a 30 cm console would leave only ' + m(p.width - 30) + ' m.' : ''), { spaceId: r.id, at: { x: p.x, y: p.y } }));
+    }
+  }
+
+  const bedrooms = plan.rooms.filter((r) => r.type === 'bedroom');
+  if (bedrooms.length) {
+    out.push(finding('smoke-detectors', 'info', 'all', `Smoke detectors: ${bedrooms.length} bedrooms + lobby`,
+      `Install a stand-alone smoke detector in each bedroom (${bedrooms.map((r) => r.name).join(', ')}) and in the hall leading to them`
+      + (plan.rooms.some((r) => r.type === 'mamad') ? '; also in the safe room if someone sleeps there' : '') + '. They are required for the completion certificate and are not shown on the furniture plan.'));
+  }
+}
+
+// ───────────────────────── safe room ─────────────────────────
+
+/** Walls and openings lying along each edge of a rectilinear room, with thickness and whether the far side is outdoors. */
+export function roomSides(plan, room) {
+  const poly = room.polygon, sides = [];
+  for (let i = 0; i < poly.length; i++) {
+    const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % poly.length];
+    if (x1 !== x2 && y1 !== y2) continue;
+    const horizontal = y1 === y2;
+    const a = horizontal ? Math.min(x1, x2) : Math.min(y1, y2), b = horizontal ? Math.max(x1, x2) : Math.max(y1, y2);
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    const n = horizontal ? [0, pointInPolygon(mx, my + 1, poly) ? -1 : 1] : [pointInPolygon(mx + 1, my, poly) ? -1 : 1, 0];
+    const strip = horizontal ? { x: a, y: n[1] < 0 ? y1 - 2 : y1, w: b - a, h: 2 } : { x: n[0] < 0 ? x1 - 2 : x1, y: a, w: 2, h: b - a };
+    const touching = (r) => {
+      const ox = Math.min(r.x + r.w, strip.x + strip.w) - Math.max(r.x, strip.x), oy = Math.min(r.y + r.h, strip.y + strip.h) - Math.max(r.y, strip.y);
+      return ox > 0 && oy > 0 && (horizontal ? ox : oy) > 5;
+    };
+    const walls = plan.walls.filter(touching), openings = plan.openings.filter(touching);
+    if (!walls.length && !openings.length) continue;
+    const thick = (r) => (horizontal ? r.h : r.w);
+    const thickness = Math.min(...walls.map(thick), ...(walls.length ? [] : openings.map(thick)));
+    const px = mx + n[0] * (thickness + 10), py = my + n[1] * (thickness + 10);
+    sides.push({ dir: horizontal ? (n[1] < 0 ? 'north' : 'south') : (n[0] < 0 ? 'west' : 'east'), n, walls, openings, thickness, exterior: !roomAt(plan, px, py), at: { x: mx, y: my } });
+  }
+  return sides;
+}
+
+function checkMamad(plan, H, store, catalog, out) {
+  for (const r of plan.rooms.filter((x) => x.type === 'mamad')) {
+    const area = areaM2(r.polygon), volume = area * H / 100;
+    const rect = largestInnerRect(r.polygon), width = Math.min(rect.w, rect.h);
+    const at = spot(r), ex = { spaceId: r.id, at };
+    const okA = area >= 9 && volume >= 22.5;
+    out.push(finding('mamad-area', okA ? 'pass' : (area >= 5 ? 'warn' : 'fail'), r.id, `Safe room: ${area.toFixed(1)} m² net, ${volume.toFixed(1)} m³`,
+      `The mamad has ${area.toFixed(2)} m² of net floor (walls excluded) and ${volume.toFixed(1)} m³ — ${okA ? 'above' : 'below'} the minimum of 9 m² and 22.5 m³`
+      + (okA ? '.' : ' (a smaller room down to 5 m² needs a specific Home Front Command approval).'), ex));
+    const okH = H >= 250 && H <= 280, okW = width >= 160;
+    out.push(finding('mamad-height', !okW || H < 250 ? 'fail' : okH ? 'pass' : 'warn', r.id,
+      okH ? `Safe room: ${m(H)} m high, ${m(width)} m wide` : `Safe room height ${m(H)} m is outside 2.50–2.80 m`,
+      (okH ? `Clear height ${m(H)} m is within the 2.50–2.80 m range` : H > 280
+        ? `The house ceiling is ${m(H)} m, but a mamad may be at most 2.80 m high unless the Home Front Command approves a higher room. Confirm with the architect whether the mamad has its own lower slab (then furniture and built-ins there must fit 2.80 m) or an approval for ${m(H)} m`
+        : `Clear height ${m(H)} m is below the 2.50 m minimum`)
+      + `; width ${m(width)} m ${okW ? 'meets' : 'is below'} the 1.60 m minimum.`, ex));
+
+    const sides = roomSides(plan, r);
+    const ext = sides.filter((s) => s.exterior);
+    out.push(finding('mamad-ext-walls', ext.length <= 2 ? 'pass' : 'warn', r.id, `Safe room: ${ext.length} external wall${ext.length === 1 ? '' : 's'}`,
+      `The mamad has ${ext.length} external wall${ext.length === 1 ? '' : 's'}${ext.length ? ' (' + ext.map((s) => s.dir).join(', ') + ')' : ''}; up to two are allowed without special approval.`, ex));
+
+    // walls
+    const parts = [], notes = [];
+    let wallFail = false;
+    const win = plan.openings.filter((o) => o.kind === 'window' && (o.rooms || []).includes(r.id));
+    for (const s of sides) {
+      if (!s.walls.length) continue;
+      const hasWin = s.openings.some((o) => win.includes(o));
+      const need = hasWin ? 30 : s.exterior ? 25 : 20;
+      if (s.thickness < need) wallFail = true;
+      parts.push(`${s.dir} ${s.thickness} cm (${s.exterior ? 'external' : 'internal'}${hasWin ? ', holds the blast window' : ''}; minimum ${need} cm)`);
+      if (s.walls.some((w) => w.kind !== 'mamad')) notes.push(`the ${s.dir} wall is recorded in the plan data as an ordinary ${s.walls.find((w) => w.kind !== 'mamad').kind} wall`);
+    }
+    out.push(finding('mamad-walls', wallFail ? 'fail' : notes.length ? 'info' : 'pass', r.id, wallFail ? 'Safe-room wall thinner than required' : `Safe-room walls ${Math.min(...sides.map((s) => s.thickness))}–${Math.max(...sides.map((s) => s.thickness))} cm`,
+      `Wall thickness as drawn: ${parts.join('; ')}.`
+      + (notes.length ? ` Note: ${notes.join(' and ')} — every wall of the mamad must be reinforced concrete cast with the shell; confirm on the structural drawings.` : ' All four walls are drawn as reinforced-concrete shelter walls.'), ex));
+
+    // door
+    const doors = plan.openings.filter((o) => isDoor(o) && (o.rooms || []).includes(r.id));
+    for (const o of doors) {
+      const dAt = openingCentre(o);
+      const side = sides.find((s) => s.openings.includes(o));
+      const outward = side ? (o.swing === side.dir[0]) : true;
+      const okSize = o.width >= 70 && o.width <= 90 && o.height >= 200;
+      const std = o.width <= 80;
+      const assumed = (o.assumed || []).length ? ' The door size is an assumption in the plan data — confirm it against the Home Front Command approved drawing.' : '';
+      out.push(finding('mamad-door', okSize && outward ? (std ? 'pass' : 'info') : 'fail', o.id, `Blast door ${o.width} × ${o.height} cm, opens ${outward ? 'outwards' : 'INTO the mamad'}`,
+        `The blast door is ${o.width} × ${o.height} cm clear and opens ${outward ? 'out of' : 'into'} the mamad. Required: 70–80 × 200 cm clear opening, opening outwards`
+        + (o.width > 80 ? ' (80–90 cm is only for a door facing a concrete wall closer than 1.30 m).' : '.') + assumed, { spaceId: r.id, at: dAt }));
+      if (side && !side.exterior) {
+        const dist = rayToExterior(plan, dAt, side.n, side.thickness / 2);
+        const ok = dist >= 400;
+        out.push(finding('mamad-door-position', ok ? 'pass' : 'info', o.id, `Blast door faces an external wall ${m(dist)} m away`,
+          `Measured straight out from the blast door, the first external wall is ${m(dist)} m away; the rule is at least 4.00 m`
+          + (ok ? '.' : ' — otherwise the door must be shielded by a concrete wall as the Home Front Command specification details. Confirm with the architect.'), { spaceId: r.id, at: dAt }));
+      } else if (side) {
+        out.push(finding('mamad-door-position', 'warn', o.id, 'Blast door is in an external wall', 'The blast door must be in an internal wall of the mamad, entered from inside the dwelling.', { spaceId: r.id, at: dAt }));
+      }
+    }
+    if (doors.length !== 1) out.push(finding('mamad-door', 'warn', r.id + ':count', `Safe room has ${doors.length} doors`, 'A mamad has one blast door (a second one only instead of the window, with approval).', ex));
+
+    // window
+    if (win.length !== 1) {
+      out.push(finding('mamad-window', 'warn', r.id + ':count', `Safe room has ${win.length} windows`, 'A mamad must have exactly one blast window.', ex));
+    }
+    for (const o of win) {
+      const a = openingArea(o);
+      const ok = o.sill >= 105 && a <= 1.21 + 1e-9 && o.width >= 60 && o.width <= 110 && o.height >= 80 && o.height <= 110;
+      out.push(finding('mamad-window', ok ? 'pass' : 'fail', o.id, `Blast window ${o.width} × ${o.height} cm, sill ${o.sill} cm`,
+        `The blast window is ${o.width} × ${o.height} cm (${a.toFixed(2)} m²) with its sill ${o.sill} cm above the floor. Required: one window, sill at least 105 cm, area up to 1.21 m², width 60–110 cm, height 80–110 cm — ${ok ? 'all met' : 'not met'}.`,
+        { spaceId: r.id, at: openingCentre(o) }));
+    }
+
+    // finishes
+    const chosen = store && store.finishes && store.finishes[r.id] && store.finishes[r.id].wall;
+    const prod = chosen && catalog && typeof catalog.getProduct === 'function' ? catalog.getProduct(chosen) : null;
+    const kind = prod && prod.params && prod.params.kind;
+    const hard = kind && ['tile', 'stone', 'brick'].includes(kind);
+    out.push(finding('mamad-finishes', hard ? 'fail' : 'pass', r.id, hard ? `Safe-room walls: ${kind} cladding is not allowed` : 'Safe-room walls: paint / plaster finish',
+      hard ? `"${prod.name}" is a ${kind} wall finish. The walls and ceiling of a mamad may not be clad with tiles, stone or similar — they shatter and fly in a blast. Use paint, thin plaster or wallpaper.`
+        : 'The mamad walls are finished with paint or a thin coating, as required (no ceramic, stone or brick cladding on walls or ceiling; floor tiles and a 10 cm skirting are fine).', ex));
+  }
+}
+
+/** Distance from `from` along unit vector `n` to the first exterior wall / opening or the edge of the house. */
+function rayToExterior(plan, from, n, skip) {
+  const b = plan.bounds;
+  for (let d = skip + 5; d < 3000; d += 5) {
+    const x = from.x + n[0] * d, y = from.y + n[1] * d;
+    if (x < b.x || y < b.y || x > b.x + b.w || y > b.y + b.h) return d - skip;
+    if (plan.walls.some((w) => w.kind === 'exterior' && pointInRect(x, y, w)) || plan.openings.some((o) => o.exterior && pointInRect(x, y, o))) return d - skip;
+    if (!roomAt(plan, x, y) && !plan.walls.some((w) => pointInRect(x, y, w)) && !plan.openings.some((o) => pointInRect(x, y, o))) return d - skip;
+  }
+  return 3000;
+}
+
+// ───────────────────────── site ─────────────────────────
+
+/** Boundary edge on a compass side: { a, b } end points. */
+export function boundaryEdge(boundary, side) {
+  const c = centre(boundary);
+  let best = null;
+  for (let i = 0; i < boundary.length; i++) {
+    const a = boundary[i], b = boundary[(i + 1) % boundary.length];
+    const mx = (a[0] + b[0]) / 2 - c.x, my = (a[1] + b[1]) / 2 - c.y;
+    const score = side === 'n' ? -my : side === 's' ? my : side === 'e' ? mx : -mx;
+    const along = side === 'n' || side === 's' ? Math.abs(b[0] - a[0]) : Math.abs(b[1] - a[1]);
+    if (along < Math.hypot(b[0] - a[0], b[1] - a[1]) * 0.7) continue;
+    if (!best || score > best.score) best = { a, b, score };
+  }
+  return best;
+}
+const SIDE_NAME = { n: 'north', e: 'east', s: 'south', w: 'west' };
+
+function checkSite(plan, out) {
+  const site = plan.site;
+  if (!site || !site.boundary) return;
+  const wallPolys = plan.walls.map(rectPoly);
+
+  // setbacks of the house from each property line
+  const parts = [];
+  let worst = 'pass';
+  for (const side of ['w', 'n', 'e', 's']) {
+    const e = boundaryEdge(site.boundary, side); if (!e) continue;
+    let dist = Infinity;
+    for (const poly of wallPolys) for (const [x, y] of poly) dist = Math.min(dist, segDist(x, y, e.a[0], e.a[1], e.b[0], e.b[1]));
+    const need = site.setbacks && site.setbacks[side];
+    const ok = need == null || dist >= need - 2;
+    if (!ok) worst = 'fail';
+    parts.push(`${SIDE_NAME[side]} ${m(dist)} m${need != null ? ` (required ${m(need)} m${ok ? '' : ' — TOO CLOSE'})` : ''}`);
+  }
+  out.push(finding('setbacks', worst, 'house', worst === 'pass' ? 'House setbacks respected on all four sides' : 'House is closer to the property line than the setback',
+    `Shortest distance from the house walls to each property line: ${parts.join(', ')}.` + (site.street ? ` The street is on the ${SIDE_NAME[site.street.side] || site.street.side} side.` : '')));
+
+  // building line
+  if (site.buildingLine) {
+    const over = Math.max(0, ...wallPolys.map((p) => overshoot(p, site.buildingLine)));
+    out.push(finding('building-line', over <= 1 ? 'pass' : 'fail', 'house', over <= 1 ? 'House is inside the building line' : `House crosses the building line by ${Math.round(over)} cm`,
+      over <= 1 ? 'Every wall of the house lies inside the building line drawn on the site plan.' : `Part of the house lies ${Math.round(over)} cm beyond the building line — this is not permitted without a formal relaxation (הקלה).`));
+    for (const a of plan.outdoorAreas || []) {
+      const o = overshoot(a.polygon, site.buildingLine);
+      if (o <= 1) continue;
+      const inLot = polyInside(a.polygon, site.boundary, 2);
+      out.push(finding('building-line', inLot ? 'info' : 'fail', a.id, `${a.name} extends ${m(o)} m beyond the building line`,
+        `The ${a.name.toLowerCase()} reaches ${m(o)} m past the building line${inLot ? ' but stays inside the lot' : ' and OUTSIDE the lot'}. Uncovered paving, steps, a fence up to 1.5 m and service installations up to 1.5 m high (bins, gas, AC units) are normally allowed in the setback; `
+        + 'a roof, a wall higher than 1.5 m or a closed room there is not. Keep it open and low, or confirm with the architect how it was approved.', { spaceId: a.id, at: spot(a) }));
+    }
+    if (site.setbacks) {
+      const off = [];
+      for (const side of ['w', 'n', 'e', 's']) {
+        const e = boundaryEdge(site.boundary, side), bl = boundaryEdge(site.buildingLine, side);
+        if (!e || !bl || site.setbacks[side] == null) continue;
+        const d = Math.min(segDist(bl.a[0], bl.a[1], e.a[0], e.a[1], e.b[0], e.b[1]), segDist(bl.b[0], bl.b[1], e.a[0], e.a[1], e.b[0], e.b[1]));
+        if (Math.abs(d - site.setbacks[side]) > 15) off.push(`${SIDE_NAME[side]}: drawn ${m(d)} m vs written ${m(site.setbacks[side])} m`);
+      }
+      out.push(finding('plan-consistency', off.length ? 'info' : 'pass', 'building-line', off.length ? 'Building line differs from the written setbacks' : 'Building line matches the written setbacks',
+        off.length ? off.join('; ') + '.' : 'The digitised building line is within 15 cm of the setbacks written on the site plan on all four sides.'));
+    }
+  }
+
+  // parking
+  const bays = site.parking || [];
+  const okCount = bays.length >= 2;
+  out.push(finding('parking-count', okCount ? 'pass' : 'fail', 'count', `${bays.length} parking place${bays.length === 1 ? '' : 's'} on the lot`,
+    `The site plan shows ${bays.length} parking place${bays.length === 1 ? '' : 's'}; a detached house needs at least 2 (in a settlement without a mass-transit system).`,
+    bays[0] ? { at: { x: bays[0].x + bays[0].w / 2, y: bays[0].y + bays[0].h / 2 } } : undefined));
+  for (const p of bays) {
+    const long = Math.max(p.w, p.h), short = Math.min(p.w, p.h);
+    const okSize = long >= 499 && short >= 249;
+    const inside = polyInside(rectPoly(p), site.boundary, 5);
+    const beyond = site.buildingLine ? overshoot(rectPoly(p), site.buildingLine) > 1 : false;
+    out.push(finding('parking-size', okSize && inside ? 'pass' : 'fail', p.id, `${p.name || p.id}: ${m(short)} × ${m(long)} m`,
+      `${p.name || p.id} is ${m(short)} × ${m(long)} m — ${okSize ? 'the standard' : 'smaller than the standard'} 2.50 × 5.00 m bay — and lies ${inside ? 'inside' : 'partly OUTSIDE'} the lot`
+      + (beyond ? '. It is in the setback, where open paved parking is permitted (a carport roof there would need a permit).' : '.'), { at: { x: p.x + p.w / 2, y: p.y + p.h / 2 } }));
+  }
+
+  // energy / roof
+  const roof = plan.meta && plan.meta.grossFloorArea;
+  out.push(finding('energy-roof', 'info', 'roof', 'Roof: solar hot water and a 5 kVA photovoltaic system',
+    `The dwelling must have a hot-water system (solar collectors with a tank, a heat pump or equivalent). ${roof ? `With a roof of about ${roof} m² (over 100 m²), a` : 'A'} new ground-attached house is also required to get a photovoltaic system of 5 kVA unless the local engineer exempts it — keep roof space free and check what the permit says.`));
+}
+
+function checkAssumptions(plan, out) {
+  for (const a of plan.assumptions || []) {
+    const done = a.status === 'confirmed';
+    out.push(finding('assumption', done ? 'pass' : 'info', a.id, done ? `Confirmed: ${a.text.split(' — ')[0]}` : `To confirm: ${a.text.split(' (')[0].split(' — ')[0]}`, a.text));
+  }
+}
+
+/** All plan-only findings. */
+export function checkBuilding({ plan, store, catalog }) {
+  const out = [];
+  const H = num(store && store.project && store.project.ceilingHeight, num(plan.heights && plan.heights.ceiling, 300));
+  checkRooms(plan, H, out);
+  checkLight(plan, out);
+  checkDoors(plan, out);
+  checkMamad(plan, H, store, catalog, out);
+  checkSite(plan, out);
+  checkAssumptions(plan, out);
+  return out;
+}

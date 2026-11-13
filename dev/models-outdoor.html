@@ -153,6 +153,8 @@ if (q.get('test') !== '0') {
       try {
         const o = def.build({ w: w / 100, d: d / 100, h: h / 100, p, item: { id: 'j', type, params: p } });
         if (!o || !o.isObject3D) throw new Error('no object');
+        const jb = new THREE.Box3().setFromObject(o);
+        if (!Number.isFinite(jb.min.x + jb.min.y + jb.min.z + jb.max.x + jb.max.y + jb.max.z)) throw new Error('NaN bbox');
         def.draw2d(scratch, { w, d, h, p, px: 1, item: null });
       } catch (e) { result.throws++; if (result.fails.length < 60) result.fails.push(`${type} THROW ${JSON.stringify(p)} ${w}x${d}x${h}: ${e.message}`); }
     }

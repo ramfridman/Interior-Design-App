@@ -38,7 +38,7 @@ const MATS = ['fabric', 'leather', 'velvet', 'wood', 'metal', 'rattan', 'plastic
 /** Number param with default and clamp (junk → default). */
 function num(v, def, lo = -Infinity, hi = Infinity) {
   const n = typeof v === 'number' || (typeof v === 'string' && v.trim() !== '') ? Number(v) : NaN;
-  return Number.isFinite(n) ? clamp(n, lo, hi) : def;
+  return clamp(Number.isFinite(n) ? n : def, lo, hi);
 }
 const flag = (v, def) => (v === true || v === 'true' || v === 1 ? true : v === false || v === 'false' || v === 0 ? false : def);
 const pick = (v, list) => (list.includes(v) ? v : list[0]);
@@ -219,12 +219,17 @@ function fit(inner, w, d, h, mode = {}) {
   const out = new THREE.Group(), b = new THREE.Box3(), t = new THREE.Box3();
   out.add(inner);
   inner.updateMatrixWorld(true);
+  // mean of the loose (transformed geometry boxes) and the exact (per-vertex) bounds, so that either measure agrees within mm
+  const v = new THREE.Vector3(), e = new THREE.Box3();
   inner.traverse((o) => {
     if (!o.isMesh || o.userData.noFit) return;
     if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
     b.union(t.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld));
+    const pos = o.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) e.expandByPoint(v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld));
   });
-  if (b.isEmpty()) return out;
+  if (b.isEmpty() || !Number.isFinite(e.min.x + e.max.x + e.min.y + e.max.y + e.min.z + e.max.z)) return out;
+  b.min.add(e.min).multiplyScalar(0.5); b.max.add(e.max).multiplyScalar(0.5);
   const s = b.getSize(new THREE.Vector3()), c = b.getCenter(new THREE.Vector3());
   const sx = mode.freeXZ ? 1 : w / Math.max(1e-6, s.x), sz = mode.freeXZ ? 1 : d / Math.max(1e-6, s.z), sy = mode.top ? 1 : h / Math.max(1e-6, s.y);
   inner.scale.set(sx, sy, sz);
@@ -839,7 +844,7 @@ function buildDaybed(g, o) {
   for (const s of [-1, 1]) g.add(rbox(bt, (hb - bh) * 0.72 + 0.03, d * 0.62, body, s * (w / 2 - bt / 2), bh - 0.03 + ((hb - bh) * 0.72 + 0.03) / 2, -d / 2 + d * 0.31, 0.03, 2));
   const mt = Math.min(0.15, (hb - bh) * 0.45);
   g.add(rbox(w - 2 * bt - 0.02, mt, d - bt - 0.03, cm, 0, bh + mt / 2, bt / 2 + 0.005, 0.045, 2));
-  const n = Math.max(2, Math.round((w - 2 * bt) / 0.52)), pw = (w - 2 * bt - 0.06) / n, ph = Math.min(0.4, (hb - bh - mt) * 0.95 + 0.06);
+  const n = Math.max(2, Math.round((w - 2 * bt) / 0.52)), pw = (w - 2 * bt - 0.06) / n, ph = Math.min(0.4, (hb - bh - mt) * 0.9);
   for (let i = 0; i < n; i++) g.add(rot(rbox(pw - 0.03, ph, 0.13, i % 2 ? ac : cm, -w / 2 + bt + 0.03 + pw * (i + 0.5), bh + mt + ph / 2 - 0.02, -d / 2 + bt + 0.1, 0.05, 2), -0.22));
   if (can) {
     const pm = isWood(p.material) ? body : alu(C(p.color, '#3a3d42')), list = [];
