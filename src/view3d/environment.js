@@ -2,21 +2,29 @@
  * Daylight, sky and exposure for the 3D view.
  *
  *   const env = createEnvironment({ scene, renderer, ctx });
- *   env.setTimeOfDay(store.ui.timeOfDay);      // 0..24 h local clock time
+ *   env.setDate(store.ui.date);                // 'YYYY-MM-DD' civil date at the site
+ *   env.setTimeOfDay(store.ui.timeOfDay);      // 0..24 h local clock time (daylight-saving time included)
+ *   env.getSunInfo();                          // { azimuth, elevation, sunrise, sunset, solarNoon, isDay, compass, … }
  *   env.setInteriorMode(true);                 // roof on / walk-through: soft fill so rooms read well
+ *   env.setSunStudy(true);                     // roofless dollhouse whose (invisible) roof still blocks the sun
  *   env.update(camera);                        // once per frame (cheap)
  *
- * Sun path: real solar geometry for the site (32.68° N, plan north from PLAN.meta.northAngle) on a late-spring
- * day (declination +15°, Israel summer time) — high crisp noon sun, long warm evenings, sunset ≈ 19:15.
- * The sun is one DirectionalLight whose orthographic shadow frustum is fitted to the whole lot (it does not
- * follow the camera, so shadows never swim). After sunset the same light becomes a dim moon.
+ * Sun path: the real ephemeris of sun.js (NOAA / Meeus) for PLAN.meta.latitude / longitude / timeZone, mapped into
+ * world space with PLAN.meta.northAngle. Light colour and strength follow the sun's elevation (warm and weak when
+ * low); below 3° the direct light fades out and is off at the horizon — after dusk the same light becomes a dim moon.
+ * The sun is one DirectionalLight whose orthographic shadow frustum is fitted to the whole lot: it never follows
+ * the camera, so shadows cannot swim while orbiting or walking, and it is snapped to whole shadow-map texels so the
+ * edges do not crawl while the time slider moves.
  * The module configures the renderer it is given: soft shadow maps, ACES tone mapping, sRGB output, exposure.
  */
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { sunPosition as ephemeris, sunTimes, sunDirectionWorld, compassPoint, todayAt, DEFAULT_SITE } from './sun.js';
 
-const LATITUDE = 32.68, DECLINATION = 15, SOLAR_NOON = 12.65;   // degrees, degrees, clock hour of solar noon (IDT)
 const DEG = Math.PI / 180;
+const MIN_LIGHT_ELEVATION = 2;                                   // degrees — the shadow frustum never goes flatter than this
+const SHADOW_BIAS_M = 0.008, SHADOW_NORMAL_BIAS_M = 0.02;        // metres: depth offset towards the light / along the receiver normal
+const TEXEL_LADDER = 1.03;                                       // shadow texel sizes are quantised to this ratio (stable while time changes)
 const FILL_COUNT = 3;                                            // interior fill lights (constant count → no shader recompiles; each costs fill-rate)
 
 /** Look-up table by sun altitude (degrees). Colours are sRGB hex; values in between are interpolated. */
@@ -32,6 +40,7 @@ const KEYS = [
   { alt: 90, zenith: '#3278d0', horizon: '#d2e3f1', sun: '#fff7ec', sunI: 2.1, hemiI: 0.42, ambI: 0.05, envI: 0.14, exposure: 1.0, glow: 0 },
 ].map((k) => ({ ...k, zenith: new THREE.Color(k.zenith), horizon: new THREE.Color(k.horizon), sun: new THREE.Color(k.sun) }));
 
+const STUDY = { sun: 1, fill: 1 };                               // sun-study dollhouse: sun / sky-fill multipliers
 const MOON = { color: new THREE.Color('#93a9e6'), intensity: 0.22, azimuth: 150, altitude: 48 };
 
 const SKY_VERTEX = /* glsl */`
@@ -79,25 +88,29 @@ function sample(alt, out) {
 }
 
 /**
- * Sun position for a clock hour at the site.
+ * Sun position for a clock hour at the site (kept for older callers; see sun.js for the full ephemeris).
+ * @param {number} hours local clock time
+ * @param {string} [date] 'YYYY-MM-DD' (default: today at the site)
  * @returns {{ altitude: number, azimuth: number }} degrees; azimuth clockwise from true north
  */
-export function sunPosition(hours) {
-  const ha = (hours - SOLAR_NOON) * 15 * DEG, lat = LATITUDE * DEG, dec = DECLINATION * DEG;
-  const sinAlt = Math.sin(lat) * Math.sin(dec) + Math.cos(lat) * Math.cos(dec) * Math.cos(ha);
-  const alt = Math.asin(Math.max(-1, Math.min(1, sinAlt)));
-  const az = Math.atan2(-Math.sin(ha), Math.tan(dec) * Math.cos(lat) - Math.sin(lat) * Math.cos(ha));
-  return { altitude: alt / DEG, azimuth: ((az / DEG) + 360) % 360 };
+export function sunPosition(hours, date = todayAt(DEFAULT_SITE.timeZone)) {
+  const p = ephemeris({ date, hours });
+  return { altitude: p.elevation, azimuth: p.azimuth };
 }
 
 /**
  * @param {{ scene: THREE.Scene, renderer: THREE.WebGLRenderer, ctx: object, shadowMapSize?: number }} options
- * @returns {{ setTimeOfDay(hours: number): void, setInteriorMode(on: boolean): void, update(camera: THREE.Camera): void,
+ * @returns {{ setDate(date: string): void, setTimeOfDay(hours: number): void, getSunInfo(): object,
+ *             setInteriorMode(on: boolean): void, setSunStudy(on: boolean): void, refreshPlan(): void,
+ *             update(camera: THREE.Camera): void,
  *             sun: THREE.DirectionalLight, hemisphere: THREE.HemisphereLight, sky: THREE.Mesh, dispose(): void }}
  */
 export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
   const plan = ctx.plan;
-  const northAngle = (plan.meta && Number(plan.meta.northAngle)) || 0;
+  const meta = plan.meta || {};
+  const northAngle = Number(meta.northAngle) || 0;
+  const num = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
+  const where = { latitude: num(meta.latitude, DEFAULT_SITE.latitude), longitude: num(meta.longitude, DEFAULT_SITE.longitude), timeZone: meta.timeZone || DEFAULT_SITE.timeZone };
   const lot = (plan.site && plan.site.bounds) || { x: plan.bounds.x - 600, y: plan.bounds.y - 400, w: plan.bounds.w + 1200, h: plan.bounds.h + 800 };
   const centre = new THREE.Vector3((lot.x + lot.w / 2) / 100, 0, (lot.y + lot.h / 2) / 100);
   const ceilingH = () => ((ctx.store.project && ctx.store.project.ceilingHeight) || plan.heights.ceiling) / 100;
@@ -140,7 +153,7 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
   sun.name = 'sun'; sun.castShadow = true;
   const size = shadowMapSize || (renderer && renderer.capabilities.maxTextureSize >= 8192 && !/Mobi|Android/i.test(globalThis.navigator ? navigator.userAgent : '') ? 4096 : 2048);
   sun.shadow.mapSize.set(size, size);
-  sun.shadow.bias = -0.00025; sun.shadow.normalBias = 0.022; sun.shadow.radius = 2.2;
+  sun.shadow.normalBias = SHADOW_NORMAL_BIAS_M;                    // bias is set per fit (it is a fraction of the depth range)
   sun.target.position.copy(centre);
   const hemisphere = new THREE.HemisphereLight(0xffffff, 0xb7a184, 1);
   hemisphere.name = 'sky-fill';
@@ -152,37 +165,56 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
 
   /** Anchor points of the bounce / fill lights: one per room, one per named zone of the open-plan space. */
   const anchors = [];
-  for (const room of plan.rooms || []) {
-    const spots = room.zones && room.zones.length ? room.zones.map((z) => z.label) : [room.label];
-    for (const p of spots) if (Array.isArray(p)) anchors.push(new THREE.Vector3(p[0] / 100, 0, p[1] / 100));
+  let order = [], dist = new Float32Array(0);
+  function readAnchors() {
+    anchors.length = 0;
+    for (const room of plan.rooms || []) {
+      const spots = room.zones && room.zones.length ? room.zones.map((z) => z.label) : [room.label];
+      for (const p of spots) if (Array.isArray(p)) anchors.push(new THREE.Vector3(p[0] / 100, 0, p[1] / 100));
+    }
+    order = anchors.map((_, i) => i); dist = new Float32Array(anchors.length);
   }
+  readAnchors();
 
-  // ── shadow frustum fitted to the lot ──
+  // ── shadow frustum: the whole lot, independent of the camera, snapped to whole texels ──
   const boxCorners = [];
   for (const x of [lot.x / 100 - 1.5, (lot.x + lot.w) / 100 + 1.5]) for (const z of [lot.y / 100 - 1.5, (lot.y + lot.h) / 100 + 1.5]) for (const y of [-0.4, 9]) boxCorners.push(new THREE.Vector3(x, y, z));
-  const _m = new THREE.Matrix4(), _v = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+  const _v = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0), _lx = new THREE.Vector3(), _ly = new THREE.Vector3();
+  const ladder = (v) => Math.pow(TEXEL_LADDER, Math.ceil(Math.log(v) / Math.log(TEXEL_LADDER)));
+  /**
+   * Fit the sun's orthographic shadow camera around the lot for a light direction.
+   * The light-space axes are anchored at the world origin; the texel size is quantised and the frustum centre is
+   * rounded to whole texels, so the same world point always lands on the same texel for a given sun direction.
+   */
   function fitShadow(dir) {
-    sun.position.copy(centre).addScaledVector(dir, 70);
-    sun.updateMatrixWorld(); sun.target.updateMatrixWorld();
-    _m.lookAt(sun.position, centre, _up).setPosition(sun.position).invert();
-    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    _lx.crossVectors(_up, dir).normalize(); _ly.crossVectors(dir, _lx);                // = the shadow camera's own x / y axes
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, d0 = Infinity, d1 = -Infinity;
     for (const c of boxCorners) {
-      _v.copy(c).applyMatrix4(_m);
-      x0 = Math.min(x0, _v.x); x1 = Math.max(x1, _v.x); y0 = Math.min(y0, _v.y); y1 = Math.max(y1, _v.y); z0 = Math.min(z0, -_v.z); z1 = Math.max(z1, -_v.z);
+      const x = c.dot(_lx), y = c.dot(_ly), d = c.dot(dir);
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); d0 = Math.min(d0, d); d1 = Math.max(d1, d);
     }
+    const n = sun.shadow.mapSize.x;
+    const tx = ladder((x1 - x0) / (n - 4)), ty = ladder((y1 - y0) / (n - 4));          // 2 texels of slack on every side
+    const cx = Math.round((x0 + x1) / 2 / tx) * tx, cy = Math.round((y0 + y1) / 2 / ty) * ty;
+    const near = 1, depth = d1 - d0 + 2;
+    sun.position.set(0, 0, 0).addScaledVector(_lx, cx).addScaledVector(_ly, cy).addScaledVector(dir, d1 + near + 1);
+    sun.target.position.copy(sun.position).sub(dir);
+    sun.updateMatrixWorld(); sun.target.updateMatrixWorld();
     const cam = sun.shadow.camera;
-    cam.left = x0; cam.right = x1; cam.bottom = y0; cam.top = y1; cam.near = Math.max(0.5, z0 - 2); cam.far = z1 + 2;
+    cam.left = -tx * n / 2; cam.right = tx * n / 2; cam.bottom = -ty * n / 2; cam.top = ty * n / 2; cam.near = near; cam.far = near + depth;
     cam.updateProjectionMatrix();
+    sun.shadow.bias = -SHADOW_BIAS_M / depth;
+    state.texel = Math.max(tx, ty);
   }
 
   /** World direction (towards the light) for a compass azimuth / altitude, honouring the plan's north. */
-  const direction = (azimuth, altitude, out) => {
-    const th = (northAngle + azimuth) * DEG, al = altitude * DEG;
-    return out.set(Math.sin(th) * Math.cos(al), Math.sin(al), -Math.cos(th) * Math.cos(al)).normalize();
-  };
+  const direction = (azimuth, altitude, out) => out.fromArray(sunDirectionWorld(azimuth, altitude, northAngle)).normalize();
 
   const S = { zenith: new THREE.Color(), horizon: new THREE.Color(), sun: new THREE.Color() };
-  const state = { hours: 13, interior: false, night: 0, day: 1, exposure: 1, k: 0, fillColor: new THREE.Color(), fillIntensity: 0 };
+  const state = {
+    hours: 13, date: todayAt(where.timeZone), interior: false, study: false, night: 0, day: 1, exposure: 1, k: 0, texel: 0,
+    fillColor: new THREE.Color(), fillIntensity: 0, info: null,
+  };
   const hb = plan.bounds, houseBox = { x0: hb.x / 100, x1: (hb.x + hb.w) / 100, z0: hb.y / 100, z1: (hb.y + hb.h) / 100 };
   const sunDir = new THREE.Vector3(), moonDir = direction(MOON.azimuth, MOON.altitude, new THREE.Vector3()), lightDir = new THREE.Vector3();
   const interiorBounce = new THREE.Color('#fff1df'), warm = new THREE.Color('#ffd7a3'), dayFill = new THREE.Color('#fff3e4'), white = new THREE.Color('#ffffff');
@@ -205,19 +237,28 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
   }
 
   function apply() {
-    const { altitude, azimuth } = sunPosition(state.hours);
+    const pos = ephemeris({ date: state.date, hours: state.hours, ...where });
+    const times = state.info && state.info.date === state.date ? state.info : sunTimes(state.date, where);
+    const altitude = pos.elevation, azimuth = pos.azimuth;
     sample(altitude, S);
     direction(azimuth, altitude, sunDir);
     const night = smooth(-3, -9, altitude), day = smooth(-6, 8, altitude);
     state.night = night; state.day = day;
+    state.info = {
+      date: state.date, hours: state.hours, azimuth, elevation: altitude, compass: compassPoint(azimuth),
+      sunrise: times.sunrise, sunset: times.sunset, solarNoon: times.solarNoon, dayLength: times.dayLength,
+      isDay: altitude > -0.3, declination: pos.declination, utcOffset: pos.utcOffset, direction: sunDir.toArray(),
+    };
 
-    // key light: sun above the horizon, moon after dusk (cross-faded through zero, so no visible jump)
+    // key light: the sun while it is above the horizon (fading out below 3°), off through twilight, a dim moon after dusk
     if (altitude > -3.5) {
-      lightDir.copy(sunDir); if (lightDir.y < 0.035) { lightDir.y = 0.035; lightDir.normalize(); }
-      sun.color.copy(S.sun); sun.intensity = S.sunI;
+      const floor = Math.sin(MIN_LIGHT_ELEVATION * DEG);
+      lightDir.copy(sunDir); if (lightDir.y < floor) { lightDir.y = floor; lightDir.normalize(); }
+      sun.color.copy(S.sun); sun.intensity = S.sunI * smooth(0, 3, altitude) * (state.study ? STUDY.sun : 1);
     } else {
       lightDir.copy(moonDir); sun.color.copy(MOON.color); sun.intensity = MOON.intensity * smooth(-4.5, -10, altitude);
     }
+    sun.castShadow = sun.intensity > 0;
     fitShadow(lightDir);
 
     // two looks, blended per frame by how far inside the house the camera is (see update()):
@@ -225,15 +266,18 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
     // indoors  — little light from above, a bright warm floor bounce on ceilings, lifted exposure (eye adaptation)
     OUTSIDE.sky.copy(S.zenith).lerp(white, 0.55);
     OUTSIDE.ground.set('#b9a385').lerp(S.horizon, 0.25).multiplyScalar(0.55 + 0.45 * day);
-    OUTSIDE.hemi = S.hemiI; OUTSIDE.amb = S.ambI; OUTSIDE.env = S.envI; OUTSIDE.exposure = S.exposure;
+    const lift = state.study ? STUDY.fill : 1;                        // sun study: the shaded rooms stay readable from above
+    OUTSIDE.hemi = S.hemiI * lift; OUTSIDE.amb = S.ambI * lift; OUTSIDE.env = S.envI; OUTSIDE.exposure = S.exposure;
     OUTSIDE.ambient.copy(S.horizon).lerp(white, 0.5);
     INSIDE.sky.copy(interiorBounce).lerp(S.zenith, 0.12).multiplyScalar(0.5);
     INSIDE.ground.copy(interiorBounce).lerp(S.sun, 0.25 * day);
-    INSIDE.hemi = S.hemiI * 1.9; INSIDE.amb = S.ambI * 2; INSIDE.env = S.envI * 1.15; INSIDE.exposure = S.exposure * 1.5;
+    // while direct sun is entering the rooms the fill is held back, so the sun patches stay the brightest thing indoors
+    const direct = smooth(0, 12, altitude);
+    INSIDE.hemi = S.hemiI * (1.9 - 0.45 * direct); INSIDE.amb = S.ambI * 2; INSIDE.env = S.envI * 1.15; INSIDE.exposure = S.exposure * (1.5 - 0.12 * direct);
     INSIDE.ambient.copy(S.horizon).lerp(white, 0.8);
     // interior fill: neutral bounce by day, warm "lights on" glow after dark
     state.fillColor.copy(dayFill).lerp(warm, 1 - day);
-    state.fillIntensity = 2.1 * day + 5.5 * (1 - day);
+    state.fillIntensity = (2.1 - 0.9 * direct) * day + 5.5 * (1 - day);
     blend(state.k);
 
     const u = skyMaterial.uniforms;
@@ -243,17 +287,44 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
     scene.fog.color.copy(S.horizon);
   }
 
-  const order = anchors.map((_, i) => i), dist = new Float32Array(anchors.length);
   apply();
 
   return {
     sun, hemisphere, sky,
-    /** Clock time 0..24 h → sun / moon position, sky colours, light intensities, exposure. */
+    /** Clock time 0..24 h (civil time at the site) → sun / moon position, sky colours, light intensities, exposure. */
     setTimeOfDay(hours) {
       const h = Number(hours);
       state.hours = Number.isFinite(h) ? ((h % 24) + 24) % 24 : 13;
       apply();
     },
+    /** Calendar day 'YYYY-MM-DD' at the site; anything unparsable falls back to today. */
+    setDate(date) {
+      const next = typeof date === 'string' && /^\d{4}-\d{1,2}-\d{1,2}/.test(date) ? date.slice(0, 10) : todayAt(where.timeZone);
+      if (next === state.date) return;
+      state.date = next;
+      apply();
+    },
+    /**
+     * Where the sun is right now and today's key times.
+     * @returns {{ date: string, hours: number, azimuth: number, elevation: number, compass: string, sunrise: number|null,
+     *             sunset: number|null, solarNoon: number, dayLength: number, isDay: boolean, declination: number,
+     *             utcOffset: number, direction: number[] }} angles in degrees (azimuth clockwise from true north),
+     *             times in decimal local clock hours, `direction` = world unit vector towards the sun
+     */
+    getSunInfo: () => ({ ...state.info, direction: state.info.direction.slice() }),
+    /** Size (m) of one shadow-map texel on a surface facing the light — for diagnostics. */
+    getShadowTexel: () => state.texel,
+    /**
+     * Sun-study look for the roofless dollhouse: the (invisible) roof blocks the sun, so the rooms are lit by sky
+     * light only — it is lifted a little and the sun eased so shaded floors stay readable next to the sun patches.
+     */
+    setSunStudy(on) {
+      if (state.study === !!on) return;
+      state.study = !!on;
+      apply();
+    },
+    /** Re-read the room list after the plan was edited (anchor points of the interior fill lights). */
+    refreshPlan: readAnchors,
     /**
      * true while the roof / ceilings are shown (walk-through). Rooms then get a soft bounce / fill look and a lifted
      * exposure — applied only while the camera is actually inside the house, so exterior views keep true daylight.

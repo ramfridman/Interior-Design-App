@@ -62,37 +62,6 @@ export default [
   "description": "Fully integrated 45 cm slim dishwasher."
  },
  {
-  "id": "ace-bosch-smv4hax20e-integrated",
-  "name": "Bosch SMV4HAX20E integrated dishwasher 60 cm",
-  "nameHe": "SMV4HAX20E מדיח כלים אינטגרלי 60 ס''מ בוש דגם",
-  "brand": "Bosch",
-  "retailer": "ACE",
-  "url": "https://www.ace.co.il/4499238",
-  "price": 3790.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 59.8,
-   "d": 55,
-   "h": 81.5
-  },
-  "type": "dishwasher",
-  "params": {
-   "variant": "integrated",
-   "color": "#c9ccd0",
-   "material": "metal"
-  },
-  "zone": "indoor",
-  "category": "kitchen",
-  "subcategory": "dishwashers",
-  "tags": [
-   "integrated",
-   "60cm",
-   "premium"
-  ],
-  "description": "Bosch Serie 4 integrated 60 cm dishwasher."
- },
- {
   "id": "ace-amcor-hr550w-top-freezer-480l",
   "name": "Amcor HR550W top-freezer fridge 480 L, white",
   "nameHe": "Amcor HR550W מקרר מקפיא עליון - 480 ליטר כולל פונקציית שבת",
@@ -124,36 +93,6 @@ export default [
   "description": "Wide 480 L top-freezer refrigerator."
  },
  {
-  "id": "ace-samsung-rt53dg7a14-top-freezer-530l",
-  "name": "Samsung RT53DG7A14 top-freezer fridge 530 L",
-  "nameHe": "מקרר מקפיא עליון - 530 ליטר Samsung RT53DG7A14S9 כסוף",
-  "brand": "Samsung",
-  "retailer": "ACE",
-  "url": "https://www.ace.co.il/4483124",
-  "price": 3690.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 79,
-   "d": 72.5,
-   "h": 185.5
-  },
-  "type": "fridge",
-  "params": {
-   "variant": "top-freezer",
-   "color": "#c9ccd0",
-   "material": "metal"
-  },
-  "zone": "indoor",
-  "category": "kitchen",
-  "subcategory": "refrigerators",
-  "tags": [
-   "top-freezer",
-   "530-litre"
-  ],
-  "description": "Samsung 530 L top-freezer refrigerator."
- },
- {
   "id": "ace-lg-gr-b445xe-top-freezer-395l",
   "name": "LG GR-B445XE top-freezer fridge 395 L, stainless",
   "nameHe": "מקרר מקפיא עליון - 395 ליטר LG GR-B445XE נירוסטה",
@@ -182,36 +121,6 @@ export default [
    "395-litre"
   ],
   "description": "LG 395 L top-freezer refrigerator, stainless."
- },
- {
-  "id": "ace-samsung-ww90dg6u95-washer-9kg",
-  "name": "Samsung WW90DG6U95 front-load washer 9 kg",
-  "nameHe": "מכונת כביסה פתח חזית 9 ק''ג SAMSUNG WW90DG6U95LX אפור",
-  "brand": "Samsung",
-  "retailer": "ACE",
-  "url": "https://www.ace.co.il/4500072",
-  "price": 2799.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 60,
-   "d": 60,
-   "h": 85
-  },
-  "type": "washer",
-  "params": {
-   "variant": "washer",
-   "color": "#f4f4f2",
-   "material": "metal"
-  },
-  "zone": "indoor",
-  "category": "laundry",
-  "subcategory": "washers-dryers",
-  "tags": [
-   "front-load",
-   "9kg"
-  ],
-  "description": "Samsung 9 kg front-loading washing machine."
  },
  {
   "id": "ace-crystal-tmw7200mw-washer-7kg-slim",
@@ -275,36 +184,6 @@ export default [
    "premium"
   ],
   "description": "AEG Series 7000 9 kg front-loading washer."
- },
- {
-  "id": "ace-premier-pd-90-dryer-9kg",
-  "name": "Premier PD-90 tumble dryer 9 kg",
-  "nameHe": "\"Premier PD-90 מייבש כביסה - 9 ק\"ג\"",
-  "brand": "Premier",
-  "retailer": "ACE",
-  "url": "https://www.ace.co.il/4505788",
-  "price": 1690.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 59.5,
-   "d": 56.2,
-   "h": 85
-  },
-  "type": "washer",
-  "params": {
-   "variant": "dryer",
-   "color": "#f4f4f2",
-   "material": "metal"
-  },
-  "zone": "indoor",
-  "category": "laundry",
-  "subcategory": "washers-dryers",
-  "tags": [
-   "dryer",
-   "9kg"
-  ],
-  "description": "Premier 9 kg tumble dryer."
  },
  {
   "id": "ace-samsung-nv7b41301ak-oven",
@@ -523,6 +402,282 @@ export default [
   "description": "Large-capacity inverter split AC; dimensions are for the indoor unit."
  },
  {
+  "id": "ace-carmel-front-85-90-frosted",
+  "name": "Carmel shower front 85-90 cm, striped frosted glass",
+  "nameHe": "מקלחון חזית 85-90 ס\"מ דגם כרמל צריבת פסים",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4195960",
+  "price": 846.65,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 90,
+   "d": 3,
+   "h": 185
+  },
+  "type": "shower",
+  "params": {
+   "variant": "hinged",
+   "glass": "frosted",
+   "frame": "chrome",
+   "tray": false,
+   "head": "none",
+   "color": "#cfe3ea",
+   "material": "glass"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "showers",
+  "tags": [
+   "front",
+   "85-90cm",
+   "frosted",
+   "on-sale"
+  ],
+  "description": "Frameless-style hinged shower front, 6 mm tempered striped glass, 185 cm high; fits 85-90 cm openings (depth = glass panel only)."
+ },
+ {
+  "id": "ace-carmel-front-100-105-clear",
+  "name": "Carmel shower front 100-105 cm, clear glass",
+  "nameHe": "מקלחון חזית 100-105 ס\"מ דגם כרמל זכוכית שקופה",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4199968",
+  "price": 931.4,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 105,
+   "d": 3,
+   "h": 185
+  },
+  "type": "shower",
+  "params": {
+   "variant": "hinged",
+   "glass": "clear",
+   "frame": "chrome",
+   "tray": false,
+   "head": "none",
+   "color": "#cfe3ea",
+   "material": "glass"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "showers",
+  "tags": [
+   "front",
+   "100-105cm",
+   "clear",
+   "on-sale"
+  ],
+  "description": "Hinged shower front with two doors opening in and out, 185 cm high; fits 100-105 cm openings (depth = glass panel only)."
+ },
+ {
+  "id": "ace-carmel-front-125-130-clear",
+  "name": "Carmel shower front 125-130 cm, clear glass",
+  "nameHe": "מקלחון חזית 125-130 ס\"מ דגם כרמל זכוכית שקופה",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4221843",
+  "price": 1016.15,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 130,
+   "d": 3,
+   "h": 185
+  },
+  "type": "shower",
+  "params": {
+   "variant": "hinged",
+   "glass": "clear",
+   "frame": "chrome",
+   "tray": false,
+   "head": "none",
+   "color": "#cfe3ea",
+   "material": "glass"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "showers",
+  "tags": [
+   "front",
+   "125-130cm",
+   "clear",
+   "on-sale"
+  ],
+  "description": "Hinged shower front with two doors, 185 cm high; fits 125-130 cm openings (depth = glass panel only)."
+ },
+ {
+  "id": "ace-chrysanthemum-sliding-175-180-clear",
+  "name": "Chrysanthemum sliding shower front 175-180 cm, clear glass",
+  "nameHe": "מקלחון חזית הזזה 175-180 ס\"מ זכוכית שקופה דגם חרצית",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4402928",
+  "price": 1027.17,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 180,
+   "d": 3,
+   "h": 185
+  },
+  "type": "shower",
+  "params": {
+   "variant": "sliding",
+   "glass": "clear",
+   "frame": "chrome",
+   "tray": false,
+   "head": "none",
+   "color": "#cfe3ea",
+   "material": "glass"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "showers",
+  "tags": [
+   "sliding",
+   "175-180cm",
+   "clear",
+   "on-sale"
+  ],
+  "description": "Sliding shower front, 6 mm tempered clear glass, 185 cm high; fits 175-180 cm openings (depth = glass panel only)."
+ },
+ {
+  "id": "ace-troya-square-89-91-black",
+  "name": "Troya square shower enclosure 89-91.5 cm, black profile",
+  "nameHe": "מקלחון מרובע 89-91.5 דגם טרויה",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/3000075",
+  "price": 1439.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 91.5,
+   "d": 91.5,
+   "h": 185
+  },
+  "type": "shower",
+  "params": {
+   "variant": "corner",
+   "glass": "clear",
+   "frame": "chrome",
+   "tray": false,
+   "head": "none",
+   "color": "#cfe3ea",
+   "material": "glass"
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "showers",
+  "tags": [
+   "square",
+   "90cm",
+   "black-profile",
+   "on-sale"
+  ],
+  "description": "Square 89-91.5 cm shower enclosure, 6 mm tempered clear glass, matte-black profile, 185 cm high."
+ },
+ {
+  "id": "ace-vessel-basin-oval-62",
+  "name": "Ceramic vessel basin, oval 62.5x36.5x13 cm, gloss white",
+  "nameHe": "כיור חרס מונח אובלי 62.5X36.5X13 ס\"מ לבן מבריק",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4500816",
+  "price": 300.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 62.5,
+   "d": 36.5,
+   "h": 13
+  },
+  "type": "sink",
+  "params": {
+   "variant": "vessel",
+   "color": "#f4f4f2",
+   "material": "ceramic",
+   "faucet": false
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "vanities",
+  "tags": [
+   "vessel",
+   "oval",
+   "ceramic"
+  ],
+  "description": "Counter-top oval ceramic basin 62.5x36.5x13 cm."
+ },
+ {
+  "id": "ace-vessel-basin-ellipse-50",
+  "name": "Ceramic vessel basin, ellipse 50x31.5x13 cm, gloss white",
+  "nameHe": "כיור חרס מונח אליפסה 50X31.5X13 ס\"מ לבן מבריק",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4500814",
+  "price": 350.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 50,
+   "d": 31.5,
+   "h": 13
+  },
+  "type": "sink",
+  "params": {
+   "variant": "vessel",
+   "color": "#f4f4f2",
+   "material": "ceramic",
+   "faucet": false
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "vanities",
+  "tags": [
+   "vessel",
+   "ellipse",
+   "ceramic"
+  ],
+  "description": "Counter-top ellipse ceramic basin 50x31.5x13 cm."
+ },
+ {
+  "id": "ace-vessel-basin-round-36",
+  "name": "Ceramic vessel basin, round 36 cm, matt white",
+  "nameHe": "כיור חרס מונח עגול 36X36X12 ס\"מ לבן מט",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4500819",
+  "price": 350.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 36,
+   "d": 36,
+   "h": 12
+  },
+  "type": "sink",
+  "params": {
+   "variant": "vessel",
+   "color": "#f4f4f2",
+   "material": "ceramic",
+   "faucet": false
+  },
+  "zone": "indoor",
+  "category": "bathroom",
+  "subcategory": "vanities",
+  "tags": [
+   "vessel",
+   "round",
+   "ceramic"
+  ],
+  "description": "Counter-top round ceramic basin 36 cm, matt white."
+ },
+ {
   "id": "homecenter-iviza-81-wall-white-wood",
   "name": "Iviza wall-hung vanity 81 cm with basin and mirror, white/wood",
   "nameHe": "ש.א תלויה איביזה 81 ס\"מ לבן/עץ",
@@ -675,83 +830,6 @@ export default [
   "description": "Wall-hung 121x46x48 cm epoxy-finish vanity with glass basin; closest stock size to a 130 cm vanity."
  },
  {
-  "id": "homecenter-tenerife-121-wall-grey",
-  "name": "Tenerife wall-hung vanity 121 cm with glass basin, grey",
-  "nameHe": "ארון אמבטיה תלוי \"טנריפה\" 121 ס\"מ אפור",
-  "brand": "Home Center",
-  "retailer": "Home Center",
-  "url": "https://www.homecenter.co.il/products/8567409478",
-  "price": 1499.9,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 121,
-   "d": 46,
-   "h": 48
-  },
-  "type": "vanity",
-  "params": {
-   "basins": 1,
-   "variant": "wall-hung",
-   "doors": 0,
-   "drawers": 3,
-   "basin": "integrated",
-   "color": "#8d9094",
-   "counter": "ceramic",
-   "counterColor": "#e8eef0",
-   "material": "laminate",
-   "mirror": false
-  },
-  "zone": "indoor",
-  "category": "bathroom",
-  "subcategory": "vanities",
-  "tags": [
-   "120cm",
-   "wall-hung",
-   "grey",
-   "on-sale"
-  ],
-  "description": "Wall-hung 121x46x48 cm grey epoxy-finish vanity with glass basin."
- },
- {
-  "id": "homecenter-viareal-101-wall-white-gloss",
-  "name": "Viareal wall-hung vanity 101 cm, gloss white",
-  "nameHe": "ארון אמבטיה תלוי ויאריאל 101 ס\"מ לבן מבריק",
-  "brand": "Home Center",
-  "retailer": "Home Center",
-  "url": "https://www.homecenter.co.il/products/8567409472",
-  "price": 1799.9,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 101,
-   "d": 46,
-   "h": 55
-  },
-  "type": "vanity",
-  "params": {
-   "basins": 1,
-   "variant": "wall-hung",
-   "doors": 0,
-   "drawers": 2,
-   "basin": "integrated",
-   "color": "#f6f6f4",
-   "counter": "ceramic",
-   "counterColor": "#f4f4f2",
-   "material": "laminate",
-   "mirror": false
-  },
-  "zone": "indoor",
-  "category": "bathroom",
-  "subcategory": "vanities",
-  "tags": [
-   "100cm",
-   "wall-hung",
-   "gloss"
-  ],
-  "description": "Wall-hung 101x46x55 cm gloss-white vanity."
- },
- {
   "id": "homecenter-barry-101-wall-natural",
   "name": "Barry wall-hung vanity 101 cm with black basin, natural wood",
   "nameHe": "ארון אמבטיה תלוי בארי 101 ס\"מ בצבע טבעי",
@@ -826,44 +904,6 @@ export default [
    "budget"
   ],
   "description": "Wall-hung 121x46.5x44.5 cm melamine vanity with black basin; matching mirror sold separately."
- },
- {
-  "id": "homecenter-barry-121-wall-concrete",
-  "name": "Barry wall-hung vanity 121 cm with white basin, concrete grey",
-  "nameHe": "ארון אמבטיה תלוי בארי 121 ס\"מ בצבע בטון",
-  "brand": "Home Center",
-  "retailer": "Home Center",
-  "url": "https://www.homecenter.co.il/products/8567410637",
-  "price": 699.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 121,
-   "d": 46.5,
-   "h": 44.5
-  },
-  "type": "vanity",
-  "params": {
-   "basins": 1,
-   "variant": "wall-hung",
-   "doors": 0,
-   "drawers": 2,
-   "basin": "integrated",
-   "color": "#9a9c9b",
-   "counter": "ceramic",
-   "counterColor": "#f4f4f2",
-   "material": "laminate",
-   "mirror": false
-  },
-  "zone": "indoor",
-  "category": "bathroom",
-  "subcategory": "vanities",
-  "tags": [
-   "120cm",
-   "wall-hung",
-   "budget"
-  ],
-  "description": "Wall-hung 121x46.5x44.5 cm concrete-effect melamine vanity with white ceramic basin."
  },
  {
   "id": "homecenter-castellon-80-floor-wood",
@@ -943,45 +983,6 @@ export default [
   "description": "Floor-standing 100x46x84 cm vanity with black basin, mirror and towel hanger."
  },
  {
-  "id": "homecenter-leon-43-wall-ivory",
-  "name": "Leon compact wall-hung vanity 43 cm, ivory",
-  "nameHe": "ארון אמבטיה תלוי ליון 43 ס\"מ שנהב",
-  "brand": "Home Center",
-  "retailer": "Home Center",
-  "url": "https://www.homecenter.co.il/products/8567409450",
-  "price": 599.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 43,
-   "d": 26,
-   "h": 47
-  },
-  "type": "vanity",
-  "params": {
-   "basins": 1,
-   "variant": "wall-hung",
-   "doors": 1,
-   "drawers": 0,
-   "basin": "integrated",
-   "color": "#e9e2d0",
-   "counter": "ceramic",
-   "counterColor": "#f4f4f2",
-   "material": "laminate",
-   "mirror": false
-  },
-  "zone": "indoor",
-  "category": "bathroom",
-  "subcategory": "vanities",
-  "tags": [
-   "43cm",
-   "compact",
-   "wall-hung",
-   "on-sale"
-  ],
-  "description": "Compact wall-hung 43x26x47 cm vanity for small guest toilets."
- },
- {
   "id": "homecenter-moon-led-round-60",
   "name": "Moon round LED bathroom mirror 60 cm",
   "nameHe": "מראת LED עגולה דגם מון – גודל 60 ס\"מ",
@@ -1012,38 +1013,6 @@ export default [
    "60cm"
   ],
   "description": "Round 60 cm bathroom mirror with LED lighting."
- },
- {
-  "id": "homecenter-moon-led-round-80",
-  "name": "Moon round LED bathroom mirror 80 cm",
-  "nameHe": "מראת LED עגולה דגם מון – גודל 80 ס\"מ",
-  "brand": "Home Center",
-  "retailer": "Home Center",
-  "url": "https://www.homecenter.co.il/products/1786370408984",
-  "price": 559.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 80,
-   "d": 4,
-   "h": 80
-  },
-  "type": "mirror",
-  "params": {
-   "shape": "round",
-   "frame": "led",
-   "color": "#e9eef0",
-   "material": "glass"
-  },
-  "zone": "indoor",
-  "category": "bathroom",
-  "subcategory": "mirrors",
-  "tags": [
-   "round",
-   "led",
-   "80cm"
-  ],
-  "description": "Round 80 cm bathroom mirror with LED lighting."
  },
  {
   "id": "homecenter-midea-hq611-4door-steel",
@@ -1140,70 +1109,6 @@ export default [
   "description": "Top-freezer 416 L refrigerator, stainless finish."
  },
  {
-  "id": "homecenter-midea-hd351-integrated-267l",
-  "name": "Midea HD-351RWEN integrated fridge 267 L",
-  "nameHe": "מקרר אינטגרלי 267 ליטר דגם HD-351RWEN של MIDEA",
-  "brand": "Midea",
-  "retailer": "Home Center",
-  "url": "https://www.homecenter.co.il/products/1739277820884",
-  "price": 3388.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 54,
-   "d": 55,
-   "h": 178.5
-  },
-  "type": "fridge",
-  "params": {
-   "variant": "bottom-freezer",
-   "color": "#c9ccd0",
-   "material": "metal",
-   "dispenser": false
-  },
-  "zone": "indoor",
-  "category": "kitchen",
-  "subcategory": "refrigerators",
-  "tags": [
-   "integrated",
-   "267-litre",
-   "on-sale"
-  ],
-  "description": "Integrated 267 L fridge-freezer for built-in housings."
- },
- {
-  "id": "homecenter-hd273fn-top-freezer-silver",
-  "name": "HD-273FN top-freezer fridge 200 L, silver",
-  "nameHe": "מקרר מקפיא עליון כ-200 ליטר דגם HD-273FN כסוף",
-  "brand": "Midea",
-  "retailer": "Home Center",
-  "url": "https://www.homecenter.co.il/products/9091708208",
-  "price": 1299.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 55,
-   "d": 55,
-   "h": 143
-  },
-  "type": "fridge",
-  "params": {
-   "variant": "top-freezer",
-   "color": "#c9ccd0",
-   "material": "metal",
-   "dispenser": false
-  },
-  "zone": "indoor",
-  "category": "kitchen",
-  "subcategory": "refrigerators",
-  "tags": [
-   "top-freezer",
-   "200-litre",
-   "compact"
-  ],
-  "description": "Compact top-freezer 200 L refrigerator."
- },
- {
   "id": "homecenter-midea-mfl80-8kg-steam",
   "name": "Midea MFL80-U1403B front-load washer 8 kg with steam",
   "nameHe": "מכונת כביסה INVERTER עם קיטור 8קג MIDEA  MFL80-U1403B",
@@ -1232,98 +1137,6 @@ export default [
    "8kg"
   ],
   "description": "Inverter 8 kg front-loading washer with steam."
- },
- {
-  "id": "homecenter-konka-kg60-6kg",
-  "name": "Konka KG60-1006U front-load washer 6 kg",
-  "nameHe": "מכונת כביסה 6 קג לבנה פתח קדמי דגם KG60-1006U של קונקה",
-  "brand": "Konka",
-  "retailer": "Home Center",
-  "url": "https://www.homecenter.co.il/products/1728810487882",
-  "price": 1390.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 60,
-   "d": 46.5,
-   "h": 84
-  },
-  "type": "washer",
-  "params": {
-   "variant": "washer",
-   "color": "#f4f4f2",
-   "material": "metal"
-  },
-  "zone": "indoor",
-  "category": "laundry",
-  "subcategory": "washers-dryers",
-  "tags": [
-   "front-load",
-   "6kg",
-   "compact"
-  ],
-  "description": "Slim 6 kg front-loading washing machine."
- },
- {
-  "id": "homecenter-midea-mfl80-du1403b-washer-dryer",
-  "name": "Midea MFL80-DU1403B washer-dryer 8/6 kg",
-  "nameHe": "מכונת כביסה משולבת 8 ק\"ג ומייבש 6 ק\"ג דגם MFL80-DU1403B של MIDEA",
-  "brand": "Midea",
-  "retailer": "Home Center",
-  "url": "https://www.homecenter.co.il/products/1669232617312",
-  "price": 3190.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 59.5,
-   "d": 50,
-   "h": 85
-  },
-  "type": "washer",
-  "params": {
-   "variant": "washer-dryer",
-   "color": "#f4f4f2",
-   "material": "metal"
-  },
-  "zone": "indoor",
-  "category": "laundry",
-  "subcategory": "washers-dryers",
-  "tags": [
-   "washer-dryer",
-   "8kg"
-  ],
-  "description": "Combined 8 kg washer and 6 kg dryer."
- },
- {
-  "id": "homecenter-telefunken-ttd800ds-dryer",
-  "name": "Telefunken TTD-800DS heat-pump dryer 8 kg, dark silver",
-  "nameHe": "מייבש כביסה 8 ק״ג HEAT PUMP דארק סילבר דגם TTD-800DS של טלפונקן",
-  "brand": "Telefunken",
-  "retailer": "Home Center",
-  "url": "https://www.homecenter.co.il/products/1791203649558",
-  "price": 1399.9,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 59.8,
-   "d": 52.5,
-   "h": 84.5
-  },
-  "type": "washer",
-  "params": {
-   "variant": "dryer",
-   "color": "#6f7378",
-   "material": "metal"
-  },
-  "zone": "indoor",
-  "category": "laundry",
-  "subcategory": "washers-dryers",
-  "tags": [
-   "heat-pump",
-   "8kg",
-   "on-sale"
-  ],
-  "description": "8 kg heat-pump tumble dryer in dark silver."
  },
  {
   "id": "homecenter-bosch-smv24ax04e-integrated",
@@ -1549,38 +1362,6 @@ export default [
   "description": "60 cm induction hob with 4 FLEX zones, three-phase."
  },
  {
-  "id": "homecenter-aeg-tn64ia0-41b-induction",
-  "name": "AEG TN64IA0-41B induction hob 60 cm, single-phase",
-  "nameHe": "כיריים אינדוקציה 60 סמ חד פאזי דגם TN64IA0-41B של AEG",
-  "brand": "AEG",
-  "retailer": "Home Center",
-  "url": "https://www.homecenter.co.il/products/1773651717503",
-  "price": 1799.9,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 59,
-   "d": 52,
-   "h": 4.4
-  },
-  "type": "cooktop",
-  "params": {
-   "variant": "induction",
-   "burners": 4,
-   "color": "#1f2023",
-   "material": "glass"
-  },
-  "zone": "indoor",
-  "category": "kitchen",
-  "subcategory": "ovens-cooktops",
-  "tags": [
-   "induction",
-   "single-phase",
-   "on-sale"
-  ],
-  "description": "AEG 60 cm four-zone induction hob for single-phase supply."
- },
- {
   "id": "homecenter-midea-60v71-b-hood",
   "name": "Midea 60V71-B wall chimney hood 60 cm, black glass",
   "nameHe": "קולט אדים צמוד קיר זכוכית שחור MIDEA 60V71-B",
@@ -1707,38 +1488,6 @@ export default [
   "description": "Wall-mounted inverter split AC with WiFi; dimensions are for the indoor unit."
  },
  {
-  "id": "homecenter-samsung-ua50du7000-tv-50",
-  "name": "Samsung UA50DU7000 50\" 4K smart TV",
-  "nameHe": "טלוויזיה \"50 4K SMART UA50DU7000 SAMSUNG",
-  "brand": "Samsung",
-  "retailer": "Home Center",
-  "url": "https://www.homecenter.co.il/products/1722845891559",
-  "price": 1199.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 112,
-   "d": 6,
-   "h": 64.7
-  },
-  "type": "tv",
-  "params": {
-   "variant": "tv",
-   "stand": false,
-   "color": "#1f2023",
-   "material": "plastic"
-  },
-  "zone": "indoor",
-  "category": "climate-tech",
-  "subcategory": "tvs",
-  "tags": [
-   "50-inch",
-   "4k",
-   "on-sale"
-  ],
-  "description": "50-inch 4K smart TV; dimensions without stand."
- },
- {
   "id": "ikea-metod-base-60x60x80-white",
   "name": "METOD base cabinet 60x60x80, white frame",
   "nameHe": "METOD",
@@ -1837,38 +1586,6 @@ export default [
   "description": "METOD base cabinet with three MAXIMERA drawers and SINARP brown fronts, 60 cm wide."
  },
  {
-  "id": "ikea-metod-corner-base-128",
-  "name": "METOD corner base cabinet 128x60x80, white frame",
-  "nameHe": "METOD",
-  "brand": "IKEA",
-  "retailer": "IKEA Israel",
-  "url": "https://www.ikea.com/il/he/p/metod-corner-base-cabinet-white-40596753/",
-  "price": 660.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 127.5,
-   "d": 67.5,
-   "h": 80
-  },
-  "type": "kitchen-base",
-  "params": {
-   "doors": 2,
-   "corner": true,
-   "color": "#f4f4f2",
-   "material": "laminate"
-  },
-  "zone": "indoor",
-  "category": "kitchen",
-  "subcategory": "kitchen-cabinets",
-  "tags": [
-   "modular",
-   "corner",
-   "frame-only"
-  ],
-  "description": "METOD corner base cabinet frame for L-shaped kitchens."
- },
- {
   "id": "ikea-metod-wall-60x37x80-white",
   "name": "METOD wall cabinet 60x37x80, white frame",
   "nameHe": "METOD",
@@ -1900,37 +1617,6 @@ export default [
   "description": "METOD wall cabinet frame, 60x37x80 cm; fronts sold separately."
  },
  {
-  "id": "ikea-metod-wall-80x80-enkoping",
-  "name": "METOD wall cabinet with shelves and 2 doors 80x80, white ENKÖPING wood effect",
-  "nameHe": "METOD",
-  "brand": "IKEA",
-  "retailer": "IKEA Israel",
-  "url": "https://www.ikea.com/il/he/p/metod-wall-cabinet-with-shelves-2-doors-white-enkoeping-white-wood-effect-s49473465/",
-  "price": 780.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 80,
-   "d": 38.9,
-   "h": 80
-  },
-  "type": "kitchen-wall",
-  "params": {
-   "doors": 2,
-   "color": "#efede8",
-   "material": "laminate"
-  },
-  "zone": "indoor",
-  "category": "kitchen",
-  "subcategory": "kitchen-cabinets",
-  "tags": [
-   "modular",
-   "wall-cabinet",
-   "white"
-  ],
-  "description": "METOD 80x80 wall cabinet with two white wood-effect doors."
- },
- {
   "id": "ikea-metod-wall-60x80-glass-hejsta",
   "name": "METOD wall cabinet with shelves and 2 glass doors 60x80, HEJSTA",
   "nameHe": "METOD",
@@ -1960,37 +1646,6 @@ export default [
    "glass-doors"
   ],
   "description": "METOD wall cabinet with two HEJSTA clear glass doors."
- },
- {
-  "id": "ikea-metod-tall-60x60x200-white",
-  "name": "METOD high cabinet 60x60x200, white frame",
-  "nameHe": "METOD",
-  "brand": "IKEA",
-  "retailer": "IKEA Israel",
-  "url": "https://www.ikea.com/il/he/p/metod-high-cabinet-white-60212565/",
-  "price": 685.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 60,
-   "d": 60,
-   "h": 200
-  },
-  "type": "kitchen-tall",
-  "params": {
-   "doors": 2,
-   "color": "#f4f4f2",
-   "material": "laminate"
-  },
-  "zone": "indoor",
-  "category": "kitchen",
-  "subcategory": "kitchen-cabinets",
-  "tags": [
-   "modular",
-   "tall",
-   "frame-only"
-  ],
-  "description": "METOD tall cabinet frame, 200 cm high; doors sold separately."
  },
  {
   "id": "ikea-metod-tall-appliances-220-veddinge",
@@ -2179,36 +1834,6 @@ export default [
   "description": "Fully integrated 60 cm dishwasher."
  },
  {
-  "id": "ikea-rengora-dishwasher-integrated-60",
-  "name": "RENGÖRA integrated dishwasher 60 cm, IKEA 300",
-  "nameHe": "RENGÖRA",
-  "brand": "IKEA",
-  "retailer": "IKEA Israel",
-  "url": "https://www.ikea.com/il/he/p/rengoera-integrated-dishwasher-ikea-300-80622632/",
-  "price": 2495.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 59.8,
-   "d": 55.5,
-   "h": 82
-  },
-  "type": "dishwasher",
-  "params": {
-   "variant": "integrated",
-   "color": "#c9ccd0",
-   "material": "metal"
-  },
-  "zone": "indoor",
-  "category": "kitchen",
-  "subcategory": "dishwashers",
-  "tags": [
-   "integrated",
-   "60cm"
-  ],
-  "description": "Integrated 60 cm dishwasher from the IKEA 300 range."
- },
- {
   "id": "ikea-frillesbo-oven-300-steel",
   "name": "FRILLESBO fan oven with grill function, IKEA 300, stainless steel colour",
   "nameHe": "FRILLESBO",
@@ -2334,37 +1959,6 @@ export default [
   "description": "Built-in 60 cm extractor hood for METOD wall cabinets."
  },
  {
-  "id": "ikea-lagan-hood-wall-60",
-  "name": "LAGAN wall-mounted extractor hood 60 cm",
-  "nameHe": "LAGAN",
-  "brand": "IKEA",
-  "retailer": "IKEA Israel",
-  "url": "https://www.ikea.com/il/he/p/lagan-wall-mounted-extractor-hood-stainless-steel-20388967/",
-  "price": 495.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 60,
-   "d": 51,
-   "h": 13
-  },
-  "type": "hood",
-  "params": {
-   "variant": "slanted",
-   "color": "#c9ccd0",
-   "material": "metal"
-  },
-  "zone": "indoor",
-  "category": "kitchen",
-  "subcategory": "hoods",
-  "tags": [
-   "wall-mounted",
-   "60cm",
-   "budget"
-  ],
-  "description": "Wall-mounted 60 cm extractor hood."
- },
- {
   "id": "ikea-lagan-microwave-builtin-black",
   "name": "LAGAN built-in microwave, black",
   "nameHe": "LAGAN",
@@ -2393,37 +1987,6 @@ export default [
    "20-litre"
   ],
   "description": "Built-in 20 L 800 W microwave."
- },
- {
-  "id": "ikea-tillreda-microwave-white",
-  "name": "TILLREDA microwave oven, white",
-  "nameHe": "TILLREDA",
-  "brand": "IKEA",
-  "retailer": "IKEA Israel",
-  "url": "https://www.ikea.com/il/he/p/tillreda-microwave-oven-white-40493335/",
-  "price": 395.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 43.9,
-   "d": 34,
-   "h": 25.8
-  },
-  "type": "microwave",
-  "params": {
-   "variant": "microwave",
-   "color": "#f4f4f2",
-   "material": "metal"
-  },
-  "zone": "indoor",
-  "category": "kitchen",
-  "subcategory": "small-appliances",
-  "tags": [
-   "countertop",
-   "20-litre",
-   "budget"
-  ],
-  "description": "Countertop 20 L 700 W microwave."
  },
  {
   "id": "ikea-langudden-sink-2-bowls-steel",
@@ -2552,37 +2115,6 @@ export default [
   "description": "Rectangular mirror with black frame, 60x120 cm."
  },
  {
-  "id": "ikea-nissedal-mirror-white-65x150",
-  "name": "NISSEDAL mirror, white 65x150",
-  "nameHe": "NISSEDAL",
-  "brand": "IKEA",
-  "retailer": "IKEA Israel",
-  "url": "https://www.ikea.com/il/he/p/nissedal-mirror-white-80605487/",
-  "price": 345.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 65,
-   "d": 3,
-   "h": 150
-  },
-  "type": "mirror",
-  "params": {
-   "shape": "rect",
-   "frame": "thin",
-   "color": "#f4f4f2",
-   "material": "wood"
-  },
-  "zone": "indoor",
-  "category": "bathroom",
-  "subcategory": "mirrors",
-  "tags": [
-   "white-frame",
-   "tall"
-  ],
-  "description": "Tall rectangular mirror with white frame, 65x150 cm."
- },
- {
   "id": "ikea-stockholm-mirror-round-80",
   "name": "STOCKHOLM round mirror 80 cm, walnut veneer",
   "nameHe": "STOCKHOLM",
@@ -2614,38 +2146,6 @@ export default [
   "description": "Round 80 cm mirror in a walnut-veneer frame."
  },
  {
-  "id": "samsung-tv-32-h5000f",
-  "name": "Samsung UE32H5000F 32\" HD smart TV",
-  "nameHe": "טלוויזיה חכמה HD 32 H5000F",
-  "brand": "Samsung",
-  "retailer": "Samsung Israel (online shop)",
-  "url": "https://www.samsung.com/il/tvs/hd-tv/h5000-32-inch-ue32h5000fuxil/",
-  "price": 826.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 73.3,
-   "d": 7.2,
-   "h": 43.9
-  },
-  "type": "tv",
-  "params": {
-   "variant": "tv",
-   "stand": false,
-   "color": "#1f2023",
-   "material": "plastic"
-  },
-  "zone": "indoor",
-  "category": "climate-tech",
-  "subcategory": "tvs",
-  "tags": [
-   "32-inch",
-   "hd",
-   "budget"
-  ],
-  "description": "32-inch HD smart TV; dimensions without stand."
- },
- {
   "id": "samsung-tv-43-f6000f",
   "name": "Samsung UE43F6000F 43\" Full HD smart TV",
   "nameHe": "טלוויזיה חכמה Full HD 43 F6000F",
@@ -2675,38 +2175,6 @@ export default [
    "full-hd"
   ],
   "description": "43-inch Full HD smart TV; dimensions without stand."
- },
- {
-  "id": "samsung-tv-43-m70h",
-  "name": "Samsung UE43M70H 43\" Mini LED 4K smart TV",
-  "nameHe": "טלוויזיה Mini LED 4k חכמה M70H 43",
-  "brand": "Samsung",
-  "retailer": "Samsung Israel (online shop)",
-  "url": "https://www.samsung.com/il/tvs/mini-led-tv/m70h-43-inch-4k-smart-tv-ue43m70hauxil/",
-  "price": 1730.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 95.8,
-   "d": 7.6,
-   "h": 55.9
-  },
-  "type": "tv",
-  "params": {
-   "variant": "tv",
-   "stand": false,
-   "color": "#1f2023",
-   "material": "plastic"
-  },
-  "zone": "indoor",
-  "category": "climate-tech",
-  "subcategory": "tvs",
-  "tags": [
-   "43-inch",
-   "mini-led",
-   "4k"
-  ],
-  "description": "43-inch Mini LED 4K smart TV; dimensions without stand."
  },
  {
   "id": "samsung-tv-55-m80h",
@@ -2771,38 +2239,6 @@ export default [
    "4k"
   ],
   "description": "65-inch Neo QLED 4K smart TV; dimensions without stand."
- },
- {
-  "id": "samsung-tv-70-u8000h",
-  "name": "Samsung UE70U8092H 70\" Crystal UHD 4K smart TV",
-  "nameHe": "טלוויזייה UHD 4k חכמה U8092H 70",
-  "brand": "Samsung",
-  "retailer": "Samsung Israel (online shop)",
-  "url": "https://www.samsung.com/il/tvs/uhd-4k-tv/u8000h-70-inch-crystal-uhd-4k-smart-tv-ue70u8092huxil/",
-  "price": 2982.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 156.7,
-   "d": 7.7,
-   "h": 87.6
-  },
-  "type": "tv",
-  "params": {
-   "variant": "tv",
-   "stand": false,
-   "color": "#1f2023",
-   "material": "plastic"
-  },
-  "zone": "indoor",
-  "category": "climate-tech",
-  "subcategory": "tvs",
-  "tags": [
-   "70-inch",
-   "uhd",
-   "4k"
-  ],
-  "description": "70-inch UHD 4K smart TV; dimensions without stand."
  },
  {
   "id": "samsung-tv-83-s85h-oled",
@@ -2899,36 +2335,6 @@ export default [
    "smartthings"
   ],
   "description": "Freestanding 538 L bottom-freezer refrigerator in black."
- },
- {
-  "id": "samsung-fridge-rt42cg6004-top-415l",
-  "name": "Samsung RT42CG6004WW top-freezer fridge 415 L, white",
-  "nameHe": "מקרר מקפיא עליון 415L Space Max",
-  "brand": "Samsung",
-  "retailer": "Samsung Israel (online shop)",
-  "url": "https://www.samsung.com/il/refrigerators/top-mount-freezer/rt6300c-top-mount-freezer-optimal-fresh-and-space-max-420l-white-rt42cg6004wwml/",
-  "price": 2542.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 70,
-   "d": 67.2,
-   "h": 178.5
-  },
-  "type": "fridge",
-  "params": {
-   "variant": "top-freezer",
-   "color": "#f4f4f2",
-   "material": "metal"
-  },
-  "zone": "indoor",
-  "category": "kitchen",
-  "subcategory": "refrigerators",
-  "tags": [
-   "top-freezer",
-   "415-litre"
-  ],
-  "description": "Freestanding 415 L top-freezer refrigerator in white."
  },
  {
   "id": "samsung-fridge-brb80f26-builtin-267l",
@@ -3084,36 +2490,6 @@ export default [
   "description": "9 kg heat-pump tumble dryer."
  },
  {
-  "id": "samsung-dishwasher-dw60bg730-freestanding",
-  "name": "Samsung DW60BG730 freestanding dishwasher 60 cm, silver",
-  "nameHe": "מדיח כלים עומד 60 ס\"מ DW7700",
-  "brand": "Samsung",
-  "retailer": "Samsung Israel (online shop)",
-  "url": "https://www.samsung.com/il/dishwashers/freestanding/dw7700-silver-dw60bg730fslml/",
-  "price": 2529.0,
-  "priceUnit": "item",
-  "priceDate": "2026-11",
-  "dims": {
-   "w": 59.8,
-   "d": 60,
-   "h": 84.5
-  },
-  "type": "dishwasher",
-  "params": {
-   "variant": "freestanding",
-   "color": "#c9ccd0",
-   "material": "metal"
-  },
-  "zone": "indoor",
-  "category": "kitchen",
-  "subcategory": "dishwashers",
-  "tags": [
-   "freestanding",
-   "60cm"
-  ],
-  "description": "Freestanding 60 cm dishwasher with WaterJet Clean."
- },
- {
   "id": "samsung-dishwasher-dw60bg750-integrated",
   "name": "Samsung DW60BG750 fully integrated dishwasher 60 cm",
   "nameHe": "מדיח כלים אינטגרלי מלא 60 ס\"מ DW7700",
@@ -3142,5 +2518,646 @@ export default [
    "60cm"
   ],
   "description": "Fully integrated 60 cm dishwasher with WaterJet Clean."
+ },
+ {
+  "id": "traklin-premier-pr681cdgcr-4door-616l",
+  "name": "Premier PR681CDGCR 4-door fridge 616 L, cream glass",
+  "nameHe": "מקרר 4 דלתות 616 ליטר Premier דגם PR681CDGCR זכוכית קרם בהיר כולל מנגנון שבת",
+  "brand": "Premier",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/מקררים_ומקפיאים/מקררים/מקרר_4_דלתות_616_ליטר_premier_דגם_pr681cdgcr_זכוכית_קרם_בהיר_כולל_מנגנון_שבת",
+  "price": 4890.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 91.1,
+   "d": 73.3,
+   "h": 183
+  },
+  "type": "fridge",
+  "params": {
+   "variant": "4-door",
+   "color": "#e8dfcf",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "refrigerators",
+  "tags": [
+   "4-door",
+   "616-litre",
+   "shabbat-mode"
+  ],
+  "description": "Four-door 616 L refrigerator with cream glass doors and Shabbat mode."
+ },
+ {
+  "id": "traklin-electrolux-ebe5304aas-bottom-493l",
+  "name": "Electrolux EBE5304AAS bottom-freezer fridge 493 L, stainless",
+  "nameHe": "מקרר מקפיא תחתון 493 ליטר נירוסטה ELECTROLUX דגם EBE5304AAS אלקטרולוקס",
+  "brand": "Electrolux",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/מקררים_ומקפיאים/מקררים/מקרר_מקפיא_תחתון_493_ליטר_נירוסטה_electrolux_דגם_ebe5304aas_אלקטרולוקס",
+  "price": 4890.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 80,
+   "d": 72.5,
+   "h": 172.5
+  },
+  "type": "fridge",
+  "params": {
+   "variant": "bottom-freezer",
+   "color": "#c9ccd0",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "refrigerators",
+  "tags": [
+   "bottom-freezer",
+   "493-litre"
+  ],
+  "description": "Bottom-freezer 493 L refrigerator, stainless steel."
+ },
+ {
+  "id": "traklin-sharp-sj-2375-sl-top-474l",
+  "name": "Sharp SJ-2375-SL top-freezer fridge 474 L, stainless",
+  "nameHe": "מקרר מקפיא עליון נפח כולל 474 ליטר שבת SHARP דגם SJ-2375-SL נירוסטה שארפ",
+  "brand": "Sharp",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/מקררים_ומקפיאים/מקררים/מקרר_מקפיא_עליון_נפח_כולל_474_ליטר_שבת_sharp_דגם_sj-2375-sl_נירוסטה_שארפ",
+  "price": 4450.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 70,
+   "d": 72,
+   "h": 177
+  },
+  "type": "fridge",
+  "params": {
+   "variant": "top-freezer",
+   "color": "#c9ccd0",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "refrigerators",
+  "tags": [
+   "top-freezer",
+   "474-litre",
+   "shabbat-mode"
+  ],
+  "description": "Top-freezer 474 L refrigerator with Shabbat mode."
+ },
+ {
+  "id": "traklin-sharp-sj-r9733sl-5door-668l",
+  "name": "Sharp SJ-R9733SL 5-door fridge 668 L, steel glass",
+  "nameHe": "מקרר 5 דלתות 668 ליטר זכוכית נירוסטה SHARP SJ-R9733SL שארפ",
+  "brand": "Sharp",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/מקררים_ומקפיאים/מקררים/מקרר_5_דלתות_668_ליטר_זכוכית_נירוסטה_sharp_sj-r9733sl_שארפ",
+  "price": 10990.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 90.8,
+   "d": 79.6,
+   "h": 185
+  },
+  "type": "fridge",
+  "params": {
+   "variant": "4-door",
+   "color": "#c9ccd0",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "refrigerators",
+  "tags": [
+   "5-door",
+   "668-litre",
+   "premium"
+  ],
+  "description": "Five-door 668 L refrigerator with steel-glass fronts."
+ },
+ {
+  "id": "traklin-graetz-gr-3218-nfw-bottom",
+  "name": "Graetz GR-3218-NFW bottom-freezer fridge, white",
+  "nameHe": "מקרר מקפיא תחתון GRAETZ דגם GR-3218-NFW לבן",
+  "brand": "Graetz",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/מקררים_ומקפיאים/מקררים/מקרר_מקפיא_תחתון_graetz_דגם_gr-3218-nfw_לבן",
+  "price": 1790.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 59.5,
+   "d": 63,
+   "h": 185
+  },
+  "type": "fridge",
+  "params": {
+   "variant": "bottom-freezer",
+   "color": "#f4f4f2",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "refrigerators",
+  "tags": [
+   "bottom-freezer",
+   "slim",
+   "budget"
+  ],
+  "description": "Slim 59.5 cm bottom-freezer refrigerator in white."
+ },
+ {
+  "id": "traklin-lg-gr-m6781bu-top-black",
+  "name": "LG GR-M6781BU top-freezer fridge, black glass",
+  "nameHe": "מקרר מקפיא עליון LG דגם GR-M6781BU זכוכית שחורה",
+  "brand": "LG",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/מקררים_ומקפיאים/מקררים/מקרר_מקפיא_עליון_lg_דגם_gr-m6781bu_זכוכית_שחורה",
+  "price": 3290.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 78,
+   "d": 73,
+   "h": 180.5
+  },
+  "type": "fridge",
+  "params": {
+   "variant": "top-freezer",
+   "color": "#1f2023",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "refrigerators",
+  "tags": [
+   "top-freezer",
+   "black-glass"
+  ],
+  "description": "LG top-freezer refrigerator with black glass front."
+ },
+ {
+  "id": "traklin-sauter-cuisine-7800ix-oven-77l",
+  "name": "Sauter Cuisine 7800IX built-in oven 77 L, stainless",
+  "nameHe": "תנור בנוי 77 ליטר נירוסטה SAUTER דגם CUISINE 7800IX סאוטר",
+  "brand": "Sauter",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/בישול_ואפייה/תנורים/תנור_בנוי_77_ליטר_נירוסטה_sauter_דגם_cuisine_7800ix_סאוטר",
+  "price": 2208.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 59.5,
+   "d": 57.5,
+   "h": 59.5
+  },
+  "type": "range",
+  "params": {
+   "variant": "built-in-oven",
+   "cooktop": "none",
+   "color": "#c9ccd0",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "ovens-cooktops",
+  "tags": [
+   "built-in",
+   "77-litre"
+  ],
+  "description": "Built-in 77 L oven, stainless steel."
+ },
+ {
+  "id": "traklin-electrolux-eoh6212x-oven-71l",
+  "name": "Electrolux EOH6212X built-in oven 71 L, stainless",
+  "nameHe": "",
+  "brand": "Electrolux",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/בישול_ואפייה/תנורים/תנור_בנוי_71_ליטר_electrolux_דגם_eoh6212x_נירוסטה_אלקטרולוקס",
+  "price": 2290.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 59.4,
+   "d": 56.7,
+   "h": 59.4
+  },
+  "type": "range",
+  "params": {
+   "variant": "built-in-oven",
+   "cooktop": "none",
+   "color": "#c9ccd0",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "ovens-cooktops",
+  "tags": [
+   "built-in",
+   "71-litre"
+  ],
+  "description": "Built-in 71 L oven, stainless steel."
+ },
+ {
+  "id": "traklin-lofra-pud76mfeci-2m-range-70",
+  "name": "Lofra PUD76MFECI-2M 70 cm freestanding cooker with oven",
+  "nameHe": "תנור משולב כיריים Lofra PUD76MFE/CI-2M",
+  "brand": "Lofra",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/בישול_ואפייה/תנורים/תנור_משולב_כיריים_lofra_pud76mfeci-2m",
+  "price": 9450.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 70,
+   "d": 60,
+   "h": 85
+  },
+  "type": "range",
+  "params": {
+   "variant": "freestanding",
+   "color": "#c9ccd0",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "ovens-cooktops",
+  "tags": [
+   "freestanding",
+   "70cm",
+   "italian"
+  ],
+  "description": "Italian 70x60 cm freestanding cooker with hob and oven; height 85-90.5 cm with adjustable feet."
+ },
+ {
+  "id": "traklin-midea-e90tew2j82-b-hood-90",
+  "name": "Midea E90TEW2J82-B 90 cm chimney hood, black",
+  "nameHe": "קולט אדים Midea E90TEW2J82-B מידאה",
+  "brand": "Midea",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/בישול_ואפייה/קולטי_אדים/קולט_אדים_midea_e90tew2j82-b_מידאה",
+  "price": 990.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 90,
+   "d": 44,
+   "h": 132
+  },
+  "type": "hood",
+  "params": {
+   "variant": "chimney",
+   "color": "#1f2023",
+   "material": "glass"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "hoods",
+  "tags": [
+   "chimney",
+   "90cm"
+  ],
+  "description": "Wall-mounted 90 cm chimney hood."
+ },
+ {
+  "id": "traklin-elica-joy-blixa60-hood",
+  "name": "Elica JOY-BLIX/A60 60 cm chimney hood",
+  "nameHe": "קולט אדים Elica JOY-BLIX/A60 אליקה",
+  "brand": "Elica",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/בישול_ואפייה/קולטי_אדים/קולט_אדים_elica_joy-blixa60_אליקה",
+  "price": 2390.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 60,
+   "d": 45.5,
+   "h": 114
+  },
+  "type": "hood",
+  "params": {
+   "variant": "chimney",
+   "color": "#c9ccd0",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "hoods",
+  "tags": [
+   "chimney",
+   "60cm",
+   "italian"
+  ],
+  "description": "Italian 60 cm chimney hood, extendable height 71-114 cm (maximum shown)."
+ },
+ {
+  "id": "traklin-blomberg-ldf30210x-dishwasher-60",
+  "name": "Blomberg LDF30210X dishwasher 60 cm, stainless",
+  "nameHe": "מדיח כלים רחב 60 ס\"מ נירוסטה Blomberg דגם LDF30210X בלומברג",
+  "brand": "Blomberg",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/נקיון_וכביסה/מדיחי_כלים/מדיח_כלים_רחב_60_סמ_נירוסטה_blomberg_דגם_ldf30210x_בלומברג",
+  "price": 1690.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 59.8,
+   "d": 60,
+   "h": 85
+  },
+  "type": "dishwasher",
+  "params": {
+   "variant": "freestanding",
+   "color": "#c9ccd0",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "dishwashers",
+  "tags": [
+   "freestanding",
+   "60cm"
+  ],
+  "description": "Freestanding 60 cm dishwasher, stainless steel."
+ },
+ {
+  "id": "traklin-lg-wfs9014ww-washer-9kg",
+  "name": "LG WFS9014WW front-load washer 9 kg",
+  "nameHe": "מכונת כביסה 9 ק\"ג 1200 סל\"ד LG דגם WFS9014WW",
+  "brand": "LG",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/נקיון_וכביסה/מכונות_כביסה/מכונת_כביסה_9_קג_1200_סלד_lg_דגם_wfs9014ww",
+  "price": 2490.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 60,
+   "d": 53.5,
+   "h": 85
+  },
+  "type": "washer",
+  "params": {
+   "variant": "washer",
+   "color": "#f4f4f2",
+   "material": "metal"
+  },
+  "zone": "indoor",
+  "category": "laundry",
+  "subcategory": "washers-dryers",
+  "tags": [
+   "front-load",
+   "9kg"
+  ],
+  "description": "LG 9 kg front-loading washing machine."
+ },
+ {
+  "id": "traklin-haier-buzz-21-inverter",
+  "name": "Haier Buzz 21 inverter split air conditioner (17,985 BTU)",
+  "nameHe": "מזגן עילי HAIER 17985BTU דגם 21 BUZZ INVERTER האייר",
+  "brand": "Haier",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/מוצרי_מיזוג_וחימום_לבית/מזגנים/מזגן_עילי_haier_17985btu_דגם_21_buzz_inverter_האייר",
+  "price": 2449.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 97.5,
+   "d": 22,
+   "h": 31.8
+  },
+  "type": "ac-unit",
+  "params": {
+   "variant": "split",
+   "color": "#f4f4f2",
+   "material": "plastic"
+  },
+  "zone": "indoor",
+  "category": "climate-tech",
+  "subcategory": "air-conditioners",
+  "tags": [
+   "split",
+   "inverter"
+  ],
+  "description": "Wall-mounted inverter split AC; dimensions are for the indoor unit."
+ },
+ {
+  "id": "traklin-electra-magic-touch-inv-190",
+  "name": "Electra Magic Touch Inverter 190 split air conditioner (15,354 BTU)",
+  "nameHe": "מזגן ELECTRA 15354BTU דגם MAGIC TOUCH INV 190 אלקטרה",
+  "brand": "Electra",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/מוצרי_מיזוג_וחימום_לבית/מזגנים/מזגן_electra_15354btu_דגם_magic_touch_inv_190_אלקטרה",
+  "price": 2750.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 97.1,
+   "d": 22.8,
+   "h": 32.1
+  },
+  "type": "ac-unit",
+  "params": {
+   "variant": "split",
+   "color": "#f4f4f2",
+   "material": "plastic"
+  },
+  "zone": "indoor",
+  "category": "climate-tech",
+  "subcategory": "air-conditioners",
+  "tags": [
+   "split",
+   "inverter"
+  ],
+  "description": "Wall-mounted inverter split AC; dimensions are for the indoor unit."
+ },
+ {
+  "id": "traklin-tornado-legend-inv-22-wifi",
+  "name": "Tornado Legend INV 22 X WiFi split air conditioner (18,420 BTU)",
+  "nameHe": "מזגן עילי TORNADO 18420BTU דגם LEGEND-INV-22 X WIFI EU טורנדו",
+  "brand": "Tornado",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/מוצרי_מיזוג_וחימום_לבית/מזגנים/מזגן_עילי_tornado_18420btu_דגם_legend-inv-22_x_wifi_eu_טורנדו",
+  "price": 3000.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 100,
+   "d": 22.5,
+   "h": 32
+  },
+  "type": "ac-unit",
+  "params": {
+   "variant": "split",
+   "color": "#f4f4f2",
+   "material": "plastic"
+  },
+  "zone": "indoor",
+  "category": "climate-tech",
+  "subcategory": "air-conditioners",
+  "tags": [
+   "split",
+   "inverter"
+  ],
+  "description": "Wall-mounted inverter split AC; dimensions are for the indoor unit."
+ },
+ {
+  "id": "traklin-infinity-star-water-bar-charcoal",
+  "name": "Infinity Star hot/cold water bar, charcoal black",
+  "nameHe": "בר מים INFINITY STAR שחור פחם",
+  "brand": "Infinity",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/מוצרי_חשמל_למטבח/ברי_מים/בר_מים_infinity_star_שחור_פחם",
+  "price": 1469.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 26,
+   "d": 36,
+   "h": 33
+  },
+  "type": "microwave",
+  "params": {
+   "variant": "water-bar",
+   "color": "#2b2b2d",
+   "material": "plastic"
+  },
+  "zone": "indoor",
+  "category": "kitchen",
+  "subcategory": "small-appliances",
+  "tags": [
+   "water-bar",
+   "hot-cold",
+   "countertop"
+  ],
+  "description": "Countertop hot and cold water bar."
+ },
+ {
+  "id": "traklin-tcl-65t6d-tv-65",
+  "name": "TCL 65T6D QD 4K UHD QLED smart TV 65\"",
+  "nameHe": "מסך טלוויזיה \"65 TCL QD 4K UHD QLED SMART דגם 65T6D טי סי אל",
+  "brand": "TCL",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/מוצרי_אלקטרוניקה/טלוויזיות_ומסכים/מסך_טלוויזיה_65_tcl_qd_4k_uhd_qled_smart_דגם_65t6d_טי_סי_אל",
+  "price": 2699.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 144.4,
+   "d": 6.95,
+   "h": 83.1
+  },
+  "type": "tv",
+  "params": {
+   "variant": "tv",
+   "stand": false,
+   "color": "#1f2023",
+   "material": "plastic"
+  },
+  "zone": "indoor",
+  "category": "climate-tech",
+  "subcategory": "tvs",
+  "tags": [
+   "65-inch",
+   "qled",
+   "4k"
+  ],
+  "description": "65-inch QLED 4K smart TV; dimensions without stand."
+ },
+ {
+  "id": "traklin-lg-sh5a-soundbar-4ch-sub",
+  "name": "LG SH5A 4.1-channel soundbar with wireless subwoofer",
+  "nameHe": "מקרן קול 4.1 ערוצים LG דגם SH5A אל.ג'י",
+  "brand": "LG",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/מוצרי_אלקטרוניקה/מקרן_קול/מקרן_קול_41_ערוצים_lg_דגם_sh5a_אלגי",
+  "price": 999.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 99,
+   "d": 12.5,
+   "h": 9.7
+  },
+  "type": "tv",
+  "params": {
+   "variant": "soundbar",
+   "stand": false,
+   "color": "#1f2023",
+   "material": "plastic"
+  },
+  "zone": "indoor",
+  "category": "climate-tech",
+  "subcategory": "audio",
+  "tags": [
+   "soundbar"
+  ],
+  "description": "Soundbar 99x12.5x9.7 cm with separate wireless subwoofer."
+ },
+ {
+  "id": "traklin-sony-ht-a8000-soundbar",
+  "name": "Sony HT-A8000 Dolby Atmos soundbar",
+  "nameHe": "מקרן קול SONY דגם HTA8000 סוני",
+  "brand": "Sony",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/מוצרי_אלקטרוניקה/מקרן_קול/מקרן_קול_sony_דגם_hta8000_סוני",
+  "price": 2690.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 110,
+   "d": 11.3,
+   "h": 6.4
+  },
+  "type": "tv",
+  "params": {
+   "variant": "soundbar",
+   "stand": false,
+   "color": "#1f2023",
+   "material": "plastic"
+  },
+  "zone": "indoor",
+  "category": "climate-tech",
+  "subcategory": "audio",
+  "tags": [
+   "soundbar"
+  ],
+  "description": "Premium Dolby Atmos soundbar, 110 cm wide."
+ },
+ {
+  "id": "traklin-tcl-s55h-soundbar-sub",
+  "name": "TCL S55H soundbar with wireless subwoofer",
+  "nameHe": "מקרן קול (סאונד בר) עם סאבוופר אלחוטי TCL דגם S55H טי סי אל",
+  "brand": "TCL",
+  "retailer": "Traklin Hashmal",
+  "url": "https://www.traklin.co.il/מוצרי_אלקטרוניקה/מקרן_קול/מקרן_קול_סאונד_בר_עם_סאבוופר_אלחוטי_tcl_דגם_s55h_טי_סי_אל",
+  "price": 699.0,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 81,
+   "d": 9.8,
+   "h": 6
+  },
+  "type": "tv",
+  "params": {
+   "variant": "soundbar",
+   "stand": false,
+   "color": "#1f2023",
+   "material": "plastic"
+  },
+  "zone": "indoor",
+  "category": "climate-tech",
+  "subcategory": "audio",
+  "tags": [
+   "soundbar"
+  ],
+  "description": "Compact 81 cm soundbar with wireless subwoofer."
  }
 ];

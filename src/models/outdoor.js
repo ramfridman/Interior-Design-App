@@ -24,7 +24,7 @@ import { mergeGeometries, toCreasedNormals } from 'three/addons/utils/BufferGeom
 import { registerModel } from './registry.js';
 import * as K from './kit.js';
 
-const { box, boxOn, rbox, rboxOn, cyl, cylOn, sphere } = K;
+const { box, rbox, cyl, cylOn, sphere } = K;
 const PI = Math.PI, TAU = PI * 2, UP = new THREE.Vector3(0, 1, 0);
 const INK = K.INK, SOFT = K.INK_SOFT;
 
@@ -91,6 +91,8 @@ function boxG(w, h, d, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
 }
 /** Many boxes as one mesh. Entry: [w, h, d, x, y, z, rx, ry, rz]. */
 const boxes = (list, material) => merge(list.map((b) => boxG(...b)), material);
+/** Rounded box geometry (copy of the kit's cached one) centred at (x, y, z). */
+const rboxG = (w, h, d, r, x = 0, y = 0, z = 0) => rbox(w, h, d, null, 0, 0, 0, r, 2).geometry.clone().translate(x, y, z);
 /** Vertical cylinder geometry centred at (x, y, z). */
 function cylG(rt, rb, h, x = 0, y = 0, z = 0, seg = 12, open = false) {
   const g = new THREE.CylinderGeometry(rt, rb, h, seg, 1, open);
@@ -196,7 +198,6 @@ function taperG(wb, db, wt, dt, h, x = 0, y0 = 0, z = 0, zShift = 0) {
   g.computeVertexNormals();
   return g;
 }
-const taper = (wb, db, wt, dt, h, material, x, y0, z, zShift) => new THREE.Mesh(taperG(wb, db, wt, dt, h, x, y0, z, zShift), material);
 /** Tyres + rims for a list of wheel centres (axis along X). */
 function wheelSet(g, spots, r, t, rimM = K.metal('#b9bdc2', { roughness: 0.35, metalness: 0.8 })) {
   const ty = [], rim = [];
@@ -207,12 +208,12 @@ function wheelSet(g, spots, r, t, rimM = K.metal('#b9bdc2', { roughness: 0.35, m
   g.add(merge(ty, rubber()), merge(rim, rimM));
 }
 /** Small fire: glowing cones + one lamp light. Not part of the fitted box. */
-function fire(g, x, y, z, r, hgt) {
+function fire(g, x, y, z, r, hgt, light = true) {
   const mk = (geo, m) => { const f = ns(new THREE.Mesh(geo, m)); f.userData.noFit = true; g.add(f); };
   const cone = (rr, hh, dx, dz) => { const c = new THREE.ConeGeometry(rr, hh, 7); c.translate(x + dx, y + hh / 2, z + dz); return c; };
   mk(mergeGeometries([cone(r * 0.55, hgt, 0, 0), cone(r * 0.4, hgt * 0.7, r * 0.45, r * 0.1), cone(r * 0.4, hgt * 0.62, -r * 0.4, -r * 0.2), cone(r * 0.32, hgt * 0.5, 0.05 * r, r * 0.5)]), K.glow('#ff8a2b', 1.6));
   mk(cone(r * 0.3, hgt * 0.6, 0, 0), K.glow('#ffd76a', 2));
-  g.add(K.lampLight('#ff9a4a', 1.4, 5, x, y + hgt * 0.6, z));
+  if (light) g.add(K.lampLight('#ff9a4a', 1.4, 5, x, y + hgt * 0.6, z));
 }
 /** Scale + centre `inner` so that its bounding box is exactly w × d × h; returns the wrapper group. */
 function fit(inner, w, d, h, mode = {}) {
@@ -266,21 +267,25 @@ function dashed(ctx, px, fn, on = 4, off = 3) { ctx.save(); ctx.setLineDash([on 
 
 // ───────────────────────── registration ─────────────────────────
 const dim = (v, min) => (Number.isFinite(+v) && +v > 0 ? Math.max(min, +v) : min);
-function norm(a, min) {
+const STYLE_MAT = { modern: 'aluminium', minimal: 'aluminium', industrial: 'metal', rustic: 'wood', classic: 'wood', boho: 'wood', scandinavian: 'wood' };
+function norm(a, min, styled) {
   const s = a || {};
-  return { w: dim(s.w, min), d: dim(s.d, min), h: dim(s.h, min), p: s.p && typeof s.p === 'object' ? s.p : {}, item: s.item || null };
+  let p = s.p && typeof s.p === 'object' ? s.p : {};
+  // the `style` hint picks the structure material when the product does not state one
+  if (styled && !MATS.includes(p.material) && STYLE_MAT[p.style]) p = { ...p, material: STYLE_MAT[p.style] };
+  return { w: dim(s.w, min), d: dim(s.d, min), h: dim(s.h, min), p, item: s.item || null };
 }
-/** Register a type from a table of variants: { name: { b(group, o) → fit mode?, s(ctx, o) } }. First variant = default. */
-function define(type, variants, fallbackSymbol) {
+/** Register a type from a table of variants: { name: { b(group, o) → fit mode?, s(ctx, o) } }. First variant = default. `styled`: style hint → material. */
+function define(type, variants, fallbackSymbol, styled = false) {
   const names = Object.keys(variants);
   registerModel(type, {
     build(a) {
-      const o = norm(a, 0.01); o.v = pick(o.p.variant, names);
+      const o = norm(a, 0.01, styled); o.v = pick(o.p.variant, names);
       const g = new THREE.Group();
       return fit(g, o.w, o.d, o.h, variants[o.v].b(g, o) || {});
     },
     draw2d(ctx, a) {
-      const o = norm(a, 1); o.v = pick(o.p.variant, names);
+      const o = norm(a, 1, styled); o.v = pick(o.p.variant, names);
       o.px = Number.isFinite(+(a && a.px)) && +a.px > 0 ? +a.px : 1;
       ctx.lineJoin = 'round'; ctx.lineCap = 'round';
       (variants[o.v].s || fallbackSymbol)(ctx, o);
@@ -690,7 +695,7 @@ function pergolaSym(ctx, { w, d, p, px, v }) {
 define('pergola', {
   slatted: { b: pergolaSlatted }, louvered: { b: pergolaLouvered }, 'solid-roof': { b: pergolaPent }, gazebo: { b: pergolaGazebo }, fabric: { b: pergolaFabric },
   'retractable-awning': { b: pergolaAwning }, carport: { b: pergolaCarport }, 'wall-mounted': { b: pergolaLeanTo }, polycarbonate: { b: pergolaPent },
-}, pergolaSym);
+}, pergolaSym, true);
 
 // ═════════════════════════ PARASOL ═════════════════════════
 const canopyColor = (p, def = '#efe9dc') => C(p.canopy, C(p.color, def));
@@ -787,7 +792,7 @@ define('parasol', { 'centre-pole': { b: parasolPole }, cantilever: { b: parasolA
 
 // ═════════════════════════ LOUNGER ═════════════════════════
 function buildLounger(g, o, lanes) {
-  const { w, d: L, h, p } = o, mat = pick(p.material, MATS.filter((m) => m !== 'fabric' && m !== 'textile').concat(['aluminium'])) === p.material ? p.material : 'aluminium';
+  const { w, d: L, h, p } = o, mat = MATS.includes(p.material) && p.material !== 'fabric' && p.material !== 'textile' ? p.material : 'aluminium';
   const fr = M(mat, C(p.color, isWood(mat) ? 'teak' : mat === 'plastic' ? '#f1f1ee' : mat === 'rattan' ? '#8a7560' : '#3a3d42'), 'aluminium'), sling = isMetal(mat);
   const cush = flag(p.cushion, true), cm = K.fabric(C(p.color2, '#e9e2d0')), ct = cush ? 0.07 : 0, wheels = flag(p.wheels, true);
   const ft = h < 0.45 ? clamp(h * 0.8 - ct, 0.12, 0.3) : clamp(0.32 - ct * 0.3, 0.2, h * 0.5), R = Math.max(0.005, h - ft - ct - 0.02);
@@ -814,9 +819,9 @@ function buildLounger(g, o, lanes) {
     }
     for (const s of [-1, 1]) bl.push([0.03, 0.035, Lb, cx + s * (iw / 2 + 0.005), 0.003, -Lb / 2]);
     if (cush) {
-      soft.push(new THREE.Mesh(K.rbox(iw - 0.02, ct, ls - 0.02, cm, 0, 0, 0, 0.03, 2).geometry, cm).geometry.clone().translate(cx, ft + ct / 2, zh + ls / 2));
-      bsoft.push(K.rbox(iw - 0.02, ct, Lb - 0.02, cm, 0, 0, 0, 0.03, 2).geometry.clone().translate(cx, 0.02 + ct / 2, -Lb / 2));
-      geo2.push(K.rbox(iw * 0.6, 0.06, 0.2, cm, 0, 0, 0, 0.028, 2).geometry.clone().translate(cx, 0.02 + ct + 0.02, -Lb + 0.14));
+      soft.push(rboxG(iw - 0.02, ct, ls - 0.02, 0.03, cx, ft + ct / 2, zh + ls / 2));
+      bsoft.push(rboxG(iw - 0.02, ct, Lb - 0.02, 0.03, cx, 0.02 + ct / 2, -Lb / 2));
+      geo2.push(rboxG(iw * 0.6, 0.06, 0.2, 0.028, cx, 0.02 + ct + 0.02, -Lb + 0.14));
     }
   }
   back.add(boxes(bl, sling ? K.fabric(K.shade(C(p.color, '#3a3d42'), 0.25)) : fr));
@@ -885,7 +890,7 @@ function buildBeanBag(g, o) {
     pos.setXYZ(i, x, Math.max(y, -0.4), z);
   }
   geo.computeVertexNormals();
-  g.add(mesh(geo, K.fabric(C(p.color, '#5f7f8f'))), box(0.3, 0.02, 0.06, K.fabric(C(p.color2, '#3a4a55')), 0, 0.93, -0.5));
+  g.add(mesh(geo, K.fabric(C(p.color, '#5f7f8f'))));
 }
 define('lounger', {
   lounger: { b: (g, o) => buildLounger(g, o, 1), s: (c, o) => loungerSym(c, o, 1) },
@@ -899,7 +904,7 @@ define('lounger', {
   'bean-bag': { b: buildBeanBag, s(ctx, { w, d, p, px }) {
     const col = C(p.color, '#5f7f8f'); ell(ctx, 0, 0, w / 2, d / 2, K.tint(col, 0.4), INK, px); ell(ctx, 0, d * 0.12, w * 0.3, d * 0.24, K.tint(col, 0.55), SOFT, px);
   } },
-});
+}, null, true);
 
 // ═════════════════════════ BBQ ═════════════════════════
 const archProfile = (hw, hh, n = 8) => { const pts = [[-hw, 0]]; for (let i = 0; i <= n; i++) { const a = PI - (i / n) * PI; pts.push([Math.cos(a) * hw, hh - hw + Math.sin(a) * hw]); } pts.push([hw, 0]); return pts; };
@@ -1068,14 +1073,14 @@ function fencePosts(w, pw, span) {
   return Array.from({ length: n + 1 }, (_, i) => lerp(-w / 2 + pw / 2, w / 2 - pw / 2, i / n));
 }
 function buildFence(g, o) {
-  const { w, d, h, p, v } = o, F = FENCE[v], col = C(p.color, F[2]), col2 = C(p.color2, F[3] || col), posts = flag(p.posts, true), gap = num(p.gap, v === 'picket' ? 0.45 : 0.18, 0, 0.9);
+  const { w, d, h, p, v } = o, F = FENCE[v], col = C(p.color, isMetal(p.material) && F[2] === '#b98a5e' ? '#3a3d42' : F[2]), col2 = C(p.color2, F[3] || col), posts = flag(p.posts, true), gap = num(p.gap, v === 'picket' ? 0.45 : 0.18, 0, 0.9);
   const wooden = !isMetal(p.material) && !['plastic', 'glass', 'stone', 'concrete'].includes(p.material);
   const im = v === 'picket' && !isWood(p.material) && !isMetal(p.material) ? K.lacquer(col) : M(p.material, col, 'wood'), pm = p.color2 || !wooden || F[3] ? (wooden && !F[3] ? M(p.material, col2, 'wood') : alu(col2)) : im;
   const pw = Math.min(F[1], Math.max(d, 0.02)), xs = fencePosts(w, pw, F[0]), list = [], inf = [], rng = seedOf(o, v);
   const addPosts = (top = h, dep = d, z = 0) => { if (posts) xs.forEach((x) => list.push([pw, top, dep, x, top / 2, z])); };
   if (v === 'slat-horizontal') {
-    const t = posts ? Math.min(0.02, d * 0.4) : d, bh = isMetal(p.material) ? 0.12 : 0.09, gs = clamp(bh * gap / (1 - gap), 0, 0.3), n = Math.max(1, Math.floor((h - 0.03 + gs) / (bh + gs)));
-    for (let i = 0; i < n; i++) inf.push([w, bh, t, 0, h - bh / 2 - i * (bh + gs), d / 2 - t / 2]);
+    const t = posts ? Math.min(0.02, d * 0.4) : d, bh = isMetal(p.material) ? 0.12 : 0.09, gs = clamp(bh * gap / (1 - gap), 0, 0.3), n = Math.max(1, Math.round((h - 0.03 + gs) / (bh + gs))), be = Math.max(0.01, (h - 0.03 - (n - 1) * gs) / n);
+    for (let i = 0; i < n; i++) inf.push([w, be, t, 0, h - be / 2 - i * (be + gs), d / 2 - t / 2]);
     addPosts(h, d - t, -t / 2);
   } else if (v === 'slat-vertical' || v === 'picket') {
     const t = Math.min(0.02, d * 0.4), bw = v === 'picket' ? 0.07 : 0.09, gs = clamp(bw * gap / (1 - gap), 0, 0.3), n = Math.max(1, Math.floor((w + gs) / (bw + gs))), y0 = v === 'picket' ? 0.05 : 0.03, x0 = -((n - 1) * (bw + gs)) / 2;
@@ -1120,13 +1125,13 @@ function buildFence(g, o) {
       list.push([b - a, fs, fz, (a + b) / 2, y1 - fs / 2, 0], [b - a, slide ? 0.07 : fs, fz, (a + b) / 2, y0 + (slide ? 0.035 : fs / 2), 0], [fs, y1 - y0, fz, a + fs / 2, (y0 + y1) / 2, 0], [fs, y1 - y0, fz, b - fs / 2, (y0 + y1) / 2, 0]);
       if (wooden) { const bh = 0.09, gs = clamp(bh * gap / (1 - gap), 0, 0.3), n = Math.max(1, Math.floor((y1 - y0 - 2 * fs + gs) / (bh + gs))); for (let i = 0; i < n; i++) inf.push([b - a - 2 * fs, bh, Math.min(0.02, fz), (a + b) / 2, y1 - fs - bh / 2 - i * (bh + gs) - 0.005, 0]); }
       else { const n = Math.max(1, Math.round((b - a - 2 * fs) / 0.11)); for (let i = 1; i < n; i++) inf.push([0.016, y1 - y0 - 2 * fs, 0.016, lerp(a + fs, b - fs, i / n), (y0 + y1) / 2, 0]); }
-      if (!slide) { const hx = leaves === 2 ? (k ? a + 0.07 : b - 0.07) : b - 0.07; g.add(box(0.03, 0.12, d + 0.0, inox(), hx, Math.min(1.0, h * 0.6), 0), boxes([[0.03, 0.08, d, k || leaves === 1 && false ? b : (k ? b : a), y0 + 0.15, 0], [0.03, 0.08, d, k ? b : a, y1 - 0.15, 0]], dark())); }
+      if (!slide) { const hx = leaves === 2 ? (k ? a + 0.07 : b - 0.07) : b - 0.07; g.add(box(0.03, 0.12, d, inox(), hx, Math.min(1.0, h * 0.6), 0), boxes([[0.03, 0.08, d, k ? b : a, y0 + 0.15, 0], [0.03, 0.08, d, k ? b : a, y1 - 0.15, 0]], dark())); }
     }
     if (slide) { g.add(box(w, 0.02, d, K.metal('#8a8d91', { roughness: 0.5 }), 0, 0.01, 0), merge([zCylG(0.045, d * 0.6, x0 + 0.3, 0.055, 0, 12), zCylG(0.045, d * 0.6, x1 - 0.3, 0.055, 0, 12)], dark('#55585c'))); }
     else xs.forEach((x) => list.push([pw, h, d, x, h / 2, 0]));
   } else if (v === 'gabion') {
     const geo = new THREE.BoxGeometry(w - 0.02, h - 0.02, Math.max(0.01, d - 0.02), Math.max(2, Math.min(28, Math.round(w / 0.14))), Math.max(2, Math.min(16, Math.round(h / 0.14))), 2), q = geo.attributes.position, jit = new Map();
-    for (let i = 0; i < q.count; i++) { const key = `${q.getX(i).toFixed(3)},${q.getY(i).toFixed(3)},${q.getZ(i).toFixed(3)}`; if (!jit.has(key)) jit.set(key, 1 - rng() * 0.07); const s = jit.get(key); q.setXYZ(i, q.getX(i) * (Math.abs(q.getX(i)) > w / 2 - 0.02 ? s : 1), q.getY(i) * (q.getY(i) > h / 2 - 0.02 ? s : 1), q.getZ(i) * (Math.abs(q.getZ(i)) > d / 2 - 0.02 ? s : 1)); }
+    for (let i = 0; i < q.count; i++) { const key = `${q.getX(i).toFixed(3)},${q.getY(i).toFixed(3)},${q.getZ(i).toFixed(3)}`; if (!jit.has(key)) jit.set(key, rng() * Math.min(0.035, d * 0.12)); const s = jit.get(key), X = q.getX(i), Y = q.getY(i), Z = q.getZ(i); q.setXYZ(i, X - (Math.abs(X) > w / 2 - 0.02 ? Math.sign(X) * s : 0), Y - (Y > h / 2 - 0.02 ? s : 0), Z - (Math.abs(Z) > d / 2 - 0.02 ? Math.sign(Z) * s : 0)); }
     geo.computeVertexNormals(); geo.translate(0, 0.01 + (h - 0.02) / 2, 0);
     g.add(mesh(geo, K.mat(col, { roughness: 1, flat: true })));
     const s = Math.max(0.1, w / 36, h / 24), nx = Math.max(1, Math.round(w / s)), ny = Math.max(1, Math.round(h / s));
@@ -1143,14 +1148,14 @@ function buildFence(g, o) {
     for (let i = 1; i < n; i++) inf.push([bt, h - 0.15, bt, lerp(-w / 2, w / 2, i / n), 0.1 + (h - 0.15) / 2, 0]);
     list.push([w, 0.04, d, 0, h - 0.02, 0], [w, 0.03, Math.min(0.03, d), 0, 0.1, 0]); addPosts();
   } else {
-    const r = Math.min(0.014, d / 2);
+    const r = Math.min(0.02, d / 2);
     g.add(merge(xs.map((x) => cylG(r, r, h, x, h / 2, 0, 8)), alu(col2)), ns(box(w - 2 * r, h - 0.1, 0.003, clear(col, 0.4), 0, 0.05 + (h - 0.1) / 2, 0)), boxes([[w - 2 * r, 0.04, Math.min(0.006, d), 0, h - 0.04, 0], [w - 2 * r, 0.04, Math.min(0.006, d), 0, 0.06, 0]], K.fabric(col)));
   }
   if (list.length) g.add(boxes(list, pm));
   if (inf.length) g.add(boxes(inf, im));
 }
 function fenceSym(ctx, { w, d, p, px, v }) {
-  const F = FENCE[v], col = C(p.color, F[2]), col2 = C(p.color2, F[3] || col), posts = flag(p.posts, true), t = Math.max(d, 2.4 * px), pw = Math.max(Math.min(F[1] * 100, Math.max(d, 2)), 3 * px);
+  const F = FENCE[v], col = C(p.color, isMetal(p.material) && F[2] === '#b98a5e' ? '#3a3d42' : F[2]), col2 = C(p.color2, F[3] || col), posts = flag(p.posts, true), t = Math.max(d, 2.4 * px), pw = Math.max(Math.min(F[1] * 100, Math.max(d, 2)), 3 * px);
   const xs = fencePosts(w, Math.min(F[1] * 100, Math.max(d, 2)), F[0] * 100);
   if (['stone-wall', 'block-wall', 'gabion', 'hedge-screen', 'bamboo'].includes(v)) {
     rect(ctx, 0, 0, w, t, K.tint(col, v === 'hedge-screen' ? 0.25 : 0.4), INK, px, v === 'hedge-screen' ? t / 3 : 0);
@@ -1173,7 +1178,7 @@ function fenceSym(ctx, { w, d, p, px, v }) {
   else rect(ctx, 0, 0, w, Math.max(t * 0.55, 1.6 * px), band, INK, px * 0.7);
   if (posts || v === 'trellis') xs.forEach((x) => rect(ctx, x, 0, pw, Math.max(t, pw), K.shade(col2, -0.15), INK, px));
 }
-define('fence', Object.fromEntries(Object.keys(FENCE).map((k) => [k, { b: buildFence }])), fenceSym);
+define('fence', Object.fromEntries(Object.keys(FENCE).map((k) => [k, { b: buildFence }])), fenceSym, true);
 
 // ═════════════════════════ SHED ═════════════════════════
 /** Walls + roof of a small building. Returns { wb, db, yw (cladded wall height at the front), zf (front wall plane) }. */
@@ -1292,7 +1297,7 @@ function shedSym(ctx, { w, d, h, p, px, v }) {
   line(ctx, -tw / 2, d / 2 - ov, tw / 2, d / 2 - ov, K.shade(C(p.color3, '#8a8378'), -0.2), Math.max(2.5 * px, 3));
   if (h > 150) dashed(ctx, px, () => { for (let i = 0; i < n; i++) { const hx = n === 1 ? -tw / 2 : (i ? tw / 2 : -tw / 2), r = Math.max(0, Math.min(dw, 45)), left = n === 1 || !i; ctx.beginPath(); ctx.arc(hx, d / 2 - ov, r, left ? 0 : PI / 2, left ? PI / 2 : PI); ctx.strokeStyle = SOFT; ctx.lineWidth = px; ctx.stroke(); } });
 }
-define('shed', { shed: { b: buildShed }, 'storage-box': { b: buildStorageBox }, 'bin-store': { b: buildBinStore }, 'tall-cabinet': { b: buildTallCabinet }, 'bike-store': { b: buildShed }, greenhouse: { b: buildGreenhouse }, 'dog-house': { b: buildDogHouse } }, shedSym);
+define('shed', { shed: { b: buildShed }, 'storage-box': { b: buildStorageBox }, 'bin-store': { b: buildBinStore }, 'tall-cabinet': { b: buildTallCabinet }, 'bike-store': { b: buildShed }, greenhouse: { b: buildGreenhouse }, 'dog-house': { b: buildDogHouse } }, shedSym, true);
 
 // ═════════════════════════ FIRE PIT ═════════════════════════
 function logsG(x, y, z, r) {
@@ -1305,7 +1310,7 @@ function buildFirePit(g, o) {
     const m = K.metal(C(p.color, '#8a5a3c'), { roughness: 0.8, metalness: 0.3 }), st = alu(C(p.color2, '#2b2d31')), yb = 0.38 * h, bh = h - yb;
     g.add(mesh(latheG([[0, yb], [0.55 * R, yb + 0.22 * bh], [0.88 * R, yb + 0.66 * bh], [R, h]], 24), K.mat(C(p.color, '#8a5a3c'), { roughness: 0.8, metalness: 0.3, side: THREE.DoubleSide })), mesh(torusG(R - 0.008, 0.008, 'xz', 0, h - 0.008, 0, 24, 5), m));
     g.add(rods([0, 1, 2].map((i) => { const a = PI / 2 + (i * TAU) / 3; return [[Math.cos(a) * R * 0.5, yb + 0.2 * bh, Math.sin(a) * R * 0.5], [Math.cos(a) * R * 0.78, 0, Math.sin(a) * R * 0.78]]; }), 0.014, st, 6), mesh(torusG(R * 0.62, 0.01, 'xz', 0, yb * 0.55, 0, 20, 4), st));
-    g.add(cyl(0.7 * R, 0.7 * R, 0.01, dark('#2a2725'), 0, yb + 0.42 * bh, 0, 16), logsG(0, yb + 0.42 * bh, 0, R * 0.6));
+    g.add(cyl(0.7 * R, 0.7 * R, 0.01, dark('#2a2725'), 0, yb + 0.42 * bh, 0, 16), logsG(0, yb + 0.42 * bh, 0, Math.min(R * 0.5, bh * 1.1)));
     if (isLit) fire(g, 0, yb + 0.5 * bh, 0, R * 0.38, Math.max(0.28, h * 0.9));
   } else if (v === 'table') {
     const body = M(p.material, C(p.color, '#8d8f92'), 'concrete'), tw = w * 0.62, td = Math.min(d * 0.42, 0.3);
@@ -1313,12 +1318,12 @@ function buildFirePit(g, o) {
     const rk = seedOf(o, 'rk'), rocks = [], n = Math.max(6, Math.round(tw / 0.06));
     for (let i = 0; i < n; i++) rocks.push(new THREE.IcosahedronGeometry(0.02 + rk() * 0.012, 0).translate(lerp(-tw / 2 + 0.03, tw / 2 - 0.03, i / (n - 1)), h - 0.012, (rk() - 0.5) * (td - 0.06)));
     g.add(merge(rocks, K.mat(C(p.color2, '#4a433d'), { roughness: 1, flat: true })));
-    if (isLit) { fire(g, 0, h, 0, 0.09, 0.2); fire(g, -tw * 0.28, h, 0, 0.07, 0.15); g.children.pop(); fire(g, tw * 0.28, h, 0, 0.07, 0.16); g.children.pop(); }
+    if (isLit) { fire(g, 0, h, 0, 0.09, 0.2); fire(g, -tw * 0.28, h, 0, 0.07, 0.15, false); fire(g, tw * 0.28, h, 0, 0.07, 0.16, false); }
   } else if (v === 'chiminea') {
-    const m = M(p.material, C(p.color, '#b9714f'), 'ceramic'), st = alu(C(p.color2, '#2b2d31'));
+    const st = alu(C(p.color2, '#2b2d31'));
     g.add(lathe([[0.3 * R, 0.14 * h], [0.8 * R, 0.2 * h], [0.97 * R, 0.36 * h], [0.9 * R, 0.5 * h], [0.45 * R, 0.64 * h], [0.3 * R, 0.7 * h], [0.26 * R, 0.96 * h], [0.34 * R, h]], K.mat(C(p.color, '#b9714f'), { roughness: 0.9, side: THREE.DoubleSide }), 20));
     g.add(at(prismZ(archProfile(0.4 * R, 0.2 * h), 0.1, dark('#120f0e')), 0, 0.25 * h, 0.82 * R), mesh(torusG(R * 0.72, 0.012, 'xz', 0, 0.17 * h, 0, 18, 4), st), rods([0, 1, 2].map((i) => { const a = PI / 2 + (i * TAU) / 3; return [[Math.cos(a) * R * 0.72, 0.17 * h, Math.sin(a) * R * 0.72], [Math.cos(a) * R * 0.97, 0, Math.sin(a) * R * 0.97]]; }), 0.012, st, 6));
-    if (m && isLit) fire(g, 0, 0.26 * h, 0.7 * R, 0.2 * R, 0.14 * h);
+    if (isLit) fire(g, 0, 0.26 * h, 0.7 * R, 0.2 * R, 0.14 * h);
   } else if (v === 'heater-mushroom') {
     const m = M(p.material, C(p.color, '#c9ccd0'), 'metal'), rb = Math.min(R, 0.23), hk = h / 2.2;
     g.add(cylOn(rb, rb, 0.04, dark(), 0, 0, 0, 20), cylOn(rb * 0.82, rb * 0.82, 0.78 * hk, m, 0, 0.04, 0, 20), cylOn(0.028, 0.028, h - 0.36 * hk - 0.78 * hk, m, 0, 0.04 + 0.78 * hk, 0, 10));
@@ -1333,7 +1338,7 @@ function buildFirePit(g, o) {
     if (isLit) { const f = ns(mesh(new THREE.ConeGeometry(Math.min(w, d) * 0.07, 0.42 * h, 8).translate(0, 0.6 * h, 0), K.glow('#ff8a2b', 1.6))); g.add(f, K.lampLight('#ff9a4a', 1.2, 5, 0, 0.6 * h, 0)); }
   } else {
     const col = C(p.color, '#8a5a3c');
-    g.add(mesh(latheG([[R - 0.012, 0], [R - 0.012, h], [R, h], [R, 0]], 28), K.metal(col, { roughness: 0.85, metalness: 0.25 })), cyl(R - 0.01, R - 0.01, 0.02, K.mat(C(p.color2, '#5a544d'), { roughness: 1 }), 0, Math.min(0.05, h * 0.3), 0, 20), logsG(0, Math.min(0.06, h * 0.3), 0, R * 0.6));
+    g.add(mesh(latheG([[R - 0.012, 0], [R - 0.012, h], [R, h], [R, 0]], 28), K.metal(col, { roughness: 0.85, metalness: 0.25 })), cyl(R - 0.02, R - 0.02, 0.02, K.mat(C(p.color2, '#5a544d'), { roughness: 1 }), 0, Math.min(0.05, h * 0.3), 0, 20), logsG(0, Math.min(0.06, h * 0.3), 0, R * 0.6));
     if (isLit) fire(g, 0, Math.min(0.1, h * 0.4), 0, R * 0.36, Math.max(0.3, h * 1.3));
   }
 }
@@ -1437,7 +1442,7 @@ function buildLight(g, o) {
     g.add(merge([cylG(pr, pr, h, -px_, h / 2, 0, 8), cylG(pr, pr, h, px_, h / 2, 0, 8), cylG(d / 2, d / 2, 0.02, -px_, 0.01, 0, 12), cylG(d / 2, d / 2, 0.02, px_, 0.01, 0, 12)], body));
     for (let i = 0; i < 16; i++) wire.push([[lerp(-px_, px_, i / 16), yy(i / 16), 0], [lerp(-px_, px_, (i + 1) / 16), yy((i + 1) / 16), 0]]);
     const n = Math.round(num(p.count, Math.round(span / 0.35), 2, 60)), br = clamp(span / n * 0.12, 0.012, 0.03);
-    for (let i = 0; i < n; i++) { const t = (i + 0.5) / n, x = lerp(-px_, px_, t); sock.push(cylG(br * 0.45, br * 0.45, br, x, yy(t) - br * 0.5, 0, 6)); bulbs.push(new THREE.SphereGeometry(br, 8, 6).translate(x, yy(t) - br * 1.7, 0)); }
+    for (let i = 0; i < n; i++) { const t = (i + 0.5) / n, x = lerp(-px_, px_, t); sock.push(cylG(br * 0.45, br * 0.45, br, x, yy(t) - br * 0.5, 0, 6)); bulbs.push(new THREE.SphereGeometry(br, 7, 5).translate(x, yy(t) - br * 1.7, 0)); }
     g.add(rods(wire, 0.003, dark(), 3), merge(sock, dark()), ns(merge(bulbs, gm))); L = [0, h - sag - 0.15, 0, 1.4, 7];
   } else if (v === 'wall' || v === 'step') {
     const bz = v === 'wall' ? 0.15 : 0.5;
@@ -1521,7 +1526,7 @@ function playSandbox(g, o) {
   const { w, d, h, p } = o, wd = M(p.material, C(p.color, '#c9a476'), 'wood'), roofed = h > 1, hb = roofed ? 0.26 : h, list = [];
   for (const s of [-1, 1]) list.push([w, hb - 0.03, 0.04, 0, (hb - 0.03) / 2, s * (d / 2 - 0.02)], [0.04, hb - 0.03, d - 0.08, s * (w / 2 - 0.02), (hb - 0.03) / 2, 0], [w, 0.03, Math.min(0.14, d * 0.2), 0, hb - 0.015, s * (d / 2 - Math.min(0.07, d * 0.1))], [Math.min(0.14, w * 0.2), 0.03, d - Math.min(0.28, d * 0.4), s * (w / 2 - Math.min(0.07, w * 0.1)), hb - 0.015, 0]);
   const sand = K.mat(C(p.color2, '#e3d3a8'), { roughness: 1 }), mound = new THREE.SphereGeometry(1, 12, 6, 0, TAU, 0, PI / 2).scale(w * 0.2, hb * 0.3, d * 0.18).translate(w * 0.1, hb * 0.6, -d * 0.08);
-  g.add(box(w - 0.08, hb * 0.6, d - 0.08, sand, 0, hb * 0.3, 0), mesh(mound, sand), cylOn(0.07, 0.055, 0.13, K.plastic(PLAY_COLS[0]), -w * 0.2, hb * 0.6, d * 0.12, 10));
+  g.add(box(w - 0.08, hb * 0.6, d - 0.08, sand, 0, hb * 0.3, 0), mesh(mound, sand), cylOn(0.07, 0.055, Math.min(0.13, hb * 0.36), K.plastic(PLAY_COLS[0]), -w * 0.2, hb * 0.6, d * 0.12, 10));
   if (roofed) {
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) list.push([0.06, h - 0.12, 0.06, sx * (w / 2 - 0.03), (h - 0.12) / 2, sz * (d / 2 - 0.03)]);
     g.add(prismZ([[-w / 2, h - 0.14], [-w / 2, h - 0.12], [0, h], [w / 2, h - 0.12], [w / 2, h - 0.14], [0, h - 0.02]], d, K.mat(C(p.color3, '#2f6f8f'), { roughness: 0.8 })));
@@ -1582,16 +1587,16 @@ function playPingPong(g, o) {
   wheelSet(g, [-1, 1].flatMap((sx) => [-1, 1].map((sz) => [sx * w * 0.28, 0.05, sz * (d / 2 - 0.12)])), 0.05, 0.03, dark('#55585c'));
 }
 function playNinja(g, o) {
-  const { w, d, h, p } = o, wd = M(p.material, C(p.color2, '#8a6a4a'), 'wood'), pr = Math.min(0.07, d / 2), x = w / 2 - pr, span = 2 * (x - pr), yl = h - 0.2, sag = Math.min(0.12, span * 0.02), yy = (t) => yl - sag * (1 - (2 * t - 1) ** 2), strap = [], hang = [], wood = [], rings = [], balls = [];
+  const { w, d, h, p } = o, wd = M(p.material, C(p.color2, '#8a6a4a'), 'wood'), pr = Math.min(0.07, d / 2), x = w / 2 - pr, span = 2 * (x - pr), yl = h - 0.2, sag = Math.min(0.12, span * 0.02), yy = (t) => yl - sag * (1 - (2 * t - 1) ** 2), zr = d / 2 - 0.016, strap = [], hang = [], wood = [], rings = [], balls = [];
   g.add(merge([cylG(pr, pr, h, -x, h / 2, 0, 12), cylG(pr, pr, h, x, h / 2, 0, 12)], wd));
   for (let i = 0; i < 10; i++) strap.push([[lerp(-x + pr, x - pr, i / 10), yy(i / 10), 0], [lerp(-x + pr, x - pr, (i + 1) / 10), yy((i + 1) / 10), 0]]);
   const n = clamp(Math.round((span - 0.6) / 0.85), 2, 10);
   for (let i = 0; i < n; i++) {
     const t = (i + 0.5) / n, cx = lerp(-x + pr, x - pr, t), y0 = yy(t), kind = i % 4, len = 0.45 + (i % 3) * 0.12;
     if (kind === 0) { for (const s of [-1, 1]) { hang.push([[cx + s * 0.16, y0, 0], [cx + s * 0.16, y0 - len + 0.09, 0]]); rings.push(torusG(0.09, 0.012, 'xy', cx + s * 0.16, y0 - len, 0, 14, 5)); } }
-    else if (kind === 1) { hang.push([[cx - 0.2, y0, 0], [cx - 0.2, y0 - len, 0]], [[cx + 0.2, y0, 0], [cx + 0.2, y0 - len, 0]]); wood.push([[cx - 0.26, y0 - len, 0], [cx + 0.26, y0 - len, 0]]); }
+    else if (kind === 1) { hang.push([[cx, y0, 0], [cx, y0 - len, -zr * 0.8]], [[cx, y0, 0], [cx, y0 - len, zr * 0.8]]); wood.push([[cx, y0 - len, -zr], [cx, y0 - len, zr]]); }
     else if (kind === 2) { hang.push([[cx, y0, 0], [cx, y0 - len, 0]]); balls.push(new THREE.SphereGeometry(Math.min(0.1, d / 2), 12, 8).translate(cx, y0 - len - 0.08, 0)); }
-    else { hang.push([[cx - 0.17, y0, 0], [cx - 0.17, y0 - len - 0.3, 0]], [[cx + 0.17, y0, 0], [cx + 0.17, y0 - len - 0.3, 0]]); for (let k = 0; k < 3; k++) wood.push([[cx - 0.2, y0 - len + 0.2 - k * 0.25, 0], [cx + 0.2, y0 - len + 0.2 - k * 0.25, 0]]); }
+    else { for (const s of [-1, 1]) hang.push([[cx, y0, 0], [cx, y0 - len + 0.2, s * zr * 0.8]], [[cx, y0 - len + 0.2, s * zr * 0.8], [cx, y0 - len - 0.3, s * zr * 0.8]]); for (let k = 0; k < 3; k++) wood.push([[cx, y0 - len + 0.2 - k * 0.25, -zr], [cx, y0 - len + 0.2 - k * 0.25, zr]]); }
   }
   g.add(rods(strap, 0.013, K.fabric(C(p.color, PLAY_COLS[0])), 5), rods(hang, 0.006, K.fabric('#2b2d31'), 4), rods(wood, 0.016, K.wood('birch'), 6), merge(rings, K.plastic(C(p.color3, PLAY_COLS[2]))), merge(balls, K.plastic(PLAY_COLS[1])));
   g.add(box(span, 0.005, Math.min(0.05, d), K.fabric(C(p.color3, PLAY_COLS[2])), 0, Math.min(0.45, h * 0.25), 0));
@@ -1660,4 +1665,161 @@ function playSym(ctx, { w, d, h, p, px, v }) {
   }
 }
 define('play', { 'swing-set': { b: playSwingSet }, slide: { b: playSlide }, trampoline: { b: playTrampoline }, playhouse: { b: playHouse }, sandbox: { b: playSandbox }, 'climbing-frame': { b: playClimb }, seesaw: { b: playSeesaw },
-  'basketball-hoop': { b: playHoop }, 'football-goal': { b: playGoal }, 'paddling-pool': { b: playPool }, 'ping-pong': { b: playPingPong }, 'ninja-line': { b: playNinja }, 'mud-kitchen': { b: playMudKitchen } }, playSym);
+  'basketball-hoop': { b: playHoop }, 'football-goal': { b: playGoal }, 'paddling-pool': { b: playPool }, 'ping-pong': { b: playPingPong }, 'ninja-line': { b: playNinja }, 'mud-kitchen': { b: playMudKitchen } }, playSym, true);
+
+// ═════════════════════════ UTILITY ═════════════════════════
+const UTIL = ['clothesline-rotary', 'clothesline-wall', 'clothes-rack', 'outdoor-shower', 'hose-reel', 'tap', 'bin', 'bins-3', 'compost', 'mailbox', 'rain-barrel', 'ev-charger', 'gas-tanks', 'irrigation-controller', 'bike-rack', 'doormat-bench'];
+const BIN_LIDS = ['#2f6f8f', '#e0762b', '#3d7a4a'];
+function wheelie(g, cx, bw, d, h, bodyM, lidM) {
+  const lt = 0.07 * h, hb = h - lt - 0.03, r = Math.min(0.1, 0.1 * h, d * 0.2);
+  g.add(mesh(taperG(bw * 0.8, d * 0.68, bw * 0.96, d * 0.86, hb, cx, 0.03, 0.03, 0.02), bodyM), rbox(bw, lt, d * 0.94, lidM, cx, h - lt / 2, 0.01, Math.min(0.02, lt * 0.4), 2), box(bw * 0.6, 0.03, 0.03, bodyM, cx, hb, d / 2 - 0.015));
+  g.add(mesh(xCylG(0.014, bw * 0.84, cx, h - lt - 0.01, -d / 2 + 0.014, 8), bodyM), boxes([[0.04, 0.05, 0.08, cx + bw * 0.3, h - lt - 0.01, -d / 2 + 0.05], [0.04, 0.05, 0.08, cx - bw * 0.3, h - lt - 0.01, -d / 2 + 0.05]], bodyM));
+  wheelSet(g, [[cx + bw / 2 - 0.035, r, -d / 2 + r + 0.02], [cx - bw / 2 + 0.035, r, -d / 2 + r + 0.02]], r, 0.045, dark('#55585c'));
+}
+function buildUtility(g, o) {
+  const { w, d, h, p, v } = o, R = Math.min(w, d) / 2, stl = alu(C(p.color2, '#b9bdc2')), cord = K.mat('#e6ebef', { roughness: 0.7 }), list = [], rl = [];
+  if (v === 'clothesline-rotary') {
+    const m = alu(C(p.color, '#c9ccd0')), yh = 0.74 * h, lines = [];
+    g.add(cylOn(0.022, 0.022, 0.8 * h, m, 0, 0, 0, 10), cylOn(0.045, 0.045, 0.04, m, 0, 0, 0, 10), cylOn(0.04, 0.04, 0.08, dark(), 0, yh - 0.04, 0, 10));
+    const tips = [[1, 1], [-1, 1], [-1, -1], [1, -1]].map(([sx, sz]) => [sx * (w / 2 - 0.012), h - 0.012, sz * (d / 2 - 0.012)]);
+    tips.forEach((t) => rl.push([[0, yh, 0], t], [[0, yh - 0.25 * h, 0], [t[0] * 0.45, lerp(yh, h, 0.45), t[2] * 0.45], 0.008]));
+    for (let k = 0; k < 5; k++) { const t = lerp(0.32, 0.98, k / 4); tips.forEach((a, i) => { const b = tips[(i + 1) % 4]; lines.push([[a[0] * t, lerp(yh, a[1], t), a[2] * t], [b[0] * t, lerp(yh, b[1], t), b[2] * t]]); }); }
+    g.add(rods(rl, 0.012, m, 6), rods(lines, 0.0025, cord, 3));
+  } else if (v === 'clothesline-wall') {
+    const m = alu(C(p.color, '#d9dcdc')), tall = h >= 1, x = w / 2 - 0.02, n = Math.max(3, Math.round(d / 0.12)), lines = [], ys = tall ? h - Math.min(0.6, 0.4 * h) : 0.015;
+    for (const s of [-1, 1]) { if (tall) list.push([0.05, h, 0.05, s * (w / 2 - 0.025), h / 2, -d / 2 + 0.025]); list.push([0.03, 0.03, d - 0.03, s * x, h - 0.015, 0.015]); rl.push([[s * x, h - 0.03, d * 0.15], [s * x, ys, -d / 2 + 0.03]]); }
+    list.push([w, 0.05, 0.04, 0, h - 0.025, -d / 2 + 0.02], [w, 0.03, 0.03, 0, h - 0.015, d / 2 - 0.015]);
+    for (let i = 1; i < n; i++) lines.push([[-x, h - 0.015, lerp(-d / 2 + 0.04, d / 2 - 0.015, i / n)], [x, h - 0.015, lerp(-d / 2 + 0.04, d / 2 - 0.015, i / n)]]);
+    g.add(boxes(list.splice(0), m), rods(rl, 0.012, m, 6), rods(lines, 0.0025, cord, 3));
+  } else if (v === 'clothes-rack') {
+    const m = K.mat(C(p.color, '#f1f1ee'), { roughness: 0.4 }), yc = 0.86 * h, xc = 0.25 * w, z = d / 2 - 0.012;
+    for (const s of [-1, 1]) { rl.push([[-xc * 1.15, 0, s * z], [xc * 0.9, yc, s * z]], [[xc * 1.15, 0, s * z], [-xc * 0.9, yc, s * z]], [[-xc, yc, s * z], [xc, yc, s * z]], [[s * xc, yc, -z], [s * xc, yc, z]]); rl.push([[s * xc, yc, -z], [s * (w / 2 - 0.01), h - 0.01, -z]], [[s * xc, yc, z], [s * (w / 2 - 0.01), h - 0.01, z]], [[s * (w / 2 - 0.01), h - 0.01, -z], [s * (w / 2 - 0.01), h - 0.01, z]]); }
+    for (let i = 1; i < 7; i++) rl.push([[lerp(-xc, xc, i / 7), yc, -z], [lerp(-xc, xc, i / 7), yc, z], 0.004]);
+    for (const s of [-1, 1]) for (let i = 1; i < 4; i++) { const t = i / 4; rl.push([[s * lerp(xc, w / 2 - 0.01, t), lerp(yc, h - 0.01, t), -z], [s * lerp(xc, w / 2 - 0.01, t), lerp(yc, h - 0.01, t), z], 0.004]); }
+    g.add(rods(rl, 0.009, m, 5));
+  } else if (v === 'outdoor-shower') {
+    const big = Math.min(w, d) >= 0.6, m = M(p.material, C(p.color, '#c9ccd0'), 'metal'), wd = K.wood(C(p.color2, 'teak')), zc = big ? -d / 2 + 0.12 : -d / 2 + 0.035, reach = Math.min(0.34, d - 0.16), hr = Math.min(0.11, (d - reach) * 0.9, w / 2);
+    if (big) {
+      const n = Math.max(2, Math.round(d / 0.1)), ns2 = Math.max(3, Math.round(0.72 * h / 0.1));
+      for (let i = 0; i < n; i++) list.push([w, 0.03, d / n - 0.012, 0, 0.035, lerp(-d / 2, d / 2, (i + 0.5) / n)]);
+      list.push([w, 0.02, 0.05, 0, 0.01, d * 0.3], [w, 0.02, 0.05, 0, 0.01, -d * 0.3]);
+      for (let i = 0; i < ns2; i++) list.push([w, 0.07, 0.02, 0, lerp(0.16, 0.86 * h, i / (ns2 - 1)), -d / 2 + 0.03]);
+      for (const s of [-1, 1]) list.push([0.05, 0.9 * h, 0.04, s * (w / 2 - 0.025), 0.45 * h, -d / 2 + 0.02]);
+      g.add(boxes(list.splice(0), wd));
+    } else g.add(cylOn(R, R, 0.015, m, 0, 0, 0, 20));
+    g.add(mesh(tubeG([[0, 0.01, zc], [0, h - 0.12, zc], [0, h - 0.03, zc + 0.05], [0, h - 0.018, zc + reach * 0.6], [0, h - 0.018, zc + reach]], 0.018, 24, 8), m), cyl(hr, hr, 0.015, m, 0, h - 0.05, zc + reach, 18), cyl(0.02, 0.02, 0.03, m, 0, h - 0.03, zc + reach, 8));
+    g.add(merge([zCylG(0.028, 0.05, 0, Math.min(1.1, h * 0.52), zc + 0.03, 10), zCylG(0.014, 0.1, 0, Math.min(0.35, h * 0.16), zc + 0.05, 8), boxG(0.012, 0.012, 0.09, 0.03, Math.min(1.1, h * 0.52), zc + 0.07)], m));
+  } else if (v === 'hose-reel') {
+    const m = alu(C(p.color2, '#3a3d42')), hose = K.mat(C(p.color, '#3d7a4a'), { roughness: 0.7 }), x = w / 2 - 0.018, rd = Math.min(0.3 * h, 0.36 * d), yc = Math.max(rd * 1.25 + 0.02, 0.45 * h), geos = [xCylG(rd, w - 0.14, 0, yc, 0, 18)];
+    for (const s of [-1, 1]) rl.push([[s * x, 0.09, -d * 0.3], [s * x, h - 0.02, -d / 2 + 0.02]], [[s * x, 0, d / 2 - 0.02], [s * x, yc, 0]], [[s * x, 0.09, -d * 0.3], [s * x, yc, 0]]);
+    rl.push([[-x, h - 0.02, -d / 2 + 0.02], [x, h - 0.02, -d / 2 + 0.02]], [[-x, 0.02, d / 2 - 0.02], [x, 0.02, d / 2 - 0.02]], [[-x, yc, 0], [x, yc, 0], 0.012]);
+    for (let i = 0; i < 7; i++) geos.push(torusG(rd, 0.011, 'zy', lerp(-w / 2 + 0.09, w / 2 - 0.09, i / 6), yc, 0, 16, 5));
+    g.add(rods(rl, 0.014, m, 6), merge(geos, hose), merge([xCylG(rd * 1.22, 0.012, w / 2 - 0.06, yc, 0, 18), xCylG(rd * 1.22, 0.012, -w / 2 + 0.06, yc, 0, 18)], dark('#2b2d31')), rods([[[w / 2 - 0.02, yc, 0], [w / 2 - 0.02, yc + rd * 0.6, rd * 0.5]]], 0.008, m, 5));
+    wheelSet(g, [[w / 2 - 0.03, 0.09, -d * 0.3], [-w / 2 + 0.03, 0.09, -d * 0.3]], Math.min(0.09, h * 0.2), 0.03, dark('#55585c'));
+  } else if (v === 'tap') {
+    const post = M(p.material, C(p.color, '#b98a5e'), 'wood'), brass = K.metal('#c5a35a', { roughness: 0.3 }), ps = Math.min(0.1, w), zp = -d / 2 + ps / 2, yt = 0.78 * h;
+    g.add(box(w, 0.02, d, K.stone(C(p.color2, '#b9b2a6')), 0, 0.01, 0), box(ps, h - 0.02, ps, post, 0, 0.02 + (h - 0.02) / 2, zp), box(ps + 0.02, 0.02, ps + 0.02 > d ? d : ps + 0.02, post, 0, h - 0.01, zp));
+    g.add(merge([zCylG(0.012, 0.07, 0, yt, zp + ps / 2 + 0.035, 8), cylG(0.01, 0.01, 0.05, 0, yt - 0.02, zp + ps / 2 + 0.065, 8), cylG(0.006, 0.006, 0.04, 0, yt + 0.025, zp + ps / 2 + 0.04, 6), boxG(0.06, 0.008, 0.012, 0, yt + 0.045, zp + ps / 2 + 0.04)], brass));
+    const br = Math.min(0.11, w * 0.45, (d - ps) * 0.42);
+    if (br > 0.03) g.add(mesh(latheG([[br * 0.7, 0.02], [br, 0.02 + br * 1.7]], 14, 0, 0, zp + ps / 2 + br + 0.01), K.mat('#9aa3a8', { roughness: 0.4, metalness: 0.7, side: THREE.DoubleSide })), cyl(br * 0.72, br * 0.72, 0.006, K.mat('#8a8d91'), 0, 0.024, zp + ps / 2 + br + 0.01, 12));
+  } else if (v === 'bin') {
+    const c = C(p.color, '#3d5a45'); wheelie(g, 0, w, d, h, K.mat(c, { roughness: 0.55 }), K.mat(C(p.color2, K.shade(c, -0.12)), { roughness: 0.5 }));
+  } else if (v === 'bins-3') {
+    const bw = (w - 0.06) / 3, body = K.mat(C(p.color, '#3a3d42'), { roughness: 0.55 });
+    [C(p.color2, BIN_LIDS[0]), C(p.color3, BIN_LIDS[1]), BIN_LIDS[2]].forEach((lc, i) => wheelie(g, -w / 2 + bw / 2 + i * (bw + 0.03), bw, d, h, body, K.mat(lc, { roughness: 0.5 })));
+  } else if (v === 'compost') {
+    const c = C(p.color, '#2b3a2e'), m = K.mat(c, { roughness: 0.6 }), hb = 0.88 * h, geos = [];
+    for (let i = 0; i < 3; i++) { const t0 = i / 3, t1 = (i + 1) / 3, f = (t) => lerp(0.98, 0.8, t); geos.push(taperG(w * f(t0), d * f(t0), w * (f(t1) + 0.015), d * (f(t1) + 0.015), hb / 3, 0, (hb * i) / 3)); }
+    g.add(merge(geos, m), rbox(w * 0.84, h - hb, d * 0.84, K.mat(C(p.color2, K.shade(c, 0.12)), { roughness: 0.5 }), 0, hb + (h - hb) / 2, 0, 0.02, 2), box(w * 0.42, hb * 0.24, 0.02, K.mat(K.shade(c, 0.18), { roughness: 0.5 }), 0, hb * 0.14, d * 0.48), box(0.1, 0.02, 0.03, dark(), 0, hb * 0.2, d * 0.49 + 0.012));
+  } else if (v === 'mailbox') {
+    const m = K.metal(C(p.color, '#2b2d31'), { roughness: 0.5, metalness: 0.5 }), tall = h > 0.6, bh = tall ? Math.min(0.34, h * 0.3) : h, y0 = h - bh;
+    if (tall) g.add(box(Math.min(0.07, w), y0, Math.min(0.07, d), alu(C(p.color2, '#3a3d42')), 0, y0 / 2, 0), box(Math.min(0.2, w), 0.012, Math.min(0.2, d), alu(C(p.color2, '#3a3d42')), 0, 0.006, 0), ns(mesh(new THREE.CylinderGeometry(0.05, 0.05, d * 0.9, 12, 1, true).rotateX(PI / 2).translate(0, y0 - 0.06, 0), K.mat(C(p.color, '#2b2d31'), { roughness: 0.5, metalness: 0.5, side: THREE.DoubleSide }))));
+    g.add(rbox(w, bh - 0.02, d - 0.02, m, 0, y0 + (bh - 0.02) / 2, -0.01, 0.012, 2), box(w, 0.02, d, m, 0, h - 0.01, 0), box(w * 0.8, 0.012, 0.012, dark('#0f0f10'), 0, h - 0.06, d / 2 - 0.014), box(w * 0.84, 0.03, 0.008, inox(), 0, h - 0.045, d / 2 - 0.006), box(w * 0.4, bh * 0.16, 0.006, K.mat('#f1f1ee'), 0, y0 + bh * 0.35, d / 2 - 0.017));
+  } else if (v === 'rain-barrel') {
+    const c = C(p.color, '#4a5a4f'), y0 = 0.12 * h, H = h - y0 - 0.03;
+    g.add(cylOn(0.82 * R, 0.82 * R, y0, K.stone(C(p.color2, '#a39c90')), 0, 0, 0, 16), lathe([[0.78 * R, y0], [0.95 * R, y0 + 0.2 * H], [R, y0 + 0.5 * H], [0.95 * R, y0 + 0.8 * H], [0.8 * R, y0 + H]], K.mat(c, { roughness: 0.6 }), 24), cylOn(0.84 * R, 0.84 * R, 0.03, K.mat(K.shade(c, -0.15), { roughness: 0.6 }), 0, h - 0.03, 0, 24));
+    g.add(merge([torusG(0.955 * R, 0.008, 'xz', 0, y0 + 0.22 * H, 0, 24, 4), torusG(0.955 * R, 0.008, 'xz', 0, y0 + 0.78 * H, 0, 24, 4)], dark('#2b2d31')), merge([zCylG(0.012, 0.07, 0, y0 + 0.1 * H, 0.86 * R + 0.02, 8), cylG(0.01, 0.01, 0.04, 0, y0 + 0.085 * H, 0.86 * R + 0.045, 8)], K.metal('#c5a35a', { roughness: 0.3 })));
+  } else if (v === 'ev-charger') {
+    const body = K.mat(C(p.color, '#f1f1ee'), { roughness: 0.35 }), tall = h > 0.8, uh = tall ? Math.min(0.42, 0.3 * h) : h, y0 = h - uh, ud = tall ? clamp(d - 0.137, 0.04, 0.16) : Math.max(0.03, d - 0.057);
+    if (tall) g.add(box(Math.min(w, 0.16), h, 0.08, alu(C(p.color2, '#3a3d42')), 0, h / 2, -d / 2 + 0.04), box(w, 0.012, d, alu(C(p.color2, '#3a3d42')), 0, 0.006, 0));
+    const zu = tall ? -d / 2 + 0.08 + ud / 2 : -d / 2 + ud / 2, cr = Math.min(0.13, w * 0.42, uh * 0.4);
+    g.add(rbox(w, uh, ud, body, 0, y0 + uh / 2, zu, 0.03, 2), box(w * 0.66, uh * 0.5, 0.006, dark('#17181a'), 0, y0 + uh * 0.6, zu + ud / 2 + 0.001), ns(box(w * 0.4, 0.012, 0.004, K.glow(C(p.color3, '#5fd08a'), 1.2), 0, y0 + uh * 0.22, zu + ud / 2 + 0.003)));
+    g.add(merge([torusG(cr, 0.012, 'xy', 0, tall ? y0 - cr * 0.6 : cr + 0.012, zu + ud / 2 + 0.02, 18, 6), torusG(cr * 0.92, 0.012, 'xy', 0, tall ? y0 - cr * 0.6 : cr + 0.012, zu + ud / 2 + 0.045, 18, 6)], rubber()), box(0.05, 0.1, Math.max(0.02, d - (zu + ud / 2 + d / 2)), dark(), w * 0.28, tall ? y0 + uh * 0.2 : uh * 0.3, (zu + ud / 2 + d / 2) / 2));
+  } else if (v === 'gas-tanks') {
+    const c = C(p.color, '#b9bfc4'), m = K.mat(c, { roughness: 0.45, metalness: 0.3 }), r = Math.max(0.02, Math.min(w / 4 - 0.01, d / 2 - 0.01)), hc = h - 0.03, geos = [], col = [];
+    for (const s of [-1, 1]) { const x = s * (w / 4); geos.push(latheG([[0.82 * r, 0.03], [r, 0.07], [r, 0.03 + 0.72 * hc], [0.72 * r, 0.03 + 0.86 * hc], [0.3 * r, 0.03 + 0.9 * hc]], 20, x, 0, 0)); col.push(new THREE.CylinderGeometry(0.5 * r, 0.5 * r, 0.1 * hc, 14, 1, true).translate(x, 0.03 + 0.95 * hc, 0)); rl.push([[x, 0.03 + 0.92 * hc, 0], [0, 0.03 + 0.8 * hc, -r * 0.6], 0.006]); }
+    g.add(box(w, 0.03, d, K.stone(C(p.color2, '#a39c90')), 0, 0.015, 0), merge(geos, m), merge(col, K.mat(c, { roughness: 0.45, metalness: 0.3, side: THREE.DoubleSide })), rods(rl, 0.006, K.mat('#e0762b', { roughness: 0.6 }), 5), box(0.07, 0.05, 0.05, K.mat(C(p.color3, '#b3272d'), { roughness: 0.5 }), 0, 0.03 + 0.8 * hc, -r * 0.6), merge([-1, 1].map((s) => cylG(0.018, 0.018, 0.05, s * w / 4, 0.03 + 0.92 * hc, 0, 8)), K.metal('#c5a35a', { roughness: 0.3 })));
+  } else if (v === 'irrigation-controller') {
+    const body = K.mat(C(p.color, '#d9dcdc'), { roughness: 0.5 }), tall = h > 0.5, uh = tall ? Math.min(0.3, 0.26 * h) : h, y0 = h - uh, ud = tall ? Math.min(0.12, d * 0.6) : d, zu = -d / 2 + (tall ? 0.05 : 0) + ud / 2;
+    if (tall) {
+      g.add(box(0.05, h - 0.01, 0.05, alu(C(p.color2, '#8a8d91')), 0, (h - 0.01) / 2, -d / 2 + 0.025), mesh(xCylG(0.02, w, 0, 0.1, 0, 10), dark('#2b2d31')));
+      const n = Math.max(2, Math.round(w / 0.13));
+      for (let i = 0; i < n; i++) { const x = lerp(-w / 2, w / 2, (i + 0.5) / n); list.push([0.07, 0.07, Math.min(0.1, d), x, 0.14, 0]); rl.push([[x, 0.17, 0], [x, 0.23, 0]]); }
+      g.add(boxes(list.splice(0), dark('#1c1d20')), rods(rl, 0.02, K.plastic(C(p.color3, '#3fa7d6')), 8), box(w, 0.02, d, K.plastic('#3d7a4a'), 0, 0.01, 0));
+    }
+    g.add(rbox(w, uh, ud, body, 0, y0 + uh / 2, zu, 0.015, 2), box(w * 0.5, uh * 0.3, 0.004, dark('#22313a'), -w * 0.12, y0 + uh * 0.68, zu + ud / 2 + 0.001), mesh(zCylG(Math.min(0.035, w * 0.12), 0.015, w * 0.28, y0 + uh * 0.66, zu + ud / 2 + 0.006, 12), dark('#55585c')), boxes([0, 1, 2, 3].map((i) => [w * 0.12, uh * 0.1, 0.006, lerp(-w * 0.3, w * 0.3, i / 3), y0 + uh * 0.25, zu + ud / 2 + 0.002]), K.plastic(C(p.color3, '#3fa7d6'))));
+  } else if (v === 'bike-rack') {
+    const m = K.metal(C(p.color, '#b9bdc2'), { roughness: 0.4, metalness: 0.7 }), n = Math.max(2, Math.round(w / 0.4)), z = d / 2 - 0.02, geos = [boxG(w, 0.03, 0.04, 0, 0.015, z), boxG(w, 0.03, 0.04, 0, 0.015, -z)];
+    for (let i = 0; i < n; i++) { const x = lerp(-w / 2 + 0.012, w / 2 - 0.012, n === 1 ? 0.5 : i / (n - 1)); geos.push(tubeG([[x, 0.02, -z], [x, h * 0.72, -z + Math.min(0.05, d * 0.1)], [x, h - 0.012, 0], [x, h * 0.72, z - Math.min(0.05, d * 0.1)], [x, 0.02, z]], 0.012, 14, 6)); }
+    g.add(merge(geos, m));
+  } else {
+    const wd = M(p.material, C(p.color, '#c8a476'), 'wood'), fr = alu(C(p.color2, '#2b2d31')), tall = h > 1.2, hb = tall ? 0.45 : h, ls = 0.03, boots = [[], []];
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) list.push([ls, hb - 0.035, ls, sx * (w / 2 - ls / 2 - 0.02), (hb - 0.035) / 2, sz * (d / 2 - ls / 2 - 0.01)]);
+    for (const s of [-1, 1]) list.push([ls, ls, d - 0.04, s * (w / 2 - ls / 2 - 0.02), 0.11, 0]);
+    g.add(boxes(list.splice(0), fr));
+    list.push([w, 0.035, d, 0, hb - 0.0175, 0]);
+    for (let i = 0; i < 3; i++) list.push([w - 0.1, 0.018, (d - 0.05) / 3 - 0.012, 0, 0.134, lerp(-d / 2 + 0.025, d / 2 - 0.025, (i + 0.5) / 3)]);
+    if (tall) { for (const s of [-1, 1]) list.push([0.045, h - hb, 0.022, s * (w / 2 - 0.04), hb + (h - hb) / 2, -d / 2 + 0.011]); for (let i = 0; i < 3; i++) list.push([w, 0.11, 0.018, 0, h - 0.12 - i * 0.14, -d / 2 + 0.031]); list.push([w, 0.022, Math.min(d, 0.2), 0, h - 0.011, -d / 2 + Math.min(d, 0.2) / 2]); g.add(rods([-0.36, -0.12, 0.12, 0.36].map((t) => [[t * w, h - 0.26, -d / 2 + 0.04], [t * w, h - 0.29, -d / 2 + 0.085]]), 0.007, inox(), 5)); }
+    g.add(boxes(list.splice(0), wd));
+    const bs = Math.min(1, (hb - 0.17) / 0.26, d / 0.3);
+    if (bs > 0.3) { [-0.3, -0.19, 0.12, 0.23].forEach((t, i) => { const x = t * w, k = i < 2 ? 0 : 1, sh = (k ? 0.1 : 0.24) * bs; boots[k].push([0.085 * bs, 0.06 * bs, 0.25 * bs, x, 0.143 + 0.03 * bs, 0.01], [0.08 * bs, sh, 0.1 * bs, x, 0.143 + 0.06 * bs + sh / 2 - 0.01, -0.065 * bs]); }); g.add(boxes(boots[0], K.mat(C(p.color3, '#3d5a45'), { roughness: 0.5 })), boxes(boots[1], K.leather('#7a5236'))); }
+  }
+}
+function utilitySym(ctx, { w, d, h, p, px, v }) {
+  const R = Math.min(w, d) / 2, col = C(p.color, '#c9ccd0'), tint = K.tint(col, 0.4);
+  if (v === 'clothesline-rotary') {
+    dashed(ctx, px, () => rect(ctx, 0, 0, w, d, null, SOFT, px));
+    for (const s of [-1, 1]) line(ctx, -w / 2, s * d / 2, w / 2, -s * d / 2, INK, px);
+    for (let k = 0; k < 5; k++) { const t = lerp(0.32, 0.98, k / 4); if (w * t > 6 * px * (k + 1)) rect(ctx, 0, 0, w * t, d * t, null, SOFT, px); }
+    circ(ctx, 0, 0, Math.max(3, 1.6 * px), '#8a8d91', INK, px);
+  } else if (v === 'clothesline-wall' || v === 'clothes-rack') {
+    rect(ctx, 0, 0, w, d, 'rgba(255,255,255,0.35)', INK, px, 1);
+    if (v === 'clothesline-wall') { hatch(ctx, -w / 2, -d / 2, w / 2, d / 2, Math.min(Math.max(3, Math.round(d / 12)) - 1, Math.floor(d / (3 * px))), true, SOFT, px); line(ctx, -w / 2, -d / 2 + 2, w / 2, -d / 2 + 2, INK, Math.max(2 * px, 4)); }
+    else { hatch(ctx, -w / 2, -d / 2, w / 2, d / 2, Math.min(13, Math.floor(w / (3 * px))), false, SOFT, px); for (const s of [-1, 1]) line(ctx, s * w / 4, -d / 2, s * w / 4, d / 2, INK, px); }
+  } else if (v === 'outdoor-shower') {
+    const big = R >= 30, zc = big ? -d / 2 + 12 : -d / 2 + 3.5, reach = Math.min(34, d - 16);
+    if (big) { rect(ctx, 0, 0, w, d, K.tint('#a9743f', 0.45), INK, px); hatch(ctx, -w / 2, -d / 2, w / 2, d / 2, Math.min(Math.max(2, Math.round(d / 10)) - 1, Math.floor(d / (3 * px))), true, SOFT, px); line(ctx, -w / 2, -d / 2 + 3, w / 2, -d / 2 + 3, K.shade('#a9743f', -0.2), Math.max(2 * px, 5)); }
+    else circ(ctx, 0, 0, R, K.tint(col, 0.5), INK, px);
+    line(ctx, 0, zc, 0, zc + reach, INK, 1.6 * px); circ(ctx, 0, zc + reach, Math.min(11, w / 2), '#eef1f2', INK, px); circ(ctx, 0, zc, Math.max(2, 1.4 * px), INK, null);
+  } else if (v === 'hose-reel') {
+    rect(ctx, 0, 0, w, d, null, INK, px, 2); rect(ctx, 0, 0, w - 14, Math.min(d * 0.72, h * 0.6), K.tint(C(p.color, '#3d7a4a'), 0.3), INK, px, 3); hatch(ctx, -w / 2 + 7, -d * 0.36, w / 2 - 7, d * 0.36, Math.min(6, Math.floor(w / (3 * px))), false, SOFT, px);
+  } else if (v === 'tap') {
+    const ps = Math.min(10, w); rect(ctx, 0, 0, w, d, K.tint(C(p.color2, '#b9b2a6'), 0.5), SOFT, px, 1); rect(ctx, 0, -d / 2 + ps / 2, ps, ps, K.tint(C(p.color, '#b98a5e'), 0.3), INK, px); circ(ctx, 0, -d / 2 + ps + Math.min(11, (d - ps) * 0.42) + 1, Math.min(11, w * 0.45, (d - ps) * 0.42), '#d5dadd', INK, px);
+  } else if (v === 'bin' || v === 'bins-3') {
+    const n = v === 'bin' ? 1 : 3, bw = (w - (n - 1) * 3) / n, lids = v === 'bin' ? [C(p.color2, C(p.color, '#3d5a45'))] : [C(p.color2, BIN_LIDS[0]), C(p.color3, BIN_LIDS[1]), BIN_LIDS[2]];
+    for (let i = 0; i < n; i++) { const x = -w / 2 + bw / 2 + i * (bw + 3); rect(ctx, x, 0, bw, d, K.tint(lids[i], 0.35), INK, px, Math.min(6, bw * 0.15)); line(ctx, x - bw * 0.42, -d / 2 + d * 0.1, x + bw * 0.42, -d / 2 + d * 0.1, INK, 1.5 * px); line(ctx, x - bw * 0.3, d / 2 - d * 0.06, x + bw * 0.3, d / 2 - d * 0.06, SOFT, px); }
+  } else if (v === 'compost') {
+    rect(ctx, 0, 0, w, d, K.tint(C(p.color, '#2b3a2e'), 0.45), INK, px, 4); rect(ctx, 0, 0, w * 0.84, d * 0.84, K.tint(C(p.color, '#2b3a2e'), 0.6), INK, px, 3); line(ctx, -w * 0.15, 0, w * 0.15, 0, INK, 1.5 * px);
+  } else if (v === 'mailbox') {
+    rect(ctx, 0, 0, w, d, K.tint(C(p.color, '#2b2d31'), 0.45), INK, px, 1.5); line(ctx, -w * 0.4, d / 2 - Math.min(3, d * 0.2), w * 0.4, d / 2 - Math.min(3, d * 0.2), INK, 1.5 * px);
+  } else if (v === 'rain-barrel') {
+    circ(ctx, 0, 0, R, K.tint(C(p.color, '#4a5a4f'), 0.4), INK, px); circ(ctx, 0, 0, R * 0.84, null, SOFT, px); circ(ctx, 0, R * 0.9, Math.max(1.6, px), '#c5a35a', INK, px * 0.6);
+  } else if (v === 'ev-charger') {
+    const tall = h > 80; if (tall) rect(ctx, 0, -d / 2 + 4, Math.min(w, 16), 8, '#55585c', INK, px);
+    rect(ctx, 0, tall ? -d / 2 + 8 + Math.min(d - 8, 16) / 2 : -d * 0.2, w, tall ? Math.min(d - 8, 16) : d * 0.6, K.tint(C(p.color, '#f1f1ee'), 0.2), INK, px, 3); circ(ctx, 0, d / 2 - Math.min(5, d * 0.2), Math.min(4, d * 0.18), '#5fd08a', INK, px * 0.7);
+  } else if (v === 'gas-tanks') {
+    const r = Math.max(2, Math.min(w / 4 - 1, d / 2 - 1)); rect(ctx, 0, 0, w, d, K.tint(C(p.color2, '#a39c90'), 0.55), SOFT, px);
+    for (const s of [-1, 1]) { circ(ctx, s * w / 4, 0, r, K.tint(C(p.color, '#b9bfc4'), 0.3), INK, px); circ(ctx, s * w / 4, 0, r * 0.5, null, SOFT, px); circ(ctx, s * w / 4, 0, Math.max(1.5, px), '#c5a35a', null); }
+    line(ctx, -w / 4, 0, w / 4, 0, '#e0762b', px);
+  } else if (v === 'irrigation-controller') {
+    rect(ctx, 0, 0, w, d, K.tint('#3d7a4a', 0.5), INK, px, 2); const n = Math.max(2, Math.round(w / 13)); for (let i = 0; i < n; i++) circ(ctx, lerp(-w / 2, w / 2, (i + 0.5) / n), d * 0.12, Math.min(3.5, d * 0.2), K.tint(C(p.color3, '#3fa7d6'), 0.2), INK, px * 0.7);
+    rect(ctx, 0, -d / 2 + Math.min(6, d * 0.3), w, Math.min(12, d * 0.6), K.tint(C(p.color, '#d9dcdc'), 0.3), INK, px, 1.5);
+  } else if (v === 'bike-rack') {
+    const n = Math.max(2, Math.round(w / 40)); for (const s of [-1, 1]) line(ctx, -w / 2, s * (d / 2 - 2), w / 2, s * (d / 2 - 2), '#8a8d91', Math.max(1.5 * px, 4));
+    for (let i = 0; i < n; i++) { const x = lerp(-w / 2 + 1.2, w / 2 - 1.2, i / (n - 1)); line(ctx, x, -d / 2 + 2, x, d / 2 - 2, INK, Math.max(1.5 * px, 2.4)); }
+  } else {
+    rect(ctx, 0, 0, w, d, K.tint(C(p.color, '#c8a476'), 0.4), INK, px, 1.5); hatch(ctx, -w / 2, -d / 2, w / 2, d / 2, 2, true, SOFT, px);
+    if (h > 120) line(ctx, -w / 2, -d / 2 + 1.5, w / 2, -d / 2 + 1.5, K.shade(C(p.color, '#c8a476'), -0.25), Math.max(2 * px, 3));
+  }
+}
+define('utility', Object.fromEntries(UTIL.map((k) => [k, { b: buildUtility }])), utilitySym);

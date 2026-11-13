@@ -43,6 +43,15 @@ function normalizeItem(partial) {
   return item;
 }
 
+/** Today's calendar date at the house ('YYYY-MM-DD' in PLAN.meta.timeZone) — the default day for the 3D sun. */
+function siteToday() {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: PLAN.meta.timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+    const get = (type) => parts.find((p) => p.type === type).value;
+    return `${get('year')}-${get('month')}-${get('day')}`;
+  } catch (e) { return new Date().toISOString().slice(0, 10); }
+}
+
 const DEFAULT_UI = {
   mode: '2d',              // '2d' | '3d' | 'walk' | 'split'
   tool: 'select',          // 'select' | 'pan' | 'measure'
@@ -56,7 +65,9 @@ const DEFAULT_UI = {
   showItems: true,
   showRoof: false,         // 3D: roof + ceiling visible (auto-on in walk mode)
   wallsCutaway: false,     // 3D orbit: cut walls to 1.2 m for a dollhouse view
-  timeOfDay: 15,           // hours 0..24, drives the sun in 3D
+  timeOfDay: 15,           // hours 0..24 local clock time, drives the sun in 3D
+  date: siteToday(),       // 'YYYY-MM-DD' — day of the year for the 3D sun (default: today at the house)
+  sunStudy: true,          // 3D: a hidden roof / cut-away walls still block the sun, so rooms show the true sun patches
   leftPanel: 'catalog',    // which left panel tab is open
   rightPanel: 'inspector', // 'inspector' | 'budget' | 'checks' | 'rooms'
   catalogZone: 'indoor',   // 'indoor' | 'outdoor'
