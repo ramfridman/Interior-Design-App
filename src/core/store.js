@@ -16,6 +16,8 @@
  *                                              undo / redo, load). reason: 'add-wall' | 'remove-wall' | 'move-wall' |
  *                                              'resize-wall' | 'add-opening' | 'update-opening' | 'remove-opening' |
  *                                              'update-room' | 'reset' | 'history' | 'load'. Rebuild everything drawn from PLAN.
+ *   'carpentry'  { reason, runIds, transient? }  – store.carpentry (made-to-measure runs, src/carpentry/) changed.
+ *                                              reason: an engine reason ('create-run', 'layout', 'adopt', …) | 'history' | 'load'
  *   'history'    { canUndo, canRedo }
  *   'load'       {}                          – whole design replaced (file open / reset)
  *   '*'          (eventName, payload)        – everything
@@ -36,6 +38,13 @@ const HISTORY_LIMIT = 200;
 let _id = 0;
 const newId = () => 'it_' + Date.now().toString(36) + (_id++).toString(36) + Math.random().toString(36).slice(2, 5);
 const clone = (o) => JSON.parse(JSON.stringify(o));
+/** Empty carpentry state (see docs/CONTRACT.md § 8). */
+const emptyCarpentry = () => ({ runs: {}, settings: {} });
+/** Accept whatever a file holds for `carpentry`; anything unreadable becomes the empty state. */
+function readCarpentry(raw) {
+  if (!raw || typeof raw !== 'object' || !raw.runs || typeof raw.runs !== 'object' || Array.isArray(raw.runs)) return emptyCarpentry();
+  return { runs: clone(raw.runs), settings: raw.settings && typeof raw.settings === 'object' ? clone(raw.settings) : {} };
+}
 
 /** Fill in every item field with its default and guarantee a unique id. */
 function normalizeItem(partial) {
@@ -105,6 +114,8 @@ class Store {
     this.project = { ...DEFAULT_PROJECT };
     /** finishes[spaceId] = { floor: productId | null, wall: productId | null, floorParams?, wallColor? } */
     this.finishes = {};
+    /** Made-to-measure carpentry: { runs: { [id]: Run }, settings } — written only by src/carpentry/ (§ 8). */
+    this.carpentry = emptyCarpentry();
     this._listeners = new Map();
     this._undo = [];
     this._redo = [];
@@ -132,7 +143,7 @@ class Store {
   spaceOf(item) { return spaceAt(item.x, item.y); }
 
   // ---------- history ----------
-  _snapshot() { return `{"items":${JSON.stringify(this.items)},"finishes":${JSON.stringify(this.finishes)},"project":${JSON.stringify(this.project)},"plan":${planStateKey()}}`; }
+  _snapshot() { return `{"items":${JSON.stringify(this.items)},"finishes":${JSON.stringify(this.finishes)},"project":${JSON.stringify(this.project)},"plan":${planStateKey()},"carpentry":${JSON.stringify(this.carpentry)}}`; }
   _pushUndo(snap) {
     this._undo.push(snap);
     if (this._undo.length > HISTORY_LIMIT) this._undo.shift();
@@ -163,9 +174,12 @@ class Store {
   _restore(snap) {
     const s = JSON.parse(snap);
     const plan = applyPlanState(s.plan || null);            // no-op unless the snapshot holds a different plan
+    const carp = readCarpentry(s.carpentry), carpChanged = JSON.stringify(carp) !== JSON.stringify(this.carpentry);
     this.items = s.items; this.finishes = s.finishes || {}; this.project = { ...DEFAULT_PROJECT, ...s.project };
+    this.carpentry = carp;
     this.selection = this.selection.filter((id) => this.getItem(id));
     if (plan.changed.walls || plan.changed.openings || plan.changed.rooms) this.emit('plan', { reason: 'history', changed: plan.changed });
+    if (carpChanged) this.emit('carpentry', { reason: 'history', runIds: Object.keys(carp.runs) });
     this.emit('items', { type: 'reset', ids: this.items.map((i) => i.id) });
     this.emit('finishes', { ids: Object.keys(this.finishes) });
     this.emit('project', { keys: Object.keys(this.project) });
@@ -304,10 +318,38 @@ class Store {
     if (gone.length) this.emit('finishes', { ids: gone, transient: !!payload.transient });
   }
 
+  // ---------- carpentry (see src/carpentry/, docs/CONTRACT.md § 8) ----------
+  /**
+   * Engine hook, not for views: apply a carpentry change prepared by src/carpentry/ as ONE undo step.
+   * `change` = { carpentry, add: Item[], update: { [id]: Item }, remove: id[], reason, runIds }.
+   */
+  _applyCarpentry(change, opts = {}) {
+    this._record(opts);
+    const transient = !!opts.transient;
+    this.carpentry = change.carpentry;
+    const removed = (change.remove || []).filter((id) => this.getItem(id));
+    if (removed.length) this.items = this.items.filter((i) => !removed.includes(i.id));
+    const updated = [];
+    for (const [id, next] of Object.entries(change.update || {})) {
+      const i = this.items.findIndex((it) => it.id === id);
+      if (i >= 0) { this.items[i] = normalizeItem(next); updated.push(id); }
+    }
+    const added = (change.add || []).map((p) => { const it = normalizeItem(p); this.items.push(it); return it.id; });
+    if (removed.length) {
+      this.selection = this.selection.filter((id) => !removed.includes(id));
+      this.emit('items', { type: 'remove', ids: removed, transient });
+    }
+    if (updated.length) this.emit('items', { type: 'update', ids: updated, transient });
+    if (added.length) this.emit('items', { type: 'add', ids: added, transient });
+    if (removed.length) this.emit('selection', { ids: this.selection });
+    this.emit('carpentry', { reason: change.reason, runIds: change.runIds || [], transient });
+    return added;
+  }
+
   // ---------- persistence ----------
   /** `planEdits` = { walls, openings, rooms } of an edited plan, null while the plan is the architect's. */
   serialize() {
-    return { app: 'e7-interior-design', version: 1, savedAt: new Date().toISOString(), project: this.project, items: this.items, finishes: this.finishes, ui: this.ui, planEdits: planState() };
+    return { app: 'e7-interior-design', version: 1, savedAt: new Date().toISOString(), project: this.project, items: this.items, finishes: this.finishes, ui: this.ui, planEdits: planState(), carpentry: this.carpentry };
   }
   /** Replace the whole design. `data` is the output of serialize(). */
   load(data, opts = {}) {
@@ -322,11 +364,13 @@ class Store {
       return item;
     });
     this.finishes = clone(data.finishes || {});
+    this.carpentry = readCarpentry(data.carpentry);           // a file without carpentry has no runs
     this.project = { ...DEFAULT_PROJECT, ...(data.project || {}) };
     if (data.ui && opts.restoreUI) this.ui = { ...DEFAULT_UI, ...data.ui };
     this.selection = [];
     this._pruneFinishes();
     if (plan.changed.walls || plan.changed.openings || plan.changed.rooms) this.emit('plan', { reason: 'load', changed: plan.changed });
+    this.emit('carpentry', { reason: 'load', runIds: Object.keys(this.carpentry.runs) });
     this.emit('load', {});
     this.emit('items', { type: 'reset', ids: this.items.map((i) => i.id) });
     this.emit('finishes', { ids: Object.keys(this.finishes) });
@@ -354,5 +398,5 @@ class Store {
 
 export const store = new Store();
 bindPlanHost({ record: (opts) => store._record(opts), changed: (payload) => store._planChanged(payload) });
-export { DEFAULT_UI, DEFAULT_PROJECT };
+export { DEFAULT_UI, DEFAULT_PROJECT, emptyCarpentry };
 export default store;
