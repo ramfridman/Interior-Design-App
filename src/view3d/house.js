@@ -95,15 +95,21 @@ function makeGrid(plan) {
   X.unshift(X[0] - 100); X.push(X[X.length - 1] + 100); Y.unshift(Y[0] - 100); Y.push(Y[Y.length - 1] + 100);
   const nx = X.length - 1, ny = Y.length - 1;
   const kind = new Uint8Array(nx * ny), ref = new Array(nx * ny).fill(null);
-  const inRect = (r, x, y) => x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h;
-  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-    const cx = (X[i] + X[i + 1]) / 2, cy = (Y[j] + Y[j + 1]) / 2, k = j * nx + i;
-    let hit;
-    if (plan.walls.some((w) => inRect(w, cx, cy))) kind[k] = WALL;
-    else if ((hit = plan.openings.find((o) => inRect(o, cx, cy)))) { kind[k] = OPENING; ref[k] = hit; }
-    else if ((hit = plan.rooms.find((r) => pointInPolygon(cx, cy, r.polygon)))) { kind[k] = ROOM; ref[k] = hit; }
-  }
   const find = (A, v) => { let lo = 0, hi = A.length - 2; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (A[m] <= v) lo = m; else hi = m - 1; } return lo; };
+  /** Visit the cells whose centres lie inside a rectangle (its edges are grid lines). Priority: wall > opening > room. */
+  const cells = (x0, y0, x1, y1, fn) => {
+    for (let j = find(Y, y0), j1 = find(Y, y1 - 1e-6); j <= j1; j++) for (let i = find(X, x0), i1 = find(X, x1 - 1e-6); i <= i1; i++) fn(j * nx + i, (X[i] + X[i + 1]) / 2, (Y[j] + Y[j + 1]) / 2);
+  };
+  for (const r of plan.rooms) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of r.polygon) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    if (x1 > x0 && y1 > y0) cells(x0, y0, x1, y1, (k, cx, cy) => { if (kind[k] === OUT && pointInPolygon(cx, cy, r.polygon)) { kind[k] = ROOM; ref[k] = r; } });
+  }
+  for (let q = plan.openings.length - 1; q >= 0; q--) {                 // back to front: the first opening listed wins, as before
+    const o = plan.openings[q];
+    if (o.w > 0 && o.h > 0) cells(o.x, o.y, o.x + o.w, o.y + o.h, (k) => { kind[k] = OPENING; ref[k] = o; });
+  }
+  for (const w of plan.walls) if (w.w > 0 && w.h > 0) cells(w.x, w.y, w.x + w.w, w.y + w.h, (k) => { kind[k] = WALL; ref[k] = null; });
   /** Cell index containing a plan point (clamped to the grid). */
   const cellAt = (x, y) => find(Y, y) * nx + find(X, x);
   return { X, Y, nx, ny, kind, ref, cellAt };

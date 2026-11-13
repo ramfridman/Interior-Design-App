@@ -40,7 +40,7 @@ const KEYS = [
   { alt: 90, zenith: '#3278d0', horizon: '#d2e3f1', sun: '#fff7ec', sunI: 2.1, hemiI: 0.42, ambI: 0.05, envI: 0.14, exposure: 1.0, glow: 0 },
 ].map((k) => ({ ...k, zenith: new THREE.Color(k.zenith), horizon: new THREE.Color(k.horizon), sun: new THREE.Color(k.sun) }));
 
-const STUDY = { sun: 1, fill: 1 };                               // sun-study dollhouse: sun / sky-fill multipliers
+const STUDY = { sun: 1.25, fill: 0.9 };                             // sun-study dollhouse: sun / sky-fill multipliers
 const MOON = { color: new THREE.Color('#93a9e6'), intensity: 0.22, azimuth: 150, altitude: 48 };
 
 const SKY_VERTEX = /* glsl */`

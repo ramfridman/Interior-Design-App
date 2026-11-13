@@ -123,6 +123,8 @@ export function itemsOverlap(a, b) {
  * (into the room / garden). Computed once and cached.
  */
 let _faces = null;
+/** Drop everything cached from PLAN. Called by core/plan-edit.js whenever walls / openings / rooms change. */
+export function invalidatePlanCaches() { _faces = null; }
 export function wallFaces(plan = PLAN) {
   if (_faces && plan === PLAN) return _faces;
   const solid = (x, y) => plan.walls.some((w) => pointInRect(x, y, w)) || plan.openings.some((o) => pointInRect(x, y, o));
