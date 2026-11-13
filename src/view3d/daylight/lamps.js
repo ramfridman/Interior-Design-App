@@ -41,10 +41,10 @@ function hexLinear(hex) {
 const unitLum = (c) => { const l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] || 1; return c.map((v) => v / l); };
 
 /**
- * Linear RGB (unit luminance) of a blackbody at `kelvin`, 45 % white-balanced towards neutral (chromatic adaptation:
+ * Linear RGB (unit luminance) of a blackbody at `kelvin`, 70 % white-balanced towards neutral (chromatic adaptation:
  * 2700 K reads warm, not orange). Tanner Helland's fit of the Planckian locus in sRGB.
  */
-export function kelvinColor(kelvin = 2700, adapt = 0.45) {
+export function kelvinColor(kelvin = 2700, adapt = 0.7) {
   const t = Math.max(10, Math.min(400, Number(kelvin) / 100 || 27));
   const r = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592);
   const g = t <= 66 ? 99.4708025861 * Math.log(t) - 161.1195681661 : 288.1221695283 * Math.pow(t - 60, -0.0755148492);
