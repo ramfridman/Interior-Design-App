@@ -16,11 +16,13 @@ export const sideHeading = (side) => ({ n: 0, e: 90, s: 180, w: 270 }[side] ?? 2
 
 const MAX_POLAR = THREE.MathUtils.degToRad(88);
 const TWEEN_MS = 700;
+/** A frame slower than this ends any running camera animation at once. */
+export const STALL_MS = 250;
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const lerp = (a, b, t) => a + (b - a) * t;
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-const _v = new THREE.Vector3();
+const _v = new THREE.Vector3(), _d = new THREE.Vector3();
 
 /** Distance at which `box` fits the frustum when looked at from the spherical direction (theta, phi) around `target`. */
 export function fitRadius(box, target, theta, phi, fovDeg, aspect, margin = 1.1) {
@@ -36,6 +38,36 @@ export function fitRadius(box, target, theta, phi, fovDeg, aspect, margin = 1.1)
   }
   return r * margin;
 }
+
+const _probe = new THREE.PerspectiveCamera();
+/**
+ * Tight framing of a point cloud seen from the spherical direction (theta, phi): the target is shifted so the
+ * projected silhouette is centred and the radius shrunk until it just fills the frustum (× margin).
+ * @returns {{ target: THREE.Vector3, radius: number }}
+ */
+export function framePoints(points, theta, phi, fovDeg, aspect, margin = 1.08) {
+  const box = new THREE.Box3().setFromPoints(points);
+  const target = box.getCenter(new THREE.Vector3());
+  const ph = Math.max(phi, 6e-4), a = Math.max(0.2, aspect);
+  let radius = fitRadius(box, target, theta, ph, fovDeg, a, 1);
+  _probe.fov = fovDeg; _probe.aspect = a; _probe.near = 0.01; _probe.far = 5000; _probe.updateProjectionMatrix();
+  const right = new THREE.Vector3(), up = new THREE.Vector3();
+  for (let pass = 0; pass < 6; pass++) {
+    _probe.position.setFromSphericalCoords(radius, ph, theta).add(target);
+    _probe.up.set(0, 1, 0); _probe.lookAt(target); _probe.updateMatrixWorld(true);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of points) {
+      _v.copy(p).project(_probe);
+      x0 = Math.min(x0, _v.x); x1 = Math.max(x1, _v.x); y0 = Math.min(y0, _v.y); y1 = Math.max(y1, _v.y);
+    }
+    const halfV = radius * Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2);
+    right.setFromMatrixColumn(_probe.matrixWorld, 0); up.setFromMatrixColumn(_probe.matrixWorld, 1);
+    target.addScaledVector(right, ((x0 + x1) / 2) * halfV * a).addScaledVector(up, ((y0 + y1) / 2) * halfV);
+    radius *= Math.max(0.05, Math.max(x1 - x0, y1 - y0) / 2);
+  }
+  return { target, radius: radius * margin };
+}
+const boxCorners = (box) => Array.from({ length: 8 }, (_, i) => new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z));
 
 function poseFromEye(eye, target, fov) {
   const s = new THREE.Spherical().setFromVector3(_v.copy(eye).sub(target));
@@ -79,6 +111,20 @@ export function createOrbitRig({ camera, dom, plan, onChange }) {
   const openingCentre = (o, y = 1.2) => new THREE.Vector3((o.x + o.w / 2) / 100, y, (o.y + o.h / 2) / 100);
   const space = (id) => plan.rooms.find((r) => r.id === id) || plan.outdoorAreas.find((r) => r.id === id) || null;
 
+  /** Pose that frames `points` tightly from (theta, phi); the orbit target is slid along the view ray onto the floor. */
+  function framed(points, theta, phi, fov, margin) {
+    const { target, radius } = framePoints(points, theta, phi, fov, aspect(), margin);
+    const dirY = -Math.cos(Math.max(phi, 6e-4));
+    let r = radius;
+    if (dirY < -0.3) { const s = -target.y / dirY; target.addScaledVector(_d.setFromSphericalCoords(1, Math.max(phi, 6e-4), theta), -s); r = radius + s; }
+    return { target, theta, phi, fov, radius: Math.max(0.5, r) };
+  }
+  const lotPoints = () => [
+    ...plan.site.boundary.map(([x, y]) => new THREE.Vector3(x / 100, G, y / 100)),
+    ...(plan.site.parking || []).flatMap((p) => [new THREE.Vector3(p.x / 100, G, p.y / 100), new THREE.Vector3((p.x + p.w) / 100, G, (p.y + p.h) / 100)]),
+    ...boxCorners(houseBox),
+  ];
+
   /** Dollhouse view into one room from a raised corner. */
   function roomPose(room) {
     const b = polygonBounds(room.polygon);
@@ -87,21 +133,17 @@ export function createOrbitRig({ camera, dom, plan, onChange }) {
     const diag = streetDiagonal(1);
     const dx = Math.abs(c.x - houseC.x) > 0.5 ? Math.sign(c.x - houseC.x) : Math.sign(diag[0]) || 1;
     const dz = Math.abs(c.z - houseC.z) > 0.5 ? Math.sign(c.z - houseC.z) : Math.sign(diag[1]) || 1;
-    const theta = Math.atan2(dx, dz * 1.25), phi = THREE.MathUtils.degToRad(33), fov = 45;
-    return { target: c, theta, phi, fov, radius: fitRadius(box, c, theta, phi, fov, aspect(), 1.12) };
+    return framed(boxCorners(box), Math.atan2(dx, dz * 1.25), THREE.MathUtils.degToRad(33), 45, 1.16);
   }
 
   /** Pose for a named preset or a room id; null when unknown. */
   function presetPose(name) {
     if (name === 'aerial') {
       const d = streetDiagonal();
-      const theta = Math.atan2(d[0], d[1]), phi = THREE.MathUtils.degToRad(57), fov = 40;
-      const target = lotC.clone().setY(0);
-      return { target, theta, phi, fov, radius: fitRadius(lotBox, target, theta, phi, fov, aspect(), 1.02) };
+      return framed(lotPoints(), Math.atan2(d[0], d[1]), THREE.MathUtils.degToRad(57), 40, 1.06);
     }
     if (name === 'top') {
-      const target = houseC.clone().setY(0), fov = 20;
-      return { target, theta: 0, phi: 0.0006, fov, radius: fitRadius(houseBox, target, 0, 0.0006, fov, aspect(), 1.1) };
+      return framed(boxCorners(houseBox), 0, 0.0006, 20, 1.1);
     }
     if (name === 'front') {
       const door = opening('door-entry');
@@ -155,13 +197,16 @@ export function createOrbitRig({ camera, dom, plan, onChange }) {
     const from = getPose();
     let dTheta = (pose.theta - from.theta) % (Math.PI * 2);
     if (dTheta > Math.PI) dTheta -= Math.PI * 2; else if (dTheta < -Math.PI) dTheta += Math.PI * 2;
-    tween = { from, to: pose, dTheta, t: 0 };
+    tween = { from, to: pose, dTheta, start: performance.now(), last: performance.now() };
     onChange();
   }
-  function stepTween(dt) {
+  /** Tweens run on wall-clock time (never on a frame count); a frame that took > 250 ms snaps to the end pose. */
+  function stepTween() {
     if (!tween) return false;
-    tween.t = Math.min(1, tween.t + (dt * 1000) / TWEEN_MS);
-    const k = easeInOut(tween.t), { from, to } = tween;
+    const now = performance.now();
+    const t = now - tween.last > STALL_MS ? 1 : Math.min(1, (now - tween.start) / TWEEN_MS);
+    tween.last = now;
+    const k = easeInOut(t), { from, to } = tween;
     applyPose({
       target: _t.copy(from.target).lerp(to.target, k),
       theta: from.theta + tween.dTheta * k,
@@ -169,7 +214,7 @@ export function createOrbitRig({ camera, dom, plan, onChange }) {
       radius: Math.exp(lerp(Math.log(from.radius), Math.log(to.radius), k)),
       fov: lerp(from.fov, to.fov, k),
     });
-    if (tween.t >= 1) { tween = null; controls.update(); }
+    if (t >= 1) { tween = null; applyPose(to); controls.update(); }
     return true;
   }
   const _t = new THREE.Vector3();
@@ -218,7 +263,7 @@ export function createOrbitRig({ camera, dom, plan, onChange }) {
     controls,
     /** Advance tweens / damping. Returns true while the camera is still moving. */
     update(dt) {
-      if (stepTween(dt)) return true;
+      if (stepTween()) return true;
       const zooming = stepZoom(dt);
       clampTarget();
       const moved = controls.enabled ? controls.update() : false;

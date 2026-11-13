@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Outdoor models — contact sheet</title>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three/three.module.min.js", "three/addons/": "../vendor/three/addons/" } }
+</script>
+<style>
+  body { margin: 0; font: 12px/1.3 system-ui, sans-serif; background: #eceae5; color: #222; }
+  h2 { margin: 14px 12px 4px; font-size: 15px; }
+  #nav { padding: 8px 12px; } #nav a { margin-right: 10px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 10px; }
+  .tile { background: #fff; border: 1px solid #d5d2cb; }
+  .tile canvas { display: block; float: left; }
+  .tile div { clear: both; padding: 2px 6px 3px; max-width: 480px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bad { color: #b00020; font-weight: 600; }
+  #report { white-space: pre-wrap; font: 11px/1.35 ui-monospace, monospace; padding: 8px 12px; }
+</style>
+</head>
+<body>
+<div id="nav"></div>
+<div id="sheet"></div>
+<div id="report">running…</div>
+<script type="module">
+/**
+ * Contact sheet + self-test for src/models/outdoor.js.
+ *   ?type=car        only one type        ?test=0   skip the junk-param test
+ * Every tile: 3D render (sun + shadows) and the 2D plan symbol at two zoom levels.
+ * window.__result = { fails: [...], cases, maxTris } when finished.
+ */
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { MODEL_TYPES } from '../src/models/types.js';
+import { buildModel, drawSymbol, getModel } from '../src/models/registry.js';
+import '../src/models/outdoor.js';
+
+const S = (w, d, h, params = {}, label = '') => ({ w, d, h, params, label });
+const CASES = {
+  car: [S(180, 450, 145, { variant: 'sedan' }), S(190, 470, 170, { variant: 'suv', color: '#5b6770' }), S(178, 405, 148, { variant: 'hatchback', color: '#b3272d' }), S(185, 470, 144, { variant: 'ev', color: '#f1f2f4' }),
+    S(195, 500, 195, { variant: 'van', color: '#eceeee' }), S(190, 530, 180, { variant: 'pickup', color: '#2f3a4a' }), S(80, 210, 115, { variant: 'motorcycle' }), S(60, 175, 105, { variant: 'bicycle' }),
+    S(45, 110, 115, { variant: 'e-scooter' }), S(120, 240, 180, { variant: 'golf-cart' }), S(62, 130, 115, { variant: 'kalnoit' }), S(70, 150, 165, { variant: 'kalnoit', color: '#2f5f8f' }, 'kalnoit roofed')],
+  pergola: [S(400, 300, 250, { variant: 'slatted' }), S(500, 350, 250, { variant: 'slatted', material: 'aluminium', color: '#3a3d42' }, 'slatted alu'), S(800, 300, 250, { variant: 'slatted', curtains: true }, 'long + curtains'),
+    S(400, 300, 250, { variant: 'slatted', attached: true, slats: 9 }, 'attached, 9 slats'), S(400, 300, 250, { variant: 'louvered' }), S(700, 400, 260, { variant: 'louvered', color: '#f1f1ee', posts: 6 }, 'louvered 6 posts'),
+    S(400, 300, 250, { variant: 'solid-roof' }), S(300, 300, 270, { variant: 'gazebo', curtains: true }), S(400, 300, 250, { variant: 'fabric' }), S(400, 300, 250, { variant: 'retractable-awning' }),
+    S(400, 300, 30, { variant: 'retractable-awning', color2: '#b3272d' }, 'awning (wall box)'), S(300, 500, 240, { variant: 'carport' }), S(400, 300, 260, { variant: 'wall-mounted' }), S(400, 300, 250, { variant: 'polycarbonate' }), S(400, 300, 250, { variant: 'slatted', posts: 2 }, 'posts: 2')],
+  parasol: [S(300, 300, 250, { variant: 'centre-pole' }), S(300, 300, 250, { variant: 'centre-pole', shape: 'square', color: '#3e5c76' }, 'square'), S(400, 300, 260, { variant: 'centre-pole', shape: 'rect', canopy: '#b3472d' }, 'rect'),
+    S(300, 300, 250, { variant: 'centre-pole', open: false }, 'closed'), S(300, 300, 260, { variant: 'cantilever', shape: 'square' }), S(350, 350, 270, { variant: 'cantilever', color: '#3a3d42' }, 'cantilever round'),
+    S(250, 250, 250, { variant: 'wall' }), S(400, 400, 280, { variant: 'sail' }), S(500, 350, 300, { variant: 'sail', color: '#c9b79a' }, 'sail rect'), S(400, 350, 280, { variant: 'sail-triangle' })],
+  lounger: [S(70, 195, 35, { variant: 'lounger' }), S(70, 195, 85, { variant: 'lounger', backAngle: 45, cushion: true, wheels: true, material: 'teak' }, 'teak, back 45°'), S(65, 190, 90, { variant: 'lounger', material: 'plastic', color: '#f1f1ee', cushion: false }, 'plastic'),
+    S(200, 140, 80, { variant: 'daybed' }), S(200, 160, 200, { variant: 'daybed', material: 'wood' }, 'daybed canopy'), S(140, 200, 80, { variant: 'double' }), S(105, 105, 195, { variant: 'hanging-egg' }), S(90, 120, 75, { variant: 'bean-bag' })],
+  bbq: [S(140, 60, 115, { variant: 'gas' }), S(75, 60, 115, { variant: 'gas', lid: 'open', sideShelves: false, burners: 2, color: '#c9ccd0' }, 'gas open'), S(60, 65, 100, { variant: 'charcoal-kettle' }), S(60, 65, 100, { variant: 'charcoal-kettle', lid: 'open', color: '#b3272d' }, 'kettle open'),
+    S(130, 75, 120, { variant: 'kamado' }), S(80, 55, 30, { variant: 'built-in' }), S(250, 65, 115, { variant: 'outdoor-kitchen' }), S(80, 90, 190, { variant: 'pizza-oven' }), S(60, 60, 70, { variant: 'pizza-oven', color: '#2b2d31' }, 'pizza tabletop'),
+    S(150, 70, 150, { variant: 'smoker' }), S(80, 80, 100, { variant: 'tabun' }), S(70, 35, 75, { variant: 'mangal' })],
+  fence: [S(200, 6, 150, { variant: 'slat-horizontal' }), S(800, 6, 180, { variant: 'slat-horizontal', material: 'aluminium', color: '#3a3d42', gap: 0.1 }, 'long alu'), S(200, 6, 150, { variant: 'slat-vertical' }), S(250, 6, 100, { variant: 'picket' }),
+    S(250, 5, 150, { variant: 'mesh' }), S(300, 25, 100, { variant: 'stone-wall' }), S(300, 20, 180, { variant: 'block-wall' }), S(200, 10, 180, { variant: 'hedge-screen' }), S(200, 6, 150, { variant: 'bamboo' }), S(300, 5, 110, { variant: 'glass' }),
+    S(100, 6, 150, { variant: 'gate' }), S(300, 6, 150, { variant: 'gate', color: '#3a3d42', material: 'metal' }, 'double gate'), S(400, 8, 160, { variant: 'gate-sliding' }), S(200, 40, 100, { variant: 'gabion' }), S(200, 6, 180, { variant: 'trellis' }),
+    S(250, 5, 100, { variant: 'railing' }), S(300, 4, 120, { variant: 'pool-fence' }), S(200, 6, 150, { variant: 'slat-horizontal', posts: false, gap: 0.5 }, 'no posts, gap .5')],
+  shed: [S(200, 150, 220, { variant: 'shed' }), S(250, 200, 210, { variant: 'shed', material: 'wood', roof: 'pent', window: true, doors: 1 }, 'wood pent'), S(180, 120, 190, { variant: 'shed', material: 'metal', roof: 'flat', color: '#5d7a55' }, 'metal flat'),
+    S(120, 55, 60, { variant: 'storage-box' }), S(150, 80, 125, { variant: 'bin-store' }), S(75, 50, 180, { variant: 'tall-cabinet' }), S(190, 90, 135, { variant: 'bike-store' }), S(250, 190, 215, { variant: 'greenhouse' }), S(80, 100, 85, { variant: 'dog-house' })],
+  'fire-pit': [S(80, 80, 40, { variant: 'bowl' }), S(80, 80, 40, { variant: 'bowl', lit: true }, 'bowl lit'), S(120, 70, 45, { variant: 'table', lit: true }), S(50, 50, 120, { variant: 'chiminea', lit: true }), S(80, 80, 220, { variant: 'heater-mushroom', lit: true }),
+    S(50, 50, 225, { variant: 'heater-pyramid', lit: true }), S(90, 90, 30, { variant: 'ring' })],
+  'swing-bench': [S(200, 120, 180, { variant: 'swing-bench' }), S(170, 115, 160, { variant: 'swing-bench', canopy: false, seats: 2, color: '#5d7a55' }, 'no canopy'), S(300, 110, 110, { variant: 'hammock-stand' }), S(350, 100, 170, { variant: 'hammock-trees' }),
+    S(110, 110, 200, { variant: 'hanging-chair' }), S(180, 130, 190, { variant: 'porch-swing' })],
+  'outdoor-light': [S(12, 12, 60, { variant: 'bollard' }), S(10, 12, 25, { variant: 'spike-spot' }), S(30, 30, 210, { variant: 'post-lantern' }), S(500, 15, 250, { variant: 'string' }), S(800, 15, 260, { variant: 'string', count: 30, on: false }, 'string off'),
+    S(12, 10, 25, { variant: 'wall' }), S(12, 4, 8, { variant: 'step' }), S(12, 12, 40, { variant: 'solar-path' }), S(25, 15, 30, { variant: 'flood' }), S(20, 20, 40, { variant: 'lantern' }), S(40, 40, 40, { variant: 'globe' })],
+  play: [S(300, 250, 220, { variant: 'swing-set' }), S(100, 250, 160, { variant: 'slide' }), S(366, 366, 270, { variant: 'trampoline' }), S(300, 300, 80, { variant: 'trampoline', net: false }, 'no net'), S(130, 120, 150, { variant: 'playhouse' }),
+    S(150, 150, 25, { variant: 'sandbox' }), S(150, 150, 140, { variant: 'sandbox' }, 'sandbox roof'), S(350, 300, 250, { variant: 'climbing-frame' }), S(250, 40, 70, { variant: 'seesaw' }), S(110, 180, 305, { variant: 'basketball-hoop' }),
+    S(300, 120, 200, { variant: 'football-goal' }), S(180, 180, 40, { variant: 'paddling-pool' }), S(274, 152, 91, { variant: 'ping-pong' }), S(800, 40, 220, { variant: 'ninja-line' }), S(90, 45, 95, { variant: 'mud-kitchen' })],
+  utility: [S(300, 300, 190, { variant: 'clothesline-rotary' }), S(200, 120, 180, { variant: 'clothesline-wall' }), S(200, 100, 25, { variant: 'clothesline-wall' }, 'wall unit'), S(180, 55, 95, { variant: 'clothes-rack' }), S(100, 100, 220, { variant: 'outdoor-shower' }),
+    S(30, 30, 215, { variant: 'outdoor-shower' }, 'shower post'), S(45, 50, 60, { variant: 'hose-reel' }), S(20, 25, 90, { variant: 'tap' }), S(58, 73, 107, { variant: 'bin' }), S(190, 75, 107, { variant: 'bins-3' }), S(80, 80, 95, { variant: 'compost' }),
+    S(35, 25, 115, { variant: 'mailbox' }), S(60, 60, 100, { variant: 'rain-barrel' }), S(30, 25, 140, { variant: 'ev-charger' }), S(70, 35, 115, { variant: 'gas-tanks' }), S(40, 20, 120, { variant: 'irrigation-controller' }),
+    S(200, 60, 80, { variant: 'bike-rack' }), S(100, 35, 45, { variant: 'doormat-bench' }), S(100, 40, 180, { variant: 'doormat-bench' }, 'bench + hooks')],
+};
+/** Cases whose box is intentionally not filled (see final report): flames, closed parasol, floor-box awning. */
+const LOOSE = (type, c) => c.params.lit || (type === 'parasol' && c.params.open === false) || (type === 'pergola' && c.params.variant === 'retractable-awning' && c.h > 100);
+
+const q = new URLSearchParams(location.search), only = q.get('type'), types = Object.keys(CASES).filter((t) => !only || t === only);
+document.getElementById('nav').innerHTML = '<a href="?">all</a>' + Object.keys(CASES).map((t) => `<a href="?type=${t}">${t}</a>`).join('');
+
+// ── 3D rig: one renderer, each tile rendered then copied to its own canvas ──
+const TW = 300, TH = 230, SW = 190;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(TW, TH); renderer.setPixelRatio(1);
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#e9edf0');
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.55;
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: '#cfccc4', roughness: 0.95 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+scene.add(new THREE.HemisphereLight('#ffffff', '#b9b2a4', 0.7));
+const sun = new THREE.DirectionalLight('#fff4e0', 2.6); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024); sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.02; scene.add(sun, sun.target);
+const cam = new THREE.PerspectiveCamera(30, TW / TH, 0.05, 200);
+
+function render3D(obj, c) {
+  scene.add(obj);
+  const w = c.w / 100, d = c.d / 100, h = c.h / 100, r = Math.hypot(w, d, h) / 2;
+  const dir = new THREE.Vector3(0.85, 0.62, 1.25).normalize();
+  cam.position.copy(dir).multiplyScalar(r / Math.sin((cam.fov / 2) * Math.PI / 180) * 1.08).add(new THREE.Vector3(0, h / 2, 0));
+  cam.lookAt(0, h * 0.45, 0);
+  sun.position.set(-r * 1.2, r * 2.6 + h, r * 1.6); sun.target.position.set(0, h / 2, 0);
+  const sc = sun.shadow.camera; sc.left = sc.bottom = -r * 2; sc.right = sc.top = r * 2; sc.near = 0.1; sc.far = r * 8 + 10; sc.updateProjectionMatrix();
+  renderer.render(scene, cam);
+  scene.remove(obj);
+}
+function draw2D(ctx, item, x0, y0, bw, bh) {
+  const s = Math.min(bw / item.w, bh / item.d);
+  ctx.save(); ctx.translate(x0 + bw / 2, y0 + bh / 2); ctx.scale(s, s);
+  drawSymbol(ctx, item, 1 / s);
+  ctx.restore();
+}
+const tris = (obj) => { let n = 0, m = 0; obj.traverse((o) => { if (o.isMesh) { m++; n += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3; } }); return [Math.round(n), m]; };
+
+const result = { fails: [], cases: 0, maxTris: 0, throws: 0 }, sheet = document.getElementById('sheet');
+const TOL = 0.0101;
+for (const type of types) {
+  const h2 = document.createElement('h2'); h2.textContent = `${type} — ${MODEL_TYPES[type].label}`; sheet.append(h2);
+  const grid = document.createElement('div'); grid.className = 'grid'; sheet.append(grid);
+  CASES[type].forEach((c, i) => {
+    const item = { id: `${type}-${i}`, type, w: c.w, d: c.d, h: c.h, params: c.params };
+    const obj = buildModel(item), [nt, nm] = tris(obj);
+    const b = new THREE.Box3().setFromObject(obj), bp = new THREE.Box3().setFromObject(obj, true);
+    const want = [-c.w / 200, 0, -c.d / 200, c.w / 200, c.h / 100, c.d / 200];
+    const err = (bx) => Math.max(...[bx.min.x, bx.min.y, bx.min.z, bx.max.x, bx.max.y, bx.max.z].map((v, k) => Math.abs(v - want[k])));
+    const e1 = err(b), e2 = err(bp), loose = LOOSE(type, c), bad = !loose && (e1 > TOL || e2 > TOL);
+    const sc = obj.children[0] ? obj.children[0].scale : new THREE.Vector3(1, 1, 1), dev = Math.max(Math.abs(sc.x - 1), Math.abs(sc.y - 1), Math.abs(sc.z - 1));
+    result.cases++; result.maxTris = Math.max(result.maxTris, nt);
+    if (bad) result.fails.push(`${item.id} ${c.params.variant} bbox err ${(e1 * 100).toFixed(1)}cm precise ${(e2 * 100).toFixed(1)}cm`);
+    if (nt > (type === 'car' ? 5200 : 3600)) result.fails.push(`${item.id} ${c.params.variant} ${nt} tris`);
+    const tile = document.createElement('div'); tile.className = 'tile';
+    const c3 = document.createElement('canvas'); c3.width = TW; c3.height = TH;
+    render3D(obj, c); c3.getContext('2d').drawImage(renderer.domElement, 0, 0);
+    const c2 = document.createElement('canvas'); c2.width = SW; c2.height = TH;
+    const g2 = c2.getContext('2d'); g2.fillStyle = '#fff'; g2.fillRect(0, 0, SW, TH);
+    draw2D(g2, item, 12, 8, SW - 24, TH - 70); draw2D(g2, item, SW - 50, TH - 50, 40, 40);
+    const cap = document.createElement('div');
+    cap.innerHTML = `<b>${c.label || c.params.variant}</b> ${c.w}×${c.d}×${c.h} · ${nt}▲ ${nm}m · fit ${(dev * 100).toFixed(1)}%` + (bad ? ` <span class="bad">BBOX ${(e1 * 100).toFixed(1)}/${(e2 * 100).toFixed(1)}cm</span>` : loose ? ' (loose)' : '');
+    tile.append(c3, c2, cap); grid.append(tile);
+  });
+}
+
+// ── robustness: p = {} and junk params / sizes must never throw ──
+if (q.get('test') !== '0') {
+  const junkVals = ['zzz', -5, 1e9, NaN, null, {}, [], true, '#12', ''];
+  const scratch = document.createElement('canvas').getContext('2d');
+  for (const type of types) {
+    const def = getModel(type), names = /'([\w-]+)'/g, variants = [...(MODEL_TYPES[type].params.variant || '').matchAll(names)].map((m) => m[1]);
+    const keys = [...Object.keys(MODEL_TYPES[type].params), 'color', 'color2', 'color3', 'material', 'material2', 'style', 'lightColor'];
+    const sizes = [[MODEL_TYPES[type].size.w, MODEL_TYPES[type].size.d, MODEL_TYPES[type].size.h], [1, 1, 1], [2000, 1500, 600], [5, 400, 20], [NaN, undefined, -3]];
+    const ps = [{}, undefined, null];
+    for (const v of [...variants, 'nope']) { ps.push({ variant: v }); junkVals.forEach((j, n) => { const p = { variant: v }; keys.forEach((k, m) => { if (k !== 'variant') p[k] = junkVals[(n + m) % junkVals.length]; }); ps.push(p); }); }
+    for (const p of ps) for (const [w, d, h] of sizes) {
+      try {
+        const o = def.build({ w: w / 100, d: d / 100, h: h / 100, p, item: { id: 'j', type, params: p } });
+        if (!o || !o.isObject3D) throw new Error('no object');
+        def.draw2d(scratch, { w, d, h, p, px: 1, item: null });
+      } catch (e) { result.throws++; if (result.fails.length < 60) result.fails.push(`${type} THROW ${JSON.stringify(p)} ${w}x${d}x${h}: ${e.message}`); }
+    }
+    // default size / default params through the public API must also be exact
+    const sz = MODEL_TYPES[type].size, o = buildModel({ id: 'd', type, w: sz.w, d: sz.d, h: sz.h, params: {} }), bb = new THREE.Box3().setFromObject(o), s = bb.getSize(new THREE.Vector3());
+    if (Math.abs(s.x - sz.w / 100) > TOL || Math.abs(s.y - sz.h / 100) > TOL || Math.abs(s.z - sz.d / 100) > TOL || Math.abs(bb.min.y) > TOL) result.fails.push(`${type} default box ${s.x.toFixed(3)}×${s.z.toFixed(3)}×${s.y.toFixed(3)}`);
+  }
+}
+document.getElementById('report').textContent = `cases ${result.cases} · max tris ${result.maxTris} · throws ${result.throws} · fails ${result.fails.length}\n` + result.fails.join('\n');
+window.__result = result;
+</script>
+</body>
+</html>

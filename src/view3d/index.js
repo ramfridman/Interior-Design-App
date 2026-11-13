@@ -8,7 +8,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { createOrbitRig } from './camera.js';
+import { createOrbitRig, STALL_MS } from './camera.js';
 import { createItemsLayer } from './items.js';
 import { createInteraction } from './interaction.js';
 import { createWalk, walkFov } from './walk.js';
@@ -111,7 +111,7 @@ export function createView3D(container, ctx) {
     house = build('house', houseMod && houseMod.buildHouse && (() => houseMod.buildHouse(ctx)), () => standInHouse(ctx), (h) => h.group && h.group.isObject3D);
     site = build('site', siteMod && siteMod.buildSite && (() => siteMod.buildSite(ctx)), () => standInSite(ctx), (s) => s.group && s.group.isObject3D);
     scene.add(house.group, site.group);
-    env = build('environment', envMod && envMod.createEnvironment && (() => envMod.createEnvironment({ scene, renderer, ctx })), () => standInEnvironment({ scene, renderer, ctx }), (e) => typeof e.setTimeOfDay === 'function');
+    env = build('environment', envMod && envMod.createEnvironment && (() => envMod.createEnvironment({ scene, renderer, ctx, shadowMapSize: softwareGL(gl) ? 2048 : undefined })), () => standInEnvironment({ scene, renderer, ctx }), (e) => typeof e.setTimeOfDay === 'function');
     call(env, 'setTimeOfDay', store.ui.timeOfDay);
     applyHouseState();
     ready = true;
@@ -139,10 +139,10 @@ export function createView3D(container, ctx) {
     let dt = lastT ? (now - lastT) / 1000 : 0;
     lastT = now;
     if (dt > 0) stats.frameMs += (Math.min(dt, 1) * 1000 - stats.frameMs) * 0.1;
-    dt = dt > 0 ? Math.min(dt, 0.1) : 1 / 60;
+    dt = dt > 0 ? Math.min(dt, 0.25) : 1 / 60;
     stats.fps = stats.frameMs ? 1000 / stats.frameMs : 0;
     let again = false;
-    if (fly) { stepFly(dt); again = true; }
+    if (fly) { stepFly(); again = true; }
     else if (mode === 'walk') { walk.update(dt); again = true; }
     else again = rig.update(dt);
     if (houseDirty) { houseDirty = false; call(house, 'update'); call(site, 'update'); dirty = true; }
@@ -173,19 +173,22 @@ export function createView3D(container, ctx) {
 
   // ───────────── camera fly (orbit ⇄ walk transition) ─────────────
   function flyTo(position, quaternion, fov, seconds, done, extra = {}) {
-    fly = { p0: camera.position.clone(), q0: camera.quaternion.clone(), f0: camera.fov, p1: position, q1: quaternion, f1: fov, t: 0, dur: seconds, done, ...extra };
+    const now = performance.now();
+    fly = { p0: camera.position.clone(), q0: camera.quaternion.clone(), f0: camera.fov, p1: position, q1: quaternion, f1: fov, start: now, last: now, dur: seconds * 1000, done, ...extra };
     invalidate();
   }
-  function stepFly(dt) {
-    const f = fly;
-    f.t = Math.min(1, f.t + dt / f.dur);
-    const k = ease(f.t);
+  /** Wall-clock driven; a frame that took > 250 ms snaps straight to the end pose. */
+  function stepFly() {
+    const f = fly, now = performance.now();
+    const t = now - f.last > STALL_MS ? 1 : Math.min(1, (now - f.start) / f.dur);
+    f.last = now;
+    const k = ease(t);
     camera.position.lerpVectors(f.p0, f.p1, k);
     camera.quaternion.slerpQuaternions(f.q0, f.q1, k);
     camera.fov = f.f0 + (f.f1 - f.f0) * k;
     camera.updateProjectionMatrix();
     if (f.deferRoof && camera.position.y < store.project.ceilingHeight / 100 - 0.1) { f.deferRoof = false; applyHouseState(); }
-    if (f.t >= 1) finishFly();
+    if (t >= 1) finishFly();
   }
   function finishFly() {
     if (!fly) return;
@@ -212,7 +215,7 @@ export function createView3D(container, ctx) {
     if (opts.animate === false || reducedMotion() || !ready) settle();
     else {
       camera.position.copy(from.p); camera.quaternion.copy(from.q); camera.fov = from.fov;
-      flyTo(eye.position, eye.quaternion, fov, 0.95, settle, { deferRoof: true });
+      flyTo(eye.position, eye.quaternion, fov, 0.8, settle, { deferRoof: true });
     }
     camera.updateProjectionMatrix();
     applyHouseState();
@@ -238,7 +241,7 @@ export function createView3D(container, ctx) {
       const ghost = camera.clone();
       ghost.position.setFromSphericalCoords(pose.radius, pose.phi, pose.theta).add(pose.target);
       ghost.up.set(0, 1, 0); ghost.lookAt(pose.target);
-      flyTo(ghost.position.clone(), ghost.quaternion.clone(), pose.fov, 0.7, restore);
+      flyTo(ghost.position.clone(), ghost.quaternion.clone(), pose.fov, 0.65, restore);
     }
     applyHouseState();
     emit('mode', { mode });
@@ -364,6 +367,15 @@ export function createView3D(container, ctx) {
     },
   };
   return api;
+}
+
+/** True when WebGL runs on a CPU rasteriser (SwiftShader / llvmpipe), where big shadow maps are very slow. */
+function softwareGL(gl) {
+  try {
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '');
+    return /swiftshader|llvmpipe|software|softpipe/i.test(name);
+  } catch (e) { return false; }
 }
 
 /** Graceful placeholder when WebGL 2 is not available: same API, nothing rendered. */

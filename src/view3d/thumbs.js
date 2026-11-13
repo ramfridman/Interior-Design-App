@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { buildModel, drawSymbol, loadModels } from '../models/index.js';
-import { fitRadius } from './camera.js';
+import { framePoints } from './camera.js';
 
 const BUDGET_MS = 6;
 const FINISHES = new Set(['floor-finish', 'wall-finish']);
@@ -69,26 +69,10 @@ function createStudio() {
   return { canvas, renderer, scene, camera, blob };
 }
 
-const _corner = new THREE.Vector3();
-/** Aim the studio camera at `box` from (theta, phi) and tighten the framing to the projected silhouette. */
+/** Aim the studio camera at `box` from (theta, phi), framed tightly with a little margin. */
 function frame(camera, box, theta, phi, margin) {
-  const target = box.getCenter(new THREE.Vector3());
-  let radius = fitRadius(box, target, theta, phi, camera.fov, 1, 1);
-  for (let pass = 0; pass < 6; pass++) {
-    camera.position.setFromSphericalCoords(radius, phi, theta).add(target);
-    camera.lookAt(target);
-    camera.updateMatrixWorld(true);
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (let i = 0; i < 8; i++) {
-      _corner.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(camera);
-      x0 = Math.min(x0, _corner.x); x1 = Math.max(x1, _corner.x); y0 = Math.min(y0, _corner.y); y1 = Math.max(y1, _corner.y);
-    }
-    const half = radius * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
-    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0), up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
-    target.addScaledVector(right, ((x0 + x1) / 2) * half).addScaledVector(up, ((y0 + y1) / 2) * half);
-    radius *= Math.max(0.2, Math.max(x1 - x0, y1 - y0) / 2);
-  }
-  radius *= margin;
+  const pts = Array.from({ length: 8 }, (_, i) => new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z));
+  const { target, radius } = framePoints(pts, theta, phi, camera.fov, 1, margin);
   camera.position.setFromSphericalCoords(radius, phi, theta).add(target);
   camera.lookAt(target);
 }

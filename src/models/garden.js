@@ -1216,3 +1216,610 @@ registerModel('tree', {
     }
   },
 });
+
+// ═════════════════════════════════ 6. shrubs ═════════════════════════════════
+/** Thin 3-sided spike from p0 to its apex p1. */
+function spikeG(p0, p1, r) {
+  const a = [p0[0] + r, p0[1], p0[2]], b2 = [p0[0] - r / 2, p0[1], p0[2] + r * 0.87], c = [p0[0] - r / 2, p0[1], p0[2] - r * 0.87];
+  return [...a, ...b2, ...p1, ...b2, ...c, ...p1, ...c, ...a, ...p1];
+}
+/** 3-sided spindle (flower bud / spike head) between p0 and p1, widest at 40 %. */
+function budG(p0, p1, r) {
+  const m = [lerp(p0[0], p1[0], 0.4), lerp(p0[1], p1[1], 0.4), lerp(p0[2], p1[2], 0.4)];
+  const a = [m[0] + r, m[1], m[2]], b2 = [m[0] - r / 2, m[1], m[2] + r * 0.87], c = [m[0] - r / 2, m[1], m[2] - r * 0.87];
+  return [...a, ...b2, ...p1, ...b2, ...c, ...p1, ...c, ...a, ...p1, ...b2, ...a, ...p0, ...c, ...b2, ...p0, ...a, ...c, ...p0];
+}
+/** Five-petalled flat flower facing direction dir. */
+function starG(c, dir, r, petals = 5) {
+  const n = new THREE.Vector3(...dir).normalize(), u = new THREE.Vector3(n.z, 0, -n.x), tri = [];
+  if (u.lengthSq() < 1e-6) u.set(1, 0, 0);
+  u.normalize(); const v = new THREE.Vector3().crossVectors(n, u);
+  const at = (a, k, lift) => [c[0] + (u.x * Math.cos(a) + v.x * Math.sin(a)) * r * k + n.x * r * lift, c[1] + (u.y * Math.cos(a) + v.y * Math.sin(a)) * r * k + n.y * r * lift, c[2] + (u.z * Math.cos(a) + v.z * Math.sin(a)) * r * k + n.z * r * lift];
+  for (let i = 0; i < petals; i++) { const a = (i / petals) * TAU, w = Math.PI / petals * 0.92; tri.push(...c, ...at(a - w, 0.62, 0.12), ...at(a, 1, 0.3), ...c, ...at(a, 1, 0.3), ...at(a + w, 0.62, 0.12)); }
+  return tri;
+}
+/**
+ * n blades radiating from point c (rosettes, grasses, ferns, paddles): elevation runs el0 (inner) → el1 (outer) and
+ * every blade arches down by `curve`. o: { wid ratio, el0, el1, curve, colors, segs, profile, fold, r0 start radius }
+ */
+function bladeFan(b, mat, c, n, L, rnd, o) {
+  for (let i = 0; i < n; i++) {
+    const u = (i + 0.5) / n, az = i * 2.39996 + rnd() * 0.4, el = lerp(o.el0, o.el1, Math.pow(u, 0.9)), Ll = L * (0.8 + rnd() * 0.35), m = o.segs || 4, r0 = o.r0 || 0;
+    const pts = [[c[0] + Math.cos(az) * r0, c[1], c[2] + Math.sin(az) * r0]];
+    for (let q = 1; q <= m; q++) { const ang = el - o.curve * Math.pow(q / m, 1.6), pr = pts[q - 1]; pts.push([pr[0] + Math.cos(az) * Math.cos(ang) * Ll / m, pr[1] + Math.sin(ang) * Ll / m, pr[2] + Math.sin(az) * Math.cos(ang) * Ll / m]); }
+    b.add(mat, paintFoliage(bladeG(pts, Ll * o.wid, o.profile || strap, { fold: o.fold ?? 0.25 }), K.shade(o.colors[i % o.colors.length], lerp(0.1, -0.1, u)), rnd, { lo: -0.22, hi: 0.14 }));
+  }
+}
+const SHRUBS = {
+  bougainvillea: { f: ['#4a7a38', '#5a8a42'], k: 8, up: 0.2, fl: { c: '#c8287f', mode: 'cover', cover: 0.7 }, sprays: 7, leaf: { n: 14, s: 0.1, a: 0.7 } },
+  lavender: { kind: 'spikes', f: ['#8a9a80', '#7c8c74'], fl: { c: '#8a6fd0' }, n: 90, len: 0.42 },
+  rosemary: { kind: 'spikes', f: ['#4f6a4a', '#5c7854'], fl: { c: '#9aa8e0' }, n: 80, len: 0.22, upright: true, green: true },
+  hibiscus: { f: ['#2f6a30', '#3b7a38', '#28582a'], k: 8, up: 0.7, stems: true, fl: { c: '#e0283a', mode: 'star', n: 12, s: 0.08 } },
+  oleander: { f: ['#4a6f42', '#587c4c'], k: 8, up: 1, stems: true, fl: { c: '#f08aa8', mode: 'cluster', n: 20, s: 0.06, top: true }, leaf: { n: 16, s: 0.13, a: 0.18 } },
+  rose: { f: ['#3f6f38', '#4c7c42'], k: 7, up: 0.6, stems: true, fl: { c: '#d8243c', mode: 'rose', n: 12, s: 0.055 } },
+  lantana: { f: ['#4f7f3c', '#5c8c46'], k: 8, up: 0, fl: { c: '#f2a024', c2: ['#f2d024', '#f05a3a', '#f07aa0'], mode: 'cluster', n: 34, s: 0.035 } },
+  plumbago: { f: ['#5f8f4a', '#6c9c54'], k: 8, up: 0.2, fl: { c: '#9fc4ee', mode: 'cluster', n: 30, s: 0.045 } },
+  myrtle: { f: ['#33602f', '#3f6c38', '#2a5028'], k: 9, up: 0.4, fl: { c: '#f4f1e4', mode: 'dots', n: 26, s: 0.02 }, leaf: { n: 12, s: 0.05, a: 0.5 } },
+  pittosporum: { f: ['#6a9a55', '#7aa862', '#5a8a48'], k: 9, up: 0.3, leaf: { n: 14, s: 0.07, a: 0.6, c: ['#cfe0a8', '#8fba6a'] } },
+  duranta: { f: ['#a8c040', '#b8cc4c', '#94ac38'], k: 8, up: 0.4, fl: { c: '#8f7ae0', c2: ['#f0a030'], mode: 'cluster', n: 20, s: 0.04 } },
+  jasmine: { f: ['#3f7038', '#4c7c42'], k: 8, up: 0.1, fl: { c: '#fffdf4', mode: 'dots', n: 40, s: 0.024 } },
+  agave: { kind: 'rosette', f: ['#7f9c8c', '#8caa98', '#708c7e'], n: 26, wid: 0.2, el: [1.35, 0.05], curve: 0.45 },
+  aloe: { kind: 'rosette', f: ['#6f9a5a', '#7ca864'], n: 20, wid: 0.14, el: [1.4, 0.25], curve: 0.5, stalk: '#f06a2a', hK: 0.6 },
+  cactus: { kind: 'cactus', f: ['#4f7a4a', '#5c8854', '#6a9a5a'], fl: { c: '#f2c63a' } },
+  yucca: { kind: 'rosette', f: ['#5f8a5a', '#6c9864', '#52784e'], n: 44, wid: 0.075, el: [1.45, -0.55], curve: 0.25, trunk: 0.4, stalk: '#f4efd8', hK: 0.72 },
+  'ornamental-grass': { kind: 'grass', f: ['#8aa860', '#9ab46a', '#b8b070'], fl: { c: '#e4d4b0' } },
+  'bird-of-paradise': { kind: 'paddle', f: ['#4f8a4a', '#5c9854', '#427a40'], fl: { c: '#f08a1e' } },
+  geranium: { f: ['#4f8a3c', '#5c9846'], k: 7, up: 0, fl: { c: '#e8303a', mode: 'cluster', n: 14, s: 0.06, raise: 0.5 } },
+  sage: { kind: 'spikes', f: ['#8fa088', '#9cac94'], fl: { c: '#7a5fc0' }, n: 60, len: 0.36 },
+  'succulent-mix': { kind: 'succulents', f: ['#7fa894', '#9a6a7a', '#a8c070', '#6f9a8a', '#c0a0a8'] },
+  fern: { kind: 'fern', f: ['#4f8a3a', '#5c9a44', '#427a32'] },
+  generic: { f: ['#4f7f3c', '#5f8f48', '#40702f'], k: 8, up: 0.3 },
+};
+/** Dome of foliage blobs with flowers by mode: cover | dots | cluster | star | rose. o: { f foliage tones, fl flower spec, custom } */
+function moundShrub(b, S, W, D, H, rnd, o) {
+  const leafM = vmat('leaf'), rx = W / 2, rz = D / 2, up = S.up ?? 0.3, k = S.k || 8, f = o.f, fl = o.fl, blobs = [];
+  const sizeK = clamp(Math.sqrt(W * D), 0.45, 1.8), lf = S.leaf || { n: 10, s: 0.07, a: 0.5 };
+  const add = (x, y, z, bx, by, bz, main, forceFl) => {
+    const cover = forceFl || (fl && fl.mode === 'cover' && !main && rnd() < fl.cover), col = cover ? K.shade(fl.c, (rnd() - 0.5) * 0.2) : f[Math.floor(rnd() * f.length)];
+    b.add(leafM, paintFoliage(blobG(bx, by, bz, x, y, z, rnd, { detail: main ? 2 : 1, amp: 0.2, floor: 0 }), col, rnd, { lo: cover ? -0.2 : -0.36 }));
+    b.add(leafM, leafCloudG([x, y, z], [bx, by, bz], Math.round(lf.n * (main ? 1.5 : 1)), lf.s * sizeK * 1.3, rnd, { aspect: lf.a, hang: 0, colors: cover ? [fl.c, K.shade(fl.c, 0.2)] : (lf.c && !o.custom ? lf.c : [K.shade(col, 0.15), col]), up: true }));
+    blobs.push({ x, y, z, bx, by, bz });
+  };
+  add(0, H * 0.5, 0, rx * lerp(0.62, 0.5, up), H * 0.5, rz * lerp(0.62, 0.5, up), true);
+  for (let i = 0; i < k; i++) {
+    const a = (i / k) * TAU + rnd() * 0.5, R = lerp(0.55, 0.42, up), hh = H * clamp(lerp(0.5, 0.78, up) + (rnd() - 0.3) * 0.35, 0.3, 1);
+    add(Math.cos(a) * R * rx, hh * 0.56, Math.sin(a) * R * rz, rx * 0.42, hh * 0.46, rz * 0.42, false);
+  }
+  if (S.stems) for (let i = 0; i < 5; i++) { const bl = blobs[1 + i]; b.add(vmat('bark'), tubeG(bez([0, 0, 0], [bl.x * 0.3, bl.y * 0.7, bl.z * 0.3], [bl.x, bl.y, bl.z], 3), taper(0.016 * sizeK, 0.007 * sizeK, 3), 5), '#6a5a48'); }
+  if (S.sprays && fl) for (let i = 0; i < S.sprays; i++) {
+    const a = (i / S.sprays) * TAU + rnd(), pts = bez([0, H * 0.5, 0], [Math.cos(a) * rx * 0.5, H * 1.1, Math.sin(a) * rz * 0.5], [Math.cos(a) * rx * 0.92, H * (0.35 + rnd() * 0.35), Math.sin(a) * rz * 0.92], 5);
+    for (let q = 2; q <= 5; q++) add(pts[q][0], pts[q][1], pts[q][2], rx * 0.17, H * 0.1, rz * 0.17, false, true);
+  }
+  if (fl && fl.mode !== 'cover') {
+    const n = Math.min(90, Math.round(fl.n * clamp(W * D, 0.35, 4))), fm = vmat('frond'), tri = {};
+    for (let i = 0; i < n; i++) {
+      const bl = blobs[Math.floor(rnd() * blobs.length)], a = rnd() * TAU, dy = fl.top ? 0.55 + rnd() * 0.45 : 0.1 + rnd() * 0.85, sr = Math.sqrt(1 - dy * dy), dir = [Math.cos(a) * sr, dy, Math.sin(a) * sr];
+      const q = [bl.x + dir[0] * bl.bx * 1.05, bl.y + dir[1] * bl.by * 1.05 + (fl.raise || 0) * fl.s, bl.z + dir[2] * bl.bz * 1.05], s = fl.s * sizeK * (0.8 + rnd() * 0.4);
+      const col = fl.c2 && rnd() < 0.5 ? fl.c2[Math.floor(rnd() * fl.c2.length)] : fl.c;
+      if (fl.mode === 'star') { (tri[col] = tri[col] || []).push(...starG(q, dir, s * 1.5)); b.add(leafM, blobG(s * 0.25, s * 0.5, s * 0.25, q[0] + dir[0] * s * 0.5, q[1] + dir[1] * s * 0.5, q[2] + dir[2] * s * 0.5, rnd, { detail: 0, amp: 0 }), '#f2d24a'); }
+      else if (fl.mode === 'rose') { b.add(leafM, paintFoliage(blobG(s * 1.25, s, s * 1.25, q[0], q[1], q[2], rnd, { detail: 0, amp: 0.15 }), col, rnd, { lo: -0.3, hi: 0.1 })); b.add(leafM, blobG(s * 0.6, s * 0.6, s * 0.6, q[0] + dir[0] * s * 0.6, q[1] + dir[1] * s * 0.6, q[2] + dir[2] * s * 0.6, rnd, { detail: 0, amp: 0.1 }), K.shade(col, -0.2)); }
+      else b.add(leafM, paintFoliage(blobG(s, s * 0.6, s, q[0], q[1], q[2], rnd, { detail: 0, amp: 0.2 }), K.shade(col, (rnd() - 0.5) * 0.15), rnd, { lo: -0.12 }));
+    }
+    for (const col of Object.keys(tri)) b.add(fm, paintFoliage(trisG(tri[col]), col, rnd, { lo: -0.1, hi: 0.1 }));
+  }
+}
+/** Lavender / rosemary / sage: a low mound bristling with fine stems tipped by flower spikes. */
+function spikeShrub(b, S, W, D, H, rnd, o) {
+  const rx = W / 2, rz = D / 2, green = [], flower = [], base = S.upright ? 0.55 : 0.5;
+  for (let i = 0; i < 4; i++) { const a = (i / 4) * TAU + rnd(); b.add(vmat('leaf'), paintFoliage(blobG(rx * 0.5, H * base * 0.6, rz * 0.5, Math.cos(a) * rx * 0.28, H * base * 0.5, Math.sin(a) * rz * 0.28, rnd, { amp: 0.25, floor: 0 }), o.f[i % o.f.length], rnd)); }
+  for (let i = 0; i < S.n; i++) {
+    const a = rnd() * TAU, el = S.upright ? 0.75 + rnd() * 0.8 : 0.3 + rnd() * 1.27, ce = Math.cos(el), se = Math.sin(el), k = 0.9 + rnd() * 0.1;
+    const p1 = [Math.cos(a) * ce * rx * k, se * H * k, Math.sin(a) * ce * rz * k], p0 = [p1[0] * 0.45, p1[1] * 0.4, p1[2] * 0.45], pm = [lerp(p0[0], p1[0], 1 - S.len), lerp(p0[1], p1[1], 1 - S.len), lerp(p0[2], p1[2], 1 - S.len)];
+    green.push(...spikeG(p0, S.green ? p1 : pm, 0.012 * (S.green ? 1.6 : 1)));
+    if (!S.green || rnd() < 0.35) flower.push(...budG(S.green ? lerp3(pm, p1, 0.5) : pm, p1, S.green ? 0.012 : 0.016));
+  }
+  b.add(vmat('frond'), paintFoliage(trisG(green), K.shade(o.f[0], S.green ? 0.05 : 0.12), rnd, { lo: -0.25 }));
+  if (flower.length) b.add(vmat('frond'), paintFoliage(trisG(flower), o.fl.c, rnd, { lo: -0.15, hi: 0.15, sparkle: 0.2 }));
+}
+const lerp3 = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+/** Agave / aloe / yucca: a rosette of stiff channelled leaves, optionally on a trunk and with a flower stalk. */
+function rosetteShrub(b, S, W, D, H, rnd, o) {
+  const R = Math.min(W, D) / 2, y0 = S.trunk ? H * S.trunk : 0, top = H * (S.hK || 1), L = S.trunk ? R * 1.02 : Math.max(R * 1.05, (top - y0) * 0.8);
+  if (S.trunk) {
+    b.add(vmat('bark'), paintBark(tubeG([[0, 0, 0], [R * 0.05, y0 * 0.5, 0], [0, y0, 0]], [R * 0.16, R * 0.12, R * 0.11], 8, { rough: 0.3, rnd }), '#7a6a55', rnd, y0));
+    b.add(vmat('frond'), paintFoliage(blobG(R * 0.3, y0 * 0.2, R * 0.3, 0, y0 * 0.84, 0, rnd, { amp: 0.35 }), '#a39472', rnd));
+  }
+  bladeFan(b, vmat('frond'), [0, y0, 0], S.n, L, rnd, { wid: S.wid, el0: S.el[0], el1: S.el[1], curve: S.curve, colors: o.f, segs: 4, fold: -0.3, r0: R * 0.04 });
+  if (S.stalk) {
+    const n = S.trunk ? 1 : 2, col = o.fl ? o.fl.c : S.stalk;
+    for (let i = 0; i < n; i++) {
+      const x = (i - (n - 1) / 2) * R * 0.3, yT = H * (1 - i * 0.12);
+      b.add(vmat('matte'), tubeG([[x * 0.3, y0, 0], [x, lerp(y0, yT, 0.6), 0]], 0.012, 5), '#8a9a5a');
+      for (let q = 0; q < 5; q++) { const t = q / 4; b.add(vmat('leaf'), paintFoliage(blobG(R * lerp(S.trunk ? 0.2 : 0.07, 0.04, t), (yT - y0) * 0.07, R * lerp(S.trunk ? 0.2 : 0.07, 0.04, t), x, lerp(lerp(y0, yT, 0.55), yT * 0.97, t), 0, rnd, { detail: 1, amp: 0.3 }), col, rnd, { lo: -0.15 })); }
+    }
+  }
+}
+/** Columnar cactus with arms next to a prickly-pear with pads. */
+function cactusShrub(b, S, W, D, H, rnd, o) {
+  const flat = vmat('flat'), rc = Math.min(W, D) * 0.13, cx = -W * 0.16, col = (i) => o.f[i % o.f.length];
+  const column = (x, z, r, h, i) => {
+    b.add(flat, paintY(tubeG([[x, 0, z], [x, h * 0.5, z], [x, h - r * 0.8, z]], [r * 0.92, r, r * 0.95], 16, { flute: 0.13, lobes: 8 }), K.shade(col(i), -0.2), col(i), 0, h));
+    b.add(flat, blobG(r * 0.98, r * 0.85, r * 0.98, x, h - r * 0.85, z, rnd, { amp: 0.03 }), col(i));
+  };
+  column(cx, -D * 0.1, rc, H, 0); column(cx + rc * 2.1, D * 0.12, rc * 0.82, H * 0.62, 1); column(cx - rc * 0.6, D * 0.3, rc * 0.7, H * 0.4, 2);
+  for (const [sg, hy] of [[1, 0.42], [-1, 0.55]]) {                       // arms
+    const e = [cx + sg * rc * 2.4, H * (hy + 0.3), -D * 0.1], pts = bez([cx, H * hy, -D * 0.1], [cx + sg * rc * 2.6, H * hy - rc * 0.3, -D * 0.1], e, 5);
+    if (sg > 0 && cx + rc * 3.2 > W / 2) continue;
+    b.add(flat, tubeG(pts, rc * 0.6, 12, { flute: 0.13, lobes: 6 }), col(sg > 0 ? 1 : 0));
+    b.add(flat, blobG(rc * 0.6, rc * 0.55, rc * 0.6, e[0], e[1], e[2], rnd, { amp: 0.03 }), col(1));
+  }
+  const px = W * 0.24, pr = Math.min(W, D) * 0.15;                          // opuntia pads
+  const pads = [[px, pr * 1.0, D * 0.05, 0, 0.3], [px - pr * 0.9, pr * 2.3, D * 0.08, 0.5, 1.2], [px + pr * 0.7, pr * 2.5, D * 0.0, -0.45, 2.2], [px - pr * 0.2, pr * 3.7, D * 0.1, 0.15, 0.6], [px + pr * 0.2, pr * 0.9, -D * 0.2, 0.2, 1.9]];
+  pads.forEach(([x, y, z, tilt, yaw], i) => {
+    const s = i < 1 ? 1 : 0.82, g = blobG(pr * s, pr * 1.25 * s, pr * 0.2, 0, 0, 0, rnd, { amp: 0.08 }).rotateZ(tilt).rotateY(yaw).translate(x, y, z);
+    b.add(flat, paintFoliage(g, col(i + 1), rnd, { lo: -0.2, hi: 0.08 }));
+    if (i > 0) b.add(vmat('leaf'), blobG(pr * 0.16, pr * 0.2, pr * 0.16, x - Math.sin(tilt) * pr * 1.2 * s, y + pr * 1.25 * s * Math.cos(tilt), z, rnd, { detail: 0, amp: 0.1 }), i % 2 ? o.fl.c : '#d8405a');
+  });
+}
+/** Fountain grass: fine arching blades and feathery plumes. */
+function grassShrub(b, S, W, D, H, rnd, o) {
+  const R = Math.min(W, D) / 2, fm = vmat('frond');
+  bladeFan(b, fm, [0, 0, 0], 64, Math.max(H * 0.95, R * 1.2), rnd, { wid: 0.035, el0: 1.52, el1: 0.75, curve: 1.25, colors: o.f, segs: 3, fold: 0.3, r0: R * 0.06 });
+  for (let i = 0; i < 9; i++) {
+    const a = rnd() * TAU, r = R * (0.25 + rnd() * 0.5), e = [Math.cos(a) * r, H * (0.86 + rnd() * 0.14), Math.sin(a) * r];
+    b.add(fm, tubeG([[e[0] * 0.15, 0, e[2] * 0.15], [e[0] * 0.7, e[1] * 0.6, e[2] * 0.7], e], 0.004, 3), o.f[0]);
+    b.add(vmat('leaf'), paintFoliage(blobG(R * 0.07, H * 0.11, R * 0.07, e[0], e[1] - H * 0.09, e[2], rnd, { detail: 0, amp: 0.3 }), o.fl.c, rnd, { lo: -0.12 }));
+  }
+}
+/** Bird-of-paradise: upright paddle leaves on long stalks plus orange-and-blue crests. */
+function paddleShrub(b, S, W, D, H, rnd, o) {
+  const R = Math.min(W, D) / 2, fm = vmat('frond'), prof = (t) => (t < 0.42 ? 0.1 : Math.pow(Math.sin(Math.PI * Math.pow((t - 0.42) / 0.58, 0.8)), 0.6));
+  bladeFan(b, fm, [0, 0, 0], 11, Math.max(H * 1.02, R), rnd, { wid: 0.2, el0: 1.52, el1: 1.0, curve: 0.5, colors: o.f, segs: 7, fold: 0.18, profile: prof, r0: R * 0.05 });
+  for (let i = 0; i < 3; i++) {
+    const a = rnd() * TAU, r = R * (0.3 + rnd() * 0.3), e = [Math.cos(a) * r, H * (0.6 + rnd() * 0.15), Math.sin(a) * r], tri = [];
+    b.add(vmat('matte'), tubeG([[e[0] * 0.2, 0, e[2] * 0.2], e], 0.011, 5), '#5c8a4a');
+    for (let q = 0; q < 4; q++) tri.push(...budG(e, [e[0] + Math.cos(a) * H * 0.05 * (q + 1), e[1] + H * (0.12 - q * 0.015), e[2] + Math.sin(a) * H * 0.05 * (q + 1)], H * 0.014));
+    b.add(fm, paintFoliage(trisG(tri), o.fl.c, rnd, { lo: -0.1 }));
+    b.add(fm, trisG(budG(e, [e[0] + Math.cos(a) * H * 0.14, e[1] + H * 0.02, e[2] + Math.sin(a) * H * 0.14], H * 0.012)), '#3a4aa0');
+  }
+}
+function fernShrub(b, S, W, D, H, rnd, o) {
+  const R = Math.min(W, D) / 2;
+  bladeFan(b, vmat('frond'), [0, 0, 0], 18, Math.max(R * 1.25, H * 1.1), rnd, { wid: 0.3, el0: 1.4, el1: 0.35, curve: 1.3, colors: o.f, segs: 6, fold: 0.12, profile: (t) => lanceolate(t) * (0.7 + 0.3 * Math.abs(Math.sin(t * 22))), r0: R * 0.04 });
+}
+/** Succulent mix: a handful of low rosettes and cushions in contrasting tones. */
+function succulentShrub(b, S, W, D, H, rnd, o) {
+  const rx = W / 2, rz = D / 2, fm = vmat('frond'), n = clamp(Math.round(W * D * 14), 5, 14);
+  for (let i = 0; i < n; i++) {
+    const a = i * 2.39996, k = i === 0 ? 0 : 0.35 + 0.5 * Math.sqrt(i / n), x = Math.cos(a) * rx * k, z = Math.sin(a) * rz * k, r = Math.min(rx, rz) * (i === 0 ? 0.42 : 0.2 + rnd() * 0.14), col = o.f[i % o.f.length];
+    if (i % 3 === 2) b.add(vmat('leaf'), paintFoliage(blobG(r, H * 0.5, r, x, H * 0.25, z, rnd, { amp: 0.3, floor: 0 }), col, rnd, { lo: -0.25 }));
+    else { bladeFan(b, fm, [x, 0, z], 12, r * 1.15, rnd, { wid: 0.5, el0: 1.3, el1: 0.2, curve: 0.2, colors: [col, K.shade(col, 0.12)], segs: 2, fold: -0.25, profile: lanceolate }); b.add(vmat('leaf'), blobG(r * 0.2, H * 0.25, r * 0.2, x, H * 0.2, z, rnd, { detail: 0, amp: 0.1 }), K.shade(col, 0.2)); }
+  }
+}
+/** Clipped topiary: ball or cone of tight foliage. */
+function topiaryShrub(b, shape, W, D, H, rnd, o) {
+  const leafM = vmat('leaf'), rx = W / 2, rz = D / 2, col = o.f[0];
+  b.add(vmat('bark'), tubeG([[0, 0, 0], [0, H * 0.2, 0]], Math.min(rx, rz) * 0.07, 6), '#6a5a48');
+  if (shape === 'cone') {
+    const g = new THREE.ConeGeometry(1, 1, 14, 6).toNonIndexed(), p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i), k = 1 + 0.07 * Math.sin(x * 9 + y * 7) * Math.sin(z * 8 + y * 5); p.setXYZ(i, x * rx * k, (y + 0.5) * H * 0.95 + H * 0.05, z * rz * k); }
+    b.add(leafM, paintFoliage(g, col, rnd, { lo: -0.3 }));
+    b.add(leafM, leafCloudG([0, H * 0.3, 0], [rx * 0.8, H * 0.3, rz * 0.8], 40, 0.06, rnd, { colors: [K.shade(col, 0.15), col], shell: 0.8, spread: 0.15 }));
+  } else {
+    b.add(leafM, paintFoliage(blobG(rx, H * 0.47, rz, 0, H * 0.53, 0, rnd, { detail: 2, amp: 0.05 }), col, rnd, { lo: -0.34 }));
+    b.add(leafM, leafCloudG([0, H * 0.53, 0], [rx, H * 0.47, rz], 70, 0.06, rnd, { colors: [K.shade(col, 0.15), col], shell: 0.97, spread: 0.06 }));
+  }
+}
+const SHRUB_BUILDERS = { spikes: spikeShrub, rosette: rosetteShrub, cactus: cactusShrub, grass: grassShrub, paddle: paddleShrub, fern: fernShrub, succulents: succulentShrub };
+/** Resolve shrub colours: color → foliage, flowerColor (or color2) → flowers. */
+function shrubLook(S, P) {
+  const color = hexOf(P.color, null), fc = hexOf(P.flowerColor, null) || hexOf(P.color2, null);
+  return { f: color ? [color, K.shade(color, 0.1), K.shade(color, -0.12)] : S.f, fl: S.fl ? { ...S.fl, c: fc || S.fl.c, c2: fc ? null : S.fl.c2 } : (fc && !S.kind ? { c: fc, mode: 'dots', n: 24, s: 0.03 } : null), custom: !!color };
+}
+/** Add a shrub of the given species to a batch, filling w × d × h (shared by shrubs, planters and hedges). */
+function addShrub(b, species, shape, w, d, h, rnd, P = {}) {
+  const S = SHRUBS[species] || SHRUBS.generic, look = shrubLook(S, P), sub = new Batch();
+  if ((shape === 'ball' || shape === 'cone') && !S.kind) topiaryShrub(sub, shape, w, d, h, rnd, look);
+  else (SHRUB_BUILDERS[S.kind] || moundShrub)(sub, S, w, d, h, rnd, look);
+  b.merge(sub.fit(w, d, h));
+}
+registerModel('shrub', {
+  build({ w, d, h, p, item }) {
+    const P = params(p), species = oneOf(P.species, Object.keys(SHRUBS), 'generic'), b = new Batch();
+    addShrub(b, species, oneOf(P.shape, ['natural', 'ball', 'cone'], 'natural'), w, d, h, K.rng(seedOf(item, species)), P);
+    return b.build();
+  },
+  draw2d(ctx, { w, d, p, px, item }) {
+    const P = params(p), species = oneOf(P.species, Object.keys(SHRUBS), 'generic');
+    shrub2D(ctx, species, oneOf(P.shape, ['natural', 'ball', 'cone'], 'natural'), w / 2, d / 2, K.rng(seedOf(item, species)), px, P);
+  },
+});
+/** Plan symbol of a shrub centred on the origin. */
+function shrub2D(ctx, species, shape, rx, ry, rnd, px, P = {}) {
+  const S = SHRUBS[species] || SHRUBS.generic, look = shrubLook(S, P), col = look.f[0], r = Math.min(rx, ry), fl = look.fl;
+  if (shape !== 'natural' && !S.kind) {
+    ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, TAU); ctx.fillStyle = rgba(col, 0.5); ctx.fill(); ctx.strokeStyle = rgba(K.shade(col, -0.45), 0.9); ctx.lineWidth = px * 1.2; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0, 0, rx * (shape === 'cone' ? 0.45 : 0.72), ry * (shape === 'cone' ? 0.45 : 0.72), 0, 0, TAU); ctx.lineWidth = px * 0.8; ctx.stroke();
+    if (shape === 'cone') dot(ctx, 0, 0, Math.max(px, r * 0.06), rgba(K.shade(col, -0.5), 0.9));
+  } else if (S.kind === 'rosette' || S.kind === 'grass' || S.kind === 'fern' || S.kind === 'paddle' || S.kind === 'spikes') {
+    if (S.kind === 'spikes' || S.kind === 'grass') { ctx.beginPath(); ctx.ellipse(0, 0, rx * 0.8, ry * 0.8, 0, 0, TAU); ctx.fillStyle = rgba(S.kind === 'spikes' && fl ? mix(col, fl.c, 0.5) : col, 0.3); ctx.fill(); }
+    const n = { rosette: S.n > 30 ? 22 : 14, grass: 26, fern: 12, paddle: 9, spikes: 24 }[S.kind], wk = { rosette: S.wid * 0.9, grass: 0.03, fern: 0.2, paddle: 0.22, spikes: 0.035 }[S.kind];
+    fronds2D(ctx, rx, ry, n, col, rnd, px, wk);
+    if (S.kind === 'spikes' && fl && r / px > 8) for (let i = 0; i < 24; i++) { const a = (i / 24) * TAU + 0.1; dot(ctx, Math.cos(a) * rx * (i % 2 ? 0.74 : 0.92), Math.sin(a) * ry * (i % 2 ? 0.74 : 0.92), Math.max(px, r * 0.045), rgba(fl.c, 0.9)); }
+    if (S.stalk || S.kind === 'paddle') dot(ctx, 0, 0, Math.max(1.2 * px, r * 0.09), rgba(fl ? fl.c : S.stalk, 0.95));
+  } else if (S.kind === 'cactus') {
+    for (const [x, y, k] of [[-0.32, -0.2, 0.3], [0.02, 0.24, 0.24], [-0.5, 0.6, 0.2]]) { ctx.save(); ctx.translate(x * rx, y * ry); fronds2D(ctx, rx * k, ry * k, 8, col, rnd, px, 0.3); ctx.restore(); }
+    for (const [x, y, k] of [[0.5, 0.1, 0.42], [0.3, -0.5, 0.3]]) { ctx.beginPath(); ctx.ellipse(x * rx, y * ry, rx * k, ry * k * 0.5, 0.6, 0, TAU); ctx.fillStyle = rgba(look.f[1], 0.45); ctx.fill(); ctx.strokeStyle = rgba(K.shade(col, -0.45), 0.85); ctx.lineWidth = px; ctx.stroke(); }
+  } else if (S.kind === 'succulents') {
+    const n = 7;
+    for (let i = 0; i < n; i++) { const a = i * 2.39996, k = i === 0 ? 0 : 0.35 + 0.5 * Math.sqrt(i / n), rr = i === 0 ? 0.42 : 0.26; ctx.save(); ctx.translate(Math.cos(a) * rx * k, Math.sin(a) * ry * k); fronds2D(ctx, rx * rr, ry * rr, 9, look.f[i % look.f.length], rnd, px, 0.4); ctx.restore(); }
+  } else {
+    const cover = fl && fl.mode === 'cover';
+    canopy2D(ctx, rx, ry, cover ? mix(col, fl.c, 0.6) : col, rnd, px, { accent: fl ? fl.c : null, dots: fl ? (fl.mode === 'dots' ? 18 : 11) : 0, dotR: fl && (fl.mode === 'star' || fl.mode === 'rose') ? 0.085 : 0.06, clumps: 5, alpha: 0.4, lobes: Math.round(clamp(7 + r / 12, 8, 14)) });
+    dot(ctx, 0, 0, Math.max(px, Math.min(r * 0.05, 3)), rgba(K.shade(col, -0.55), 0.8));
+  }
+}
+
+// ═════════════════════════════════ 7. hedge ═════════════════════════════════
+const HEDGES = {
+  ficus: { f: ['#2f632c', '#3a7034', '#285526'] }, myrtle: { f: ['#33602f', '#3f6c38', '#2a5028'], fl: '#f4f1e4', flN: 5 }, pittosporum: { f: ['#6a9a55', '#7aa862', '#5a8a48'], lc: ['#cfe0a8', '#8fba6a'] },
+  cypress: { f: ['#2f4f33', '#3a5c3b', '#263f2a'], natural: true }, bamboo: { f: ['#6f9a45', '#82aa52', '#5c8a3c'], natural: true }, duranta: { f: ['#a8c040', '#b8cc4c', '#94ac38'], fl: '#8f7ae0', flN: 6 },
+  bougainvillea: { f: ['#4a7a38', '#5a8a42'], fl: '#c8287f', flN: 60, natural: true }, generic: { f: ['#3f7436', '#4c8240', '#34642e'] },
+};
+/** Clump of bamboo canes with leaf tufts filling w × d × h. */
+function bambooCanes(b, W, D, H, rnd, f, trimmed) {
+  const n = clamp(Math.round((W / 0.065) * Math.max(1, D / 0.35)), 5, 110), fm = vmat('leaf');
+  for (let i = 0; i < n; i++) {
+    const x = (rnd() - 0.5) * W * 0.9, z = (rnd() - 0.5) * D * 0.7, hh = H * (trimmed ? 0.9 + rnd() * 0.06 : 0.68 + rnd() * 0.3), r = 0.008 + rnd() * 0.008, lx = (rnd() - 0.5) * 0.12 * hh, lz = (rnd() - 0.5) * 0.08 * hh;
+    b.add(vmat('satin'), paintY(tubeG([[x, 0, z], [x + lx * 0.3, hh * 0.5, z + lz * 0.3], [x + lx, hh, z + lz]], [r, r * 0.9, r * 0.5], 5), '#8a9a48', rnd() < 0.3 ? '#c8b860' : '#7fa04a', 0, hh));
+    for (let q = 0; q < 2; q++) { const t = 0.5 + rnd() * 0.5; b.add(fm, leafCloudG([x + lx * t * t, hh * t, z + lz * t * t], [Math.min(0.22, W * 0.3), 0.16, Math.min(0.2, D * 0.4)], 6, 0.16, rnd, { aspect: 0.2, hang: 0.55, colors: f, shell: 0.3, spread: 0.8 })); }
+  }
+}
+registerModel('hedge', {
+  build({ w, d, h, p, item }) {
+    const P = params(p), species = oneOf(P.species, Object.keys(HEDGES), 'generic'), S = HEDGES[species], rnd = K.rng(seedOf(item, species)), b = new Batch(), leafM = vmat('leaf');
+    const color = hexOf(P.color, null), f = color ? [color, K.shade(color, 0.1), K.shade(color, -0.12)] : S.f, fl = S.fl ? hexOf(P.color2, S.fl) : null;
+    const trimmed = P.trimmed == null ? !S.natural : !(P.trimmed === false || P.trimmed === 'false' || P.trimmed === 0);
+    if (species === 'bamboo') bambooCanes(b, w, d, h, rnd, f, trimmed);
+    else if (species === 'cypress') {
+      const n = Math.max(1, Math.round(w / Math.max(0.45, d * 0.9))), cw = w / n;
+      for (let i = 0; i < n; i++) { const sub = new Batch(), hh = h * (trimmed ? 1 : 0.9 + rnd() * 0.1); columnTree(sub, TREES.cypress, cw * 1.12, d, hh, rnd, { look: { f, bark: '#5a4a3c' }, young: false }); b.merge(sub.fit(cw * 1.12, d, hh), -w / 2 + (i + 0.5) * cw); }
+    } else if (trimmed) {
+      const sx = clamp(Math.round(w / 0.22), 2, 64), sy = clamp(Math.round(h / 0.24), 2, 10), sz = clamp(Math.round(d / 0.2), 2, 6);
+      const g = new THREE.BoxGeometry(w, h, d, sx, sy, sz).toNonIndexed().translate(0, h / 2, 0), a = g.attributes.position.array;
+      for (let i = 0; i < a.length; i += 3) {
+        const x = a[i], y = a[i + 1], z = a[i + 2], n1 = 0.5 + 0.5 * Math.sin(x * 9.1 + y * 3.3) * Math.sin(y * 7.3 + z * 4.1) * Math.sin(z * 8.7 + x * 2.9), amt = 0.012 + 0.05 * n1;
+        const ex = Math.pow(Math.abs(x) / (w / 2), 8), ez = Math.pow(Math.abs(z) / (d / 2), 8), ey = Math.pow(y / h, 8), round = 0.05 * ey;
+        a[i] = x - Math.sign(x) * (amt * ex + round * ex); a[i + 2] = z - Math.sign(z) * (amt * ez + round * ez); a[i + 1] = y - amt * ey * 0.7 - 0.03 * ey * Math.max(ex, ez);
+      }
+      g.computeVertexNormals();
+      b.add(leafM, paintFoliage(g, f[0], rnd, { lo: -0.3, hi: 0.1, sparkle: 0.16 }));
+      const area = w * d + 2 * w * h + 2 * d * h;
+      b.add(leafM, leafBoxG(w * 0.99, h * 0.99, d * 0.99, clamp(Math.round(area * 55), 30, 700), 0.075, rnd, { colors: S.lc || [f[1], K.shade(f[1], 0.14), f[2]], aspect: 0.55 }));
+      if (fl) b.add(leafM, leafBoxG(w, h, d, clamp(Math.round(area * S.flN), 4, 300), 0.06, rnd, { colors: [fl, K.shade(fl, 0.2)], aspect: 0.9 }));
+    } else {
+      const n = Math.max(1, Math.round(w / Math.max(0.4, d * 0.95))), cw = w / n;
+      for (let i = 0; i < n; i++) {
+        const x = -w / 2 + (i + 0.5) * cw + (rnd() - 0.5) * cw * 0.2, hh = h * (0.82 + rnd() * 0.18);
+        for (let j = 0; j < 3; j++) {
+          const bx = cw * (j ? 0.5 : 0.68), by = hh * (j ? 0.34 : 0.5), ox = j ? (j === 1 ? -1 : 1) * cw * 0.3 : 0, y = j ? hh * (0.45 + rnd() * 0.35) : hh * 0.5, z = j ? (rnd() - 0.5) * d * 0.3 : 0, bz = d * (j ? 0.36 : 0.5);
+          const flower = fl && rnd() < (S.flN > 20 ? 0.6 : 0), col = flower ? K.shade(fl, (rnd() - 0.5) * 0.2) : f[Math.floor(rnd() * f.length)];
+          b.add(leafM, paintFoliage(blobG(bx, by, bz, x + ox, y, z, rnd, { detail: j ? 1 : 2, amp: 0.2, floor: 0 }), col, rnd, { lo: flower ? -0.2 : -0.36 }));
+          b.add(leafM, leafCloudG([x + ox, y, z], [bx, by, bz], j ? 9 : 16, 0.1, rnd, { colors: flower ? [fl, K.shade(fl, 0.2)] : S.lc || [f[1], K.shade(f[1], 0.14)], aspect: 0.6, up: true }));
+        }
+      }
+    }
+    return b.fit(w, d, h).build();
+  },
+  draw2d(ctx, { w, d, p, px, item }) {
+    const P = params(p), species = oneOf(P.species, Object.keys(HEDGES), 'generic'), S = HEDGES[species], col = hexOf(P.color, S.f[0]), fl = S.fl ? hexOf(P.color2, S.fl) : null, rnd = K.rng(seedOf(item, species));
+    const trimmed = P.trimmed == null ? !S.natural : !(P.trimmed === false || P.trimmed === 'false');
+    const dark = rgba(K.shade(col, -0.45), 0.9), fill = rgba(fl && S.flN > 20 ? mix(col, fl, 0.5) : col, 0.42);
+    if (species === 'cypress') {
+      const n = Math.max(1, Math.round(w / Math.max(45, d * 0.9))), cw = w / n;
+      for (let i = 0; i < n; i++) { ctx.save(); ctx.translate(-w / 2 + (i + 0.5) * cw, 0); canopy2D(ctx, cw * 0.56, d / 2, col, rnd, px, { alpha: 0.55, clumps: 0, lobes: 9 }); dot(ctx, 0, 0, Math.max(px, d * 0.06), dark); ctx.restore(); }
+      return;
+    }
+    const n = Math.max(2, Math.round(w / (d * (trimmed ? 0.5 : 0.8)))), m = Math.max(1, Math.round(d / (w / n))), dep = Math.min(d * (trimmed ? 0.07 : 0.14), w / n / 3), sx = w / n, sy = d / m;
+    ctx.beginPath(); ctx.moveTo(-w / 2 + dep, -d / 2 + dep);
+    for (let i = 0; i < n; i++) ctx.quadraticCurveTo(-w / 2 + (i + 0.5) * sx, -d / 2 - dep, i === n - 1 ? w / 2 - dep : -w / 2 + (i + 1) * sx, -d / 2 + dep);
+    for (let j = 0; j < m; j++) ctx.quadraticCurveTo(w / 2 + dep, -d / 2 + (j + 0.5) * sy, w / 2 - dep, j === m - 1 ? d / 2 - dep : -d / 2 + (j + 1) * sy);
+    for (let i = n - 1; i >= 0; i--) ctx.quadraticCurveTo(-w / 2 + (i + 0.5) * sx, d / 2 + dep, i === 0 ? -w / 2 + dep : -w / 2 + i * sx, d / 2 - dep);
+    for (let j = m - 1; j >= 0; j--) ctx.quadraticCurveTo(-w / 2 - dep, -d / 2 + (j + 0.5) * sy, -w / 2 + dep, j === 0 ? -d / 2 + dep : -d / 2 + j * sy);
+    ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = dark; ctx.lineWidth = px * 1.2; ctx.lineJoin = 'round'; ctx.stroke();
+    if (d / px > 10) {
+      ctx.strokeStyle = rgba(K.shade(col, -0.4), 0.4); ctx.lineWidth = px * 0.8;
+      if (species === 'bamboo') { for (let i = 0; i < Math.min(160, w / 7); i++) dot(ctx, (rnd() - 0.5) * w * 0.9, (rnd() - 0.5) * d * 0.6, Math.max(px * 0.8, 1.1), rgba('#7a8a40', 0.9)); }
+      else if (trimmed) { ctx.beginPath(); ctx.moveTo(-w / 2 + d * 0.3, 0); ctx.lineTo(w / 2 - d * 0.3, 0); ctx.setLineDash([d * 0.25, d * 0.18]); ctx.stroke(); ctx.setLineDash([]); }
+      else for (let i = 0; i < n; i++) { scallopPath(ctx, -w / 2 + (i + 0.5) * sx, 0, sx * 0.4, d * 0.3, 6, 0.15, rnd, rnd() * 3); ctx.stroke(); }
+      if (fl) for (let i = 0; i < Math.min(120, (w / d) * (S.flN > 20 ? 9 : 3)); i++) dot(ctx, (rnd() - 0.5) * w * 0.92, (rnd() - 0.5) * d * 0.8, Math.max(px, d * 0.05), rgba(fl, 0.9));
+    }
+  },
+});
+
+// ═════════════════════════════════ 8. beds, planters, raised beds ═════════════════════════════════
+const FLOWER_COLORS = ['#e8303a', '#f2c63a', '#f08aa8', '#ffffff', '#8a6fd0', '#f08a2a'];
+/** Small low-poly plants for beds: kind ∈ tuft | spikes | grass | rosette | rock | cactus | lettuce | tomato | mat | berry. */
+function miniPlant(b, kind, x, y, z, r, hgt, rnd, c, fl, lod) {
+  const leafM = vmat('leaf'), fm = vmat('frond'), det = lod ? 0 : 1;
+  const flowers = (n, top, spread, s) => { if (!fl) return; const tri = []; for (let i = 0; i < n; i++) { const a = rnd() * TAU, k = Math.sqrt(rnd()) * spread, q = [x + Math.cos(a) * k, y + top * (0.82 + rnd() * 0.2), z + Math.sin(a) * k]; tri.push(...budG([q[0], q[1] - s, q[2]], [q[0], q[1] + s * 0.6, q[2]], s)); } b.add(fm, paintFoliage(trisG(tri), fl, rnd, { lo: -0.1, hi: 0.15, sparkle: 0.2 })); };
+  switch (kind) {
+    case 'rock': b.add(vmat('flat'), paintFoliage(blobG(r, hgt * 0.7, r * 0.8, x, y + hgt * 0.3, z, rnd, { detail: 1, amp: 0.3, floor: y }), c, rnd, { lo: -0.25, hi: 0.1 })); break;
+    case 'grass': bladeFan(b, fm, [x, y, z], lod ? 7 : 12, hgt * 1.05, rnd, { wid: 0.05, el0: 1.5, el1: 0.85, curve: 1.1, colors: [c, K.shade(c, 0.12)], segs: 2, fold: 0.3 }); break;
+    case 'rosette': bladeFan(b, fm, [x, y, z], lod ? 7 : 11, Math.max(r * 1.1, hgt), rnd, { wid: 0.28, el0: 1.3, el1: 0.2, curve: 0.3, colors: [c, K.shade(c, 0.1)], segs: 2, fold: -0.3, profile: lanceolate }); break;
+    case 'spikes': {
+      b.add(leafM, paintFoliage(blobG(r * 0.8, hgt * 0.35, r * 0.8, x, y + hgt * 0.3, z, rnd, { detail: det, amp: 0.25, floor: y }), c, rnd));
+      const g = [], f2 = [];
+      for (let i = 0; i < (lod ? 6 : 10); i++) { const a = rnd() * TAU, el = 0.7 + rnd() * 0.8, p1 = [x + Math.cos(a) * Math.cos(el) * r, y + Math.sin(el) * hgt, z + Math.sin(a) * Math.cos(el) * r], p0 = [lerp(x, p1[0], 0.3), y + hgt * 0.25, lerp(z, p1[2], 0.3)], pm = lerp3(p0, p1, 0.6); g.push(...spikeG(p0, pm, 0.008)); f2.push(...budG(pm, p1, 0.013)); }
+      b.add(fm, paintFoliage(trisG(g), K.shade(c, 0.1), rnd)); b.add(fm, paintFoliage(trisG(f2), fl || '#8a6fd0', rnd, { lo: -0.1 }));
+      break;
+    }
+    case 'cactus': b.add(vmat('flat'), tubeG([[x, y, z], [x, y + hgt * 0.85, z]], r * 0.7, 10, { flute: 0.14, lobes: 5 }), c); b.add(vmat('flat'), blobG(r * 0.7, r * 0.6, r * 0.7, x, y + hgt * 0.85, z, rnd, { detail: 0, amp: 0.03 }), K.shade(c, 0.08)); break;
+    case 'lettuce': bladeFan(b, fm, [x, y, z], lod ? 6 : 9, r * 1.15, rnd, { wid: 0.6, el0: 1.2, el1: 0.25, curve: 0.5, colors: [c, K.shade(c, 0.15)], segs: 2, fold: -0.2, profile: lanceolate }); b.add(leafM, paintFoliage(blobG(r * 0.45, hgt * 0.5, r * 0.45, x, y + hgt * 0.4, z, rnd, { detail: 0, amp: 0.2 }), K.shade(c, 0.2), rnd)); break;
+    case 'tomato': {
+      b.add(vmat('matte'), cylG(0.008, 0.008, hgt, x, y, z, 4), '#b89a6a');
+      for (let i = 0; i < 3; i++) b.add(leafM, paintFoliage(blobG(r * (0.9 - i * 0.15), hgt * 0.22, r * (0.9 - i * 0.15), x + (rnd() - 0.5) * r * 0.3, y + hgt * (0.3 + i * 0.25), z + (rnd() - 0.5) * r * 0.3, rnd, { detail: det, amp: 0.3 }), c, rnd));
+      for (let i = 0; i < (lod ? 3 : 6); i++) { const a = rnd() * TAU; b.add(vmat('satin'), blobG(0.022, 0.022, 0.022, x + Math.cos(a) * r * 0.75, y + hgt * (0.25 + rnd() * 0.5), z + Math.sin(a) * r * 0.75, rnd, { detail: 0, amp: 0, facet: 0 }), fl || '#e03a2a'); }
+      break;
+    }
+    case 'mat': b.add(leafM, paintFoliage(blobG(r * 1.25, hgt * 0.8, r * 1.25, x, y + hgt * 0.25, z, rnd, { detail: det, amp: 0.3, floor: y }), c, rnd, { lo: -0.2 })); flowers(lod ? 4 : 7, hgt * 0.95, r, 0.012); break;
+    case 'berry': bladeFan(b, fm, [x, y, z], lod ? 6 : 9, r * 1.1, rnd, { wid: 0.55, el0: 1.1, el1: 0.3, curve: 0.5, colors: [c, K.shade(c, 0.12)], segs: 2, fold: 0.1, profile: lanceolate }); for (let i = 0; i < 4; i++) { const a = rnd() * TAU; b.add(vmat('satin'), blobG(0.014, 0.018, 0.014, x + Math.cos(a) * r * 0.7, y + 0.03, z + Math.sin(a) * r * 0.7, rnd, { detail: 0, amp: 0, facet: 0 }), i % 4 ? '#d8242c' : '#f4f1e4'); } break;
+    default:
+      b.add(leafM, paintFoliage(blobG(r, hgt * 0.5, r, x, y + hgt * 0.45, z, rnd, { detail: det, amp: 0.26, floor: y }), c, rnd));
+      if (!lod) b.add(leafM, leafCloudG([x, y + hgt * 0.45, z], [r, hgt * 0.5, r], 6, 0.05, rnd, { colors: [K.shade(c, 0.15)], up: true }));
+      flowers(lod ? 4 : 7, hgt, r * 0.8, Math.max(0.014, r * 0.13));
+  }
+}
+const G1 = '#4f8a3c', G2 = '#3f7436', G3 = '#6a9a50';
+/** Planting schemes: sp spacing (m) · mulch default · plants [kind, radius m, relative height, colour, flower ('F' = from flowerColors)]. */
+const BEDS = {
+  mixed: { sp: 0.36, mulch: 'bark', plants: [['tuft', 0.17, 0.5, G1, 'F'], ['spikes', 0.16, 0.6, '#8a9a80', '#8a6fd0'], ['grass', 0.16, 1, '#8aa860'], ['tuft', 0.2, 0.8, G2, 'F'], ['rosette', 0.14, 0.4, '#7f9c8c'], ['tuft', 0.13, 0.35, G3, 'F']] },
+  flowers: { sp: 0.26, mulch: 'soil', plants: [['tuft', 0.12, 0.6, G1, 'F'], ['tuft', 0.1, 0.45, G3, 'F'], ['tuft', 0.13, 0.8, G2, 'F'], ['spikes', 0.1, 1, G1, 'F']] },
+  succulents: { sp: 0.3, mulch: 'gravel', plants: [['rosette', 0.13, 0.5, '#7f9c8c'], ['rosette', 0.1, 0.35, '#9a6a7a'], ['tuft', 0.1, 0.3, '#a8c070'], ['rock', 0.12, 0.4, '#a8a39a'], ['cactus', 0.06, 1, '#5c8854'], ['rosette', 0.16, 0.7, '#6f9a5a']] },
+  herbs: { sp: 0.3, mulch: 'soil', plants: [['tuft', 0.13, 0.6, '#5c9a3c'], ['spikes', 0.13, 1, '#4f6a4a', '#9aa8e0'], ['tuft', 0.14, 0.4, '#7a9a6a'], ['spikes', 0.12, 0.8, '#8a9a80', '#8a6fd0'], ['grass', 0.1, 0.7, '#4f8a3a']] },
+  vegetables: { sp: 0.34, mulch: 'soil', rows: true, plants: [['lettuce', 0.14, 0.3, '#8fc050'], ['tomato', 0.15, 1, '#4f8a3a', '#e03a2a'], ['tuft', 0.15, 0.45, '#3f7a4a'], ['grass', 0.09, 0.5, '#5c9a4a'], ['lettuce', 0.15, 0.35, '#7a4a6a'], ['tomato', 0.14, 0.8, '#4f8a3a', '#f0c030']] },
+  grasses: { sp: 0.42, mulch: 'gravel', plants: [['grass', 0.2, 1, '#8aa860'], ['grass', 0.17, 0.7, '#b8b070'], ['grass', 0.14, 0.5, '#7a9a8a'], ['grass', 0.2, 0.85, '#9a7a5a']] },
+  groundcover: { sp: 0.24, mulch: 'bark', plants: [['mat', 0.16, 1, '#4f8a3c', 'F'], ['mat', 0.15, 0.8, '#5c9a46'], ['mat', 0.14, 0.9, '#6a9a5a', 'F']] },
+  'rock-garden': { sp: 0.36, mulch: 'gravel', plants: [['rock', 0.16, 0.7, '#a8a39a'], ['rosette', 0.12, 0.5, '#7f9c8c'], ['grass', 0.12, 1, '#b8b070'], ['rock', 0.1, 0.4, '#8f8a82'], ['tuft', 0.1, 0.4, '#6f9a5a', 'F'], ['rock', 0.22, 0.9, '#b5aea2'], ['spikes', 0.12, 0.8, '#8a9a80', '#8a6fd0']] },
+  strawberries: { sp: 0.28, mulch: 'soil', rows: true, plants: [['berry', 0.13, 1, '#4f8a3a']] },
+  empty: { sp: 1, mulch: 'soil', plants: [] },
+};
+/**
+ * Deterministic planting plan for a w × d patch (metres): constant density, jittered grid (or straight crop rows).
+ * → [{ x, z, kind, r, hk, c, fl }]; the same list drives the 3D model and the plan symbol.
+ */
+function plantPlan(scheme, w, d, rnd, flowerColors) {
+  const B = BEDS[scheme] || BEDS.mixed, out = [];
+  if (!B.plants.length || w < 0.12 || d < 0.12) return out;
+  let sp = B.sp; const count = (w / sp) * (d / sp); if (count > 420) sp *= Math.sqrt(count / 420);
+  const nx = Math.max(1, Math.round(w / sp)), nz = Math.max(1, Math.round(d / sp)), along = w >= d;
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    const jit = B.rows ? 0.12 : 0.7, row = along ? j : i, pl = B.plants[B.rows ? row % B.plants.length : Math.floor(rnd() * B.plants.length)];
+    const r = Math.min(pl[1] * (0.85 + rnd() * 0.3), w / 2, d / 2), x = clamp(-w / 2 + (i + 0.5 + (rnd() - 0.5) * jit) * (w / nx), -w / 2 + r, w / 2 - r), z = clamp(-d / 2 + (j + 0.5 + (rnd() - 0.5) * jit) * (d / nz), -d / 2 + r, d / 2 - r);
+    out.push({ x, z, kind: pl[0], r, hk: pl[2] * (0.85 + rnd() * 0.25), c: pl[3], fl: pl[4] === 'F' ? flowerColors[Math.floor(rnd() * flowerColors.length)] : pl[4] });
+  }
+  return out;
+}
+/** Build the plants of a plan into a batch whose tallest point is `top` and which stays inside w × d. */
+function plantsBatch(plan, w, d, top, rnd) {
+  const pb = new Batch(), lod = plan.length > 110;
+  for (const q of plan) miniPlant(pb, q.kind, q.x, 0, q.z, q.r, Math.max(0.05, top * q.hk), rnd, q.c, q.fl, lod);
+  return pb.settle(top, w, d);
+}
+function plants2D(ctx, plan, px) {
+  for (const q of plan) {
+    const x = q.x * 100, y = q.z * 100, r = q.r * 100;
+    if (r / px < 1.2) continue;
+    ctx.save(); ctx.translate(x, y);
+    if (q.kind === 'rock') { ctx.beginPath(); ctx.ellipse(0, 0, r, r * 0.8, q.hk * 3, 0, TAU); ctx.fillStyle = K.tint(q.c, 0.3); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px * 0.8; ctx.stroke(); }
+    else if (['grass', 'rosette', 'lettuce', 'berry', 'spikes'].includes(q.kind) && r / px > 5) fronds2D(ctx, r, r, q.kind === 'grass' ? 10 : 7, q.kind === 'spikes' && q.fl ? mix(q.c, q.fl, 0.5) : q.c, K.rng(Math.round(x * 7 + y * 13) + 5), px, q.kind === 'grass' || q.kind === 'spikes' ? 0.06 : 0.3);
+    else { ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fillStyle = rgba(q.c, 0.5); ctx.fill(); ctx.strokeStyle = rgba(K.shade(q.c, -0.45), 0.8); ctx.lineWidth = px * 0.8; ctx.stroke(); }
+    if (q.fl && q.kind !== 'spikes' && r / px > 2.5) dot(ctx, 0, 0, Math.max(px, r * (q.kind === 'tomato' ? 0.3 : 0.42)), rgba(q.fl, 0.95));
+    ctx.restore();
+  }
+}
+const EDGING = { stone: 0.1, steel: 0.005, wood: 0.028, brick: 0.1, none: 0 };
+function bedSetup(P, w, d, h, item) {
+  const variant = oneOf(P.variant, Object.keys(BEDS).filter((k) => k !== 'empty' && k !== 'strawberries'), 'mixed'), edging = oneOf(P.edging, Object.keys(EDGING), 'none');
+  const mulch = oneOf(P.mulch, ['bark', 'tuff', 'gravel', 'soil'], BEDS[variant].mulch), ew = Math.min(EDGING[edging], w * 0.2, d * 0.2);
+  const cols = Array.isArray(P.flowerColors) ? P.flowerColors.map((c) => hexOf(c, null)).filter(Boolean) : [];
+  const rnd = K.rng(seedOf(item, 'bed' + variant)), iw = w - 2 * ew, id = d - 2 * ew;
+  return { variant, edging, mulch, ew, iw, id, rnd, plan: plantPlan(variant, iw - 0.04, id - 0.04, rnd, cols.length ? cols : FLOWER_COLORS), ground: surfaceOpts(mulch, {}) };
+}
+/** Edging ring around a w × d rectangle, top at height eh. */
+function addEdging(b, kind, w, d, ew, eh, rnd, color) {
+  if (kind === 'none' || ew <= 0) return;
+  if (kind === 'steel' || kind === 'wood') {
+    const [m, c] = kind === 'steel' ? [vmat('matte'), color || '#6a4a38'] : [K.wood(color || '#9a7448'), null];
+    b.add(m, boxOnG(w, eh, ew, 0, 0, d / 2 - ew / 2), c); b.add(m, boxOnG(w, eh, ew, 0, 0, -d / 2 + ew / 2), c);
+    b.add(m, boxOnG(ew, eh, d - 2 * ew, w / 2 - ew / 2, 0, 0), c); b.add(m, boxOnG(ew, eh, d - 2 * ew, -w / 2 + ew / 2, 0, 0), c);
+    return;
+  }
+  const brick = kind === 'brick', len = brick ? 0.2 : 0.16, run = (L, place) => { const n = Math.max(1, Math.round(L / len)), s = L / n; for (let i = 0; i < n; i++) place(-L / 2 + (i + 0.5) * s, s); };
+  const unit = (x, z, sx, sz) => {
+    if (brick) b.add(vmat('matte'), boxOnG(sx - 0.008, eh * (0.92 + rnd() * 0.08), sz - 0.008, x, 0, z), K.shade(color || '#a8563c', (rnd() - 0.5) * 0.25));
+    else { const g = blobG(sx * 0.52, eh * 0.62, sz * 0.52, x, eh * 0.45, z, rnd, { detail: 1, amp: 0.16, floor: 0 }), a = g.attributes.position.array; for (let i = 0; i < a.length; i += 3) { a[i] = clamp(a[i], -w / 2, w / 2); a[i + 1] = Math.min(a[i + 1], eh); a[i + 2] = clamp(a[i + 2], -d / 2, d / 2); } b.add(vmat('flat'), paintFoliage(g, K.shade(color || '#b5ada0', (rnd() - 0.5) * 0.2), rnd, { lo: -0.2, hi: 0.1 })); }
+  };
+  run(w, (x, s) => { unit(x, d / 2 - ew / 2, s, ew); unit(x, -d / 2 + ew / 2, s, ew); });
+  run(d - 2 * ew, (z, s) => { unit(w / 2 - ew / 2, z, ew, s); unit(-w / 2 + ew / 2, z, ew, s); });
+}
+const rectPts = (w, d) => [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]];
+registerModel('flower-bed', {
+  build({ w, d, h, p, item }) {
+    const P = params(p), S = bedSetup(P, w, d, h, item), b = new Batch(), bh = Math.min(0.05, h * 0.5), eh = Math.min(h, S.edging === 'steel' ? 0.09 : S.edging === 'wood' ? 0.12 : 0.085);
+    const G = addGround(b, rectPts(S.iw, S.id), bh, S.ground);
+    b.add(vmat('matte'), wallG(rectPts(w - (S.ew ? 0.002 : 0), d - (S.ew ? 0.002 : 0)), 0, bh), G.avg);
+    addEdging(b, S.edging, w, d, S.ew, eh, S.rnd, hexOf(P.color, null));
+    if (S.plan.length) b.merge(plantsBatch(S.plan, S.iw, S.id, h - bh, S.rnd), 0, bh, 0);
+    else b.add(vmat('matte'), boxOnG(0.02, h, 0.02, 0, 0, 0), G.avg);
+    return b.build();
+  },
+  draw2d(ctx, { w, d, h, p, px, item }) {
+    const P = params(p), S = bedSetup(P, w / 100, d / 100, h / 100, item), ew = S.ew * 100;
+    K.rr(ctx, 0, 0, w, d, Math.min(4, w / 8, d / 8));
+    ctx.fillStyle = groundFill2D(ctx, S.ground, px, -w / 2, -d / 2); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px; ctx.stroke();
+    if (ew / px > 1.5) { ctx.fillStyle = { stone: '#d6d0c4', brick: '#d0a090', wood: '#c9a878', steel: '#7a6a5a' }[S.edging] || '#ccc'; ctx.beginPath(); ctx.rect(-w / 2, -d / 2, w, d); ctx.rect(-w / 2 + ew, -d / 2 + ew, w - 2 * ew, d - 2 * ew); ctx.fill('evenodd'); ctx.strokeRect(-w / 2 + ew, -d / 2 + ew, w - 2 * ew, d - 2 * ew); }
+    else if (S.edging !== 'none') { ctx.lineWidth = px * 2.2; ctx.strokeStyle = S.edging === 'steel' ? '#6a4a38' : '#9a7448'; ctx.strokeRect(-w / 2, -d / 2, w, d); }
+    plants2D(ctx, S.plan, px);
+  },
+});
+
+// ── planters ──
+const POT_SHAPES = ['round', 'square', 'rect', 'bowl', 'tall', 'trough', 'hanging', 'wall'];
+const POT_PLANTS = ['none', 'shrub', 'flowers', 'palm', 'olive', 'citrus', 'cactus', 'succulents', 'herbs', 'grass', 'topiary', 'bamboo', 'bougainvillea'];
+const POT_PROFILES = {
+  round: [[0.001, 0], [0.66, 0], [0.7, 0.02], [0.94, 0.84], [1, 0.85], [1, 1]],
+  bowl: [[0.001, 0], [0.42, 0], [0.5, 0.03], [0.76, 0.3], [0.93, 0.66], [1, 0.97], [1, 1]],
+  tall: [[0.001, 0], [0.6, 0], [0.64, 0.01], [0.74, 0.4], [0.9, 0.8], [1, 0.985], [1, 1]],
+};
+function planterSetup(P, w, d, h) {
+  const shape = oneOf(P.shape, POT_SHAPES, 'round'), plant = oneOf(P.plant, POT_PLANTS, 'shrub');
+  const material = typeof P.material === 'string' ? P.material : { round: 'terracotta', bowl: 'ceramic', tall: 'fibre-clay', square: 'concrete', rect: 'fibre-clay', trough: 'fibre-clay', hanging: 'rattan', wall: 'terracotta' }[shape];
+  const hanging = shape === 'hanging', maxPot = hanging ? Math.min(h * 0.4, w * 0.6) : h;
+  let ph = plant === 'none' ? 0 : num(P.plantHeight, -1, 0, 2000) / 100;
+  if (plant !== 'none' && ph <= 0) ph = hanging ? maxPot * 0.9 : h * 0.55;
+  const potH = hanging ? Math.max(0.04, maxPot) : clamp(h - ph, Math.min(h, Math.max(0.05, h * 0.18)), h);
+  return { shape, plant, material, hanging, potH, ph: hanging ? Math.min(ph, h - potH - 0.05) : h - potH, t: clamp(Math.min(w, d) * 0.07, 0.008, 0.035) };
+}
+/** Plant standing on the soil of a pot: fills pw × pd × ph and starts at y = 0 of the returned batch. */
+function potPlant(kind, pw, pd, ph, rnd, P) {
+  const pb = new Batch();
+  const tree = (sp, o) => { const S = TREES[sp]; broadleaf(pb, S, pw, pd, ph, rnd, { young: true, fruit: !!o.fruit, look: treeLook(S, {}), P: {} }); pb.fit(pw, pd, ph); };
+  switch (kind) {
+    case 'flowers': addShrub(pb, 'geranium', 'natural', pw, pd, ph, rnd, { flowerColor: P.flowerColor || P.color2 }); break;
+    case 'palm': bladeFan(pb, vmat('frond'), [0, 0, 0], 12, ph * 1.05, rnd, { wid: 0.2, el0: 1.55, el1: 1.05, curve: 0.75, colors: TREES['date-palm'].f.map((c) => K.shade(c, 0.05)), segs: 7, fold: 0.3, profile: (t) => (t < 0.25 ? 0.08 : lanceolate((t - 0.25) / 0.75) * (0.6 + 0.4 * Math.abs(Math.sin(t * 30)))) }); pb.fit(pw, pd, ph); break;
+    case 'olive': tree('olive', {}); break;
+    case 'citrus': tree('lemon', { fruit: true }); break;
+    case 'cactus': addShrub(pb, 'cactus', 'natural', pw, pd, ph, rnd); break;
+    case 'succulents': addShrub(pb, 'succulent-mix', 'natural', pw, pd, ph, rnd); break;
+    case 'herbs': addShrub(pb, 'rosemary', 'natural', pw, pd, ph, rnd); break;
+    case 'grass': addShrub(pb, 'ornamental-grass', 'natural', pw, pd, ph, rnd); break;
+    case 'topiary': addShrub(pb, 'myrtle', 'ball', pw, pd, ph, rnd); break;
+    case 'bamboo': bambooCanes(pb, pw, pd, ph, rnd, HEDGES.bamboo.f, false); pb.fit(pw, pd, ph); break;
+    case 'bougainvillea': addShrub(pb, 'bougainvillea', 'natural', pw, pd, ph, rnd, { flowerColor: P.flowerColor || P.color2 }); break;
+    default: addShrub(pb, 'pittosporum', 'natural', pw, pd, ph, rnd);
+  }
+  return pb;
+}
+registerModel('planter', {
+  build({ w, d, h, p, item }) {
+    const P = params(p), S = planterSetup(P, w, d, h), rnd = K.rng(seedOf(item, 'planter' + S.shape + S.plant)), b = new Batch();
+    const [m, c] = bodyMat(S.material, hexOf(P.color, null)), H = S.potH, t = S.t, soilY = H - Math.min(0.035, H * 0.25), SOIL = '#3d2b1f';
+    const lathe = (prof, phi0, phiLen, rxy, rz) => {
+      const outer = prof.map(([r, y]) => [r, y * H]), lip = [[1 - t / rxy, H], [1 - t / rxy - 0.02, soilY - 0.01]];
+      const g = new THREE.LatheGeometry([...outer, ...lip].map(([r, y]) => new THREE.Vector2(Math.max(1e-4, r), y)), phiLen < 6 ? 14 : 28, phi0, phiLen);
+      return g.scale(rxy, 1, rz);
+    };
+    if (S.shape === 'round' || S.shape === 'bowl' || S.shape === 'tall' || S.hanging) {
+      b.add(m, lathe(POT_PROFILES[S.hanging ? 'bowl' : S.shape], 0, TAU, w / 2, d / 2), c);
+      b.add(vmat('matte'), flatG(ellipsePts(w / 2 - t, d / 2 - t, 24), soilY), SOIL);
+      if (S.hanging) {
+        const mm = K.metal('#3a3d42'), topY = h - 0.03;
+        for (let i = 0; i < 3; i++) { const a = (i / 3) * TAU + 0.5; b.add(mm, barG([Math.cos(a) * (w / 2 - t / 2), H, Math.sin(a) * (d / 2 - t / 2)], [0, topY, 0], 0.0025, 4)); }
+        b.add(mm, new THREE.TorusGeometry(0.012, 0.003, 5, 12).translate(0, h - 0.015, 0));
+      }
+    } else if (S.shape === 'wall') {
+      const g = lathe(POT_PROFILES.round, -Math.PI / 2, Math.PI, w / 2, d).translate(0, 0, -d / 2);
+      b.add(m, g, c); b.add(m, boxOnG(w, H, Math.min(0.012, d * 0.2), 0, 0, -d / 2 + Math.min(0.006, d * 0.1)), c);
+      b.add(vmat('matte'), flatG(ellipsePts(w / 2 - t, d - t, 24).filter(([, z]) => z >= 0).map(([x, z]) => [x, z - d / 2]), soilY), SOIL);
+    } else {
+      const wood = S.material === 'wood' || S.material === 'teak', feet = S.shape === 'trough' ? Math.min(0.04, H * 0.15) : 0;
+      if (wood) {
+        const n = Math.max(1, Math.round((H - feet) / 0.11)), ph2 = (H - feet) / n;
+        for (let i = 0; i < n; i++) { const y = feet + i * ph2; b.add(m, boxOnG(w - 0.01, ph2 - 0.004, t, 0, y, d / 2 - t / 2 - 0.005)); b.add(m, boxOnG(w - 0.01, ph2 - 0.004, t, 0, y, -d / 2 + t / 2 + 0.005)); b.add(m, boxOnG(t, ph2 - 0.004, d - 2 * t - 0.01, w / 2 - t / 2 - 0.005, y, 0)); b.add(m, boxOnG(t, ph2 - 0.004, d - 2 * t - 0.01, -w / 2 + t / 2 + 0.005, y, 0)); }
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.add(m, boxOnG(0.035, H, 0.035, sx * (w / 2 - 0.0175), 0, sz * (d / 2 - 0.0175)));
+      } else {
+        const rim = Math.min(0.03, H * 0.15), ins = Math.min(0.006, t * 0.4);
+        b.add(m, boxOnG(w - 2 * ins, H - rim - feet, d - 2 * ins, 0, feet, 0), c);
+        b.add(m, extrudeG(rectPts(w, d), rim, H - rim, [rectPts(w - 2 * t, d - 2 * t).reverse()]), c);
+        if (feet) for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.add(m, boxOnG(0.05, feet, 0.05, sx * (w / 2 - 0.06), 0, sz * (d / 2 - 0.045)), c);
+      }
+      b.add(vmat('matte'), flatG(rectPts(w - 2 * t, d - 2 * t), soilY), SOIL);
+    }
+    if (S.plant !== 'none' && S.ph > 0.02) {
+      const k = S.shape === 'wall' ? 0.9 : 0.96, pd = S.shape === 'wall' ? d * 0.9 : d * k;
+      b.merge(potPlant(S.plant, w * k, pd, S.ph + (H - soilY), rnd, P), 0, soilY, S.shape === 'wall' ? (d - pd) / 2 - 0.001 : 0);
+      if (S.hanging) b.add(vmat('leaf'), leafCloudG([0, H * 0.75, 0], [w * 0.47, H * 0.55, d * 0.47], 40, 0.07, rnd, { colors: ['#5c9846', '#4f8a3c'], hang: 0.8, aspect: 0.5, shell: 0.85, spread: 0.15 }));
+    }
+    return b.build();
+  },
+  draw2d(ctx, { w, d, h, p, px, item }) {
+    const P = params(p), S = planterSetup(P, w / 100, d / 100, h / 100), rnd = K.rng(seedOf(item, 'planter' + S.shape + S.plant)), t = Math.max(S.t * 100, 1.5 * px);
+    const [, c] = bodyMat(S.material, hexOf(P.color, null)), fill = K.tint(c || K.col(P.color, '#a9774a'), 0.35), round = ['round', 'bowl', 'tall', 'hanging'].includes(S.shape);
+    if (round) { ctx.beginPath(); ctx.ellipse(0, 0, w / 2, d / 2, 0, 0, TAU); ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px; ctx.stroke(); ctx.beginPath(); ctx.ellipse(0, 0, Math.max(1, w / 2 - t), Math.max(1, d / 2 - t), 0, 0, TAU); ctx.fillStyle = '#8a6a50'; ctx.fill(); ctx.stroke(); }
+    else if (S.shape === 'wall') { ctx.beginPath(); ctx.moveTo(-w / 2, -d / 2); ctx.lineTo(w / 2, -d / 2); ctx.ellipse(0, -d / 2, w / 2, d, 0, 0, Math.PI); ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px; ctx.stroke(); }
+    else { K.fillRR(ctx, 0, 0, w, d, 1.5, fill, INK, px); K.fillRR(ctx, 0, 0, w - 2 * t, d - 2 * t, 1, '#8a6a50', INK, px); }
+    if (S.plant === 'none') return;
+    ctx.save(); if (S.shape === 'wall') { ctx.translate(0, -d / 2 + d * 0.48); ctx.scale(1, 0.5); }
+    const k = 0.47, sp = { flowers: 'geranium', cactus: 'cactus', succulents: 'succulent-mix', herbs: 'rosemary', grass: 'ornamental-grass', bougainvillea: 'bougainvillea', topiary: 'myrtle' }[S.plant];
+    if (S.plant === 'palm' || S.plant === 'bamboo') fronds2D(ctx, w * k, d * k, S.plant === 'palm' ? 11 : 16, '#6f9a4a', rnd, px, S.plant === 'palm' ? 0.16 : 0.05);
+    else if (S.plant === 'olive' || S.plant === 'citrus') canopy2D(ctx, w * k, d * k, S.plant === 'olive' ? TREES.olive.f[0] : TREES.lemon.f[0], rnd, px, { accent: S.plant === 'citrus' ? '#f3d63a' : null, dots: 7, dotR: 0.09, clumps: 4, alpha: 0.5, lobes: 9 });
+    else shrub2D(ctx, sp || 'pittosporum', S.plant === 'topiary' ? 'ball' : 'natural', w * k, d * k, rnd, px, { flowerColor: P.flowerColor || P.color2 });
+    ctx.restore();
+  },
+});
+
+// ── raised beds ──
+const BED_FRAMES = { wood: 0.035, steel: 0.02, corten: 0.006, stone: 0.12, plastic: 0.03 };
+function raisedSetup(P, w, d, item) {
+  const frame = oneOf(P.frame, Object.keys(BED_FRAMES), typeof P.material === 'string' && P.material === 'metal' ? 'steel' : 'wood'), crop = oneOf(P.crop, ['vegetables', 'herbs', 'empty', 'flowers', 'strawberries'], 'vegetables');
+  const t = Math.min(BED_FRAMES[frame], w * 0.2, d * 0.2), rnd = K.rng(seedOf(item, 'raised' + frame + crop)), trellis = P.trellis === true || P.trellis === 'true' || P.trellis === 1;
+  const iw = w - 2 * t, id = d - 2 * t, cd = trellis ? id - 0.1 : id;
+  return { frame, crop, t, rnd, trellis, iw, id, cd, plan: plantPlan(crop, iw - 0.06, cd - 0.06, rnd, FLOWER_COLORS) };
+}
+registerModel('raised-bed', {
+  build({ w, d, h, p, item }) {
+    const P = params(p), S = raisedSetup(P, w, d, item), b = new Batch(), t = S.t, rnd = S.rnd, color = hexOf(P.color, null), soilY = Math.max(h * 0.5, h - 0.045);
+    const ring = (y0, hh, m, c, ins = 0, tt = t) => b.add(m, extrudeG(rectPts(w - 2 * ins, d - 2 * ins), hh, y0, [rectPts(w - 2 * ins - 2 * tt, d - 2 * ins - 2 * tt).reverse()]), c);
+    if (S.frame === 'wood') {
+      const m = K.wood(color || '#b08a5a'), n = Math.max(1, Math.round(h / 0.145)), ph = h / n, post = Math.min(0.07, w * 0.2, d * 0.2);
+      for (let i = 0; i < n; i++) {
+        const y = i * ph, hh = ph - 0.004;
+        b.add(m, boxOnG(w, hh, t, 0, y, d / 2 - t / 2)); b.add(m, boxOnG(w, hh, t, 0, y, -d / 2 + t / 2)); b.add(m, boxOnG(t, hh, d - 2 * t, w / 2 - t / 2, y, 0)); b.add(m, boxOnG(t, hh, d - 2 * t, -w / 2 + t / 2, y, 0));
+      }
+      const xs = [-1, 1].map((s) => s * (w / 2 - t - post / 2)); for (let x = -w / 2 + 1.2; x < w / 2 - 0.6; x += 1.2) xs.push(x);
+      for (const x of xs) for (const sz of [-1, 1]) b.add(m, boxOnG(post, h - 0.01, post, x, 0, sz * (d / 2 - t - post / 2)));
+    } else if (S.frame === 'steel') {
+      const outer = roundRectPts(w - 0.016, d - 0.016, Math.min(0.12, w * 0.2, d * 0.2), 5), pts = [], mm = vmat('metal'), col = color || '#b4b9bd';
+      for (let i = 0; i < outer.length; i++) { const a = outer[i], c = outer[(i + 1) % outer.length], len = Math.hypot(c[0] - a[0], c[1] - a[1]), n = Math.max(1, Math.round(len / 0.019)), nx = (c[1] - a[1]) / (len || 1), nz = -(c[0] - a[0]) / (len || 1); for (let q = 0; q < n; q++) { const k = (pts.length % 2 ? 0.008 : -0.001); pts.push([lerp(a[0], c[0], q / n) + nx * k, lerp(a[1], c[1], q / n) + nz * k]); } }
+      b.add(mm, wallG(pts, 0, h - 0.012), col); b.add(mm, wallG(insetPts(outer, 0.012), soilY - 0.01, h - 0.012, true), K.shade(col, -0.15));
+      b.add(mm, extrudeG(roundRectPts(w, d, Math.min(0.128, w * 0.2, d * 0.2), 5), 0.012, h - 0.012, [insetPts(outer, 0.016).reverse()]), K.shade(col, 0.08));
+    } else if (S.frame === 'corten') {
+      const col = color || '#9a5230', g = extrudeG(rectPts(w - 0.02, d - 0.02), h - 0.006, 0, [rectPts(w - 0.02 - 2 * t, d - 0.02 - 2 * t).reverse()]).toNonIndexed();
+      b.add(vmat('matte'), paintFoliage(g, col, rnd, { lo: -0.18, hi: 0.08, sparkle: 0.2 })); ring(h - 0.006, 0.006, vmat('matte'), K.shade(col, -0.1), 0, Math.min(0.03, w * 0.2));
+    } else if (S.frame === 'stone') {
+      const bh = clamp(h / Math.max(1, Math.round(h / 0.1)), 0.04, 0.2), rows = Math.max(1, Math.round(h / bh)), col = color || '#b9b0a0';
+      for (let r = 0; r < rows; r++) {
+        const course = (L, place) => { const n = Math.max(1, Math.round(L / 0.22)), s = L / n; for (let i = 0; i < n; i++) place(-L / 2 + (i + 0.5) * s + (r % 2 && n > 1 ? (i === n - 1 ? 0 : s * 0) : 0), s); };
+        const blk = (x, z, sx, sz) => b.add(vmat('flat'), paintFoliage(boxOnG(sx - 0.006, bh - 0.005, sz - 0.006, x, r * bh, z).toNonIndexed(), K.shade(col, (rnd() - 0.5) * 0.22), rnd, { lo: -0.1, hi: 0.06, sparkle: 0.05 }));
+        const ex = r % 2 ? t : 0;
+        course(w - 2 * ex, (x, s) => { blk(x, d / 2 - t / 2, s, t); blk(x, -d / 2 + t / 2, s, t); });
+        course(d - 2 * (t - ex), (z, s) => { blk(w / 2 - t / 2, z, t, s); blk(-w / 2 + t / 2, z, t, s); });
+      }
+    } else {
+      const col = color || '#4a4d52', m = vmat('satin');
+      ring(0, h, m, col, 0.006); ring(h - 0.025, 0.025, m, K.shade(col, 0.08));
+      for (let x = -w / 2 + 0.2; x < w / 2 - 0.1; x += 0.2) for (const sz of [-1, 1]) b.add(m, boxOnG(0.02, h - 0.03, 0.006, x, 0, sz * (d / 2 - 0.003)), K.shade(col, 0.05));
+      for (let z = -d / 2 + 0.2; z < d / 2 - 0.1; z += 0.2) for (const sx of [-1, 1]) b.add(m, boxOnG(0.006, h - 0.03, 0.02, sx * (w / 2 - 0.003), 0, z), K.shade(col, 0.05));
+    }
+    addGround(b, rectPts(S.iw, S.id), soilY, surfaceOpts('soil', {}));
+    const cropH = { vegetables: 0.6, herbs: 0.35, flowers: 0.4, strawberries: 0.16, empty: 0 }[S.crop];
+    if (S.plan.length) b.merge(plantsBatch(S.plan, S.iw, S.cd, cropH, rnd), 0, soilY, S.trellis ? 0.05 : 0);
+    if (S.trellis) {
+      const m = K.wood('#b08a5a'), z = -d / 2 + t + 0.03, th = 1.3, x0 = -w / 2 + t + 0.03, x1 = w / 2 - t - 0.03, top = h + th;
+      for (const x of [x0, x1]) b.add(m, boxOnG(0.035, top - soilY, 0.035, x, soilY, z));
+      for (let y = h + 0.15; y <= top + 1e-6; y += (th - 0.15) / 4) b.add(m, boxG(x1 - x0, 0.018, 0.012, 0, y - 0.009, z));
+      const nv = Math.max(1, Math.round((x1 - x0) / 0.2)); for (let i = 1; i < nv; i++) b.add(m, boxOnG(0.012, top - h - 0.1, 0.012, lerp(x0, x1, i / nv), h + 0.08, z + 0.012));
+      for (let i = 0; i < nv; i++) { const x = lerp(x0, x1, (i + 0.5) / nv), hh = th * (0.5 + rnd() * 0.45); for (let q = 0; q < 3; q++) { const y = h + hh * (0.2 + q * 0.3); b.add(vmat('leaf'), paintFoliage(blobG(0.11, 0.13, 0.06, x + (rnd() - 0.5) * 0.08, y, z + 0.03, rnd, { detail: 1, amp: 0.3 }), q % 2 ? '#5c9a3c' : '#4f8a3a', rnd)); } b.add(vmat('leaf'), leafCloudG([x, h + hh * 0.5, z + 0.03], [0.12, hh * 0.5, 0.05], 12, 0.09, rnd, { colors: ['#6aa844', '#5c9a3c'], aspect: 0.8 })); }
+    }
+    return b.build();
+  },
+  draw2d(ctx, { w, d, p, px, item }) {
+    const P = params(p), S = raisedSetup(P, w / 100, d / 100, item), t = Math.max(S.t * 100, 1.6 * px), col = hexOf(P.color, { wood: '#b08a5a', steel: '#b4b9bd', corten: '#9a5230', stone: '#b9b0a0', plastic: '#4a4d52' }[S.frame]);
+    const r = S.frame === 'steel' ? Math.min(12, w * 0.2, d * 0.2) : 0.8;
+    K.fillRR(ctx, 0, 0, w, d, r, K.tint(col, 0.3), INK, px);
+    K.rr(ctx, 0, 0, w - 2 * t, d - 2 * t, Math.max(0, r - t)); ctx.fillStyle = groundFill2D(ctx, surfaceOpts('soil', {}), px, -w / 2, -d / 2); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px; ctx.stroke();
+    ctx.save(); ctx.translate(0, S.trellis ? 5 : 0); plants2D(ctx, S.plan, px); ctx.restore();
+    if (S.trellis) { const z = -d / 2 + t + 3; K.line(ctx, -w / 2 + t + 3, z, w / 2 - t - 3, z, '#8a6a40', px * 2); for (const x of [-w / 2 + t + 3, w / 2 - t - 3]) K.fillRR(ctx, x, z, 4, 4, 0, '#b08a5a', INK, px); }
+  },
+});
