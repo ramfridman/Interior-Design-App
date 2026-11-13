@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 8): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 9): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -24,7 +24,10 @@ Hebrew terms to have checked by a native speaker: לבן בוהק, גרייג׳,
 
 Small follow-ups noted: island stools do not travel with the island; overlap of an island with ordinary furniture is only a warning; studio light leaves the room backdrop dim; 3D finish-drop highlight and phone studio / open-fronts not checked by eye; at 320 px wide the File menu button is cut off.
 
-## Next
+## Done in version 9 (13 Nov 2026, night)
+- [x] Lamps light the rooms at night through the same light simulation (auto on at dusk; Lights: auto / on / off), Sky: clear / overcast, Realistic daylight on / off, furniture blocks light, direct sun strength follows the simulation's model (dimmer, truer sunrise / sunset). Lamp brightness uses typical lumen values per lamp type, not each product's data sheet. The architect's starting layout contains no lamps, so nights stay dark until lamps are placed.
+- [x] Catalogue: 878 products (28 added).
+
 - [x] **Stretched display on a phone** — fixed in version 6 (13 Nov): off-screen sheets made the page itself scrollable, so the app could slide up and out of view. The root and the app shell are now clipped and page scroll is reset; the top bar fits down to 360 px wide (at 320 px the File menu is still cut off).
 - [x] **Carpentry in 3D** — published in version 7 (13 Nov): every unit is built in 3D from the same data as the drawings (fronts, handles, worktops with cut-outs, corner pantry in its true L shape); 3D tab in the carpentry workbench with section cut, Open fronts, fit warnings pinned on the units. Follow-ups: the interior is dim at some hours (add a neutral studio-light option for inspecting carpentry); splashbacks / upstands not modelled; lift-off doors look like hinged doors while closed; sliding wardrobe doors do not follow the run's door split; corner pantry shape checked by numeric tests only, not by eye; phone layout of the 3D tab unchecked.
 - [ ] Touch gestures for the structure tools are untested on a real device.
