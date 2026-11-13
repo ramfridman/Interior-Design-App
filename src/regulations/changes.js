@@ -13,10 +13,10 @@ const RULE_OF = { free: 'plan-change-free', warn: 'plan-change-structural', perm
 const SEVERITY_OF = { free: 'info', warn: 'warn', permit: 'warn' };
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-let baseMetrics = null;
-/** Size and daylight of the architect's rooms, by id (computed once — BASE_PLAN never changes). */
+let baseMetrics = null, baseOf = null;
+/** Size and daylight of the base plan's rooms, by id (computed once per base plan — it changes only when a project is opened). */
 function baseline() {
-  if (!baseMetrics) baseMetrics = new Map(BASE_PLAN.rooms.map((r) => [r.id, { room: r, shape: JSON.stringify(r.polygon), ...roomMetrics(BASE_PLAN, r) }]));
+  if (!baseMetrics || baseOf !== BASE_PLAN) { baseOf = BASE_PLAN; baseMetrics = new Map(BASE_PLAN.rooms.map((r) => [r.id, { room: r, shape: JSON.stringify(r.polygon), ...roomMetrics(BASE_PLAN, r) }])); }
   return baseMetrics;
 }
 

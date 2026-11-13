@@ -19,6 +19,7 @@ import { RULES, DISCLAIMER, CATEGORIES, ruleById } from './rules.js';
 import { checkBuilding } from './building.js';
 import { checkChanges } from './changes.js';
 import { planRev } from './geom.js';
+import { planPhase } from '../core/plan-edit.js';
 import { buildContext, checkInterior } from './interior.js';
 import { checkOutdoor } from './outdoor.js';
 
@@ -35,7 +36,7 @@ const BUILDING_CACHE = new WeakMap();
 function buildingFindings(args) {
   const { plan, store } = args;
   const mamadWalls = plan.rooms.filter((r) => r.type === 'mamad').map((r) => (store && store.finishes && store.finishes[r.id] && store.finishes[r.id].wall) || '').join('|');
-  const key = `${planRev(plan)}#${store && store.project ? store.project.ceilingHeight : ''}#${mamadWalls}`;
+  const key = `${planRev(plan)}#${planPhase()}#${store && store.project ? store.project.ceilingHeight : ''}#${mamadWalls}`;
   const hit = BUILDING_CACHE.get(plan);
   if (hit && hit.key === key && hit.catalog === args.catalog) return hit.findings;
   const findings = [];

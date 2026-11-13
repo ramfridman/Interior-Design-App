@@ -15,12 +15,21 @@
  *                                            – PLAN.walls / openings / rooms / wallOutline were REPLACED (core/plan-edit.js,
  *                                              undo / redo, load). reason: 'add-wall' | 'remove-wall' | 'move-wall' |
  *                                              'resize-wall' | 'add-opening' | 'update-opening' | 'remove-opening' |
- *                                              'update-room' | 'reset' | 'history' | 'load'. Rebuild everything drawn from PLAN.
+ *                                              'update-room' | 'reset' | 'history' | 'load' | 'base' (another project's base plan:
+ *                                              EVERY part of PLAN was replaced, site and meta too) | 'phase' (draft ↔ fixed).
+ *                                              Rebuild everything drawn from PLAN.
  *   'carpentry'  { reason, runIds, transient? }  – store.carpentry (made-to-measure runs, src/carpentry/) changed.
  *                                              reason: an engine reason ('create-run', 'layout', 'adopt', …) | 'history' | 'load'
  *   'history'    { canUndo, canRedo }
  *   'load'       {}                          – whole design replaced (file open / reset)
+ *   'base'       {}                          – another project was opened (store.openProject): base plan, site, location
+ *                                              and design all replaced, history cleared. Emitted LAST, after 'plan' / 'load' /
+ *                                              … — views that captured the site or the sun at creation are rebuilt on it.
  *   '*'          (eventName, payload)        – everything
+ *
+ * PERSISTENCE
+ *   Autosave is debounced (400 ms). With `store.saver = fn` set (src/core/projects.js does) it calls `fn()` — the
+ *   current project is saved through the project storage; without it the design goes to the legacy localStorage key.
  *
  * HISTORY
  *   Every mutating call records one undo step, except calls with { transient: true } (used while dragging).
@@ -30,7 +39,7 @@
  */
 import { PLAN } from './plan.js';
 import { spaceAt } from './geometry.js';
-import { bindPlanHost, planState, planStateKey, applyPlanState } from './plan-edit.js';
+import { bindPlanHost, planState, planStateKey, applyPlanState, setBasePlan, setPlanPhase as setEnginePhase } from './plan-edit.js';
 
 const STORAGE_KEY = 'e7-interior-design/v1';
 const HISTORY_LIMIT = 200;
@@ -112,6 +121,8 @@ const DEFAULT_PROJECT = {
   exteriorColor: '#efece6', // exterior render
   frameColor: '#2b2d31',    // window / door frames (dark aluminium)
 };
+/** Project defaults for the plan that is open now (DEFAULT_PROJECT is the built-in house's). */
+const defaultProject = () => ({ ...DEFAULT_PROJECT, name: PLAN.meta.name, ceilingHeight: PLAN.heights.ceiling });
 
 class Store {
   constructor() {
@@ -131,6 +142,8 @@ class Store {
     this._batch = null;
     this._saveTimer = null;
     this.persist = true;
+    /** Autosave target (set by core/projects.js); null = the legacy single-design localStorage key. */
+    this.saver = null;
   }
 
   // ---------- events ----------
@@ -184,7 +197,7 @@ class Store {
     const s = JSON.parse(snap);
     const plan = applyPlanState(s.plan || null);            // no-op unless the snapshot holds a different plan
     const carp = readCarpentry(s.carpentry), carpChanged = JSON.stringify(carp) !== JSON.stringify(this.carpentry);
-    this.items = s.items; this.finishes = s.finishes || {}; this.project = { ...DEFAULT_PROJECT, ...s.project };
+    this.items = s.items; this.finishes = s.finishes || {}; this.project = { ...defaultProject(), ...s.project };
     this.carpentry = carp;
     this.selection = this.selection.filter((id) => this.getItem(id));
     if (plan.changed.walls || plan.changed.openings || plan.changed.rooms) this.emit('plan', { reason: 'history', changed: plan.changed });
@@ -375,11 +388,12 @@ class Store {
     this.finishes = clone(data.finishes || {});
     this.carpentry = readCarpentry(data.carpentry);           // a file without carpentry has no runs
     this.carpentryImages = data.carpentryImages && typeof data.carpentryImages === 'object' ? { ...data.carpentryImages } : {};
-    this.project = { ...DEFAULT_PROJECT, ...(data.project || {}) };
+    this.project = { ...defaultProject(), ...(data.project || {}) };
     if (data.ui && opts.restoreUI) this.ui = { ...DEFAULT_UI, ...data.ui };
     this.selection = [];
     this._pruneFinishes();
-    if (plan.changed.walls || plan.changed.openings || plan.changed.rooms) this.emit('plan', { reason: 'load', changed: plan.changed });
+    if (opts.base) this.emit('plan', { reason: 'base', changed: { walls: true, openings: true, rooms: true } });
+    else if (plan.changed.walls || plan.changed.openings || plan.changed.rooms) this.emit('plan', { reason: 'load', changed: plan.changed });
     this.emit('carpentry', { reason: 'load', runIds: Object.keys(this.carpentry.runs) });
     this.emit('load', {});
     this.emit('items', { type: 'reset', ids: this.items.map((i) => i.id) });
@@ -389,9 +403,49 @@ class Store {
     this.emit('ui', { keys: Object.keys(this.ui) });
   }
   _scheduleSave() {
-    if (!this.persist || typeof localStorage === 'undefined') return;
+    if (!this.persist || (!this.saver && typeof localStorage === 'undefined')) return;
     clearTimeout(this._saveTimer);
-    this._saveTimer = setTimeout(() => this.saveLocal(), 400);
+    this._saveTimer = setTimeout(() => { this._saveTimer = null; if (this.saver) this.saver(); else this.saveLocal(); }, 400);
+  }
+  /** True while an autosave is waiting to run. */
+  get savePending() { return !!this._saveTimer; }
+
+  // ---------- projects (see core/projects.js) ----------
+  /**
+   * Open another project in place: replace the base plan (`basePlan`, phase 'draft' | 'fixed'), then the whole design
+   * (`design` = what serialize() returned, or nothing for an empty one), clear selection and undo history, and reset the
+   * per-session UI state (structure / carpentry selection, active room, walk mode). Emits 'plan' { reason: 'base' }, the
+   * usual 'load' events, then 'base'. Never autosaves by itself.
+   */
+  openProject({ basePlan, phase = 'fixed', design, name } = {}) {
+    clearTimeout(this._saveTimer); this._saveTimer = null;
+    const persist = this.persist;
+    this.persist = false;
+    try {
+      this._undo = []; this._redo = []; this._batch = null;
+      if (basePlan) setBasePlan(basePlan, { phase });
+      const data = design && Array.isArray(design.items) ? design : { items: [] };
+      const project = { ...(data.project || {}), ...(name ? { name } : {}) };
+      const ui = { ...(data.ui || this.ui), structureSel: null, carpentrySel: null, activeSpace: null };
+      if (ui.mode === 'walk') ui.mode = '3d';
+      this.load({ ...data, project, ui }, { restoreUI: true, base: true });
+      this.emit('history', this.historyState());
+      this.emit('base', {});
+    } finally { this.persist = persist; }
+  }
+  /**
+   * 'draft' (the existing house is still being drawn: everything editable, no permit warnings, no changes list) |
+   * 'fixed' ("this is the house as built": the current plan becomes the base plan and the permission levels and the
+   * changes list apply relative to it). Clears the undo history (old steps refer to the other base). Returns true if changed.
+   */
+  setPlanPhase(phase) {
+    if (!setEnginePhase(phase).changed) return false;
+    this._undo = []; this._redo = []; this._batch = null;
+    const gone = this._pruneFinishes();
+    this.emit('plan', { reason: 'phase', changed: { walls: true, openings: true, rooms: true } });
+    if (gone.length) this.emit('finishes', { ids: gone });
+    this.emit('history', this.historyState());
+    return true;
   }
   saveLocal() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.serialize())); } catch (e) { /* storage unavailable — design still works in memory */ } }
   /** Returns true if a saved design was restored. */
@@ -408,5 +462,5 @@ class Store {
 
 export const store = new Store();
 bindPlanHost({ record: (opts) => store._record(opts), changed: (payload) => store._planChanged(payload) });
-export { DEFAULT_UI, DEFAULT_PROJECT, emptyCarpentry };
+export { DEFAULT_UI, DEFAULT_PROJECT, defaultProject, emptyCarpentry, STORAGE_KEY };
 export default store;

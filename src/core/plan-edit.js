@@ -35,7 +35,7 @@ const MIN_WALL = 30;       // cm — shortest wall a user can draw; shorter free
 const MIN_CLEAR = 60;      // cm — narrowest free space an edit may create
 const TRIM = 15;           // cm — a drawn wall end this close to a wall face is extended to it
 const REACH = 60;          // cm — how far addOpening looks for a wall around the requested point
-const NEW_WALL = { min: 7, max: 20, def: 10 };
+const NEW_WALL = { min: 7, max: 20, def: 10, draftMax: TMAX };   // while drafting, exterior and safe-room walls (≤ 30 cm) can be drawn too
 
 export const REASONS = Object.freeze({
   mamad: 'Altering the protective shell, door or window of a mamad (safe room) is prohibited by the Civil Defence (shelter specifications) regulations.',
@@ -72,14 +72,22 @@ function lowerBound(arr, v) {
   return lo;
 }
 
-/** The architect's plan: deep-frozen, never changes. */
-export const BASE_PLAN = deepFreeze(clone(PLAN));
-const BASE_SOLIDS = [...BASE_PLAN.walls, ...BASE_PLAN.openings];
+// ---------------------------------------------------------------- base plan (switchable, see setBasePlan)
+/**
+ * The plan edits are measured against: deep-frozen, same shape as PLAN. It is House 98 (the architect's plan) unless a
+ * project with another house is open — `setBasePlan()` replaces it (ES live binding: importers always see the current one).
+ */
+export let BASE_PLAN = deepFreeze(clone(PLAN));
+/** The built-in house (House 98, the architect's plan) — deep-frozen, never changes. */
+export const BUILTIN_PLAN = BASE_PLAN;
+const BUILTIN_KEY = JSON.stringify(BUILTIN_PLAN);
+/** Keys of a PLAN-shaped object, in PLAN's own order. */
+export const PLAN_KEYS = Object.freeze(Object.keys(PLAN));
 
-/** Safe-room shell, derived once from the architect's plan (it is locked, so it never changes). */
-const MAMAD = (() => {
-  const room = BASE_PLAN.rooms.find((r) => r.id === 'mamad') || BASE_PLAN.rooms.find((r) => r.type === 'mamad');
-  const walls = BASE_PLAN.walls.filter((w) => w.kind === 'mamad');
+/** Safe-room shell of a base plan (it is locked, so it never changes while that plan is the base). */
+function mamadOf(base) {
+  const room = base.rooms.find((r) => r.id === 'mamad') || base.rooms.find((r) => r.type === 'mamad');
+  const walls = base.walls.filter((w) => w.kind === 'mamad');
   if (!room) return { room: null, shell: null, rects: walls };
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const [x, y] of room.polygon) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
@@ -89,11 +97,24 @@ const MAMAD = (() => {
   for (const w of walls) if (overlapArea(w, grown) > 0) { x0 = Math.min(x0, w.x); y0 = Math.min(y0, w.y); x1 = Math.max(x1, w.x + w.w); y1 = Math.max(y1, w.y + w.h); }
   const shell = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   return { room: inner, shell, rects: [shell, ...walls.filter((w) => overlapArea(w, shell) < w.w * w.h)] };
-})();
-const inMamad = (r) => MAMAD.rects.some((s) => overlapArea(r, s) > 0);
+}
+const NO_MAMAD = Object.freeze({ room: null, shell: null, rects: [] });
 
-const outdoorAt = (x, y) => { for (const o of BASE_PLAN.outdoorAreas) if (pointInPolygon(x, y, o.polygon)) return o.id; return 'outside'; };
-const isOutdoorId = (id) => id === 'outside' || BASE_PLAN.outdoorAreas.some((o) => o.id === id);
+/**
+ * Everything the derivation reads from the base plan, swapped as a whole when the base plan or the phase changes.
+ * Phase 'draft' = the owner is still drawing the existing house: nothing is locked, nothing needs a permit, nothing is
+ * "a change to the plan" (no safe-room shell, no base solids). Phase 'fixed' = the base plan is the house as built.
+ */
+function makeEnv(base, ph) {
+  const draft = ph === 'draft';
+  return { draft, solids: [...base.walls, ...base.openings], mamad: draft ? NO_MAMAD : mamadOf(base), outdoorAreas: base.outdoorAreas || [], baseWalls: base.walls };
+}
+let phase = 'fixed';
+let ENV = makeEnv(BASE_PLAN, phase);
+const inMamad = (r) => ENV.mamad.rects.some((s) => overlapArea(r, s) > 0);
+
+const outdoorAt = (x, y) => { for (const o of ENV.outdoorAreas) if (pointInPolygon(x, y, o.polygon)) return o.id; return 'outside'; };
+const isOutdoorId = (id) => id === 'outside' || ENV.outdoorAreas.some((o) => o.id === id);
 
 // ---------------------------------------------------------------- grid model
 const FREE = 0, WALL = 1, GAP = 2;        // cell states
@@ -102,6 +123,8 @@ const T_H = 1, T_V = 2, T_J = 3;          // bar orientation of a solid cell
 function buildModel(solids, openings, extraX = [], extraY = []) {
   const xs0 = new Set(extraX), ys0 = new Set(extraY);
   for (const list of [solids, openings]) for (const r of list) { xs0.add(r.x); xs0.add(r.x + r.w); ys0.add(r.y); ys0.add(r.y + r.h); }
+  if (!xs0.size) xs0.add(0);
+  if (!ys0.size) ys0.add(0);
   const xs = [...xs0].sort((a, b) => a - b), ys = [...ys0].sort((a, b) => a - b);
   xs.unshift(xs[0] - 100); xs.push(xs[xs.length - 1] + 100); ys.unshift(ys[0] - 100); ys.push(ys[ys.length - 1] + 100);
   const nx = xs.length - 1, ny = ys.length - 1;
@@ -192,7 +215,7 @@ function computeCores(m) {
     for (let j = c.j0; j < c.j1; j++) { if (outdoor(c.i0 - 1, j) || outdoor(c.i1, j)) ext = true; if (c.axis === 'h') { if (!free(c.i0 - 1, j)) freeA = false; if (!free(c.i1, j)) freeB = false; } }
     for (let i = c.i0; i < c.i1; i++) { if (outdoor(i, c.j0 - 1) || outdoor(i, c.j1)) ext = true; if (c.axis === 'v') { if (!free(i, c.j0 - 1)) freeA = false; if (!free(i, c.j1)) freeB = false; } }
     c.freeA = freeA; c.freeB = freeB;
-    c.isNew = coverage(r, BASE_SOLIDS) < 0.5;
+    c.isNew = !ENV.draft && coverage(r, ENV.solids) < 0.5;
     c.cls = inMamad(r) ? 'mamad' : ext ? 'exterior' : c.thickness >= THICK && !c.isNew ? 'thick' : 'partition';
     c.t = { i0: c.i0, i1: c.i1, j0: c.j0, j1: c.j1 };
   };
@@ -294,7 +317,7 @@ function buildWalls(m, prevWalls) {
   rects.sort((a, b) => a.y - b.y || a.x - b.x);
   const key = (r) => `${r.x},${r.y},${r.w},${r.h}`, old = new Map(), used = new Set();
   let next = 0;
-  for (const w of [...BASE_PLAN.walls, ...(prevWalls || [])]) { const n = parseInt(String(w.id).slice(1), 10); if (n > next) next = n; }
+  for (const w of [...ENV.baseWalls, ...(prevWalls || [])]) { const n = parseInt(String(w.id).slice(1), 10); if (n > next) next = n; }
   for (const w of prevWalls || []) if (!old.has(key(w))) old.set(key(w), w.id);
   return rects.map((r) => {
     let id = old.get(key(r));
@@ -524,7 +547,7 @@ function derive(solids, openings, prevRooms, prevWalls) {
     return {
       id: c.junction ? `seg:j:${c.x}:${c.y}` : v ? `seg:v:${c.x}:${c.y}:${c.y + c.h}` : `seg:h:${c.y}:${c.x}:${c.x + c.w}`,
       axis: c.axis, ...tile, thickness: c.thickness, length: v ? tile.h : tile.w, cls: c.cls,
-      policy: c.cls === 'mamad' ? { level: 'locked', reason: REASONS.mamad } : c.cls === 'exterior' ? { level: 'locked', reason: REASONS.exteriorWall }
+      policy: ENV.draft ? { level: 'free', reason: '' } : c.cls === 'mamad' ? { level: 'locked', reason: REASONS.mamad } : c.cls === 'exterior' ? { level: 'locked', reason: REASONS.exteriorWall }
         : c.cls === 'thick' ? { level: 'warn', reason: REASONS.thick(c.thickness) } : { level: 'free', reason: '' },
       openingIds: nextOpenings.filter((o) => overlapArea(o, tile) > 0).map((o) => o.id),
       isNew: c.isNew,
@@ -539,7 +562,7 @@ function derive(solids, openings, prevRooms, prevWalls) {
 // ---------------------------------------------------------------- live state
 let host = { record() {}, changed() {} };
 let modified = false, analysis = null, stateKey = null;
-const foreign = new WeakMap();
+let foreign = new WeakMap();
 
 /** Called once by the store: `record(opts)` takes the undo snapshot BEFORE a change, `changed(payload)` announces it. */
 export function bindPlanHost(h) { host = { record: h.record || (() => {}), changed: h.changed || (() => {}) }; }
@@ -576,13 +599,27 @@ function setBase() {
   PLAN.walls = clone(BASE_PLAN.walls); PLAN.openings = clone(BASE_PLAN.openings);
   PLAN.rooms = clone(BASE_PLAN.rooms); PLAN.wallOutline = clone(BASE_PLAN.wallOutline);
   modified = false; analysis = null;
+  syncBounds();
+}
+
+/** Outer bounding box of wall rectangles (openings included), or null when there are none. */
+export function wallBounds(walls, openings = []) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const r of [...walls, ...openings]) { x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y); x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h); }
+  return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+}
+/** While drafting, the house grows with the walls: PLAN.bounds follows them (a fixed plan keeps its base bounds). */
+function syncBounds() {
+  if (!ENV.draft) { if (JSON.stringify(PLAN.bounds) !== JSON.stringify(BASE_PLAN.bounds)) PLAN.bounds = clone(BASE_PLAN.bounds); return; }
+  const b = wallBounds(PLAN.walls, PLAN.openings) || BASE_PLAN.bounds;
+  if (JSON.stringify(b) !== JSON.stringify(PLAN.bounds)) PLAN.bounds = clone(b);
 }
 
 /** Install a derived plan as the live plan (no history, no event). Returns which parts changed. */
 function install(d) {
   const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
   if (isArchitectPlan(d)) setBase();
-  else { PLAN.walls = d.walls; PLAN.openings = d.openings; PLAN.rooms = d.rooms; PLAN.wallOutline = d.wallOutline; modified = true; analysis = d; }
+  else { PLAN.walls = d.walls; PLAN.openings = d.openings; PLAN.rooms = d.rooms; PLAN.wallOutline = d.wallOutline; modified = true; analysis = d; syncBounds(); }
   stateKey = null; invalidatePlanCaches();
   const after = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
   return { walls: before[0] !== after[0], openings: before[1] !== after[1], rooms: before[2] !== after[2] };
@@ -637,10 +674,10 @@ export function applyPlanState(state) {
     const locked = analysisOf(BASE_PLAN).segments.filter((g) => g.policy.level === 'locked');
     const solids = [...d.walls, ...d.openings];
     const footprint = (walls, openings, rooms) => [...walls, ...openings].reduce((a, r) => a + r.w * r.h, 0) + rooms.reduce((a, r) => a + polygonArea(r.polygon), 0);
-    const intact = d.problems.length === 0 && d.rooms.length > 0
+    const intact = d.problems.length === 0 && (ENV.draft || (d.rooms.length > 0
       && locked.every((g) => coverage(g, solids) > 0.999)
       && Math.abs(footprint(d.walls, d.openings, d.rooms) - footprint(BASE_PLAN.walls, BASE_PLAN.openings, BASE_PLAN.rooms)) < 1
-      && BASE_PLAN.openings.filter(inMamad).every((b) => { const o = d.openings.find((x) => x.id === b.id); return o && JSON.stringify(o) === JSON.stringify(b); });
+      && BASE_PLAN.openings.filter(inMamad).every((b) => { const o = d.openings.find((x) => x.id === b.id); return o && JSON.stringify(o) === JSON.stringify(b); })));
     if (!intact) return toBase('The saved plan edits do not fit this house — the architect\'s plan was restored.');
     // keep the saved rectangles (ids included) when they describe the same walls, so undo / redo is exact
     const area = (list) => list.reduce((a, r) => a + r.w * r.h, 0);
@@ -668,6 +705,7 @@ export function segmentAt(x, y, tol = 6) {
 
 const segmentOfOpening = (o) => current().segments.find((s) => s.openingIds.includes(o.id)) || null;
 function policyOfOpening(o) {
+  if (ENV.draft) return { level: 'free', reason: '' };
   if (inMamad(o) || o.style === 'mamad') return { level: 'locked', reason: REASONS.mamad };
   if (o.exterior) return { level: 'permit', reason: REASONS.permit };
   return { level: 'free', reason: '' };
@@ -677,8 +715,8 @@ export function openingPolicy(openingId) {
   const o = PLAN.openings.find((x) => x.id === openingId);
   return o ? policyOfOpening(o) : { level: 'locked', reason: 'No such opening.' };
 }
-/** True when the plan differs from the architect's. */
-export function isPlanModified() { return modified; }
+/** True when the plan differs from the architect's (never while drafting: nothing is a change then). */
+export function isPlanModified() { return modified && !ENV.draft; }
 
 // ---------------------------------------------------------------- wall editing
 /** Edit model of the current plan with extra grid lines, plus axis-agnostic accessors (u = across the wall, v = along it). */
@@ -743,7 +781,7 @@ function fitWall(E, c0, c1, a, b) {
   const slab = (v) => {
     if (v < 0 || v >= A.length - 1) return 'out';
     let walls = 0, free = 0;
-    for (let u = u0; u < u1; u++) { const k = K(u, v), c = m.cell[k]; if (c === GAP) return 'opening'; if (c === WALL) walls++; else if (m.out[k]) return 'out'; else free++; }
+    for (let u = u0; u < u1; u++) { const k = K(u, v), c = m.cell[k]; if (c === GAP) return 'opening'; if (c === WALL) walls++; else if (m.out[k] && !ENV.draft) return 'out'; else free++; }
     return walls === 0 ? 'free' : free === 0 ? 'wall' : 'mixed';
   };
   let ka = E.ai(a), kb = E.ai(b);
@@ -769,7 +807,7 @@ function fitWall(E, c0, c1, a, b) {
     else { const hit = lockedAt(E.rect(c0, c1, A[v], A[v + 1])); if (hit) return fail(hit.cls === 'mamad' ? REASONS.mamad : 'A new wall cannot cross an exterior wall. ' + REASONS.exteriorWall); }
   }
   if (!fresh) return fail('There is already a wall here.');
-  if (MAMAD.shell && overlapArea(rect, MAMAD.shell) > 0) return fail('No walls may be built inside the safe room. ' + REASONS.mamad);
+  if (ENV.mamad.shell && overlapArea(rect, ENV.mamad.shell) > 0) return fail('No walls may be built inside the safe room. ' + REASONS.mamad);
   if (slab(ka - 1) === 'opening' || slab(kb) === 'opening') return fail('A wall cannot end on a door or window.');
   return { ok: true, rect, ka, kb, u0, u1 };
 }
@@ -777,8 +815,8 @@ function fitWall(E, c0, c1, a, b) {
 function planAddWall(input) {
   const p = input || {};
   if (![p.x1, p.y1, p.x2, p.y2].every(num)) return fail('A wall needs two points.');
-  const t = Math.round(p.thickness == null ? NEW_WALL.def : p.thickness);
-  if (!(t >= NEW_WALL.min && t <= NEW_WALL.max)) return fail(`New partitions are ${NEW_WALL.min}–${NEW_WALL.max} cm thick.`);
+  const t = Math.round(p.thickness == null ? NEW_WALL.def : p.thickness), max = ENV.draft ? NEW_WALL.draftMax : NEW_WALL.max;
+  if (!(t >= NEW_WALL.min && t <= max)) return fail(ENV.draft ? `Walls are ${NEW_WALL.min}–${max} cm thick.` : `New partitions are ${NEW_WALL.min}–${max} cm thick.`);
   const x1 = snap(p.x1), y1 = snap(p.y1), x2 = snap(p.x2), y2 = snap(p.y2);
   const axis = Math.abs(x2 - x1) >= Math.abs(y2 - y1) ? 'h' : 'v';
   const a = axis === 'h' ? Math.min(x1, x2) : Math.min(y1, y2), b = axis === 'h' ? Math.max(x1, x2) : Math.max(y1, y2);
@@ -920,7 +958,7 @@ function planMoveWall(s, d0) {
   for (let v = va0; v < va1; v++) for (let u = d0 > 0 ? uc1 : un0; u < (d0 > 0 ? un1 : uc0); u++) {
     const k = K(u, v);
     if (m.cell[k]) return fail(cross);
-    if (m.out[k]) return fail('A wall cannot leave the house.');
+    if (m.out[k] && !ENV.draft) return fail('A wall cannot leave the house.');
   }
   const hull0 = Math.min(uc0, un0), hull1 = Math.max(uc1, un1), fill = [], clear = [];
   for (const end of [{ v: va0 - 1, dir: -1 }, { v: va1, dir: 1 }]) {
@@ -937,7 +975,7 @@ function planMoveWall(s, d0) {
       if (!rows.every((r) => across(r, un0, un1, (k) => m.cell[k] !== GAP))) return fail('That wall would end on a door or window.');
       for (const r of rows) for (let u = hull0; u < hull1; u++) {                               // stretch the wall it meets
         const k = K(u, r);
-        if (m.cell[k] === FREE) { if (m.out[k]) return fail('A wall cannot leave the house.'); fill.push(k); }
+        if (m.cell[k] === FREE) { if (m.out[k] && !ENV.draft) return fail('A wall cannot leave the house.'); fill.push(k); }
       }
       const trail = d0 > 0 ? uc0 - 1 : uc1, s0 = d0 > 0 ? uc0 : un1, s1 = d0 > 0 ? un0 : uc1;
       if (!continues && landed && rows.every((r) => m.cell[K(trail, r)] === FREE)                   // an L-corner: shrink the wall it meets
@@ -1175,7 +1213,7 @@ const whereOpening = (o) => (o.rooms || []).map(spaceName).join(' / ');
  */
 export function planDiff() {
   const items = [];
-  if (!modified) return { changed: false, items };
+  if (!modified || ENV.draft) return { changed: false, items };
   const base = analysisOf(BASE_PLAN), cur = current(), solids = solidsOf(PLAN), coreLen = (s) => (s.axis === 'h' ? s.core.w : s.core.h);
   const gone = base.segments.filter((s) => coverage(s.core, solids) < 0.5), carried = [];
   // a short new piece in line with an existing wall is that wall stretched to follow a move, not a new wall
@@ -1192,8 +1230,8 @@ export function planDiff() {
     } else items.push({ kind: 'wall-removed', level: g.policy.level, text: `Removed the ${wallName(g)} ${sides(g)} (${metres(coreLen(g))})`, at: centreOf(g.core), ref: g.id });
   }
   for (const n of added) items.push({ kind: 'wall-added', level: 'free', text: `New ${n.thickness} cm partition ${sides(n)} (${metres(coreLen(n))})`, at: centreOf(n.core), ref: n.id });
-  if (!items.length && !sameSolid(PLAN.walls.concat(PLAN.openings), BASE_SOLIDS)) {
-    const a = cur.segments.find((s) => coverage(s.core, BASE_SOLIDS) < 0.999) || base.segments.find((s) => coverage(s.core, solids) < 0.999);
+  if (!items.length && !sameSolid(PLAN.walls.concat(PLAN.openings), ENV.solids)) {
+    const a = cur.segments.find((s) => coverage(s.core, ENV.solids) < 0.999) || base.segments.find((s) => coverage(s.core, solids) < 0.999);
     if (a) items.push({ kind: 'wall-moved', level: a.policy.level === 'locked' ? 'free' : a.policy.level, text: `Changed the length of the ${wallName(a)} ${sides(a)}`, at: centreOf(a.core), ref: a.id });
   }
   for (const b of BASE_PLAN.openings) {
@@ -1218,4 +1256,74 @@ export function planDiff() {
 export function recomputePlan(plan = PLAN) {
   const d = derive(solidsOf(plan), plan.openings, plan.rooms, plan.walls);
   return { walls: d.walls, openings: d.openings, rooms: d.rooms, wallOutline: d.wallOutline, problems: d.problems };
+}
+
+// ---------------------------------------------------------------- switchable base plan and phase (projects)
+/**
+ * Replace the base plan at runtime (opening another project). `PLAN` keeps its identity; every field is replaced by a
+ * copy of `planData` (meta, heights, bounds, walls, wallOutline, openings, rooms, outdoorAreas, site, assumptions),
+ * `BASE_PLAN` becomes a deep-frozen copy, the derived state (safe-room shell, classification, caches) follows, and the
+ * live plan is the base plan unedited. No history, no event: the store's `openProject()` wraps this and announces it.
+ * @param {object} planData  a complete PLAN-shaped object (from `plan-build.js` `buildPlan()` or a saved project)
+ * @param {{ phase?: 'draft' | 'fixed' }} [opts]
+ */
+export function setBasePlan(planData, opts = {}) {
+  const base = deepFreeze(clone(planData));
+  BASE_PLAN = JSON.stringify(base) === BUILTIN_KEY ? BUILTIN_PLAN : base;
+  phase = opts.phase === 'draft' ? 'draft' : 'fixed';
+  for (const k of Object.keys(PLAN)) if (!(k in BASE_PLAN)) delete PLAN[k];
+  for (const k of Object.keys(BASE_PLAN)) PLAN[k] = clone(BASE_PLAN[k]);
+  ENV = makeEnv(BASE_PLAN, phase);
+  foreign = new WeakMap();
+  modified = false; analysis = null; stateKey = null;
+  syncBounds();
+  invalidatePlanCaches();
+}
+
+/** True while the base plan is the built-in house (House 98 — the architect's plan and layout exist only for it). */
+export function isBuiltinBase() { return BASE_PLAN === BUILTIN_PLAN; }
+
+/** 'draft' (the existing house is still being drawn) | 'fixed' (the base plan is the house as built). */
+export function planPhase() { return phase; }
+
+/**
+ * Switch the phase (engine only; use `store.setPlanPhase()` from the UI, which also clears the undo history and emits
+ * 'plan'). draft → fixed: the current plan becomes the new base plan ("this is the house as built"), from then on the
+ * permission levels and the changes list apply relative to it. fixed → draft: the base stays, every wall and opening is
+ * free again and the changes list is empty; fixing again later restarts it from the plan as it is then.
+ * @returns {{ changed: boolean }}
+ */
+export function setPlanPhase(next) {
+  const want = next === 'draft' ? 'draft' : 'fixed';
+  if (want === phase) return { changed: false };
+  if (want === 'fixed') setBasePlan(currentPlanData(), { phase: 'fixed' });
+  else {
+    phase = 'draft'; ENV = makeEnv(BASE_PLAN, phase); foreign = new WeakMap();
+    analysis = null; stateKey = null; syncBounds(); invalidatePlanCaches();
+  }
+  return { changed: true };
+}
+
+/** A plain copy of the live plan as a complete PLAN-shaped object (walls without the edit-only `cls`). */
+export function currentPlanData() {
+  const out = {};
+  for (const k of Object.keys(PLAN)) out[k] = clone(PLAN[k]);
+  out.walls = out.walls.map(({ cls, ...w }) => w);
+  return out;
+}
+
+/**
+ * Pure derivation for building a NEW plan (no live state is read or changed): wall rectangles + openings → clean wall
+ * rectangles, wall outline, rooms (enclosed indoor regions between walls, matched to `prevRooms` by overlap; new ones are
+ * `{ id: 'room-<n>', name: 'New room' }`), openings with their rooms / exterior / outside sides, and problems
+ * (`{ id, type: 'overlap' | 'jamb' | 'blocked' }` for openings that do not sit cleanly in a wall).
+ * Runs as a draft (nothing locked, no safe-room shell). Used by `plan-build.js`.
+ */
+export function analyseWalls(walls, openings, { prevRooms = [], outdoorAreas = [] } = {}) {
+  const saved = ENV;
+  ENV = { draft: true, solids: [], mamad: NO_MAMAD, outdoorAreas, baseWalls: [] };
+  try {
+    const d = derive([...walls, ...openings], openings, prevRooms, []);
+    return { walls: d.walls, openings: d.openings, rooms: d.rooms, wallOutline: d.wallOutline, problems: d.problems, segments: d.segments };
+  } finally { ENV = saved; }
 }

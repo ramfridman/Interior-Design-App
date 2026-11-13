@@ -476,7 +476,7 @@ export function createView3D(container, ctx) {
       call(daylight, 'dispose'); daylight = null;
       carpentry.dispose(); walk.dispose(); finishDrop.dispose(); interaction.dispose(); items.dispose(); rig.dispose();
       call(house, 'dispose'); call(site, 'dispose'); call(env, 'dispose');
-      renderer.dispose();
+      renderer.dispose(); try { renderer.forceContextLoss(); } catch (e) { /* context already gone */ }
       canvas.remove(); overlay.remove();
       handlers.clear();
     },
