@@ -124,6 +124,7 @@ const triCount = (obj) => { let t = 0; obj.traverse((o) => { if (o.isMesh) t += 
 /** Bounding-box check → '' when fine, otherwise a description. Horizontal ±2 cm; vertical: y0 ≈ 0 and top ≈ h except documented cases. */
 function bboxIssue(type, s, obj) {
   const { w, d, h } = sizeOf(type, s), b = new THREE.Box3().setFromObject(obj), e = 0.02, issues = [];
+  obj.traverse((m) => { if (m.isMesh) { const a = m.geometry.attributes.position.array; for (let i = 0; i < a.length; i++) if (!Number.isFinite(a[i])) { issues.push('NaN vertex in ' + m.material.name); break; } } });
   if (Math.abs(b.min.x + w / 200) > e || Math.abs(b.max.x - w / 200) > e) issues.push(`x ${(b.min.x * 100).toFixed(1)}..${(b.max.x * 100).toFixed(1)} ≠ ±${w / 2}`);
   if (Math.abs(b.min.z + d / 200) > e || Math.abs(b.max.z - d / 200) > e) issues.push(`z ${(b.min.z * 100).toFixed(1)}..${(b.max.z * 100).toFixed(1)} ≠ ±${d / 2}`);
   const below = type === 'pool', above = type === 'raised-bed' || (type === 'pool' && b.min.y < -0.05);

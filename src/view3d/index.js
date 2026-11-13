@@ -60,6 +60,8 @@ export function createView3D(container, ctx) {
   // ───────────── loop state ─────────────
   let active = true, destroyed = false, contextLost = false, ready = false;
   let raf = 0, dirty = true, lastT = 0, houseDirty = false;
+  let probe = 0;
+  let slow = false;         // last measured frame interval was > 250 ms: camera animations are skipped, not played in slow motion
   let mode = 'orbit', fly = null, saved = null;
   let house = null, site = null, env = null;
   const standIns = { house: false, site: false, environment: false };
@@ -69,7 +71,7 @@ export function createView3D(container, ctx) {
   function invalidate() { dirty = true; schedule(); }
   function schedule() { if (!raf && active && !destroyed && !contextLost) raf = requestAnimationFrame(frame); }
 
-  const rig = createOrbitRig({ camera, dom: canvas, plan, onChange: invalidate });
+  const rig = createOrbitRig({ camera, dom: canvas, plan, onChange: invalidate, isSlow: () => slow });
   let framing = 'aerial';   // preset the camera still shows untouched (re-fitted on resize); null once the user moves it
   rig.controls.addEventListener('start', () => { framing = null; });
   canvas.addEventListener('wheel', () => { framing = null; }, { passive: true });
@@ -138,7 +140,7 @@ export function createView3D(container, ctx) {
     // First frame after an idle period has no meaningful delta; slow frames are clamped rather than dropped.
     let dt = lastT ? (now - lastT) / 1000 : 0;
     lastT = now;
-    if (dt > 0) stats.frameMs += (Math.min(dt, 1) * 1000 - stats.frameMs) * 0.1;
+    if (dt > 0) { stats.frameMs += (Math.min(dt, 1) * 1000 - stats.frameMs) * 0.1; slow = dt * 1000 > STALL_MS; }
     dt = dt > 0 ? Math.min(dt, 0.25) : 1 / 60;
     stats.fps = stats.frameMs ? 1000 / stats.frameMs : 0;
     let again = false;
@@ -146,8 +148,14 @@ export function createView3D(container, ctx) {
     else if (mode === 'walk') { walk.update(dt); again = true; }
     else again = rig.update(dt);
     if (houseDirty) { houseDirty = false; call(house, 'update'); call(site, 'update'); dirty = true; }
-    if (dirty || again) renderNow();
-    if (again) schedule(); else lastT = 0;
+    const rendered = dirty || again;
+    if (rendered) renderNow();
+    if (again) schedule();
+    else {
+      lastT = 0;
+      // Going idle: one empty callback measures how long that last frame really took to present.
+      if (rendered && !probe) probe = requestAnimationFrame((t) => { probe = 0; const ms = t - now; if (ms < 5000) slow = ms > STALL_MS; });
+    }
   }
 
   function resize() {
@@ -216,7 +224,7 @@ export function createView3D(container, ctx) {
     walk.start(opts);
     const eye = walk.eyePose(), fov = walkFov(camera.aspect);
     const settle = () => { camera.fov = fov; camera.updateProjectionMatrix(); walk.syncCamera(); applyHouseState(); };
-    if (opts.animate === false || reducedMotion() || !ready) settle();
+    if (opts.animate === false || reducedMotion() || !ready || slow) settle();
     else {
       camera.position.copy(from.p); camera.quaternion.copy(from.q); camera.fov = from.fov;
       flyTo(eye.position, eye.quaternion, fov, 0.8, settle, { deferRoof: true });
@@ -240,7 +248,7 @@ export function createView3D(container, ctx) {
       rig.setPose(pose, { animate: false });
       interaction.setEnabled(true);
     };
-    if (opts.animate === false || reducedMotion()) restore();
+    if (opts.animate === false || reducedMotion() || slow) restore();
     else {
       const ghost = camera.clone();
       ghost.position.setFromSphericalCoords(pose.radius, pose.phi, pose.theta).add(pose.target);
@@ -348,7 +356,7 @@ export function createView3D(container, ctx) {
       if (destroyed) return;
       finishFly();
       destroyed = true;
-      cancelAnimationFrame(raf);
+      cancelAnimationFrame(raf); cancelAnimationFrame(probe);
       offs.forEach((off) => off());
       if (observer) observer.disconnect();
       window.removeEventListener('resize', resize);

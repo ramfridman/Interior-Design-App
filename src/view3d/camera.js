@@ -75,9 +75,10 @@ function poseFromEye(eye, target, fov) {
 }
 
 /**
- * @param {{ camera: THREE.PerspectiveCamera, dom: HTMLElement, plan: object, onChange: () => void }} o
+ * @param {{ camera: THREE.PerspectiveCamera, dom: HTMLElement, plan: object, onChange: () => void, isSlow?: () => boolean }} o
+ *        isSlow: when it returns true (very low frame rate) poses are applied at once instead of tweened
  */
-export function createOrbitRig({ camera, dom, plan, onChange }) {
+export function createOrbitRig({ camera, dom, plan, onChange, isSlow }) {
   const controls = new OrbitControls(camera, dom);
   controls.enableDamping = true;
   controls.dampingFactor = 0.09;
@@ -193,7 +194,7 @@ export function createOrbitRig({ camera, dom, plan, onChange }) {
   }
   function setPose(pose, { animate = true } = {}) {
     if (!pose) return;
-    if (!animate || reducedMotion()) { tween = null; applyPose(pose); controls.update(); onChange(); return; }
+    if (!animate || reducedMotion() || (isSlow && isSlow())) { tween = null; applyPose(pose); controls.update(); onChange(); return; }
     const from = getPose();
     let dTheta = (pose.theta - from.theta) % (Math.PI * 2);
     if (dTheta > Math.PI) dTheta -= Math.PI * 2; else if (dTheta < -Math.PI) dTheta += Math.PI * 2;

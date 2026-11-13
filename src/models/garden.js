@@ -145,6 +145,11 @@ class Batch {
     }
     return this;
   }
+  /** Clamp x into [x0, x1] (keeps climbers on their trellis). */
+  clampX(x0, x1) {
+    for (const list of this.buckets.values()) for (const g of list) { const a = g.attributes.position.array; for (let i = 0; i < a.length; i += 3) a[i] = clamp(a[i], x0, x1); g.boundingBox = null; }
+    return this;
+  }
   /** Merge and return a Group with one mesh per material. */
   build(group = new THREE.Group()) {
     for (const [material, list] of this.buckets) {
@@ -370,8 +375,8 @@ function bladeG(pts, width, profile, o = {}) {
   }
   return trisG(tri);
 }
-const lanceolate = (t) => Math.pow(Math.sin(Math.PI * Math.pow(t, 0.7)), 0.8);
-const strap = (t) => (t < 0.12 ? 0.55 + t * 3.75 : Math.pow(1 - (t - 0.12) / 0.88, 0.55));
+const lanceolate = (t) => Math.pow(Math.max(0, Math.sin(Math.PI * Math.pow(clamp(t, 0, 1), 0.7))), 0.8);
+const strap = (t) => (t < 0.12 ? 0.55 + t * 3.75 : Math.pow(Math.max(0, 1 - (t - 0.12) / 0.88), 0.55));
 
 /** Closed 2D outline helpers: all return [[x, z], …] counter-clockwise in plan (x right, z front). */
 function ellipsePts(rx, rz, n = 40, cx = 0, cz = 0) { return Array.from({ length: n }, (_, i) => [cx + Math.cos((i / n) * TAU) * rx, cz + Math.sin((i / n) * TAU) * rz]); }
@@ -1124,7 +1129,7 @@ function palmTree(b, S, W, D, H, rnd, o) {
 /** Banana clump: fat green pseudostems and huge arching paddle leaves (some torn by the wind). */
 function bananaTree(b, S, W, D, H, rnd, o) {
   const leafM = vmat('frond'), R = Math.min(W, D) / 2, stems = o.young ? 1 : 3, look = o.look;
-  const paddle = (t) => (t < 0.1 ? 0.14 : Math.pow(Math.sin(Math.PI * Math.pow((t - 0.1) / 0.9, 0.72)), 0.55));
+  const paddle = (t) => (t < 0.1 ? 0.14 : Math.pow(Math.max(0, Math.sin(Math.PI * Math.pow(clamp((t - 0.1) / 0.9, 0, 1), 0.72))), 0.55));
   for (let s = 0; s < stems; s++) {
     const k = s === 0 ? 1 : 0.62 + rnd() * 0.2, a0 = rnd() * TAU, off = s === 0 ? 0 : R * 0.28;
     const bx = Math.cos(a0 + s * 2.2) * off, bz = Math.sin(a0 + s * 2.2) * off, hs = H * 0.5 * k, r = 0.1 * Math.pow(H / 3, 0.7) * k;
@@ -1373,7 +1378,7 @@ function grassShrub(b, S, W, D, H, rnd, o) {
 }
 /** Bird-of-paradise: upright paddle leaves on long stalks plus orange-and-blue crests. */
 function paddleShrub(b, S, W, D, H, rnd, o) {
-  const R = Math.min(W, D) / 2, fm = vmat('frond'), prof = (t) => (t < 0.42 ? 0.1 : Math.pow(Math.sin(Math.PI * Math.pow((t - 0.42) / 0.58, 0.8)), 0.6));
+  const R = Math.min(W, D) / 2, fm = vmat('frond'), prof = (t) => (t < 0.42 ? 0.1 : Math.pow(Math.max(0, Math.sin(Math.PI * Math.pow(clamp((t - 0.42) / 0.58, 0, 1), 0.8))), 0.6));
   bladeFan(b, fm, [0, 0, 0], 11, Math.max(H * 1.02, R), rnd, { wid: 0.2, el0: 1.52, el1: 1.0, curve: 0.5, colors: o.f, segs: 7, fold: 0.18, profile: prof, r0: R * 0.05 });
   for (let i = 0; i < 3; i++) {
     const a = rnd() * TAU, r = R * (0.3 + rnd() * 0.3), e = [Math.cos(a) * r, H * (0.6 + rnd() * 0.15), Math.sin(a) * r], tri = [];
@@ -1602,7 +1607,7 @@ function plantPlan(scheme, w, d, rnd, flowerColors) {
 }
 /** Build the plants of a plan into a batch whose tallest point is `top` and which stays inside w × d. */
 function plantsBatch(plan, w, d, top, rnd) {
-  const pb = new Batch(), lod = plan.length > 110;
+  const pb = new Batch(), lod = plan.length > 70;
   for (const q of plan) miniPlant(pb, q.kind, q.x, 0, q.z, q.r, Math.max(0.05, top * q.hk), rnd, q.c, q.fl, lod);
   return pb.settle(top, w, d);
 }
@@ -1785,7 +1790,7 @@ registerModel('raised-bed', {
       b.add(mm, wallG(pts, 0, h - 0.012), col); b.add(mm, wallG(insetPts(outer, 0.012), soilY - 0.01, h - 0.012, true), K.shade(col, -0.15));
       b.add(mm, extrudeG(roundRectPts(w, d, Math.min(0.128, w * 0.2, d * 0.2), 5), 0.012, h - 0.012, [insetPts(outer, 0.016).reverse()]), K.shade(col, 0.08));
     } else if (S.frame === 'corten') {
-      const col = color || '#9a5230', g = extrudeG(rectPts(w - 0.02, d - 0.02), h - 0.006, 0, [rectPts(w - 0.02 - 2 * t, d - 0.02 - 2 * t).reverse()]).toNonIndexed();
+      const col = color || '#9a5230', g = extrudeG(rectPts(w - 0.02, d - 0.02), h - 0.006, 0, [rectPts(w - 0.02 - 2 * t, d - 0.02 - 2 * t).reverse()]);
       b.add(vmat('matte'), paintFoliage(g, col, rnd, { lo: -0.18, hi: 0.08, sparkle: 0.2 })); ring(h - 0.006, 0.006, vmat('matte'), K.shade(col, -0.1), 0, Math.min(0.03, w * 0.2));
     } else if (S.frame === 'stone') {
       const bh = clamp(h / Math.max(1, Math.round(h / 0.1)), 0.04, 0.2), rows = Math.max(1, Math.round(h / bh)), col = color || '#b9b0a0';
@@ -1810,7 +1815,9 @@ registerModel('raised-bed', {
       for (const x of [x0, x1]) b.add(m, boxOnG(0.035, top - soilY, 0.035, x, soilY, z));
       for (let y = h + 0.15; y <= top + 1e-6; y += (th - 0.15) / 4) b.add(m, boxG(x1 - x0, 0.018, 0.012, 0, y - 0.009, z));
       const nv = Math.max(1, Math.round((x1 - x0) / 0.2)); for (let i = 1; i < nv; i++) b.add(m, boxOnG(0.012, top - h - 0.1, 0.012, lerp(x0, x1, i / nv), h + 0.08, z + 0.012));
-      for (let i = 0; i < nv; i++) { const x = lerp(x0, x1, (i + 0.5) / nv), hh = th * (0.5 + rnd() * 0.45); for (let q = 0; q < 3; q++) { const y = h + hh * (0.2 + q * 0.3); b.add(vmat('leaf'), paintFoliage(blobG(0.11, 0.13, 0.06, x + (rnd() - 0.5) * 0.08, y, z + 0.03, rnd, { detail: 1, amp: 0.3 }), q % 2 ? '#5c9a3c' : '#4f8a3a', rnd)); } b.add(vmat('leaf'), leafCloudG([x, h + hh * 0.5, z + 0.03], [0.12, hh * 0.5, 0.05], 12, 0.09, rnd, { colors: ['#6aa844', '#5c9a3c'], aspect: 0.8 })); }
+      const vb = new Batch();
+      for (let i = 0; i < nv; i++) { const x = lerp(x0, x1, (i + 0.5) / nv), hh = th * (0.5 + rnd() * 0.45); for (let q = 0; q < 3; q++) { const y = h + hh * (0.2 + q * 0.3); vb.add(vmat('leaf'), paintFoliage(blobG(0.11, 0.13, 0.06, x + (rnd() - 0.5) * 0.08, y, z + 0.03, rnd, { detail: 1, amp: 0.3 }), q % 2 ? '#5c9a3c' : '#4f8a3a', rnd)); } vb.add(vmat('leaf'), leafCloudG([x, h + hh * 0.5, z + 0.03], [0.12, hh * 0.5, 0.05], 12, 0.09, rnd, { colors: ['#6aa844', '#5c9a3c'], aspect: 0.8 })); }
+      b.merge(vb.clampX(-w / 2, w / 2));
     }
     return b.build();
   },
