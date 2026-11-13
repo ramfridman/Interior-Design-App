@@ -78,7 +78,7 @@ export function starterUnits(kind, length, { windows = false } = {}) {
   return out;
 }
 
-/** Front / carcass colour presets (warm, realistic carpentry colours). */
+/** Front / carcass colour presets (warm, realistic carpentry colours). Their Hebrew (Hebrew PDF) is Carp.SPEC_TEXT_HE — add new names there too. */
 export const FRONT_COLOURS = [
   ['Warm white', '#f3f1ec'], ['Pure white', '#fbfbf9'], ['Cashmere', '#d9d0c1'], ['Greige', '#b9b2a6'], ['Stone grey', '#8d8c86'],
   ['Anthracite', '#3a3d42'], ['Black', '#1e1f21'], ['Sage', '#9aa58f'], ['Forest green', '#4f5d4a'], ['Navy', '#2f3e55'],

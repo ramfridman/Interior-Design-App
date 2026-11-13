@@ -63,7 +63,13 @@ const CASES = [
   ["H98-CARP-RFQ-01", "rtl", "H98-CARP-RFQ-01"],
   ["2026-11-13", "rtl", "2026-11-13"],
   ["Corner pantry — מזווה פינתי", "ltr", "Corner pantry — יתניפ הווזמ"],
-  ["מזווה פינתי עם דלתות נשלפות", "ltr", "תופלשנ תותלד םע יתניפ הווזמ"]
+  ["מזווה פינתי עם דלתות נשלפות", "ltr", "תופלשנ תותלד םע יתניפ הווזמ"],
+  // Hebrew spec vocabulary with Latin brand names, materials and numbers (task: Hebrew labels for every spec value)
+  ["פרימיום (בדרגת Blum / Hettich)", "rtl", "(Blum / Hettich תגרדב) םוימירפ"],
+  ["MDF צבוע בתנור, מט, 18 מ״מ", "rtl", "מ״מ 18 ,טמ ,רונתב עובצ MDF"],
+  ["אבן קוורץ (בסגנון Caesarstone), 20 מ״מ, קוורץ לבן", "rtl", "ןבל ץרווק ,מ״מ 20 ,(Caesarstone ןונגסב) ץרווק ןבא"],
+  ["ציר קליפס 110°", "rtl", "110° ספילק ריצ"],
+  ["למינציה ננו מט (בסגנון Fenix), 18 מ״מ, ירוק מרווה", "rtl", "הוורמ קורי ,מ״מ 18 ,(Fenix ןונגסב) טמ וננ היצנימל"]
 ];
 for (const [s, dir, want] of CASES) { const got = visualOrder(s, dir); check(`${dir} ${JSON.stringify(s)}`, got === want, got === want ? '' : JSON.stringify(got)); }
 check('pure LTR text in an LTR paragraph is unchanged', visualOrder('W 180/100(+110) K1·B3 12,500', 'ltr') === 'W 180/100(+110) K1·B3 12,500');
@@ -188,6 +194,30 @@ if (has('pdffonts') && has('pdftotext')) {
   check('HE: Hebrew strings extract in logical order', miss.length === 0, miss.join(' | '));
   check('HE: owner\'s English title kept as typed', he.includes('Removable doors without tools'));
 } else console.log('  (poppler-utils not installed — pdffonts / pdftotext checks skipped)');
+
+group('Hebrew edition: spec values (colours, materials, handles, hardware) in Hebrew');
+{
+  const k = C.listRuns().find((r) => r.code === 'K1');
+  const before = JSON.stringify(k.spec);
+  C.updateRun(k.id, { spec: { fronts: { color: 'Sage', material: 'fenix', style: 'gola' }, worktop: { color: 'Calacatta', material: 'porcelain', edge: 'mitred' }, handles: { type: 'knob', finish: 'brass' }, carcass: { color: 'Light grey' }, hardware: { grade: 'premium' } } });
+  const docHe = composeQuotation(opts('he'));
+  const texts = docHe.pages.flatMap((p) => p.ops.filter((o) => o.t === 'text').map((o) => o.text));
+  const all = texts.join('\n');
+  check('colours in Hebrew (ירוק מרווה, קלקטה, אפור בהיר, לבן חם)', ['ירוק מרווה', 'קלקטה', 'אפור בהיר', 'לבן חם'].every((w) => all.includes(w)));
+  check('materials and finishes in Hebrew (Fenix / Dekton / Caesarstone kept in Latin letters)', ['למינציה ננו מט (בסגנון Fenix)', 'פורצלן / אבן מסונטרת (בסגנון Dekton)', 'אבן קוורץ (בסגנון Caesarstone)', 'MDF צבוע בתנור', 'ידית כפתור', 'פליז מוברש', 'פרימיום (בדרגת Blum / Hettich)'].every((w) => all.includes(w)));
+  check('hardware descriptions in Hebrew (ציר קליפס, מסילות טלסקופיות, טריקה שקטה)', ['ציר קליפס 110°', 'מסילות טלסקופיות', 'טריקה שקטה', 'ללא ידיות — פרופיל גולה'].every((w) => all.includes(w)));
+  const english = ['Sage', 'Calacatta', 'Light grey', 'warm white', 'clip-on', 'full-extension', 'standard', 'gola', 'knob', 'edge-pull', 'Brushed', 'Lacquered', 'Quartz', 'Melamine'];
+  const leaks = texts.filter((t) => english.some((w) => new RegExp(`(^|[^A-Za-z])${w}([^A-Za-z]|$)`).test(t)));
+  check('no English vocabulary value printed in the Hebrew edition', !leaks.length, leaks.slice(0, 4).join(' | '));
+  const sched = C.schedules(k.id);
+  check('schedules: colour bilingual, hardware variants bilingual', sched.materials.some((m) => m.colour && m.colour.he === 'ירוק מרווה') && sched.hardware.some((h) => h.kind === 'profile' && /פרופיל גולה/.test(h.spec.he)) && sched.hardware.some((h) => h.kind === 'hinge' && /^רגיל, /.test(h.spec.he)) && sched.hardware.every((h) => !/standard/.test(h.spec.he)));
+  const { FRONT_COLOURS, WORKTOP_COLOURS, CARCASS_COLOURS } = await import('../src/ui/carpentry/vocab.js');
+  const presets = [...FRONT_COLOURS, ...WORKTOP_COLOURS, ...CARCASS_COLOURS].map(([n]) => n);
+  check('every UI colour preset has a Hebrew label', presets.every((n) => C.SPEC_TEXT_HE[n.toLowerCase()]), presets.filter((n) => !C.SPEC_TEXT_HE[n.toLowerCase()]).join(', '));
+  check('every vocabulary value has a Hebrew label', Object.values(C.VOCAB).every((g) => Object.values(g).every((v) => /[֐-׿]/.test(v.he) || /^[A-Z0-9 .\-/()]+$/.test(v.he))));
+  check('specText: unknown free text stays as typed', C.specText('RAL 7016 custom').he === 'RAL 7016 custom' && C.specText('Pure White').he === 'לבן בוהק');
+  C.updateRun(k.id, { spec: JSON.parse(before) });
+}
 
 group('Screen renderers');
 {

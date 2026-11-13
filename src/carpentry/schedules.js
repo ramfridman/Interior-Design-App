@@ -3,7 +3,7 @@
  * { headers, units, materials, hardware, worktops, appliances, questions }. Codes match the drawings (run code · unit code).
  */
 import { view } from './state.js';
-import { VOCAB, vocab } from './spec.js';
+import { VOCAB, vocab, specText, hwVariantLabel } from './spec.js';
 import { takeoff } from './takeoff.js';
 import { MODULES } from './modules.js';
 import { geometryOf, unitsOf as unitsOfRun } from './layout.js';
@@ -39,7 +39,7 @@ function internalsSummary(u) {
   const name = { Shelf: L('shelf', 'מדף'), 'Glass shelf': L('glass shelf', 'מדף זכוכית'), 'Shoe shelf': L('shoe shelf', 'מדף נעליים'), Divider: L('divider', 'מחיצה'), 'Internal drawer front': L('internal drawer', 'מגירה פנימית') };
   for (const p of u.panels) if (name[p.part.en]) { c[p.part.en] = (c[p.part.en] || 0) + p.qty; }
   const parts = Object.entries(c).map(([k, n]) => L(`${n} × ${name[k].en}`, `${n} × ${name[k].he}`));
-  for (const h of u.hardware) if (['rail', 'pullout', 'larder', 'trouser-rack'].includes(h.kind)) parts.push(L(`${h.qty} × ${h.label.en.toLowerCase()}${h.variant ? ' (' + h.variant + ')' : ''}`, `${h.qty} × ${h.label.he}${h.variant ? ' (' + h.variant + ')' : ''}`));
+  for (const h of u.hardware) if (['rail', 'pullout', 'larder', 'trouser-rack'].includes(h.kind)) { const vl = hwVariantLabel(h.kind, h.variant); parts.push(L(`${h.qty} × ${h.label.en.toLowerCase()}${vl ? ' (' + vl.en + ')' : ''}`, `${h.qty} × ${h.label.he}${vl ? ' (' + vl.he + ')' : ''}`)); }
   return parts.length ? join(parts) : L('—', '—');
 }
 function hardwareSummary(u) {
@@ -92,7 +92,7 @@ export function schedules(runId = 'all', src) {
       for (const a of u.appliances) appliances.push({ runId: rt.runId, ref: `${rt.code}·${u.code}`, appliance: a.label, make: [a.make, a.model].filter(Boolean).join(' ') || '—', niche: a.niche ? `${n0(a.niche.w)} × ${n0(a.niche.h)}` : '—' });
     }
     for (const a of rt.appliances.filter((x) => !x.unit)) appliances.push({ runId: rt.runId, ref: rt.code, appliance: a.label, make: [a.make, a.model].filter(Boolean).join(' ') || '—', niche: '—' });
-    const M = (element, material, thickness, colour, finish) => materials.push({ runId: rt.runId, run: rt.code, element, material, thickness, colour: colour || '—', finish: finish || L('—', '—') });
+    const M = (element, material, thickness, colour, finish) => materials.push({ runId: rt.runId, run: rt.code, element, material, thickness, colour: colour ? specText(colour) : '—', finish: finish || L('—', '—') });
     M(L('Carcass', 'גוף'), vocab('carcassMaterial', S.carcass.material), `${S.carcass.thickness} mm`, S.carcass.color, vocab('edge', S.edge.carcass));
     M(L('Back panels', 'גבות'), vocab('backMaterial', S.carcass.back.material), `${S.carcass.back.thickness} mm`, S.carcass.color, null);
     M(L('Fronts', 'חזיתות'), vocab('frontMaterial', S.fronts.material), `${S.fronts.thickness} mm`, S.fronts.color, join([vocab('frontStyle', S.fronts.style), vocab('edge', S.edge.fronts)]));
@@ -100,7 +100,7 @@ export function schedules(runId = 'all', src) {
     if (rt.plinth.m) M(L('Plinth', 'צוקל'), vocab('plinthFinish', S.plinth.finish), `${S.plinth.height} cm`, null, L(`set back ${S.plinth.setback} cm`, `נסיגה ${S.plinth.setback} ס״מ`));
     if (S.worktop.material !== 'none' && rt.worktops.length) M(L('Worktop', 'משטח עבודה'), vocab('worktopMaterial', S.worktop.material), `${S.worktop.thickness} mm`, S.worktop.color, vocab('worktopEdge', S.worktop.edge));
     if (rt.splashback.m2) M(L('Splashback', 'חיפוי קיר'), vocab('splashback', S.splashback.material), `${S.splashback.height} cm high`, null, null);
-    M(L('Hardware grade', 'דרגת פרזול'), vocab('hardwareGrade', S.hardware.grade), '—', null, L(`${S.hardware.hinge}; ${S.hardware.drawers}`, `${S.hardware.hinge}; ${S.hardware.drawers}`));
+    M(L('Hardware grade', 'דרגת פרזול'), vocab('hardwareGrade', S.hardware.grade), '—', null, L(`${specText(S.hardware.hinge).en}; ${specText(S.hardware.drawers).en}`, `${specText(S.hardware.hinge).he}; ${specText(S.hardware.drawers).he}`));
     for (const p of rt.worktops) {
       const ends = (s) => ({ wall: L('wall', 'קיר'), polished: L('polished', 'מלוטש'), joint: L('joint', 'תפר'), butt: L('butt joint (corner)', 'תפר פינה'), tall: L('against tall unit', 'צמוד לארון גבוה'), waterfall: L('mitred to waterfall', 'מיטר לדופן נופלת'), mitre: L('mitre', 'מיטר'), floor: L('floor', 'רצפה') }[s] || L(s, s));
       worktops.push({ runId: rt.runId, ref: `${rt.code}·${p.id}`, material: vocab('worktopMaterial', p.material), thickness: p.thickness, size: { length: p.length, depth: p.depth }, sizeText: `${n0(p.length)} × ${n0(p.depth)}`,
@@ -118,6 +118,6 @@ export function schedules(runId = 'all', src) {
     for (const u of unitsOfRun(run, v).filter((x) => x.carp.module === 'custom')) questions.push({ runId: run.id, run: run.code, topic: L('Bespoke unit', 'יחידה בהתאמה אישית'),
       text: L(`${rt.units.find((q) => q.unitId === u.id).code}: confirm construction, divisions and fittings of the bespoke layout.`, `${rt.units.find((q) => q.unitId === u.id).code}: לאשר אופן בנייה, חלוקה ופרזול של היחידה בהתאמה אישית.`) });
   }
-  const hardware = t.totals.hardware.map((h) => ({ specifiedByCarpenter: !!h.specifiedByCarpenter, item: h.label, spec: L([h.variant, h.length ? h.length + ' mm' : null, h.grade ? vocab('hardwareGrade', h.grade).en : null].filter(Boolean).join(', ') || '—', [h.variant, h.length ? h.length + ' מ״מ' : null, h.grade ? vocab('hardwareGrade', h.grade).he : null].filter(Boolean).join(', ') || '—'), qty: h.qty, unit: UNIT_L[h.unit] || UNIT_L.unit, kind: h.kind }));
+  const hardware = t.totals.hardware.map((h) => ({ specifiedByCarpenter: !!h.specifiedByCarpenter, item: h.label, spec: L([h.variant ? hwVariantLabel(h.kind, h.variant).en : null, h.length ? h.length + ' mm' : null, h.grade ? vocab('hardwareGrade', h.grade).en : null].filter(Boolean).join(', ') || '—', [h.variant ? hwVariantLabel(h.kind, h.variant).he : null, h.length ? h.length + ' מ״מ' : null, h.grade ? vocab('hardwareGrade', h.grade).he : null].filter(Boolean).join(', ') || '—'), qty: h.qty, unit: UNIT_L[h.unit] || UNIT_L.unit, kind: h.kind }));
   return { headers: HEADERS, units, materials, hardware, worktops, appliances, questions, features, totals: t.totals, runKinds: VOCAB.runKind };
 }

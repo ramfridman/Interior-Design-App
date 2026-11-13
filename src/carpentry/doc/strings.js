@@ -125,11 +125,11 @@ export const EXCLUDED = [
 
 /** Alternatives the bidder is asked to price (rows of the options table). */
 export const ALTERNATIVES = [
-  L('Hardware upgrade to Blum / Hettich (or equal) premium series throughout', 'שדרוג פרזול לסדרת פרימיום של בלום / הטיך (או שווה ערך) בכל הפרויקט'),
-  L('Kitchen fronts in nano-matt laminate (Fenix-type) instead of lacquered MDF', 'חזיתות מטבח בלמינציה ננו מט (פניקס) במקום MDF צבוע'),
-  L('Kitchen fronts in high-pressure laminate (Formica) instead of lacquered MDF', 'חזיתות מטבח בפורמייקה (HPL) במקום MDF צבוע'),
-  L('Wardrobe fronts in lacquered MDF instead of melamine', 'חזיתות ארונות בגדים ב־MDF צבוע במקום מלמין'),
-  L('Worktop in sintered porcelain (Dekton-type) instead of quartz', 'משטח פורצלן מסונטר (דקטון) במקום קוורץ'),
+  L('Hardware upgrade to Blum / Hettich (or equal) premium series throughout', 'שדרוג פרזול לסדרת פרימיום של Blum / Hettich (או שווה ערך) בכל הפרויקט'),
+  L('Kitchen fronts in nano-matt laminate (Fenix-type) instead of lacquered MDF', 'חזיתות מטבח בלמינציה ננו מט (בסגנון Fenix) במקום MDF צבוע בתנור'),
+  L('Kitchen fronts in high-pressure laminate (Formica) instead of lacquered MDF', 'חזיתות מטבח בפורמייקה (HPL) במקום MDF צבוע בתנור'),
+  L('Wardrobe fronts in lacquered MDF instead of melamine', 'חזיתות ארונות בגדים ב־MDF צבוע בתנור במקום מלמין'),
+  L('Worktop in sintered porcelain (Dekton-type) instead of quartz', 'משטח פורצלן מסונטר (בסגנון Dekton) במקום קוורץ'),
   L('Handle-less fronts (gola channel) in the kitchen', 'חזיתות ללא ידיות (פרופיל גולה) במטבח'),
 ];
 

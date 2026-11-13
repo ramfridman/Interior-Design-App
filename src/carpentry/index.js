@@ -4,7 +4,7 @@
  *   import * as Carp from './carpentry/index.js';
  *   Carp.adoptArchitectLayout();  Carp.checkRun('all');  Carp.drawings(runId);  Carp.estimate('all', { pricebook });
  */
-export { VOCAB, RULES, DEFAULT_SPEC, KIND_SPEC, defaultSpec, unitSpec, derivedHeights, deepMerge, vocab } from './spec.js';
+export { VOCAB, RULES, DEFAULT_SPEC, KIND_SPEC, defaultSpec, unitSpec, derivedHeights, deepMerge, vocab, SPEC_TEXT_HE, specText, hwVariantLabel } from './spec.js';
 export { MODULES, modulesFor, splitEven, islandBays, APPLIANCE_LABELS } from './modules.js';
 export { bindStore, view, emptyCarpentry } from './state.js';
 export { wallSpanAt, spanOfRun, openingConflicts, toPlan, toLocal, frame } from './walls.js';

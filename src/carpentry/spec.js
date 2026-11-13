@@ -29,19 +29,19 @@ export const VOCAB = {
   frontMaterial: {
     melamine: L('Melamine (MFC)', 'מלמין (טגו)'),
     laminate: L('High-pressure laminate (Formica)', 'פורמייקה (HPL)'),
-    'lacquer-matt': L('Lacquered MDF, matt', 'MDF צבוע (פוליאור) מט'),
-    'lacquer-gloss': L('Lacquered MDF, high gloss', 'MDF צבוע (פוליאור) מבריק'),
+    'lacquer-matt': L('Lacquered MDF, matt', 'MDF צבוע בתנור, מט'),
+    'lacquer-gloss': L('Lacquered MDF, high gloss', 'MDF צבוע בתנור, מבריק (היי-גלוס)'),
     veneer: L('Wood veneer', 'פורניר עץ'),
     'solid-frame': L('Solid-wood frame', 'מסגרת עץ מלא'),
     glass: L('Glass', 'זכוכית'),
-    fenix: L('Nano matt laminate (Fenix-type)', 'למינציה ננו מט (פניקס)'),
+    fenix: L('Nano matt laminate (Fenix-type)', 'למינציה ננו מט (בסגנון Fenix)'),
   },
   frontStyle: {
     flat: L('Flat (slab)', 'חזית חלקה'), shaker: L('Shaker / framed', 'שייקר / מסגרת'),
     'j-profile': L('Handle-less, J-profile', 'ללא ידיות — פרופיל J'), gola: L('Handle-less, gola channel', 'ללא ידיות — פרופיל גולה'),
   },
   handleType: {
-    bar: L('Bar handle', 'ידית מוט'), knob: L('Knob', 'כפתור'), 'edge-pull': L('Edge pull', 'ידית חריץ עליונה'),
+    bar: L('Bar handle', 'ידית מוט'), knob: L('Knob', 'ידית כפתור'), 'edge-pull': L('Edge pull', 'ידית חריץ עליונה'),
     push: L('Push-to-open', 'פתיחה בלחיצה (פוש)'), none: L('No handle (profile)', 'ללא ידית (פרופיל)'),
   },
   finish: {
@@ -56,11 +56,11 @@ export const VOCAB = {
   },
   hardwareGrade: {
     standard: L('Standard', 'סטנדרט'), 'soft-close': L('Soft-close', 'טריקה שקטה'),
-    premium: L('Premium (Blum / Hettich class)', 'פרימיום (בדרגת בלום / הטיך)'),
+    premium: L('Premium (Blum / Hettich class)', 'פרימיום (בדרגת Blum / Hettich)'),
   },
   worktopMaterial: {
-    quartz: L('Quartz (Caesarstone-type)', 'קוורץ (אבן קיסר)'), porcelain: L('Sintered porcelain (Dekton-type)', 'פורצלן / אבן מסונטרת (דקטון)'),
-    granite: L('Granite', 'גרניט'), 'solid-wood': L('Solid wood', 'עץ מלא'), laminate: L('Laminate (post-formed)', 'למינציה (פורמייקה)'),
+    quartz: L('Quartz (Caesarstone-type)', 'אבן קוורץ (בסגנון Caesarstone)'), porcelain: L('Sintered porcelain (Dekton-type)', 'פורצלן / אבן מסונטרת (בסגנון Dekton)'),
+    granite: L('Granite', 'גרניט'), 'solid-wood': L('Solid wood', 'עץ מלא'), laminate: L('Laminate (post-formed)', 'משטח פורמייקה (למינציה)'),
     stainless: L('Stainless steel', 'נירוסטה'), none: L('No worktop', 'ללא משטח'),
   },
   worktopEdge: {
@@ -113,11 +113,46 @@ export const VOCAB = {
     door: L('Door', 'דלת'), drawer: L('Drawer', 'מגירה'), drawers: L('Drawers', 'מגירות'), open: L('Open shelf', 'מדף פתוח'), glass: L('Glass door', 'דלת זכוכית'),
     panel: L('Fixed panel', 'פאנל קבוע'), appliance: L('Appliance', 'מכשיר'), pullout: L('Pull-out', 'נשלף'), void: L('Empty niche', 'נישה ריקה'),
   },
+  /** Variants of take-off hardware lines (handle → handleType, profile → frontStyle, the rest here). */
+  hwVariant: {
+    standard: L('standard', 'רגיל'), glass: L('for glass doors', 'לדלת זכוכית'), 'blind-corner': L('blind corner', 'לפינה עיוורת'),
+    internal: L('internal drawer', 'מגירה פנימית'), spice: L('spice pull-out', 'נשלף תבלינים'), bin: L('waste-bin pull-out', 'נשלף לפחי אשפה'),
+    lemans: L('LeMans-type swing-out', 'מנגנון לה-מאן'), 'magic-corner': L('Magic-corner pull-out', 'מנגנון מג׳יק קורנר'), carousel: L('carousel', 'קרוסלה'),
+    custom: L('bespoke', 'בהתאמה אישית'),
+  },
   cornerInternal: {
     shelf: L('Fixed shelf', 'מדף קבוע'), lemans: L('LeMans-type swing-out', 'מנגנון לה-מאן'),
     'magic-corner': L('Magic-corner pull-out', 'מנגנון מג׳יק קורנר'), carousel: L('Carousel', 'קרוסלה'), none: L('Empty (dead corner)', 'פינה מתה (ללא גישה)'),
   },
 };
+
+/**
+ * Hebrew for the free-text spec values the engine and the UI presets store in English (colours of fronts / carcass /
+ * worktop, the default hinge / runner / lift-up descriptions). Keys are lower case. Values typed by the owner that are not
+ * here stay as typed. Brand names stay in Latin letters.
+ */
+export const SPEC_TEXT_HE = {
+  // colours (src/ui/carpentry/vocab.js presets + engine defaults)
+  white: 'לבן', 'warm white': 'לבן חם', 'pure white': 'לבן בוהק', cashmere: 'קשמיר', greige: 'גרייג׳', 'stone grey': 'אפור אבן',
+  'light grey': 'אפור בהיר', grey: 'אפור', anthracite: 'אנתרציט', black: 'שחור', sage: 'ירוק מרווה', 'forest green': 'ירוק יער',
+  navy: 'כחול נייבי', oak: 'אלון', 'natural oak': 'אלון טבעי', walnut: 'אגוז', beige: 'בז׳', cream: 'שמנת',
+  'white quartz': 'קוורץ לבן', calacatta: 'קלקטה', 'concrete grey': 'אפור בטון', basalt: 'בזלת', travertine: 'טרוורטין', steel: 'נירוסטה',
+  // default hardware descriptions (DEFAULT_SPEC.hardware)
+  'clip-on 110°': 'ציר קליפס 110°', 'full-extension box': 'מגירת קופסה על מסילות טלסקופיות (שליפה מלאה)', 'stay-lift': 'מנגנון הרמה (סטיי-ליפט)',
+  'soft-close': 'טריקה שקטה',
+};
+/** A free-text spec value as { en, he } (Hebrew from SPEC_TEXT_HE when known, otherwise the text as typed). */
+export function specText(v) {
+  if (v && typeof v === 'object') return v;
+  const s = v == null || v === '' ? '—' : String(v);
+  return L(s, SPEC_TEXT_HE[s.trim().toLowerCase()] || s);
+}
+/** Label of a take-off hardware variant: handles use handleType, handle profiles frontStyle, the rest VOCAB.hwVariant. */
+export function hwVariantLabel(kind, variant) {
+  if (variant == null || variant === '') return null;
+  const g = kind === 'handle' ? VOCAB.handleType : kind === 'profile' ? VOCAB.frontStyle : VOCAB.hwVariant;
+  return g[variant] || VOCAB.hwVariant[variant] || VOCAB.cornerInternal[variant] || L(String(variant), String(variant));
+}
 
 /** Recommended / limit values a professional designer works to (cm unless stated). */
 export const RULES = {

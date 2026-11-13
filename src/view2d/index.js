@@ -182,7 +182,7 @@ export function createView2D(container, ctx) {
   let planShot = planSnapshot(plan);        // fingerprint of the drawn plan, to find what the next edit touched
   const offs = [
     store.on('items', (e) => {
-      if (e.transient) { if (!state.gesture) for (const id of e.ids) state.live.add(id); }
+      if (e.transient) { if (!state.gesture || state.gesture.type === 'c-drag') for (const id of e.ids) state.live.add(id); }   // c-drag: an island moved in Carpentry mode
       else { if (!state.gesture) state.live.clear(); V.renderer.invalidate(); }
       interaction.externalItems(e);
       if (state.hoverId && !store.getItem(state.hoverId)) state.hoverId = null;

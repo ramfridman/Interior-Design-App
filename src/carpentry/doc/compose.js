@@ -13,13 +13,8 @@ const L = (en, he) => ({ en, he });
 const { vocab } = Carp;
 const TIERS = { suggested: L('suggested per run', 'מוצעת לפי קו'), basic: L('basic', 'בסיסית'), mid: L('mid', 'בינונית'), premium: L('premium', 'פרימיום') };
 
-/** Free-text spec values (colours, hardware names) the engine stores in English only. */
-const FREE_HE = {
-  white: 'לבן', 'warm white': 'לבן חם', 'white quartz': 'קוורץ לבן', black: 'שחור', grey: 'אפור', 'light grey': 'אפור בהיר', anthracite: 'אנתרציט',
-  oak: 'אלון', 'natural oak': 'אלון טבעי', walnut: 'אגוז', beige: 'בז׳', cream: 'שמנת', 'clip-on 110°': 'ציר קליפס 110°',
-  'full-extension box': 'מגירת קופסה בשליפה מלאה', 'stay-lift': 'מנגנון הרמה (סטיי-ליפט)',
-};
-const free = (s) => (s && typeof s === 'object' ? s : L(String(s ?? '—'), FREE_HE[String(s ?? '').toLowerCase()] || String(s ?? '—')));
+/** Free-text spec values (colours, hardware names) the engine stores in English: Hebrew from Carp.SPEC_TEXT_HE. */
+const free = (s) => Carp.specText(s ?? '—');
 const cat = (...parts) => L(parts.map((p) => tr(p, 'en')).filter(Boolean).join(''), parts.map((p) => tr(p, 'he')).filter(Boolean).join(''));
 const cm = L(' cm', ' ס״מ'), mm = L(' mm', ' מ״מ');
 

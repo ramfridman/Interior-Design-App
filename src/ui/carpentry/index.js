@@ -311,13 +311,16 @@ export function createCarpentry(app) {
       const sel = store.ui.carpentrySel;
       if (!sel || sel.runId !== run.id) api.select(run.id, itemId);
       store.begin();
-      drag = { runId: run.id, applied: { x: 0, y: 0 }, refusal: null };
+      const fp = Carp.runFootprint(run);
+      drag = { runId: run.id, applied: { x: 0, y: 0 }, refusal: null, x0: fp ? fp.x : 0, y0: fp ? fp.y : 0 };
       redrawPlan();
     },
     move({ dx, dy, snap }) {
       if (!drag) return;
       const step = snap ? 5 : 1;
-      const want = { x: Math.round(dx / step) * step, y: Math.round(dy / step) * step };
+      // the footprint's north-west corner lands on the 5 cm grid (1 cm with Ctrl / ⌘ held or snapping off)
+      const want = { x: Math.round((drag.x0 + dx) / step) * step - drag.x0, y: Math.round((drag.y0 + dy) / step) * step - drag.y0 };
+      want.x = Math.round(want.x * 10) / 10; want.y = Math.round(want.y * 10) / 10;
       const tryTo = (tx, ty) => {
         const ddx = tx - drag.applied.x, ddy = ty - drag.applied.y;
         if (!ddx && !ddy) return { ok: true };

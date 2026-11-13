@@ -377,7 +377,7 @@ the UI passes them in.
   and `load()` (a file without it → no runs; unreadable → no runs, never throws). Every engine change is ONE undo step and
   emits **`'carpentry' { reason, runIds, transient? }`** (plus the usual `'items'` events for the unit items). `reason`:
   `'create-run' | 'update-run' | 'remove-run' | 'duplicate-run' | 'layout' | 'fit' | 'add-unit' | 'update-unit' |
-  'remove-unit' | 'move-unit' | 'adopt' | 'history' | 'load'`. Views re-render carpentry panels / drawings on `'carpentry'`.
+  'remove-unit' | 'move-unit' | 'move-run' | 'adopt' | 'history' | 'load'`. Views re-render carpentry panels / drawings on `'carpentry'`.
 * **Run** `{ id, code, name, nameHe, kind, roomId, anchor: { x, y, dir }, length, levels: string[], freeStanding, spec: RunSpec,
   unitIds: string[], worktops: WorktopPiece[] (derived, refreshed by every layout), ends: { left: End, right: End }, notes, source: 'architect'|'user' }`
   * `kind` ∈ `kitchen | island | wardrobe | pantry | vanity | utility | media | entry | shelving | desk | custom` (`VOCAB.runKind` labels).
@@ -410,6 +410,10 @@ the UI passes them in.
   `heights { worktop 90, wallBottom 145, topLine 220, aboveTop: open|filler|cabinet, body 240 (full-height units incl. plinth), scribe 2 }`,
   `depths { base 56, wall 33, tall 56, full 58, island 56 }` (CARCASS depths; item depth = carcass + front, base units = worktop depth),
   `sliding { doors, mirror }` (sliding wardrobes). All labels: `VOCAB.<group>[key] = { en, he }`, `vocab(group, key)`.
+  Free-text values (colours, the default hinge / runner / lift-up descriptions, the UI colour presets) are stored in English;
+  their Hebrew is `SPEC_TEXT_HE[lowerCaseEnglish]` and `specText(value)` → `{ en, he }` (unknown text stays as typed in both).
+  Take-off hardware variants: `hwVariantLabel(kind, variant)` → `{ en, he }` (handles → `VOCAB.handleType`, handle profiles →
+  `VOCAB.frontStyle`, the rest `VOCAB.hwVariant`). Brand names (Blum, Hettich, Caesarstone, Dekton, Fenix) stay in Latin letters.
   Derived heights: `derivedHeights(spec)` → `{ plinth, wt, worktop, baseCarcass, wallBottom, topLine, wallH, tallH, body, … }`.
   Kind defaults: wardrobes / entry / utility `aboveTop: 'cabinet'` (top boxes to the 3.00 m ceiling: unit h = 300 − scribe).
 
@@ -440,6 +444,11 @@ addUnit(runId, moduleId, { index | at, width, level, internals, fronts, spec, ha
 //   refused: width outside min / max; the unit would block a door or a tall / full unit would cover a window
 updateUnit(unitId, { module, width, level, internals, fronts, spec, handed, appliance, hob, cutout, offset, elev, h, depth, note, worktop, cornerSide, blind })  // null deletes a key
 setUnitWidth(unitId, w)  ·  removeUnit(unitId)  ·  moveUnit(unitId, indexInItsRow)
+moveRun(runId, { dx, dy, rot })               // free-standing runs (island) only: move dx / dy cm and / or turn `rot` (multiple of 90°,
+//   clockwise) about the footprint centre. Refused: wall-bound runs (positioned by their wall), other angles, a footprint that would
+//   leave its room or enter a wall / opening / door swing or overlap another run. A drag = transient moveRun()s inside
+//   store.begin() … then cancel() and ONE moveRun() of the whole distance (one undo step, a full 'carpentry' event).
+//   isFreeRun(run) → run.kind === 'island' || run.freeStanding
 fitRun(runId, { mode: 'fillers' | 'stretch' | 'units', unitIds, length, toSpan })
 //   'fillers' (default): a 5 cm filler (3 cm handle-less) at every end against a wall / another run, adjustable units absorb the rest,
 //   then fillers (2–15). 'stretch': no new fillers. 'units': only `unitIds`. `toSpan`: first set the run to the free wall between
@@ -461,12 +470,16 @@ wallSpanAt(x, y) → { anchor {x,y,dir}, length, a, b, normal, roomId, at, ends 
                      openings: [{ id, kind, style, from, to, width, sill, height, top, hinge, swing }] } | null
 spanOfRun(run) → span + { runFrom, runTo }     ·  openingConflicts(run, units)
 checkRun(runId | 'all') → Finding[]   // { severity: 'error'|'warning'|'info', code, text { en, he }, unitIds, runId }, errors first
+runFootprint(run) → { x, y, w, h } | null   // plan box of the run's visible units
+runClearances(runId) → [{ side: 'n'|'e'|'s'|'w', d (cm | null = nothing within 4 m), what, whatHe, from [x,y], to [x,y] | null,
+                          level: 'ok' (≥ RULES.aisleRecommended) | 'tight' (≥ RULES.aisleMin) | 'short' }]   // walkway around an island
 ```
 Finding codes: `overflow, underfill, width-range, above-ceiling, no-wall, outside-wall, door-crossing, window-base, window-wall,
 window-tall, mamad, wall-filler, corner-filler, end-panel, corner-dead, corner-access, hob-tall, hob-wall, hob-window, hob-landing,
 wall-over-hob, sink-landing, sink-corner, prep-zone, no-dishwasher, dishwasher-sink, appliance-door, fridge-niche, fridge-landing,
 slab-length, joint-cutout, worktop-joints, overhang-support, overhang-knees, end-overhang, wall-low, wall-reach, hanging-depth,
-hanging-height, sliding-min, sliding-max, aisle, door-swing, clash`. Re-run checks on `'carpentry'`, `'items'` and `'plan'`.
+hanging-height, sliding-min, sliding-max, aisle, door-swing, clash` (`aisle` also for islands / free-standing runs: the narrowest
+side of `runClearances`, < `RULES.aisleMin` warning, < aisleMin − 15 error, as for wall runs). Re-run checks on `'carpentry'`, `'items'` and `'plan'`.
 
 ### Take-off — `takeoff(runId | 'all')`
 `{ runs: RunTakeoff[], totals, units: { panels: 'mm', area: 'm2', lengths: 'm' } }`. **Panel sizes in mm**, areas m², lengths m.
@@ -643,9 +656,20 @@ listFeatures(runId | 'all', src?) // → [{ …feature, runId, run, unitId, code
   hidden in the view only; picking ignores what is cut; walk mode never cuts), open fronts for that run, units flagged by
   `checkRun` (errors / warnings) outlined + pinned with the Checks text. The carpentry selection gets the selection outline.
   Unit models rebuild when their `carp` or their run's spec / worktops / reservations change (items-layer `setVariant`).
-* UI: Carpentry workbench tab **3D** (switches Plan → Split while open, back on leaving): "Open fronts", "Cut away the room in
-  front", "Frame the run", and the run's fit problems (click → selects the unit).
-* Test: `node tests/carpentry-3d.test.mjs` (bounds, every module closed / open, corner pantry on both arms, worktop cut-outs).
+* `showCarpentry({ studio })`: **studio light** while a run is shown (not in walk mode) — for that render only: two neutral-white
+  shadowless directional lights following the camera, the sun eased (×0.35), exposure 1 and `NeutralToneMapping`; everything is
+  restored right after `renderer.render()` (`carpentry.beginFrame(camera, { env })` → undo), so the normal daylight / eye adaptation
+  is untouched outside it. The two lights stay in the scene at intensity 0 after first use (no shader recompiles per toggle).
+* Model details: run `spec.splashback` (material, height) on each worktop-carrying unit's slice exactly as the elevation draws it
+  (stopped under wall units, cut at windows; tiles show metro joints; not on islands) and `spec.worktop.upstand` (cm) as a worktop
+  strip; lift-off (`removable`) doors show a 6 mm shadow gap with a dark rebate and 2–4 exposed lift-off hinges while closed;
+  sliding wardrobe doors follow the elevation's door split (`spec.sliding.doors` or max(2, ⌈len / 100⌉), 3 cm overlap,
+  alternate tracks), each carcass drawing its share of every door.
+* UI: Carpentry workbench tab **3D** (switches Plan → Split while open, back on leaving): "Open fronts", "Studio light" (default on),
+  "Cut away the room in front", "Frame the run", and the run's fit problems (click → selects the unit). Phone (≤ 699 px): the tab is
+  a bottom sheet under a full-width 3D view (key plan hidden); closing the sheet leaves the tab state.
+* Test: `node tests/carpentry-3d.test.mjs` (bounds, every module closed / open, corner pantry on both arms, worktop cut-outs,
+  splashback vs elevation, upstand, lift-off details, sliding door split, studio light set / restore).
 
 ### Drawings — `drawings(runId)` → `Drawing[]` (plan, elevation, section, worktop if any, internal if tall / full units)
 `Drawing = { id, kind: 'plan'|'elevation'|'section'|'worktop'|'internal', runId, title { en, he }, scale (1:scale, from 10/20/25/50/100 to
@@ -689,6 +713,9 @@ hardware choice, corner, wardrobe interiors, mamad fixing, tolerances). Codes ma
 ### Notes for the UI / PDF teams
 * Use `checkRun` severities: errors block "send to carpenter", warnings are shown, info is advice.
 * The estimate is not a quotation; show the price book's `asOf` and sources. Fridge / washer / dryer stay ordinary catalogue items.
+* Plan view hook (Carpentry mode): `view2d.setCarpentryDrag({ canDrag(itemId), start({ itemId, x, y }), move({ itemId, x, y, dx, dy, snap }),
+  end({ itemId }), cancel() })` — a press-drag on a unit it accepts goes to the handler instead of panning (the UI accepts island
+  units only: drag = move, 5 cm grid; arrows nudge 5 cm, Shift 1 cm; R / Shift+R and the Run tab's "Turn 90°" turn it).
 * Store hook used by the engine only: `store._applyCarpentry(change, opts)`. `Carp.bindStore(otherStore)` for workers / tests;
   read-only functions also take a `src = { carpentry, items }` (e.g. a parsed design file): `checkRun / takeoff / drawings / schedules (runId, src)`, `estimate(runId, { …, src })`, `listRuns(src)`, `getRun(runId, src)`.
 
@@ -777,6 +804,8 @@ glyph by glyph (fontkit's own RTL reversal is disabled on the embedded font); th
 `unicode-bidi: bidi-override`, so both are identical. RTL documents mirror every region (tables: first column on the right,
 furniture and title blocks mirrored); drawings themselves are never mirrored. Text widths come from the real Heebo
 advances (`metrics-data.js`, generated from the TTFs and re-checked by the test); no kerning / ligatures in either renderer.
+Spec values in the Hebrew edition are always the Hebrew side of the engine vocabulary (`VOCAB`, `specText` for colours and
+hardware descriptions, `hwVariantLabel` in the hardware schedule); schedule `materials.colour` is `{ en, he }`.
 
 ### Special requirements, bespoke units, door operations (engine § 8 "Bespoke units…")
 * Features come from `schedules().features` (`{ runId, unitId, featureId, n, label '①', ref, code, title, text, category { en, he },
