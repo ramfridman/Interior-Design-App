@@ -719,7 +719,7 @@ export function createVisibilityJob(S, { coarse = false } = {}) {
             const c2 = col + dc, r2 = row + dr;
             if (c2 < 0 || r2 < 0 || c2 >= ch.cols || r2 >= ch.rows) continue;
             const q = ch.texPatch[r2 * ch.cols + c2];
-            if (q >= 0 && owner[q] !== -2) { best = q; break; }
+            if (q >= 0 && isSeed(q)) { best = q; break; }
           }
           owner[p] = best;
         }
