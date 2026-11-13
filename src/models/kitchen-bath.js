@@ -41,7 +41,9 @@ function reg(type, build, draw) {
 }
 
 // ───────────────────────── materials ─────────────────────────
-const steel = () => K.mat('#c6c9cd', { roughness: 0.34, metalness: 0.62 });
+/** Bright chrome that still reads without an environment map. */
+const chrome = () => K.mat('#e4e7eb', { roughness: 0.16, metalness: 0.78 });
+const steel = () => K.mat('#c9ccd0', { roughness: 0.36, metalness: 0.5 });
 const steelDark = () => K.mat('#7f8389', { roughness: 0.42, metalness: 0.6 });
 const blackGlass = () => K.mat('#0d0e11', { roughness: 0.07, metalness: 0.25 });
 const ovenWindow = () => K.mat('#1c2026', { roughness: 0.04, metalness: 0.55 });
@@ -61,7 +63,7 @@ function finish(name) {
     case 'nickel': return K.mat('#b3b0a8', { roughness: 0.32, metalness: 0.85 });
     case 'copper': return K.mat('#b87a52', { roughness: 0.28, metalness: 0.9 });
     case 'white': return enamel('#f4f4f2');
-    default: return K.chrome();
+    default: return chrome();
   }
 }
 const FINISH_HEX = { chrome: '#c9cdd2', black: '#2a2b2e', gold: '#c9a657', brass: '#c9a657', nickel: '#b3b0a8', copper: '#b87a52', white: '#f4f4f2' };
@@ -81,7 +83,7 @@ function cabinetMat(p, color) {
 function applianceMat(color, material) {
   const { s, l } = hsl(color);
   const metallic = material === 'metal' || material === 'aluminium' || (!material && s < 0.22 && l > 0.2 && l < 0.86);
-  return K.mat(color, { roughness: metallic ? 0.34 : 0.3, metalness: metallic ? 0.62 : l < 0.2 ? 0.35 : 0.02 });
+  return K.mat(color, { roughness: metallic ? 0.36 : 0.3, metalness: metallic ? 0.5 : l < 0.2 ? 0.35 : 0.02 });
 }
 const counterHex = (p, def = STONE) => (p.counter === 'steel' ? '#c6c9cd' : hex(p.counterColor, hex(p.color2, p.counter === 'wood' ? '#c8a476' : def)));
 function counterMat(p, def = STONE) {
@@ -198,7 +200,6 @@ const gCyl = (r, len, x = 0, y = 0, z = 0, axis = 'y', seg = 10, r2 = r) => {
   return g.translate(x, y, z);
 };
 const gRingY = (r0, r1, x, y, z, seg = 36) => new THREE.RingGeometry(r0, r1, seg).rotateX(-Math.PI / 2).translate(x, y, z);
-const gRingZ = (r0, r1, x, y, z, seg = 36) => new THREE.RingGeometry(r0, r1, seg).translate(x, y, z);
 /** One mesh from several primitive geometries (cached under `key`; pass null to skip caching). */
 function merged(key, parts, material, x = 0, y = 0, z = 0) {
   const make = () => { const list = parts(); const m = mergeGeometries(list, false); list.forEach((q) => q.dispose()); return m || new THREE.BufferGeometry(); };
@@ -223,7 +224,7 @@ const OVH = 0.025;  // counter overhang beyond the door faces (also the handle p
 /** Bar handle on two stand-offs; projects 24 mm in +Z (or −Z when dir = −1). */
 function barHandle(len, material, x, y, z, vertical = false, dir = 1) {
   const L = Math.max(0.04, Math.round(len * 100) / 100);
-  const m = merged(`hb|${mm(L)}`, () => [gCyl(0.005, L, 0, 0, 0.019, 'x', 8), gCyl(0.004, 0.019, -L * 0.36, 0, 0.0095, 'z', 6), gCyl(0.004, 0.019, L * 0.36, 0, 0.0095, 'z', 6)], material, x, y, z);
+  const m = merged(`hb|${mm(L)}`, () => [gCyl(0.005, L, 0, 0, 0.019, 'x', 6), gCyl(0.004, 0.019, -L * 0.36, 0, 0.0095, 'z', 5), gCyl(0.004, 0.019, L * 0.36, 0, 0.0095, 'z', 5)], material, x, y, z);
   m.rotation.set(0, dir < 0 ? Math.PI : 0, vertical ? Math.PI / 2 : 0);
   return m;
 }
@@ -337,7 +338,7 @@ function sinkBowls(g, bowls, yTop, maxDepth = 0.18) {
     wall.holes.push(rrShape(b.w - 2 * t, b.d - 2 * t, b.r - t, b.x, -b.z, THREE.Path));
     g.add(flat(wall, dp + 0.0015, st, yTop - dp));
     g.add(flat(rrShape(b.w - t, b.d - t, b.r, b.x, -b.z), 0.003, st, yTop - dp));
-    g.add(K.cyl(0.022, 0.022, 0.003, K.chrome(), b.x, yTop - dp + 0.0045, b.z, 16));
+    g.add(K.cyl(0.022, 0.022, 0.003, chrome(), b.x, yTop - dp + 0.0045, b.z, 16));
   }
 }
 /** Taps. Origin = mounting point, spout towards +Z. */
@@ -345,7 +346,7 @@ function tap(kind, fin = 'chrome') {
   const g = new THREE.Group(), m = finish(fin);
   if (kind === 'kitchen') {
     g.add(K.cylOn(0.025, 0.027, 0.012, m, 0, 0, 0, 16), K.cylOn(0.016, 0.017, 0.11, m, 0, 0.012, 0, 12));
-    g.add(tube([[0, 0.11, 0], [0, 0.26, 0], [0, 0.325, 0.035], [0, 0.335, 0.1], [0, 0.3, 0.155], [0, 0.255, 0.165]], 0.0105, m, 28, 8));
+    g.add(tube([[0, 0.11, 0], [0, 0.26, 0], [0, 0.325, 0.035], [0, 0.335, 0.1], [0, 0.3, 0.155], [0, 0.255, 0.165]], 0.0105, m, 20, 6));
     g.add(K.cyl(0.013, 0.013, 0.02, m, 0, 0.25, 0.166, 10));
     g.add(K.bar([0.014, 0.085, 0], [0.062, 0.105, 0], 0.006, m, 8));
   } else if (kind === 'bath') {
@@ -394,7 +395,7 @@ function hob(kind, hw, hd, burners, ht = 0.034, dark = false, knobs = true) {
     g.add(K.box(hw, 0.006, hd, dark ? blackGlass() : steel(), 0, 0.003, 0));
     for (const b of L) {
       const r = b.r * 0.62, s = b.r * 1.28;
-      g.add(merged(`brn|${mm(r)}`, () => [gCyl(r, 0.01, 0, 0.011, 0, 'y', 20), gCyl(r * 0.6, 0.007, 0, 0.0195, 0, 'y', 18)], iron(), b.x, 0, b.z));
+      g.add(merged(`brn|${mm(r)}`, () => [gCyl(r, 0.01, 0, 0.011, 0, 'y', 14), gCyl(r * 0.6, 0.007, 0, 0.0195, 0, 'y', 12)], iron(), b.x, 0, b.z));
       g.add(merged(`grt|${mm(s)}|${mm(ht)}`, () => {
         const y = ht - 0.004, f = s * 0.5, parts = [];
         for (const k of [-1, 1]) {
@@ -470,7 +471,7 @@ function hob2d(ctx, kind, cx, cy, hw, hd, burners, px, flip = 1) {
 
 // ═════════════════════════ KITCHEN CABINETS ═════════════════════════
 const handleMat = (p) => (hex(p.color3, null) ? K.mat(hex(p.color3, '#b4b7bb'), { roughness: 0.35, metalness: 0.7 }) : K.mat('#b4b7bb', { roughness: 0.3, metalness: 0.7 }));
-const plinthMat = (p, color) => K.mat(K.shade(color, -0.62), { roughness: 0.6 });
+const plinthMat = (p, color) => K.mat(K.shade(color, -0.93), { roughness: 0.6 });
 const sinkKindOf = (v) => (v === true ? 'single' : pick(v, ['single', 'double'], null));
 const hobKindOf = (v) => (v === true ? 'induction' : pick(v, ['gas', 'induction', 'ceramic'], null));
 
@@ -498,7 +499,7 @@ function baseModules(w, p, sinkKind, hobKind) {
   const drawerMods = (drawersN && !doorsN ? nr : both ? nr - doorMods : 0) + (hobDrawers ? 1 : 0);
   const per = drawersN ? (drawersN <= 4 ? drawersN : clamp(Math.round(drawersN / Math.max(1, drawerMods)), 2, 4)) : 3;
   const regular = (i) => {
-    if (both) return nr === 1 && !sp.length ? { kind: 'combo' } : i < doorMods ? { kind: 'door' } : { kind: 'drawers', n: per };
+    if (both) return nr === 1 && !sp.length ? { kind: 'combo' } : i < doorMods ? { kind: 'door', leaves: clamp(Math.round(doorsN / doorMods), 1, 2) } : { kind: 'drawers', n: per };
     if (drawersN) return { kind: 'drawers', n: per };
     if (doorsN) return { kind: 'door' };
     return nr >= 3 && i === 0 ? { kind: 'drawers', n: 3 } : { kind: 'door' };
@@ -728,7 +729,8 @@ function islandSpec(w, d, p) {
   let n = doorsN + drawersN;
   if (!n || bw / n < 0.3 || bw / n > 1.0) n = Math.max(1, Math.round(bw / 0.6));
   const nDraw = doorsN + drawersN === n ? drawersN : drawersN && !doorsN ? n : doorsN && !drawersN ? 0 : Math.ceil(n / 2);
-  const mods = Array.from({ length: n }, (_, i) => ({ x: -bw / 2 + (bw / n) * (i + 0.5), w: bw / n, kind: i < nDraw ? 'drawers' : 'door', n: 3 }));
+  // seen from the working side the sink is on the right (x < 0): keep the drawer stacks away from it
+  const mods = Array.from({ length: n }, (_, i) => ({ x: -bw / 2 + (bw / n) * (i + 0.5), w: bw / n, kind: (sinkKind ? i >= n - nDraw : i < nDraw) ? 'drawers' : 'door', n: 3 }));
   if (sink) for (const m of mods) if (Math.abs(m.x - sx) < m.w / 2 + 0.15) m.kind = 'door';
   return { ov, waterfall, tc, inset, bw, zB, zFr, sink, sinkKind, hobKind, hobX: hx, hobZ: zB + 0.07 + hobD / 2, hobW, hobD, mods };
 }
@@ -1129,7 +1131,7 @@ function tank(rx, rz, len, material, seg = 28) {
 }
 function buildHeater({ w, d, h, p }) {
   const g = new THREE.Group(), v = pick(p.variant, HEATERS, 'electric');
-  const white = enamel(hex(p.color, '#f3f3f0')), ch = K.chrome(), frame = K.mat('#b9bcc0', { roughness: 0.45, metalness: 0.6 });
+  const white = enamel(hex(p.color, '#f3f3f0')), ch = chrome(), frame = K.mat('#b9bcc0', { roughness: 0.45, metalness: 0.6 });
   if (v === 'electric' || v === 'heat-pump') {
     if (v === 'electric' && w > h * 1.2) {                      // horizontal cylinder
       const t = tank(h / 2 - 0.01, d / 2, w, white); t.rotation.z = -Math.PI / 2; g.add(at(t, -w / 2, h / 2 + 0.01, 0));
@@ -1225,8 +1227,9 @@ function sinkSpec(w, d, v) {
   return { bowls, drainer, tapX: dbl ? 0 : bowls[0].x, tapZ: -d / 2 + 0.045, zc, bd };
 }
 function buildSink({ w, d, h, p }) {
-  const g = new THREE.Group(), v = pick(p.variant, SINKS, 'kitchen-single'), fin = pick(p.finish, Object.keys(FINISH_HEX), 'chrome'), withTap = flag(p.faucet, true);
-  const cer = K.ceramic(hex(p.color, '#f7f7f5')), ch = K.chrome();
+  const g = new THREE.Group(), v = pick(p.variant, SINKS, 'kitchen-single'), fin = pick(p.finish, Object.keys(FINISH_HEX), 'chrome');
+  const withTap = flag(p.faucet, v !== 'vessel' && v !== 'utility');   // counter-top bowls get their wall spout only on request
+  const cer = K.ceramic(hex(p.color, '#f7f7f5')), ch = chrome();
   if (v === 'kitchen-single' || v === 'kitchen-double') {
     const S = sinkSpec(w, d, v), st = steel(), fl = rrShape(w, d, 0.02);
     for (const b of S.bowls) fl.holes.push(rrShape(b.w, b.d, b.r, b.x, -b.z, THREE.Path));
@@ -1257,7 +1260,7 @@ function buildSink({ w, d, h, p }) {
   return g;
 }
 function drawSink(ctx, { w, d, p, px }) {
-  const v = pick(p.variant, SINKS, 'kitchen-single'), big = Math.min(w, d) / px > 12, fill = K.tint(hex(p.color, '#f7f7f5'), 0.6), withTap = flag(p.faucet, true);
+  const v = pick(p.variant, SINKS, 'kitchen-single'), big = Math.min(w, d) / px > 12, fill = K.tint(hex(p.color, '#f7f7f5'), 0.6), withTap = flag(p.faucet, v !== 'vessel' && v !== 'utility');
   const tapMark = (x, y, len) => { if (!withTap || !big) return; K.line(ctx, x, y, x, y + len, INK, px * 1.6); circ2(ctx, x, y, Math.min(2.2, w * 0.06), PAPER, INK, px); };
   if (v === 'kitchen-single' || v === 'kitchen-double') {
     const S = sinkSpec(w / 100, d / 100, v);
@@ -1292,7 +1295,7 @@ function toiletSpec(w, d, h, p) {
 }
 function buildToilet({ w, d, h, p }) {
   const g = new THREE.Group(), S = toiletSpec(w, d, h, p), { v, R, rimY } = S;
-  const cer = K.ceramic(hex(p.color, '#f7f7f5')), seatM = K.mat(hex(p.color2, '#fbfbf9'), { roughness: 0.34 }), ch = K.chrome();
+  const cer = K.ceramic(hex(p.color, '#f7f7f5')), seatM = K.mat(hex(p.color2, '#fbfbf9'), { roughness: 0.34 }), ch = chrome();
   const yb = v === 'wall-hung' ? clamp(h * 0.2, 0.03, 0.1) : 0, H = rimY - yb, e = Math.min(0.012, H * 0.1);
   const outer = v === 'wall-hung'
     ? [R(0.6, 0.62, yb), R(0.85, 0.84, yb + H * 0.25), R(0.97, 0.97, yb + H * 0.62), R(1, 1, rimY - e), R(1, 1, rimY)]
@@ -1316,7 +1319,8 @@ function buildToilet({ w, d, h, p }) {
   } else if (p.cistern !== 'exposed') {
     const pl = new THREE.Group(), py = Math.max(h + 0.35, 1.0);
     pl.add(K.rbox(0.245, 0.165, 0.012, K.mat('#f4f4f2', { roughness: 0.15 }), 0, py, -d / 2 + 0.006, 0.005, 2));
-    pl.add(K.rbox(0.075, 0.1, 0.004, ch, -0.055, py, -d / 2 + 0.014, 0.0018, 2), K.rbox(0.11, 0.1, 0.004, ch, 0.045, py, -d / 2 + 0.014, 0.0018, 2));
+    const bt = K.mat('#dfe2e6', { roughness: 0.3, metalness: 0.4 });
+    pl.add(K.rbox(0.075, 0.1, 0.004, bt, -0.055, py, -d / 2 + 0.014, 0.0018, 2), K.rbox(0.11, 0.1, 0.004, bt, 0.045, py, -d / 2 + 0.014, 0.0018, 2));
     g.add(extra(pl));
   }
   if (v === 'smart') {
@@ -1358,7 +1362,7 @@ function vanitySpec(w, d, h, p) {
 }
 function buildVanity({ w, d, h, p }) {
   const g = new THREE.Group(), S = vanitySpec(w, d, h, p), { v, yC, tct } = S;
-  const fin = pick(p.faucet, Object.keys(FINISH_HEX), 'chrome'), fmat = finish(fin), white = K.ceramic('#f8f8f6'), ch = K.chrome();
+  const fin = pick(p.faucet, Object.keys(FINISH_HEX), 'chrome'), fmat = finish(fin), white = K.ceramic('#f8f8f6'), ch = chrome();
   const color = hex(p.color, WHITE), fm = cabinetMat(p, color);
   const cmat = S.kind === 'integrated' && !p.counter ? K.ceramic(counterHex(p, '#f6f5f1')) : counterMat(p, '#f1efea'), bowlM = S.kind === 'integrated' ? cmat : white;
   const holes = S.vessel ? null : S.xs.map((x) => ({ pts: S.outline(x).map((q) => [q[0], q[2]]) }));
@@ -1476,7 +1480,7 @@ function showerSpec(w, d, h, p) {
   }
   const armLen = Math.min(0.38, Math.max(0.12, d - 0.2));
   const head = !tall ? 'none' : pick(p.head, ['rain', 'hand', 'column', 'none'], v === 'tray-only' ? 'column' : 'rain');
-  const drain = { x: tray ? headX : 0, z: tray ? B + Math.min(0.28, d * 0.3) : B + Math.min(0.08, d * 0.15) };
+  const drain = { x: 0, z: tray ? B + d * 0.62 : B + Math.min(0.08, d * 0.15) };
   return { v, open, tall, tray, th, gi, F, Rx, panels, headX, brace, quadR, framed, mirror, armLen, head, drain };
 }
 /** Wall-mounted shower fittings; origin on the wall at floor level, facing +Z. */
@@ -1531,7 +1535,7 @@ function buildShower({ w, d, h, p }) {
     const rimH = Math.min(0.008, th * 0.3), rim = Math.min(0.045, w * 0.1, d * 0.1);
     if (S.quadR) { g.add(flat(quadShape(w, d, S.quadR), th - rimH, tm, 0)); const r = quadShape(w, d, S.quadR); r.holes.push(quadShape(w, d, S.quadR, rim)); g.add(flat(r, rimH, tm, th - rimH)); }
     else { g.add(K.box(w, th - rimH, d, tm, 0, (th - rimH) / 2, 0)); const r = rrShape(w, d, 0.008); r.holes.push(rrShape(w - 2 * rim, d - 2 * rim, 0.03, 0, 0, THREE.Path)); g.add(flat(r, rimH, tm, th - rimH)); }
-    g.add(K.box(0.11, 0.004, 0.11, K.chrome(), S.drain.x, th - rimH + 0.001, S.drain.z));
+    g.add(K.box(0.11, 0.004, 0.11, chrome(), S.drain.x, th - rimH + 0.001, S.drain.z));
   } else {
     g.add(K.box(w, th, d, K.stone(hex(p.color, '#c4c1bb')), 0, th / 2, 0));
     g.add(K.box(Math.min(0.7, w * 0.6), 0.004, 0.065, steel(), S.drain.x, th + 0.001, S.drain.z), K.box(Math.min(0.7, w * 0.6) - 0.03, 0.002, 0.012, shadowMat(), S.drain.x, th + 0.0035, S.drain.z));
@@ -1628,7 +1632,7 @@ function tubSpec(w, d, h, v) {
 }
 function buildBathtub({ w, d, h, p }) {
   const g = new THREE.Group(), v = pick(p.variant, TUBS, 'built-in'), S = tubSpec(w, d, h, v);
-  const white = K.ceramic('#f9f9f7'), shell = K.ceramic(hex(p.color, '#f9f9f7')), ch = K.chrome(), fin = pick(p.finish, Object.keys(FINISH_HEX), 'chrome');
+  const white = K.ceramic('#f9f9f7'), shell = K.ceramic(hex(p.color, '#f9f9f7')), ch = chrome(), fin = pick(p.finish, Object.keys(FINISH_HEX), 'chrome');
   const depth = Math.min(0.42, h * 0.76);
   if (v === 'corner' || v === 'built-in' || v === 'whirlpool') {
     const top = S.I(1, h), holes = [{ pts: top.map((q) => [q[0], q[2]]) }];
@@ -1651,8 +1655,7 @@ function buildBathtub({ w, d, h, p }) {
     g.add(loft([outer[outer.length - 1], S.I(claw ? 0.97 : 1, h), S.I(0.9, fh + H * 0.55), S.I(0.6, floorY)], white, false, true));
     g.add(K.cyl(0.024, 0.024, 0.004, ch, S.drain[0], floorY + 0.003, S.drain[1], 16));
     if (claw) {
-      const fm = finish(pick(p.feet, Object.keys(FINISH_HEX), hex(p.color2, null) ? 'x' : 'gold'));
-      const m = hex(p.color2, null) ? K.metal(hex(p.color2, '#222')) : fm;
+      const m = hex(p.color2, null) ? K.metal(hex(p.color2, '#222')) : finish('gold');
       for (const kx of [-1, 1]) for (const kz of [-1, 1]) { const x = kx * w * 0.3, z = kz * d * 0.27; g.add(K.sphere(Math.min(0.035, fh * 0.45), m, x, Math.min(0.035, fh * 0.45), z, 12, 8), K.bar([x, 0.03, z], [x * 0.82, fh + H * 0.1, z * 0.75], Math.min(0.02, fh * 0.3), m, 8)); }
     }
     // floor-standing filler in the free corner of the footprint
@@ -1757,22 +1760,22 @@ function drawMirror(ctx, { w, d, p, px }) {
 reg('mirror', buildMirror, drawMirror);
 
 const RAILS = ['ladder', 'bar', 'heated', 'hooks', 'shelf', 'paper-holder', 'laundry-basket'];
-function railSpec(w, h, v) {
+function railSpec(h, v) {
   const heated = v === 'heated', n = clamp(Math.round(h / (heated ? 0.07 : 0.11)), 2, 26), ys = [];
   for (let i = 0; i < n; i++) { const f = (i + 0.5) / n; ys.push(heated && n >= 8 && (i % 5) === 4 ? null : 0.04 + f * (h - 0.08)); }
   return ys.filter((y) => y !== null);
 }
 function buildRail({ w, d, h, p }) {
   const g = new THREE.Group(), v = pick(p.variant, RAILS, 'ladder');
-  const c = hex(p.color, null), m = !c ? K.chrome() : hsl(c).l > 0.85 ? enamel(c) : K.mat(c, { roughness: 0.38, metalness: 0.6 });
+  const c = hex(p.color, null), m = !c ? chrome() : hsl(c).l > 0.85 ? enamel(c) : K.mat(c, { roughness: 0.38, metalness: 0.6 });
   const towelM = K.fabric(hex(p.color2, '#e9e5dd')), z0 = -d / 2;
   const towel = (x, yTop, len, tw, zc) => { g.add(K.rbox(tw, len, 0.012, towelM, x, yTop - len / 2, zc + 0.012, 0.005, 2), K.rbox(tw, len * 0.7, 0.012, towelM, x, yTop - len * 0.35, zc - 0.012, 0.005, 2), cylX(0.018, tw, towelM, x, yTop, zc, 10)); };
   if (v === 'ladder' || v === 'heated') {
-    const tr = Math.min(0.013, w * 0.04, d * 0.3), heated = v === 'heated', zc = d / 2 - tr, ys = railSpec(w, h, v), y0 = heated ? Math.min(0.035, h * 0.06) : 0;
+    const tr = Math.min(0.013, w * 0.04, d * 0.3), heated = v === 'heated', zc = d / 2 - tr, ys = railSpec(h, v), y0 = heated ? Math.min(0.035, h * 0.06) : 0;
     for (const k of [-1, 1]) g.add(K.cyl(tr, tr, h - y0, m, k * (w / 2 - tr), (h + y0) / 2, zc, 12));
     g.add(merged(null, () => ys.map((y) => (heated ? gBox(w - 2 * tr, 0.024, tr * 1.2, 0, y, 0) : gCyl(tr * 0.72, w - 2 * tr, 0, y, 0, 'x', 10))), m, 0, 0, zc));
-    g.add(merged(`rb|${mm(w)}|${mm(h)}|${mm(d)}`, () => [-1, 1].flatMap((k) => [0.12, 0.88].flatMap((f) => [gCyl(0.007, d - tr, k * (w / 2 - tr), h * f, -tr / 2, 'z', 8), gCyl(0.018, 0.006, k * (w / 2 - tr), h * f, z0 + 0.003 - (d / 2 - tr) + d / 2 - tr, 'z', 12)])), m, 0, 0, 0));
-    if (heated) { for (const k of [-1, 1]) g.add(K.cylOn(tr * 0.9, tr * 0.9, y0, K.chrome(), k * (w / 2 - tr), 0, zc, 10)); g.add(cylX(0.016, 0.04, enamel('#f2f2f0'), w / 2 - tr - 0.035, y0 * 0.6, zc, 12)); }
+    g.add(merged(`rb|${mm(w)}|${mm(h)}|${mm(d)}`, () => [-1, 1].flatMap((k) => [0.12, 0.88].flatMap((f) => [gCyl(0.007, d - tr, k * (w / 2 - tr), h * f, -tr / 2, 'z', 8), gCyl(0.018, 0.006, k * (w / 2 - tr), h * f, z0 + 0.003, 'z', 12)])), m, 0, 0, 0));
+    if (heated) { for (const k of [-1, 1]) g.add(K.cylOn(tr * 0.9, tr * 0.9, y0, chrome(), k * (w / 2 - tr), 0, zc, 10)); g.add(cylX(0.016, 0.04, enamel('#f2f2f0'), w / 2 - tr - 0.035, y0 * 0.6, zc, 12)); }
     if (h > 0.5 && ys.length > 2) { const y = ys[Math.floor(ys.length * 0.62)]; towel(-w * 0.06, y + 0.012, Math.min(0.36, y - 0.02), w * 0.6, zc); }
   } else if (v === 'bar') {
     const r = Math.min(0.01, d * 0.2), yb = h > 0.25 ? h - 0.022 : h / 2, zc = d / 2 - (h > 0.25 ? 0.019 : r);
@@ -1794,12 +1797,12 @@ function buildRail({ w, d, h, p }) {
     const r = Math.min(h, d) / 2 * 0.98, zc = d / 2 - r, rl = Math.min(0.1, w * 0.8);
     g.add(cylX(r, rl, K.mat('#fbfaf6', { roughness: 0.95 }), -(w - rl) / 2 + 0.004, r, zc, 24), cylX(r * 0.38, rl + 0.002, K.mat('#b9a98f', { roughness: 0.9 }), -(w - rl) / 2 + 0.004, r, zc, 12));
     g.add(cylX(0.006, w - 0.012, m, 0, r, zc, 8), cylZ(0.006, zc - z0, m, w / 2 - 0.012, r, (zc + z0) / 2, 8), cylZ(Math.min(0.02, r), 0.006, m, w / 2 - 0.012, r, z0 + 0.003, 14));
-    g.add(K.box(w, 0.003, 0.003, m, 0, h - 0.0015, z0 + 0.0015));
+    if (h - 2 * r > 0.012) g.add(K.box(rl + 0.012, 0.004, d * 0.9, m, -(w - rl) / 2 + 0.004, h - 0.002, d * 0.05), K.box(rl + 0.012, h - r, 0.004, m, -(w - rl) / 2 + 0.004, (h + r) / 2, z0 + 0.002));
   } else {
     const rm = K.rattan(hex(p.color, '#c9a878')), O = (f, y, i = 0) => ring(0, 0, (w / 2) * f - i, (d / 2) * f - i, y, 32, 0.42);
     g.add(loft([O(0.86, 0), O(0.88, h * 0.04), O(1, h - 0.03), O(1, h), O(1, h, 0.012), O(0.98, h - Math.min(0.05, h * 0.1), 0.012)], rm, true, false));
     g.add(loft([O(0.98, h - Math.min(0.05, h * 0.1), 0.012), O(0.5, h - Math.min(0.035, h * 0.07), 0.012)], K.fabric(hex(p.color2, '#ece8df')), false, true));
-    for (const k of [-1, 1]) g.add(K.box(0.006, Math.min(0.03, h * 0.08), Math.min(0.11, d * 0.35), shadowMat(), k * (w / 2 - 0.004) * 0.985, h * 0.8, 0));
+    for (const k of [-1, 1]) g.add(K.box(0.003, Math.min(0.028, h * 0.08), Math.min(0.11, d * 0.35), shadowMat(), k * (w / 2) * 0.972, h * 0.8, 0));
   }
   return g;
 }

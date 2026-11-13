@@ -74,8 +74,8 @@ export function initTopbar(root, app) {
   /* Menus */
   const fileBtn = iconBtn('more', 'File and export', { onClick: () => openMenu(fileBtn, fileMenu(), { placement: 'bottom-end' }) });
   fileBtn.setAttribute('aria-haspopup', 'menu');
-  const settingsBtn = iconBtn('settings', 'Settings', { onClick: () => app.openSettings() });
-  const helpBtn = iconBtn('help', 'Help', { onClick: () => openMenu(helpBtn, [
+  const settingsBtn = iconBtn('settings', 'Settings', { class: 'hide-phone', onClick: () => app.openSettings() });
+  const helpBtn = iconBtn('help', 'Help', { class: 'hide-phone', onClick: () => openMenu(helpBtn, [
     { label: 'Keyboard shortcuts', icon: 'keyboard', kbd: '?', onSelect: () => app.openShortcuts() },
     { label: 'Welcome and house facts', icon: 'home', onSelect: () => app.openWelcome() },
   ], { placement: 'bottom-end' }) });
@@ -95,6 +95,9 @@ export function initTopbar(root, app) {
         ? { label: 'Print shopping list', icon: 'print', onSelect: actions.printShoppingList }
         : { label: 'Copy shopping list', icon: 'copy', onSelect: actions.copyShoppingList },
       compact && { separator: true },
+      compact && { label: 'Settings', icon: 'settings', onSelect: () => app.openSettings() },
+      compact && { label: 'Keyboard shortcuts', icon: 'keyboard', onSelect: () => app.openShortcuts() },
+      compact && { label: 'Welcome and house facts', icon: 'home', onSelect: () => app.openWelcome() },
       compact && { heading: 'Tool' },
       ...(compact ? TOOLS.map((t) => ({ label: t.label, icon: t.icon, checked: store.ui.tool === t.value ? true : undefined, onSelect: () => store.setUI({ tool: t.value }) })) : []),
     ];

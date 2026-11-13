@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Garden models — contact sheet</title>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three/three.module.min.js", "three/addons/": "../vendor/three/addons/" } }
+</script>
+<style>
+  body { margin: 0; padding: 12px 16px 60px; font: 13px/1.4 system-ui, sans-serif; background: #f4f3ef; color: #26282e; }
+  h1 { font-size: 18px; margin: 4px 0 2px; } h2 { font-size: 15px; margin: 22px 0 6px; }
+  nav a { margin-right: 10px; } canvas { display: block; background: #fff; border: 1px solid #d8d5cc; margin-bottom: 8px; }
+  pre { background: #fff; border: 1px solid #d8d5cc; padding: 8px; white-space: pre-wrap; max-width: 1500px; }
+  .bad { color: #b3261e; font-weight: 600; } .ok { color: #1e7a34; font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>Garden models — contact sheet</h1>
+<nav>Query: <code>?only=tree,shrub</code> · <code>?mode=3d|2d|corner|test</code> (default: everything)</nav>
+<div id="out"></div>
+<pre id="report">running…</pre>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { buildModel, drawSymbol, getModel } from '../src/models/registry.js';
+import { MODEL_TYPES } from '../src/models/types.js';
+import '../src/models/garden.js';
+
+const q = new URLSearchParams(location.search);
+const only = q.get('only') ? q.get('only').split(',') : null, mode = q.get('mode') || 'all';
+const out = document.getElementById('out');
+const enumOf = (type, key) => (MODEL_TYPES[type].params[key].match(/'([^']+)'/g) || []).map((s) => s.slice(1, -1));
+const S = (label, p = {}, size) => ({ label, p, size });
+
+// ───────────── specimens: every type × every variant (+ a few sizes) ─────────────
+const SPEC = {
+  tree: [
+    ...enumOf('tree', 'species').map((s) => S(s, { species: s }, { cypress: [110, 110, 520], 'date-palm': [420, 420, 700], 'washingtonia-palm': [300, 300, 900], poinciana: [600, 600, 450], ficus: [500, 500, 500], eucalyptus: [450, 450, 900], banana: [300, 300, 320], plumeria: [280, 280, 300], lemon: [250, 250, 300], orange: [250, 250, 300], pomegranate: [240, 240, 280], fig: [400, 400, 350], olive: [350, 350, 380], oak: [600, 600, 600] }[s])),
+    S('olive young', { species: 'olive', age: 'young' }, [200, 200, 280]), S('olive fruit 5×4 m', { species: 'olive', fruit: true }, [500, 400, 450]),
+    S('lemon no fruit', { species: 'lemon', fruit: false }, [250, 250, 300]), S('date-palm fruit young', { species: 'date-palm', fruit: true, age: 'young' }, [380, 380, 420]),
+    S('mango fruit', { species: 'mango', fruit: true }, [450, 450, 500]), S('banana fruit', { species: 'banana', fruit: true }, [300, 300, 320]),
+    S('jacaranda young', { species: 'jacaranda', age: 'young' }, [250, 250, 400]), S('generic colour', { species: 'generic', color: '#a86a2c', color3: '#3a3028' }), S('cypress young', { species: 'cypress', age: 'young' }, [80, 80, 300]),
+    S('loquat fruit', { species: 'loquat', fruit: true }), S('carob fruit', { species: 'carob', fruit: true }, [500, 500, 450]),
+  ],
+  shrub: [
+    ...enumOf('shrub', 'species').map((s) => S(s, { species: s }, { cactus: [90, 90, 180], yucca: [110, 110, 170], 'ornamental-grass': [90, 90, 110], agave: [110, 110, 80], aloe: [70, 70, 80], 'succulent-mix': [80, 80, 30], lavender: [70, 70, 60], rosemary: [70, 70, 70], oleander: [180, 180, 220], bougainvillea: [200, 200, 180], 'bird-of-paradise': [120, 120, 150], fern: [90, 90, 70], geranium: [60, 60, 45], sage: [70, 70, 60], hibiscus: [130, 130, 160] }[s])),
+    S('myrtle ball', { species: 'myrtle', shape: 'ball' }, [80, 80, 90]), S('pittosporum cone', { species: 'pittosporum', shape: 'cone' }, [70, 70, 130]),
+    S('rose yellow', { species: 'rose', flowerColor: '#f2c63a' }), S('bougainvillea orange', { species: 'bougainvillea', flowerColor: '#f08a2a' }, [200, 200, 180]), S('hibiscus wide', { species: 'hibiscus', flowerColor: '#f6d24a' }, [220, 140, 150]),
+  ],
+  hedge: [
+    ...enumOf('hedge', 'species').flatMap((s) => [S(s + ' trimmed', { species: s, trimmed: true }), S(s + ' natural', { species: s, trimmed: false })]),
+    S('ficus 6 m', { species: 'ficus', trimmed: true }, [600, 60, 180]), S('cypress 5 m', { species: 'cypress' }, [500, 90, 300]), S('bamboo 4 m', { species: 'bamboo' }, [400, 60, 280]), S('low myrtle', { species: 'myrtle', trimmed: true }, [300, 40, 50]),
+  ],
+  'flower-bed': [
+    ...enumOf('flower-bed', 'variant').map((v, i) => S(v, { variant: v, edging: ['stone', 'steel', 'wood', 'brick', 'none'][i % 5], mulch: ['bark', 'tuff', 'gravel', 'soil'][i % 4] })),
+    S('flowers custom colours', { variant: 'flowers', flowerColors: ['#f2c63a', '#ffffff', '#3a6ad6'], edging: 'brick', mulch: 'soil' }),
+    S('mixed 5×1.5 m', { variant: 'mixed', edging: 'steel', mulch: 'tuff' }, [500, 150, 60]), S('succulents 3×3', { variant: 'succulents', mulch: 'gravel', edging: 'stone' }, [300, 300, 40]), S('herbs small', { variant: 'herbs', edging: 'wood' }, [120, 60, 35]),
+  ],
+  planter: [
+    ...enumOf('planter', 'shape').map((s, i) => S(s, { shape: s, plant: ['shrub', 'flowers', 'olive', 'succulents', 'palm', 'herbs', 'flowers', 'herbs'][i], material: ['terracotta', 'concrete', 'wood', 'ceramic', 'fibre-clay', 'metal', 'plastic', 'ceramic'][i] }, { rect: [100, 40, 90], tall: [40, 40, 150], trough: [120, 35, 70], bowl: [70, 70, 45], hanging: [35, 35, 90], wall: [60, 22, 45], round: [50, 50, 110], square: [50, 50, 95] }[s])),
+    ...enumOf('planter', 'plant').map((pl, i) => S('plant: ' + pl, { plant: pl, shape: i % 2 ? 'square' : 'round', material: ['ceramic', 'terracotta', 'concrete', 'fibre-clay', 'plastic', 'metal', 'wood'][i % 7], plantHeight: pl === 'none' ? 0 : [60, 30, 120, 90, 80, 50, 15, 25, 50, 70, 130, 90][i % 12] }, [45, 45, pl === 'none' ? 42 : 42 + [60, 30, 120, 90, 80, 50, 15, 25, 50, 70, 130, 90][i % 12]])),
+    S('ceramic blue', { shape: 'round', material: 'ceramic', color: '#2f5f8f', plant: 'citrus', plantHeight: 90 }, [55, 55, 140]), S('default {}', {}),
+  ],
+  'raised-bed': [
+    ...enumOf('raised-bed', 'frame').map((f, i) => S(f, { frame: f, crop: enumOf('raised-bed', 'crop')[i % 5] })),
+    ...enumOf('raised-bed', 'crop').map((c) => S('crop: ' + c, { crop: c, frame: 'wood' }, [160, 80, 30])),
+    S('wood + trellis', { frame: 'wood', crop: 'vegetables', trellis: true }, [240, 100, 45]), S('corten 4 m', { frame: 'corten', crop: 'herbs' }, [400, 120, 60]), S('steel tall', { frame: 'steel', crop: 'flowers' }, [120, 120, 80]),
+  ],
+  surface: [
+    ...enumOf('surface', 'kind').map((k) => S(k, { kind: k })),
+    S('paving grid', { kind: 'paving-concrete', pattern: 'grid', tile: 40 }), S('paving herringbone', { kind: 'paving-concrete', pattern: 'herringbone' }), S('brick herringbone', { kind: 'brick', pattern: 'herringbone' }),
+    S('porcelain 120×60', { kind: 'porcelain-tile', pattern: 'running-bond', tile: 120, color: '#8f8c86' }), S('deck wide 6×2', { kind: 'deck-wood', tile: 19, color: '#7a5a3c' }, [600, 200, 3]),
+    S('lawn 8×5 m', { kind: 'lawn' }, [800, 500, 2]), S('stone grid', { kind: 'paving-stone', pattern: 'grid', tile: 50 }), S('stepping gravel', { kind: 'stepping-stones', base: 'gravel' }, [400, 90, 3]), S('rubber green', { kind: 'rubber', color: '#3f8a4f' }),
+  ],
+  pool: [
+    ...enumOf('pool', 'variant').map((v) => S(v, { variant: v }, { 'above-ground-frame': [400, 200, 100], 'above-ground-round': [366, 366, 90], inflatable: [305, 305, 76], plunge: [250, 200, 140], lap: [1000, 250, 130], kids: [180, 180, 40], natural: [500, 350, 100] }[v])),
+    ...enumOf('pool', 'shape').map((s, i) => S('in-ground ' + s, { variant: 'in-ground', shape: s, steps: ['corner', 'ladder', 'full-width', 'corner', 'full-width'][i], deck: [30, 30, 40, 30, 60][i] }, s === 'round' ? [400, 400, 140] : [600, 350, 140])),
+    S('in-ground cover', { variant: 'in-ground', cover: true }), S('travertine + ladder', { variant: 'in-ground', coping: '#d9c9a8', water: '#3fa7a0', steps: 'ladder', deck: 80 }, [800, 400, 150]),
+    S('frame + ladder', { variant: 'above-ground-frame', steps: 'ladder', color: '#5a6a7a' }, [549, 274, 122]), S('round + ladder', { variant: 'above-ground-round', steps: 'ladder' }, [457, 457, 122]),
+  ],
+  spa: [
+    ...enumOf('spa', 'variant').map((v) => S(v, { variant: v }, { 'swim-spa': [450, 230, 130], 'sauna-barrel': [200, 240, 210], 'sauna-cabin': [200, 180, 220], 'cold-plunge': [160, 75, 75], round: [180, 180, 100], inflatable: [196, 196, 71] }[v])),
+    S('square cover', { variant: 'square', cover: true }), S('square steps 6 seats', { variant: 'square', steps: true, seats: 6, color: '#5a4a3c' }, [230, 265, 92]), S('inflatable cover', { variant: 'inflatable', cover: true }, [196, 196, 71]), S('round cover', { variant: 'round', cover: true }, [180, 180, 100]),
+  ],
+  'water-feature': [
+    ...enumOf('water-feature', 'variant').map((v) => S(v, { variant: v }, { 'fountain-tier': [120, 120, 150], 'fountain-wall': [120, 50, 150], 'fountain-sphere': [90, 90, 70], pond: [250, 180, 35], 'bird-bath': [55, 55, 75], stream: [400, 120, 30], bubbler: [80, 80, 80] }[v])),
+    S('pond big', { variant: 'pond' }, [400, 300, 40]), S('tier stone colour', { variant: 'fountain-tier', color: '#c9b79a' }, [160, 160, 190]),
+  ],
+  'garden-decor': [
+    ...enumOf('garden-decor', 'variant').map((v) => S(v, { variant: v }, { boulder: [90, 70, 55], rocks: [160, 120, 60], statue: [50, 50, 150], 'bird-feeder': [40, 40, 170], arch: [140, 50, 220], obelisk: [50, 50, 180], 'stepping-stone': [50, 45, 4], edging: [200, 10, 12], sundial: [45, 45, 95], gnome: [28, 26, 55], sign: [50, 8, 90], bridge: [220, 100, 90], 'wind-chime': [40, 40, 190] }[v])),
+    S('edging 4 m brick', { variant: 'edging', material: 'ceramic', color: '#a8563c' }, [400, 10, 12]), S('boulder big', { variant: 'boulder' }, [180, 130, 100]),
+  ],
+};
+const TYPES = Object.keys(SPEC).filter((t) => !only || only.includes(t));
+const sizeOf = (type, s) => { const d = MODEL_TYPES[type].size; return s.size ? { w: s.size[0], d: s.size[1], h: s.size[2] } : { ...d }; };
+const itemOf = (type, s, i) => ({ id: `${type}-${i}`, type, params: s.p, ...sizeOf(type, s) });
+
+// ───────────── 3D set-up ─────────────
+const TW = 300, TH = 270, COLS = 6;
+let renderer, scene, camera, sun, ground;
+function init3D() {
+  renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(1); renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
+  scene = new THREE.Scene(); scene.background = new THREE.Color('#dfe9f2');
+  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.45;
+  scene.add(new THREE.HemisphereLight('#eaf2ff', '#8a8468', 0.9));
+  sun = new THREE.DirectionalLight('#fff2dc', 3.0); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02;
+  scene.add(sun, sun.target);
+  ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#b9c2a4', roughness: 1 }));
+  ground.receiveShadow = true; scene.add(ground);
+  camera = new THREE.PerspectiveCamera(30, TW / TH, 0.05, 500);
+}
+function frame(box, w, h, dir = [0.75, 0.55, 1]) {
+  const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3()), r = Math.max(0.2, sz.length() / 2);
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  const dist = r / Math.sin((camera.fov * Math.PI) / 360) * 1.02, v = new THREE.Vector3(...dir).normalize();
+  camera.position.copy(c).addScaledVector(v, dist); camera.lookAt(c);
+  sun.position.copy(c).add(new THREE.Vector3(-0.5, 1.1, 0.65).multiplyScalar(r * 3)); sun.target.position.copy(c);
+  const sc = sun.shadow.camera; sc.left = sc.bottom = -r * 1.6; sc.right = sc.top = r * 1.6; sc.near = 0.1; sc.far = r * 8; sc.updateProjectionMatrix();
+}
+const triCount = (obj) => { let t = 0; obj.traverse((o) => { if (o.isMesh) t += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3; }); return Math.round(t); };
+
+/** Bounding-box check → '' when fine, otherwise a description. Horizontal ±2 cm; vertical: y0 ≈ 0 and top ≈ h except documented cases. */
+function bboxIssue(type, s, obj) {
+  const { w, d, h } = sizeOf(type, s), b = new THREE.Box3().setFromObject(obj), e = 0.02, issues = [];
+  if (Math.abs(b.min.x + w / 200) > e || Math.abs(b.max.x - w / 200) > e) issues.push(`x ${(b.min.x * 100).toFixed(1)}..${(b.max.x * 100).toFixed(1)} ≠ ±${w / 2}`);
+  if (Math.abs(b.min.z + d / 200) > e || Math.abs(b.max.z - d / 200) > e) issues.push(`z ${(b.min.z * 100).toFixed(1)}..${(b.max.z * 100).toFixed(1)} ≠ ±${d / 2}`);
+  const below = type === 'pool', above = type === 'raised-bed' || (type === 'pool' && b.min.y < -0.05);
+  if (!below && Math.abs(b.min.y) > e) issues.push(`y0 ${(b.min.y * 100).toFixed(1)}`);
+  if (!above && Math.abs(b.max.y - h / 100) > e) issues.push(`top ${(b.max.y * 100).toFixed(1)} ≠ ${h}`);
+  if (type === 'raised-bed' && b.max.y < h / 100 - e) issues.push(`top ${(b.max.y * 100).toFixed(1)} < ${h}`);
+  return issues.join('; ');
+}
+
+const report = { failures: [], tris: {}, throws: [] };
+function section(title, w, h) {
+  const h2 = document.createElement('h2'); h2.textContent = title; out.appendChild(h2);
+  const c = document.createElement('canvas'); c.width = w; c.height = h; c.id = 'sec-' + title.replace(/[^a-z0-9]+/gi, '-').toLowerCase(); out.appendChild(c);
+  return c.getContext('2d');
+}
+function sheet3D(type) {
+  const list = SPEC[type], rows = Math.ceil(list.length / COLS), g = section(`${type} 3d`, COLS * TW, rows * TH);
+  list.forEach((s, i) => {
+    const item = itemOf(type, s, i), obj = buildModel(item), tris = triCount(obj), issue = getModel(type) ? bboxIssue(type, s, obj) : 'not registered';
+    report.tris[`${type}/${s.label}`] = tris;
+    if (issue) report.failures.push(`${type}/${s.label}: ${issue}`);
+    scene.add(obj);
+    const box = new THREE.Box3().setFromObject(obj); box.min.y = Math.min(box.min.y, 0);
+    frame(box, TW, TH, type === 'surface' || type === 'pool' ? [0.6, 0.85, 1] : [0.75, 0.5, 1]);
+    renderer.render(scene, camera);
+    const x = (i % COLS) * TW, y = Math.floor(i / COLS) * TH;
+    g.drawImage(renderer.domElement, x, y);
+    scene.remove(obj);
+    g.fillStyle = 'rgba(255,255,255,0.78)'; g.fillRect(x, y, TW, 19);
+    g.fillStyle = issue ? '#b3261e' : '#26282e'; g.font = '12px system-ui'; g.fillText(`${s.label} · ${item.w}×${item.d}×${item.h} · ${tris}▲${issue ? ' ✗' : ''}`, x + 5, y + 14);
+    g.strokeStyle = '#d8d5cc'; g.strokeRect(x + 0.5, y + 0.5, TW, TH);
+  });
+}
+function draw2DItem(g, item, cx, cy, scale) {
+  g.save(); g.translate(cx, cy); g.scale(scale, scale); drawSymbol(g, item, 1 / scale); g.restore();
+}
+function sheet2D(type) {
+  const list = SPEC[type], cw = 250, chh = 190, cols = 7, rows = Math.ceil(list.length / cols), g = section(`${type} 2d`, cols * cw, rows * chh);
+  g.fillStyle = '#fff'; g.fillRect(0, 0, cols * cw, rows * chh);
+  list.forEach((s, i) => {
+    const item = itemOf(type, s, i), x = (i % cols) * cw, y = Math.floor(i / cols) * chh, m = Math.max(item.w, item.d);
+    g.save(); g.beginPath(); g.rect(x, y, cw, chh); g.clip();
+    g.strokeStyle = '#eceae4'; g.lineWidth = 1; for (let k = 0; k < cw; k += 20) { g.beginPath(); g.moveTo(x + k, y); g.lineTo(x + k, y + chh); g.stroke(); }
+    draw2DItem(g, item, x + 88, y + 104, 150 / m); draw2DItem(g, item, x + 208, y + 104, 46 / m);
+    g.restore();
+    g.fillStyle = '#26282e'; g.font = '12px system-ui'; g.fillText(`${s.label} · ${item.w}×${item.d}`, x + 5, y + 14);
+    g.strokeStyle = '#d8d5cc'; g.strokeRect(x + 0.5, y + 0.5, cw, chh);
+  });
+}
+
+// ───────────── composed garden corner ─────────────
+const CORNER = [
+  ['surface', { kind: 'lawn' }, [1400, 1100, 2], 0, 0, 0],
+  ['surface', { kind: 'deck-wood' }, [500, 350, 4], -420, 330, 0], ['surface', { kind: 'paving-stone' }, [300, 700, 3], 80, -150, 0], ['surface', { kind: 'tuff' }, [1400, 90, 3], 0, -505, 0],
+  ['surface', { kind: 'stepping-stones' }, [330, 80, 3], 400, 150, 0], ['surface', { kind: 'gravel' }, [260, 260, 3], 540, 400, 0],
+  ['pool', { variant: 'in-ground', steps: 'corner', deck: 35 }, [600, 300, 140], -330, -120, 0],
+  ['hedge', { species: 'ficus', trimmed: true }, [1400, 60, 170], 0, -520, 0], ['hedge', { species: 'cypress' }, [500, 90, 320], 660, -250, 90],
+  ['tree', { species: 'olive' }, [380, 380, 400], 480, 380, 0], ['tree', { species: 'lemon' }, [240, 240, 290], 330, -330, 0], ['tree', { species: 'date-palm', fruit: true }, [420, 420, 720], -620, -400, 0],
+  ['tree', { species: 'jacaranda' }, [450, 450, 520], 520, -90, 0], ['tree', { species: 'pomegranate' }, [220, 220, 260], 130, 420, 0], ['tree', { species: 'banana' }, [260, 260, 300], -610, 130, 0],
+  ['flower-bed', { variant: 'mixed', edging: 'steel', mulch: 'tuff' }, [520, 110, 60], -360, -360, 0], ['flower-bed', { variant: 'succulents', mulch: 'gravel', edging: 'stone' }, [220, 160, 40], 300, 300, 0],
+  ['raised-bed', { frame: 'wood', crop: 'vegetables', trellis: true }, [220, 100, 40], 330, 480, 0], ['raised-bed', { frame: 'corten', crop: 'herbs' }, [160, 80, 40], 560, 200, 90],
+  ['shrub', { species: 'bougainvillea' }, [200, 200, 190], -640, -160, 0], ['shrub', { species: 'lavender' }, [70, 70, 60], 220, 140, 0], ['shrub', { species: 'lavender' }, [70, 70, 60], 220, 60, 0], ['shrub', { species: 'rosemary' }, [70, 70, 70], 220, -20, 0],
+  ['shrub', { species: 'agave' }, [100, 100, 75], 600, 470, 0], ['shrub', { species: 'hibiscus' }, [130, 130, 160], -90, 480, 0], ['shrub', { species: 'ornamental-grass' }, [90, 90, 110], -60, -330, 0], ['shrub', { species: 'bird-of-paradise' }, [120, 120, 150], -150, 420, 0],
+  ['planter', { shape: 'round', material: 'terracotta', plant: 'citrus', plantHeight: 90 }, [55, 55, 140], -200, 200, 0], ['planter', { shape: 'square', material: 'fibre-clay', plant: 'topiary', plantHeight: 80 }, [45, 45, 125], -640, 470, 0],
+  ['spa', { variant: 'square' }, [210, 210, 90], -520, 390, 0], ['water-feature', { variant: 'fountain-tier' }, [110, 110, 140], 80, 130, 0], ['garden-decor', { variant: 'rocks' }, [150, 110, 55], 470, 250, 0], ['garden-decor', { variant: 'arch' }, [140, 50, 220], 80, -420, 0],
+].map(([type, p, sz, x, y, rot], i) => ({ id: 'corner-' + i, type, params: p, w: sz[0], d: sz[1], h: sz[2], x, y, rot }));
+function corner3D() {
+  const W = 1500, H = 900, g = section('corner 3d', W, H * 2), grp = new THREE.Group();
+  for (const it of CORNER) { const o = buildModel(it); o.position.set(it.x / 100, 0, it.y / 100); o.rotation.y = (-it.rot * Math.PI) / 180; grp.add(o); }
+  scene.add(grp); report.tris.corner = triCount(grp);
+  const box = new THREE.Box3(new THREE.Vector3(-6.6, 0, -5.2), new THREE.Vector3(6.6, 3.2, 5.6));
+  camera.fov = 34; frame(box, W, H, [0.35, 0.5, 1]); renderer.render(scene, camera); g.drawImage(renderer.domElement, 0, 0);
+  // eye-level view from the deck towards the pool
+  renderer.setSize(W, H, false); camera.fov = 55; camera.aspect = W / H; camera.updateProjectionMatrix();
+  camera.position.set(-1.2, 1.65, 5.6); camera.lookAt(-2.6, 0.6, -2.5); renderer.render(scene, camera); g.drawImage(renderer.domElement, 0, H);
+  camera.fov = 30; scene.remove(grp);
+}
+function corner2D() {
+  const g = section('corner 2d', 1500, 760);
+  g.fillStyle = '#fff'; g.fillRect(0, 0, 1500, 760);
+  const draw = (cx, cy, sc) => { for (const it of CORNER) { g.save(); g.translate(cx + it.x * sc, cy + it.y * sc); g.rotate((it.rot * Math.PI) / 180); g.scale(sc, sc); drawSymbol(g, it, 1 / sc); g.restore(); } };
+  draw(520, 380, 0.66); draw(1280, 380, 0.24);
+}
+
+// ───────────── robustness: p = {} and junk params never throw ─────────────
+function robustness() {
+  const junk = [{}, undefined, null, { species: 42, variant: {}, kind: [], shape: 'zzz', color: 'not-a-colour', color2: 7, color3: null, material: 'unobtainium', age: 3, fruit: 'maybe', flowerColor: {}, flowerColors: 'red', edging: 9, mulch: null, plant: 'triffid', plantHeight: 'tall', crop: 0, frame: [], trellis: 'x', tile: -5, pattern: 1, coping: 1, water: {}, steps: 'escalator', depth: 'deep', cover: 'yes', deck: -3, seats: 'many', trimmed: 'no', style: 5 },
+    { tile: 1e9, depth: 1e9, deck: 1e9, plantHeight: 1e9, seats: 1e9, flowerColors: [1, null, '#fff'] }, { tile: NaN, depth: 0, deck: 0, plantHeight: -1, seats: 0, flowerColors: [] }];
+  const sizes = [null, [1, 1, 1], [3000, 20, 5], [15, 900, 600]];
+  const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+  for (const type of TYPES) {
+    const def = getModel(type); if (!def) { report.throws.push(`${type}: not registered`); continue; }
+    for (const p of junk) for (const sz of sizes) {
+      const d = MODEL_TYPES[type].size, w = sz ? sz[0] : d.w, dd = sz ? sz[1] : d.d, h = sz ? sz[2] : d.h, tag = `${type} p=${JSON.stringify(p)} ${w}×${dd}×${h}`;
+      try { const o = def.build({ w: w / 100, d: dd / 100, h: h / 100, p, item: undefined }); if (!o || !o.isObject3D) report.throws.push(`build returned nothing: ${tag}`); else o.traverse((m) => { if (m.isMesh) { const a = m.geometry.attributes.position.array; for (let i = 0; i < a.length; i++) if (!Number.isFinite(a[i])) { report.throws.push(`NaN vertex: ${tag}`); break; } } }); } catch (e) { report.throws.push(`build threw: ${tag}: ${e.message}`); }
+      try { g.save(); g.translate(32, 32); def.draw2d(g, { w, d: dd, h, p, px: 1, item: undefined }); g.restore(); } catch (e) { g.restore(); report.throws.push(`draw2d threw: ${tag}: ${e.message}`); }
+    }
+  }
+}
+
+try {
+  if (mode !== '2d') init3D();
+  if (mode === 'all' || mode === '3d') for (const t of TYPES) sheet3D(t);
+  if (mode === 'all' || mode === 'corner') { corner3D(); corner2D(); }
+  if (mode === 'all' || mode === '2d') for (const t of TYPES) sheet2D(t);
+  if (mode === 'test') { for (const t of TYPES) SPEC[t].forEach((s, i) => { const o = buildModel(itemOf(t, s, i)), issue = getModel(t) ? bboxIssue(t, s, o) : 'not registered'; report.tris[`${t}/${s.label}`] = triCount(o); if (issue) report.failures.push(`${t}/${s.label}: ${issue}`); }); }
+  if (mode === 'all' || mode === 'test') robustness();
+} catch (e) { report.throws.push('PAGE ERROR: ' + (e.stack || e.message)); }
+const heavy = Object.entries(report.tris).sort((a, b) => b[1] - a[1]).slice(0, 14);
+document.getElementById('report').innerHTML =
+  `<span class="${report.failures.length ? 'bad' : 'ok'}">bounding-box failures: ${report.failures.length}</span>\n${report.failures.join('\n')}\n` +
+  `<span class="${report.throws.length ? 'bad' : 'ok'}">throws / robustness problems: ${report.throws.length}</span>\n${report.throws.slice(0, 40).join('\n')}\n` +
+  `heaviest models (triangles):\n${heavy.map(([k, v]) => `  ${v}  ${k}`).join('\n')}`;
+window.__report = report; window.__done = true;
+</script>
+</body>
+</html>

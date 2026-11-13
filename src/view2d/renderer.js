@@ -4,7 +4,7 @@
  *   over  — labels and dimension lines
  * A frame is then: blit `under`, draw the few live (dragged) items, blit `over`, draw the interaction overlay.
  * Panning re-uses the caches (pixel-exact integer offsets) until the margin is used up; a zoom frame paints
- * straight to the screen. Nothing is drawn unless the view was invalidated.
+ * straight to the screen from vectors (always crisp). Nothing is drawn unless the view was invalidated.
  */
 import { createGfx, createBoxes } from './gfx.js';
 import { drawSiteGround, drawSiteLines, drawSiteLabels } from './site.js';
@@ -61,7 +61,7 @@ export function createRenderer(canvas, env) {
   const under = document.createElement('canvas'), over = document.createElement('canvas');
   const uctx = under.getContext('2d', { alpha: false }), octx = over.getContext('2d');
   const cache = { scale: NaN, ox: 0, oy: 0, underOk: false, overOk: false, liveKey: '' };
-  const stats = { ms: 0, mode: '', frames: 0, rebuilds: 0 };
+  const stats = { ms: 0, fullMs: 0, mode: '', frames: 0, rebuilds: 0 };
 
   const gfx = (target, cam, dpr, ox, oy, w, h) => createGfx(target, { scale: cam.scale, dpr, ox, oy, width: w, height: h, font: env.font });
 
@@ -86,11 +86,13 @@ export function createRenderer(canvas, env) {
       const liveItems = live && live.size ? env.store.items.filter((it) => live.has(it.id) && !it.hidden) : [];
 
       if (frame.direct) {
+        // zoom frame: straight from vectors (always crisp); the caches are rebuilt once the zoom settles
         paintUnder(G, env, live);
         if (env.ui.showItems) for (const it of liveItems) drawItem(G, env, it);
         paintOver(G, env);
         cache.underOk = cache.overOk = false;
         stats.mode = 'direct';
+        stats.fullMs = performance.now() - t0;
       } else {
         const cw = W + 2 * MARGIN, ch = H + 2 * MARGIN;
         const liveKey = live && live.size ? [...live].sort().join(',') : '';
@@ -98,6 +100,7 @@ export function createRenderer(canvas, env) {
         if (moved) { cache.underOk = cache.overOk = false; cache.scale = cam.scale; cache.ox = ox; cache.oy = oy; }
         if (liveKey !== cache.liveKey) { cache.underOk = false; cache.liveKey = liveKey; }
         stats.mode = 'cached';
+        const both = !cache.underOk && !cache.overOk;
         if (!cache.underOk) {
           if (under.width !== cw || under.height !== ch) { under.width = cw; under.height = ch; }
           paintUnder(gfx(uctx, cam, dpr, cache.ox + MARGIN, cache.oy + MARGIN, cw, ch), env, live);
@@ -109,6 +112,7 @@ export function createRenderer(canvas, env) {
           paintOver(gfx(octx, cam, dpr, cache.ox + MARGIN, cache.oy + MARGIN, cw, ch), env);
           cache.overOk = true; stats.mode = 'rebuild';
         }
+        if (both) stats.fullMs = performance.now() - t0;
         const dx = ox - cache.ox - MARGIN, dy = oy - cache.oy - MARGIN;
         ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
         ctx.drawImage(under, dx, dy);

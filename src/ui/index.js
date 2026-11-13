@@ -198,6 +198,8 @@ export function initUI(ctx) {
     const x = p.clientX ?? p.x, y = p.clientY ?? p.y;
     if (typeof x === 'number' && typeof y === 'number') openItemMenu(app, { x, y });
   });
+  // Double-clicking an item in the plan is a request to edit it.
+  listen(ctx.view2d, 'item-dblclick', () => openPanel('inspector'));
   const pane2d = document.getElementById('pane2d');
   let downAt = null;
   pane2d.addEventListener('pointerdown', (e) => { if (e.button === 2) downAt = { x: e.clientX, y: e.clientY }; }, true);

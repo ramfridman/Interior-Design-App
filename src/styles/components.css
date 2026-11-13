@@ -99,7 +99,7 @@
 .textarea:focus, .export__text:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); outline: none; }
 .export__text { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: var(--fs-12); white-space: pre; margin-top: var(--s-3); }
 .export__imgwrap { margin-top: var(--s-3); padding: var(--s-2); background: var(--sunken); border-radius: var(--r-2); display: grid; place-items: center; }
-.export__img { max-width: 100%; max-height: 56vh; height: auto; border-radius: var(--r-1); }
+.export__img { max-width: 100%; max-height: 440px; height: auto; border-radius: var(--r-1); }
 .filepick { margin: var(--s-3) 0 0; }
 .form__error { margin-top: var(--s-2); color: var(--fail); font-size: var(--fs-12); }
 
@@ -267,4 +267,15 @@
   .scrim { padding: var(--s-2); align-items: end; }
   .dialog { border-radius: var(--r-3); }
   .dialog__foot { flex-wrap: wrap; }
+}
+
+/* ───────── Touch: 40 px targets ───────── */
+@media (pointer: coarse) {
+  .chip { height: 36px; padding: 0 12px; }
+  .swatch { width: 30px; height: 30px; }
+  .seg--mini .seg__btn { height: 32px; min-width: 40px; }
+  .menu__item { min-height: 44px; }
+  .check { min-height: 40px; }
+  .select--quiet { height: 36px; }
+  .kbd kbd { min-width: 22px; height: 22px; }
 }

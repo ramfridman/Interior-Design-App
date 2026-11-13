@@ -30,6 +30,7 @@ export function initChecks(root, app, onCounts) {
 
   async function loadRunner() {
     if (runner !== undefined) return runner;
+    if (typeof app.runChecks === 'function') { runner = app.runChecks; return runner; }   // injected (tests, dev harness)
     try {
       const mod = await import('../regulations/index.js');
       runner = typeof mod.runChecks === 'function' ? mod.runChecks : null;

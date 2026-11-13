@@ -230,9 +230,13 @@ export function createSnapper({ plan, store }) {
         res.attached = r;
       }
     }
+    // keep a wall-backed item within the length of its wall (so it tucks into the corner instead of piercing it)
+    const within = (v, r) => (r.a1 - r.a0 >= it.w ? clamp(v, r.a0 + it.w / 2, r.a1 - it.w / 2) : v);
+    if (res.attached) { if (res.attached.horiz) res.x = within(res.x, res.attached); else res.y = within(res.y, res.attached); }
     const pose = { ...it, x: res.x, y: res.y, rot: res.rot };
     const s = snapBox(itemAABB(pose), { ...opts, lockX, lockY });
     res.x += s.dx; res.y += s.dy; res.guides = s.guides;
+    if (res.attached) { if (res.attached.horiz) res.x = within(res.x, res.attached); else res.y = within(res.y, res.attached); }
     if (res.attached) {
       const r = res.attached, b = itemAABB({ ...pose, x: res.x, y: res.y });
       res.guides.push(r.horiz ? { x1: b.x, y1: r.c, x2: b.x + b.w, y2: r.c, kind: 'wall' } : { x1: r.c, y1: b.y, x2: r.c, y2: b.y + b.h, kind: 'wall' });
@@ -271,15 +275,15 @@ export function createSnapper({ plan, store }) {
     if (!opts.enabled) return { x: p.x, y: p.y, kind: null };
     const thr = threshold(opts.scale, 10);
     let best = null;
-    const offer = (x, y, kind, bias = 0) => {
-      const d = Math.hypot(x - p.x, y - p.y) + bias;
-      if (d <= thr + bias && (!best || d < best.d)) best = { x, y, kind, d };
+    const offer = (x, y, kind, reach) => {
+      const d = Math.hypot(x - p.x, y - p.y);
+      if (d <= reach && (!best || d < best.d)) best = { x, y, kind, d };
     };
-    for (const [x, y] of corners) offer(x, y, 'corner');
+    for (const [x, y] of corners) offer(x, y, 'corner', thr);
     for (const it of others(opts.exclude)) {
       if (Math.abs(it.x - p.x) > 600 || Math.abs(it.y - p.y) > 600) continue;
-      for (const [x, y] of itemCorners(it)) offer(x, y, 'item', thr * 0.15);
-      offer(it.x, it.y, 'item', thr * 0.3);
+      for (const [x, y] of itemCorners(it)) offer(x, y, 'item', thr * 0.55);
+      offer(it.x, it.y, 'item', thr * 0.4);
     }
     if (best) return best;
     const step = store.ui.gridStep || 0;
@@ -308,6 +312,7 @@ export function createSnapper({ plan, store }) {
       for (const r of solids) {
         const lo = [r.x, r.y], hi = [r.x + r.w, r.y + r.h];
         if (at < lo[j] || at > hi[j]) continue;
+        if (from > lo[i] + 0.5 && from < hi[i] - 0.5) return;       // this side is inside a wall: nothing to report
         offer(dir > 0 ? lo[i] : hi[i]);
       }
       if (hit == null || (hit - from) * dir > maxDist) {

@@ -17,7 +17,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const LATITUDE = 32.68, DECLINATION = 15, SOLAR_NOON = 12.65;   // degrees, degrees, clock hour of solar noon (IDT)
 const DEG = Math.PI / 180;
-const FILL_COUNT = 5;                                            // interior fill lights (constant → no shader recompiles)
+const FILL_COUNT = 3;                                            // interior fill lights (constant count → no shader recompiles; each costs fill-rate)
 
 /** Look-up table by sun altitude (degrees). Colours are sRGB hex; values in between are interpolated. */
 const KEYS = [
@@ -147,7 +147,7 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
   const ambient = new THREE.AmbientLight(0xffffff, 0.2);
   const fills = new THREE.Group(); fills.name = 'interior-fill'; fills.visible = false;
   const fillLights = [];
-  for (let i = 0; i < FILL_COUNT; i++) { const l = new THREE.PointLight(0xfff1e0, 0, 9, 1.6); l.castShadow = false; fillLights.push(l); fills.add(l); }
+  for (let i = 0; i < FILL_COUNT; i++) { const l = new THREE.PointLight(0xfff1e0, 0, 10, 1.5); l.castShadow = false; fillLights.push(l); fills.add(l); }
   scene.add(sun, sun.target, hemisphere, ambient, fills);
 
   /** Anchor points of the bounce / fill lights: one per room, one per named zone of the open-plan space. */
@@ -219,7 +219,7 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
     // interior fill: neutral bounce by day, warm "lights on" glow after dark
     fills.visible = interior;
     state.fillColor = dayFill.clone().lerp(warm, 1 - day);
-    state.fillIntensity = 1.7 * day + 5 * (1 - day);
+    state.fillIntensity = 2.1 * day + 5.5 * (1 - day);
 
     state.exposure = S.exposure * (interior ? 1.5 : 1);
     if (renderer) renderer.toneMappingExposure = state.exposure;

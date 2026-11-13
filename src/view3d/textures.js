@@ -357,11 +357,11 @@ function paintPlaster(p, r, strength = 1) {
 // ───────────────────────── site / envelope painters ─────────────────────────
 function paintEarth(r) {
   const S = surface(700, 700, 2), { g } = S;
-  const base = [168, 143, 104];
+  const base = [160, 144, 112];
   g.fillStyle = css(base); g.fillRect(0, 0, S.w, S.h);
   clouds(S, r, 60, 60, 220, 0.035);
   // dry-grass patches: thin straw / dull-olive blades in loose clusters
-  const blades = [[203, 186, 128], [176, 168, 108], [150, 152, 96], [214, 200, 150], [128, 134, 84]];
+  const blades = [[196, 182, 130], [166, 164, 108], [138, 146, 94], [208, 196, 150], [118, 130, 84], [128, 140, 90]];
   for (let c = 0; c < 150; c++) {
     const cx = r() * S.w, cy = r() * S.h, rad = 14 + r() * 60, n = 30 + Math.floor(r() * 110), col = blades[Math.floor(r() * blades.length)];
     for (let i = 0; i < n; i++) {

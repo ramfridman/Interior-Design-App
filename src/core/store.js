@@ -29,6 +29,20 @@ let _id = 0;
 const newId = () => 'it_' + Date.now().toString(36) + (_id++).toString(36) + Math.random().toString(36).slice(2, 5);
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
+/** Fill in every item field with its default and guarantee a unique id. */
+function normalizeItem(partial) {
+  const item = {
+    id: null, productId: null, type: 'cabinet', name: 'Item', params: {},
+    x: 0, y: 0, rot: 0, elev: 0, w: 100, d: 50, h: 80,
+    placement: 'floor', zone: 'indoor', price: null, priceUnit: 'item', url: null, retailer: null, brand: null,
+    locked: false, hidden: false, fixture: false, generic: false, note: '',
+    ...clone(partial),
+  };
+  if (!item.id) item.id = newId();
+  if (!item.params || typeof item.params !== 'object') item.params = {};
+  return item;
+}
+
 const DEFAULT_UI = {
   mode: '2d',              // '2d' | '3d' | 'walk' | 'split'
   tool: 'select',          // 'select' | 'pan' | 'measure'
@@ -46,6 +60,7 @@ const DEFAULT_UI = {
   leftPanel: 'catalog',    // which left panel tab is open
   rightPanel: 'inspector', // 'inspector' | 'budget' | 'checks' | 'rooms'
   catalogZone: 'indoor',   // 'indoor' | 'outdoor'
+  activeSpace: null,       // id of the room / outdoor area the user last clicked (target for finishes)
 };
 
 const DEFAULT_PROJECT = {
@@ -149,14 +164,7 @@ class Store {
    */
   addItem(partial, opts = {}) {
     this._record(opts);
-    const item = {
-      id: newId(), productId: null, type: 'cabinet', name: 'Item', params: {},
-      x: 0, y: 0, rot: 0, elev: 0, w: 100, d: 50, h: 80,
-      placement: 'floor', zone: 'indoor', price: null, priceUnit: 'item', url: null, retailer: null,
-      locked: false, hidden: false, fixture: false, note: '',
-      ...clone(partial),
-    };
-    if (!item.id) item.id = newId();
+    const item = normalizeItem(partial);
     this.items.push(item);
     this.emit('items', { type: 'add', ids: [item.id] });
     if (opts.select !== false) this.select([item.id]);
@@ -261,7 +269,13 @@ class Store {
   load(data, opts = {}) {
     if (!data || !Array.isArray(data.items)) throw new Error('Not a valid design file');
     if (opts.recordUndo) this._pushUndo(this._snapshot());
-    this.items = clone(data.items);
+    const seen = new Set();
+    this.items = data.items.map((raw) => {
+      const item = normalizeItem(raw);
+      if (seen.has(item.id)) item.id = newId();   // never allow duplicate ids from a hand-edited file
+      seen.add(item.id);
+      return item;
+    });
     this.finishes = clone(data.finishes || {});
     this.project = { ...DEFAULT_PROJECT, ...(data.project || {}) };
     if (data.ui && opts.restoreUI) this.ui = { ...DEFAULT_UI, ...data.ui };

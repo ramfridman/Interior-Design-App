@@ -6,7 +6,6 @@
 import { itemAABB, itemLocalToPlan, planToItemLocal, spaceAt, isIndoors, polygonBounds, normDeg, snapTo, DEG } from '../core/geometry.js';
 import { itemHandles } from './overlay.js';
 import { isBelowWalls } from './items.js';
-import { isResizable } from './snapping.js';
 
 const DRAG_SLOP = 3;           // px before a press becomes a drag
 const DOUBLE_MS = 350;
@@ -14,6 +13,7 @@ const MIN_SIZE = 10;           // cm
 const RESIZE_CURSORS = ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'];
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
+const r1 = (v) => Math.round(v * 10) / 10;       // positions are stored to the millimetre
 const editable = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 export function attachInteraction(V) {
@@ -95,10 +95,13 @@ export function attachInteraction(V) {
   }
 
   // ───────────── feedback helpers ─────────────
-  function feedbackFor(items, guides, extra = {}) {
+  function unionBox(items) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const it of items) { const b = itemAABB(it); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
-    const box = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  function feedbackFor(items, guides, extra = {}) {
+    const box = unionBox(items);
     let problems = { any: false };
     for (const it of items) { const p = snapper.problems(it); if (p.any) { problems = p; break; } }
     st.feedback = {
@@ -127,7 +130,7 @@ export function attachInteraction(V) {
     return true;
   }
 
-  function beginMove(g, e) {
+  function beginMove(g) {
     const clicked = store.getItem(g.itemId);
     let items = store.getSelected().filter((it) => !it.locked && !it.hidden);
     if (!clicked || clicked.locked || !items.length) { g.type = 'noop'; return false; }
@@ -140,18 +143,12 @@ export function attachInteraction(V) {
     g.type = 'move';
     g.ids = items.map((it) => it.id);
     g.orig = new Map(items.map((it) => [it.id, { x: it.x, y: it.y, rot: it.rot || 0 }]));
-    g.box0 = feedbackBox(items);
+    g.box0 = unionBox(items);
     g.snapState = {};
     g.manualRot = false;
     st.live = new Set(g.ids);
     return true;
   }
-  function feedbackBox(items) {
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const it of items) { const b = itemAABB(it); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
-    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
-  }
-
   function updateMove(g, p, e) {
     let dx = (p.x - g.start.x) / cam.scale, dy = (p.y - g.start.y) / cam.scale;
     if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
@@ -163,12 +160,12 @@ export function attachInteraction(V) {
       if (!it) return cancelGesture();
       const res = snapper.snapItem({ ...it, x: o.x + dx, y: o.y + dy, rot: o.rot },
         { scale: cam.scale, enabled, autoOrient: !g.manualRot, exclude: st.live, state: g.snapState });
-      poses.set(id, { x: res.x, y: res.y, rot: res.rot });
+      poses.set(id, { x: r1(res.x), y: r1(res.y), rot: res.rot });
       guides = res.guides;
     } else {
       const box = { x: g.box0.x + dx, y: g.box0.y + dy, w: g.box0.w, h: g.box0.h };
       const res = enabled ? snapper.snapBox(box, { scale: cam.scale, exclude: st.live }) : { dx: 0, dy: 0, guides: [] };
-      for (const id of g.ids) { const o = g.orig.get(id); poses.set(id, { x: o.x + dx + res.dx, y: o.y + dy + res.dy }); }
+      for (const id of g.ids) { const o = g.orig.get(id); poses.set(id, { x: r1(o.x + dx + res.dx), y: r1(o.y + dy + res.dy) }); }
       guides = res.guides;
     }
     V.selfWrite = true;
@@ -218,9 +215,8 @@ export function attachInteraction(V) {
     if (g.hy > 0) bottom = Math.max(snapLocal(ly, false, top), top + MIN_SIZE);
     if (g.hy < 0) top = Math.min(snapLocal(ly, false, bottom), bottom - MIN_SIZE);
     const [x, y] = itemLocalToPlan(o, (left + right) / 2, (top + bottom) / 2);
-    const round = (v) => Math.round(v * 10) / 10;
     V.selfWrite = true;
-    store.updateItem(g.id, { x: round(x), y: round(y), w: round(right - left), d: round(bottom - top) }, { transient: true });
+    store.updateItem(g.id, { x: r1(x), y: r1(y), w: r1(right - left), d: r1(bottom - top) }, { transient: true });
     V.selfWrite = false;
     feedbackFor([store.getItem(g.id)], guides);
   }
@@ -256,9 +252,9 @@ export function attachInteraction(V) {
     redraw();
   }
   function addFromPose(partial, pose) {
-    const { id, ...rest } = clone(partial);
-    void id;
-    return store.addItem({ ...rest, x: Math.round(pose.x * 10) / 10, y: Math.round(pose.y * 10) / 10, rot: pose.rot,
+    const rest = clone(partial);
+    delete rest.id;
+    return store.addItem({ ...rest, x: r1(pose.x), y: r1(pose.y), rot: pose.rot,
       zone: isIndoors(pose.x, pose.y, plan) ? 'indoor' : 'outdoor', elev: partial.elev ?? 0 });
   }
   function endPlacing(item) {
@@ -415,7 +411,7 @@ export function attachInteraction(V) {
         break;
       }
       case 'press':
-        if (far && beginMove(g, e)) { st.hoverId = null; updateMove(g, p, e); setCursor(p); }
+        if (far && beginMove(g)) { st.hoverId = null; updateMove(g, p, e); setCursor(p); }
         break;
       case 'move': updateMove(g, p, e); break;
       case 'press-empty':
@@ -475,10 +471,12 @@ export function attachInteraction(V) {
       }
       case 'pan': {
         if (g.tap && !g.moved) { click(p, e, null); break; }
+        // a flick with a finger or pen glides on; a mouse stays exactly where it was released
         const now = performance.now(), s = g.samples.filter((q) => now - q.t < 90);
-        if (s.length >= 2 && now - s[s.length - 1].t < 40) {
-          const a = s[0], b = s[s.length - 1], dt = Math.max(1, b.t - a.t);
-          cam.glide((b.x - a.x) / dt, (b.y - a.y) / dt);
+        if (e.pointerType !== 'mouse' && s.length >= 2 && now - s[s.length - 1].t < 40) {
+          const a = s[0], b = s[s.length - 1], dt = Math.max(8, b.t - a.t);
+          const vx = (b.x - a.x) / dt, vy = (b.y - a.y) / dt, v = Math.hypot(vx, vy), cap = Math.min(1, 2.5 / (v || 1));
+          cam.glide(vx * cap, vy * cap);
         }
         break;
       }
@@ -525,7 +523,7 @@ export function attachInteraction(V) {
     const trackpad = now < wheelTrackpadUntil;
     if (e.ctrlKey || e.metaKey) {
       // pinch on a trackpad (or ctrl + wheel): precise, immediate
-      if (trackpad || Math.abs(dy) < 50) cam.zoomAt(p.x, p.y, Math.exp(-dy * 0.01));
+      if (trackpad || Math.abs(dy) < 50) { cam.stop(); cam.zoomAt(p.x, p.y, Math.exp(-dy * 0.01)); }
       else cam.zoomToward(p.x, p.y, Math.exp(-Math.sign(dy) * 0.22));
     } else if (trackpad) {
       cam.stop(); cam.panBy(-dx, -dy);

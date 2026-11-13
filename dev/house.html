@@ -55,7 +55,7 @@ let active = camera;
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.maxPolarAngle = Math.PI / 2 - 0.02;
 
-const house = buildHouse(ctx), site = buildSite(ctx), env = createEnvironment({ scene, renderer, ctx });
+const house = buildHouse(ctx), site = buildSite(ctx), env = createEnvironment({ scene, renderer, ctx, shadowMapSize: +new URLSearchParams(location.search).get('shadow') || undefined });
 scene.add(site.group, house.group);
 
 // furniture from the architect's layout (whatever model modules exist; boxes otherwise)

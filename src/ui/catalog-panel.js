@@ -4,7 +4,7 @@
  */
 import { h, setKids, debounce, rafThrottle, titleize, clamp } from './dom.js';
 import { icon, CATEGORY_ICON } from './icons.js';
-import { btn, iconBtn, segmented, emptyState, extLink } from './components.js';
+import { btn, iconBtn, segmented, emptyState } from './components.js';
 import { openPopover, openDialog } from './dialogs.js';
 import { fmtPrice, fmtDims, fmtUnitPrice } from './format.js';
 import { DND_TYPE } from './viewport.js';
@@ -149,7 +149,7 @@ export function initCatalogPanel(root, app) {
   /* ───────── Cards ───────── */
   function card(p) {
     const finish = isFinish(p);
-    const dims = p.dims ? fmtDims(p.dims.w, p.dims.d, p.dims.h).replace(' cm', '') : '';
+    const dims = p.dims ? fmtDims(p.dims.w, p.dims.d, p.dims.h).replace(' cm', '').replace(/ × /g, '×') : '';   // compact: fits beside the price
     const open = h('button', { type: 'button', class: 'pcard__open', 'aria-label': `${p.name}, ${p.retailer}, ${fmtUnitPrice(p.price, p.priceUnit)}. Show details`, onClick: () => openDetail(p, el) },
       h('span', { class: 'pcard__media' }, thumbs.el(p, { size: 176, lazy: false })),
       h('span', { class: 'pcard__body' },
@@ -196,7 +196,12 @@ export function initCatalogPanel(root, app) {
       const dlg = openDialog({ title: 'Product', size: 'sm', cls: 'dialog--flush', body, onClose: () => { if (detail === dlg) detail = null; } });
       detail = dlg;
     } else {
-      const pop = openPopover(anchor, body, { cls: 'popover--detail', placement: 'right-start', gap: 10, label: p.name, onClose: () => { if (detail === pop) detail = null; } });
+      // Dock the sheet to the sidebar's outer edge, level with the card, so it never covers the grid.
+      const dock = { getBoundingClientRect: () => {
+        const side = root.getBoundingClientRect(), c = anchor.isConnected ? anchor.getBoundingClientRect() : side;
+        return { left: side.right, right: side.right, top: c.top, bottom: c.bottom, width: 0, height: c.height };
+      } };
+      const pop = openPopover(dock, body, { cls: 'popover--detail', placement: 'right-start', gap: 8, label: p.name, onClose: () => { if (detail === pop) detail = null; } });
       detail = pop;
     }
   }

@@ -164,7 +164,9 @@ export function drawExteriorDims(G, env, boxes) {
   const { chains } = plansDims(plan);
   const env0 = envelope(plan);
   const ink = pal.dim, size = 10.5, subSize = 8.5;
-  const halo = css(ui.showSite ? pal.garden : pal.paper, 0.85);
+  // knock-out colour behind a figure: garden inside the lot, paper outside
+  const inLot = (box) => ui.showSite && pointInPolygon(((box.x0 + box.x1) / 2 - G.ox) / G.k, ((box.y0 + box.y1) / 2 - G.oy) / G.k, plan.site.boundary);
+  const mask = [css(pal.paper, 0.85), css(pal.garden, 0.85)];
   const unitSuffix = ui.units === 'cm' ? ' cm' : ' m';
 
   for (const side of ['n', 's', 'w', 'e']) {
@@ -186,7 +188,12 @@ export function drawExteriorDims(G, env, boxes) {
     rows.forEach((row, ri) => {
       if (ri > 0) off += ri === 1 && subOutward ? DIM_GAP_SUB : DIM_GAP;
       let pos = base + sign * Math.round(off * d);
-      if (lotLine != null && Math.abs(pos - sign * 6 * d - lotLine) < 13 * d) { off += 22; pos = base + sign * Math.round(off * d); }
+      if (lotLine != null) {
+        // figures sit above / left of their line, the lot's side length just outside the property line
+        const gap = (pos - lotLine) / d;
+        const push = sign > 0 ? (gap > -3 && gap < 32 ? 33 - gap : 0) : (gap > -14 && gap < 10 ? gap + 15 : 0);
+        if (push) { off += push; pos = base + sign * Math.round(off * d); }
+      }
       lastPos = pos;
       const a0 = A(row[0].from), a1 = A(row[row.length - 1].to);
       // line
@@ -221,7 +228,7 @@ export function drawExteriorDims(G, env, boxes) {
         let above = true, box = mk(true);
         if (boxes.collides(box, 1.5 * d)) { above = false; box = mk(false); if (boxes.collides(box, 1.5 * d)) continue; }
         boxes.add(box);
-        ctx.fillStyle = halo; ctx.fillRect(box.x0 - d, box.y0, box.x1 - box.x0 + 2 * d, box.y1 - box.y0);
+        ctx.fillStyle = mask[inLot(box) ? 1 : 0]; ctx.fillRect(box.x0 - d, box.y0, box.x1 - box.x0 + 2 * d, box.y1 - box.y0);
         const opts = { size, weight, color: seg.total ? pal.ink : ink, baseline: above ? 'alphabetic' : 'top', angle: horiz ? 0 : -Math.PI / 2 };
         if (horiz) G.text(label, mid, above ? pos - 4 * d : pos + 5 * d, opts);
         else G.text(label, above ? pos - 4 * d : pos + 5 * d, mid, opts);

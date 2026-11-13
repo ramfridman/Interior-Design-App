@@ -9,7 +9,7 @@
     ?products=600|10|0|real   fixture catalogue size (default: real catalogue if it has products, else 120 fixtures)
     ?views=stub|real          stub views (default) or the real src/view2d + src/view3d if they load
     ?theme=light|dark  ?mode=2d|3d|walk|split  ?panel=inspector|budget|rooms|checks  ?select=N (select N items)
-    ?welcome=1  ?sandbox=1 (simulate the sandboxed viewer)  ?zone=outdoor
+    ?welcome=1  ?sandbox=1 (simulate the sandboxed viewer)  ?zone=outdoor  ?checks=fake (sample check results)
   The shell markup is taken from ../index.html at load time so the two can never drift apart.
 -->
 <script type="importmap">
@@ -61,7 +61,14 @@ if (q.get('panel')) store.setUI({ rightPanel: q.get('panel') });
 const view2d = createView2D(document.getElementById('view2d'), ctx);
 const view3d = createView3D(document.getElementById('view3d'), ctx);
 const { initUI } = await import('../src/ui/index.js');
-const ui = initUI({ ...ctx, view2d, view3d });
+const fakeChecks = ({ store }) => [
+  { id: 'c1', severity: 'fail', category: 'Clearances', title: 'Dining chair blocks the terrace door', detail: 'Sample result: 42 cm clear, 80 cm needed.', reference: 'Sample reference', itemIds: [store.items[30].id] },
+  { id: 'c2', severity: 'warn', category: 'Clearances', title: 'Tight passage beside the bed', detail: 'Sample result: 55 cm clear.', reference: 'Sample reference', spaceId: 'parents-bedroom' },
+  { id: 'c3', severity: 'info', category: 'Site', title: 'Pergola within the building line', detail: 'Sample result.', spaceId: 'terrace' },
+  { id: 'c4', severity: 'pass', category: 'Site', title: 'House inside the setbacks', detail: 'Sample result.' },
+  { id: 'c5', severity: 'pass', category: 'Safe room', title: 'Nothing fixed to the safe-room walls', detail: 'Sample result.', spaceId: 'mamad' },
+];
+const ui = initUI({ ...ctx, view2d, view3d, ...(q.get('checks') === 'fake' ? { runChecks: fakeChecks } : {}) });
 window.app = { store, plan: PLAN, catalog, models, view2d, view3d, ui, resetToArchitectLayout() { store.load({ items: initialLayout() }, { recordUndo: true }); } };
 
 if (q.get('mode')) store.setUI({ mode: q.get('mode') });

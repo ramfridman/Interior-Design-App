@@ -340,7 +340,7 @@ function makeMaterials(frameColor) {
     entry: std(entry, 0.5, 0.35),
     door: std('#f3f1ec', 0.5),
     steel: std('#8b978c', 0.55, 0.35),
-    handle: std('#c4c6c8', 0.3, 0.9),
+    handle: std('#b9bbbd', 0.38, 0.6),
     stone: std('#d8d2c6', 0.75),
     glass: std('#6f8b96', 0.05, 0, { transparent: true, opacity: 0.3, depthWrite: false, envMapIntensity: 3 }),
   };

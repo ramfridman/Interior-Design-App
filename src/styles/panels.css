@@ -210,7 +210,13 @@
 .walk__top > .walk__where { flex: 0 1 auto; min-width: 0; }
 .walk__top > .btn { height: calc(var(--ctl) + 2px); box-shadow: var(--shadow-1); }
 .walk__room { overflow: hidden; text-overflow: ellipsis; }
-@container (max-width: 700px) { .walk__hint { display: none; } .sun .range { width: 110px; } }
+@container (max-width: 700px) { .walk__hint { display: none; } }
+@container (max-width: 600px) {
+  .ov__bc { left: var(--s-3); transform: none; }
+  .sun .range { width: 96px; }
+  .ov__br > .btn--primary { width: calc(var(--ctl) + 4px); padding: 0; }
+  .ov__br > .btn--primary .btn__label { display: none; }
+}
 .walk__where { display: flex; align-items: center; gap: 6px; height: calc(var(--ctl) + 2px); padding: 0 var(--s-3); color: var(--ink-2); }
 .walk__room { color: var(--ink); font-size: var(--fs-14); font-weight: 500; white-space: nowrap; }
 .walk__hint { display: flex; align-items: center; gap: var(--s-4); height: calc(var(--ctl) + 2px); padding: 0 var(--s-3); color: var(--ink-2); font-size: var(--fs-12); white-space: nowrap; }
@@ -271,7 +277,14 @@
 /* ───────── Phone adjustments ───────── */
 @media (max-width: 699px) {
   .side-left { flex-direction: column; }
-  .rail { flex-direction: row; width: auto; height: auto; padding: var(--s-2) var(--s-3) 6px; gap: 6px; border-right: 0; overflow-x: auto; overflow-y: hidden; }
+  /* Header and search first, then the category row, then the grid. */
+  .side-left .cat { display: contents; }
+  .side-left .side__head { order: 0; }
+  .side-left .cat__controls { order: 1; }
+  .side-left .rail { order: 2; flex: none; }
+  .side-left .cat__meta { order: 3; }
+  .side-left .cat__scroll { order: 4; }
+  .rail { flex-direction: row; width: auto; height: auto; padding: 0 var(--s-3) var(--s-2); gap: 6px; border-right: 0; overflow-x: auto; overflow-y: hidden; }
   .rail__btn { width: auto; height: 34px; padding: 0 10px; display: inline-flex; gap: 6px; border: 1px solid var(--line); white-space: nowrap; font-size: var(--fs-12); }
   .rail__btn[aria-pressed='true']::before { display: none; }
   .rail__label { position: static; width: auto; height: auto; clip: auto; overflow: visible; }
@@ -284,4 +297,15 @@
   .ov__bc { left: var(--s-3); transform: none; }
   .ov__br > .btn--primary .btn__label { display: none; }
   .ov__br > .btn--primary { padding: 0; width: calc(var(--ctl) + 4px); }
+}
+
+/* ───────── Touch: 40 px targets ───────── */
+@media (pointer: coarse) {
+  .rail__btn { width: 40px; height: 40px; }
+  .search__clear { width: 36px; height: 36px; margin-top: -18px; }
+  .fpick { min-height: 44px; }
+  .fopt, .altrow { min-height: 48px; }
+  .brow__link { min-height: 28px; padding: 0 2px; }
+  .sellist__row { padding: 11px 0; }
+  .dial { width: 40px; height: 40px; }
 }

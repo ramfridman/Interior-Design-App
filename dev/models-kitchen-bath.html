@@ -61,6 +61,7 @@ const GROUPS = {
     'kitchen-island': [
       V('default 200×100', 200, 100, 90), V('280×120 layout', 280, 120, 90, { overhang: 30, color: OAK, counterColor: STONE, drawers: 4 }),
       V('waterfall + sink + induction', 260, 110, 92, { waterfall: true, sink: true, cooktop: 'induction', overhang: 30, color: '#34373c', counterColor: '#f2f0ec' }),
+      V('280×120 layout — working side', 280, 120, 90, { overhang: 30, color: OAK, counterColor: STONE, drawers: 4 }, { back: true }), V('sink + gas — working side', 240, 100, 90, { sink: 'double', cooktop: 'gas', doors: 2, drawers: 2 }, { back: true }),
       V('no overhang two-sided 180×90', 180, 90, 90, { overhang: 0, doors: 3 }), V('small 120×60 gas', 120, 60, 90, { cooktop: 'gas', drawers: 2 }),
     ],
   },
@@ -182,7 +183,7 @@ function renderCell(type, v, i, wPx, hPx) {
   if (v.below) { const cl = plane(30, 30, wallMat); cl.rotation.x = Math.PI / 2; cl.position.y = elev + v.h / 100 + 0.001; stage.add(cl); }
   scene.add(stage);
   const box = new THREE.Box3().setFromObject(obj), c = box.getCenter(new THREE.Vector3()), r = box.getSize(new THREE.Vector3()).length() / 2;
-  const cam = new THREE.PerspectiveCamera(26, wPx / hPx, 0.05, 100), dir = new THREE.Vector3(0.62, v.below ? -v.below : 0.46, 1).normalize();
+  const cam = new THREE.PerspectiveCamera(26, wPx / hPx, 0.05, 100), dir = new THREE.Vector3(v.back ? -0.62 : 0.62, v.below ? -v.below : 0.46, v.back ? -1 : 1).normalize();
   cam.position.copy(c).addScaledVector(dir, (r / Math.sin((13 * Math.PI) / 180)) * 1.02); cam.lookAt(c);
   setSun(c, Math.max(r, 0.4));
   renderer.setPixelRatio(1); renderer.setSize(wPx, hPx, false); renderer.render(scene, cam);
@@ -229,8 +230,8 @@ const SCENES = [
     { type: 'kitchen-wall', w: 80, d: 35, h: 75, x: 460, y: 37.5, rot: 0, elev: 150, params: { doors: 2 } }, { type: 'kitchen-wall', w: 95, d: 35, h: 75, x: 607.5, y: 37.5, rot: 0, elev: 150, params: { doors: 2 } },
     { type: 'ac-unit', w: 90, d: 22, h: 30, x: 870, y: 131, rot: 90, elev: 245, params: {} }, { type: 'microwave', w: 26, d: 40, h: 40, x: 390, y: 300, rot: 270, elev: 90, params: { variant: 'water-bar' } },
   ] },
-  { name: 'Master bathroom (architect layout)', rect: [0, 1180, 360, 1380], cam: [4.4, 2.5, 10.4], look: [1.7, 0.8, 13.2], extra: [{ type: 'towel-rail', w: 50, d: 10, h: 110, x: 215, y: 1355, rot: 180, elev: 60, params: { variant: 'heated', color: '#2a2b2e' } }] },
-  { name: 'Family bathroom + laundry (architect layout)', rect: [665, 1040, 1000, 1380], cam: [10.4, 2.7, 10.3], look: [7.9, 0.8, 12.9], extra: [] },
+  { name: 'Master bathroom (architect layout)', rect: [0, 1180, 360, 1380], cam: [3.3, 2.1, 12.12], look: [1.25, 0.75, 13.4], fov: 62, extra: [{ type: 'towel-rail', w: 50, d: 10, h: 110, x: 215, y: 1355, rot: 180, elev: 60, params: { variant: 'heated', color: '#2a2b2e' } }] },
+  { name: 'Family bathroom + laundry (architect layout)', rect: [665, 1040, 1000, 1380], cam: [8.95, 2.2, 10.75], look: [7.55, 0.8, 13.1], fov: 62, extra: [] },
 ];
 function sceneItems(sc) {
   const [x0, y0, x1, y1] = sc.rect;
@@ -249,7 +250,7 @@ function scenes() {
     }
     for (const it of items) { const o = buildModel(it); o.position.set(it.x / 100, (it.elev || 0) / 100, it.y / 100); o.rotation.y = -(it.rot || 0) * Math.PI / 180; stage.add(o); }
     scene.add(stage);
-    const W = 1500, H = 900, cam = new THREE.PerspectiveCamera(38, W / H, 0.05, 100); cam.position.copy(camP); cam.lookAt(...sc.look);
+    const W = 1500, H = 900, cam = new THREE.PerspectiveCamera(sc.fov || 38, W / H, 0.05, 100); cam.position.copy(camP); cam.lookAt(...sc.look);
     setSun(new THREE.Vector3(cx, 0.5, cz), 4);
     renderer.setPixelRatio(1); renderer.setSize(W, H, false); renderer.render(scene, cam);
     card(g, grab(W, H), sc.name, `${items.length} items`); scene.remove(stage);
