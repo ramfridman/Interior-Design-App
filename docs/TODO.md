@@ -23,7 +23,13 @@ Last updated: 13 Nov 2026. Published preview: https://claude.ai/artifact/8ZvK3RL
 - [ ] **Public hosting, invite-only** — Cloudflare Pages + Cloudflare Access, free subdomain, hidden from search engines. Full plan and the owner's decisions: `docs/HOSTING-PLAN.md`.
 - [ ] Price refresh script for the catalogue (prices are a November 2026 snapshot).
 
-## New feature (requested 13 Nov 2026): Carpentry studio
+## Carpentry studio — STARTED 13 Nov 2026 (owner: "important, must be done perfectly, a professional tool")
+
+Decisions: quotation PDF in **English and Hebrew** (chosen at export); **cost estimates** shown as sourced ranges; **carpenter directory sorted by distance from the house**.
+
+Build order: (1) core engine `src/carpentry/` — runs, module library, fit, validation, take-off, estimate, dimensioned drawings, schedules [in progress, Opus]; (2) carpenter directory research and (3) Israeli price-book research [in progress, Sonnet]; (4) drawing / PDF kit: SVG preview + real vector PDF with embedded Hebrew font, bilingual document composer; (5) Carpentry mode UI: run editor on the plan, elevation editor, spec inspector, estimate panel, quotation preview + export, carpenter list; (6) integration, review, publish.
+
+Original request and scope notes:
 
 Design all made-to-measure carpentry for the house and hand a carpenter a complete package to price.
 
