@@ -109,10 +109,12 @@ export function drawRoomLabels(G, env, boxes) {
     h: lines.reduce((s, l) => s + lineH(l.size), 0) + 4 * d,
   });
 
+  // Placement is always done for every label, so it never depends on which part of the drawing is being
+  // repainted; only the drawing itself is skipped for labels outside the painted area.
+  const inView = (box) => G.visible((box.x0 - G.ox) / G.k, (box.y0 - G.oy) / G.k, (box.x1 - G.ox) / G.k, (box.y1 - G.oy) / G.k);
   for (const sp of spaces) {
     if (!sp.label) continue;
     const b = polygonBounds(sp.polygon);
-    if (!G.visible(b.x, b.y, b.x + b.w, b.y + b.h)) continue;
     const area = { text: `${areaM2(sp.polygon).toFixed(1)} m²`, size: small, weight: 400, color: pal.inkSoft };
     const name = (t) => ({ text: t, size, weight: 600, color: pal.ink });
     const bx0 = G.X(b.x), by0 = G.Y(b.y), bx1 = G.X(b.x + b.w), by1 = G.Y(b.y + b.h);
@@ -122,7 +124,7 @@ export function drawRoomLabels(G, env, boxes) {
       const m = measureBlock(lines);
       const at = placeLabel(G, sp.polygon, sp.label, m.w, m.h, near, boxes, 260);
       if (!at) continue;
-      drawBlock(lines, at);
+      if (inView(at.box)) drawBlock(lines, at);
       boxes.add(at.box);
       break;
     }
@@ -130,13 +132,12 @@ export function drawRoomLabels(G, env, boxes) {
   // zones of open spaces, in lighter small caps
   for (const room of plan.rooms) {
     for (const z of room.zones || []) {
-      if (!G.visible(z.label[0] - 200, z.label[1] - 60, z.label[0] + 200, z.label[1] + 60)) continue;
       const line = { text: z.name.toUpperCase(), size: small - 0.5, weight: 600, color: pal.inkSoft, spacing: 0.14 };
       const m = measureBlock([line]);
       if (m.w > 260 * G.k) continue;
       const at = placeLabel(G, room.polygon, z.label, m.w, m.h, obstacles, boxes, 150);
       if (!at || boxes.collides(at.box, 1)) continue;
-      drawBlock([line], at);
+      if (inView(at.box)) drawBlock([line], at);
       boxes.add(at.box);
     }
   }
@@ -262,17 +263,6 @@ export function dimBandRect(plan, ui, scale, side) {
   return lay.horiz ? { x: a0, y: c0, w: a1 - a0, h: c1 - c0 } : { x: c0, y: a0, w: c1 - c0, h: a1 - a0 };
 }
 
-/** Does anything a side draws — its rows or its two extension lines — reach into the painted area? */
-function sideVisible(G, rows, lay) {
-  const { horiz, sign, base } = lay, m = 20 / G.scale;
-  const first = rows[0][0], last = rows[0][rows[0].length - 1];
-  const out = base + sign * (lay.reach + 12) / G.scale;
-  const vis = (a0, a1, c0, c1) => (horiz ? G.visible(a0, Math.min(c0, c1), a1, Math.max(c0, c1)) : G.visible(Math.min(c0, c1), a0, Math.max(c0, c1), a1));
-  if (vis(first.from - m, last.to + m, base + sign * (lay.start - 8) / G.scale, out)) return true;
-  if (lay.far) return false;
-  return vis(first.from - m, first.from + m, first.depth, out) || vis(last.to - m, last.to + m, last.depth, out);
-}
-
 export function drawExteriorDims(G, env, boxes) {
   const { plan, pal, ui } = env, { ctx } = G, d = G.dpr;
   const { chains } = plansDims(plan);
@@ -287,7 +277,6 @@ export function drawExteriorDims(G, env, boxes) {
     const rows = chains[side], lay = layout[side];
     if (!rows.length || !lay) continue;
     const { horiz, sign } = lay;
-    if (!sideVisible(G, rows, lay)) continue;
     const base = horiz ? G.RY(lay.base) : G.RX(lay.base);
     const A = (v) => (horiz ? G.RX(v) : G.RY(v));
     let lastPos = base;
@@ -408,8 +397,8 @@ export function drawInteriorDims(G, env, boxes) {
       }
     }
     if (!best) continue;
-    if (!G.visible(horiz ? dim.from : best.at - 1, horiz ? best.at - 1 : dim.from, horiz ? dim.to : best.at + 1, horiz ? best.at + 1 : dim.to)) continue;
     boxes.add(best.box);
+    if (!G.visible(horiz ? dim.from : best.at - 1, horiz ? best.at - 1 : dim.from, horiz ? dim.to : best.at + 1, horiz ? best.at + 1 : dim.to)) continue;
     const p0 = horiz ? G.RX(dim.from) : G.RY(dim.from), p1 = horiz ? G.RX(dim.to) : G.RY(dim.to);
     const line = horiz ? G.RY(best.at) + 0.5 : G.RX(best.at) + 0.5;
     ctx.beginPath();
