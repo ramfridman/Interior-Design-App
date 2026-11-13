@@ -124,6 +124,27 @@ class Batch {
     }
     return this;
   }
+  /** Move everything from another batch into this one, turned by ry and shifted by (dx, dy, dz). */
+  merge(other, dx = 0, dy = 0, dz = 0, ry = 0) {
+    for (const [m, list] of other.buckets) {
+      if (!this.buckets.has(m)) this.buckets.set(m, []);
+      for (const g of list) { if (ry) g.rotateY(ry); g.translate(dx, dy, dz); g.boundingBox = null; this.buckets.get(m).push(g); }
+    }
+    other.buckets.clear();
+    return this;
+  }
+  /** Scale heights so the content spans y ∈ [0, top], and clamp x / z into the w × d footprint. */
+  settle(top, w, d) {
+    const bb = this.bounds();
+    if (bb.isEmpty()) return this;
+    const sy = bb.max.y > 1e-5 ? top / bb.max.y : 1;
+    for (const list of this.buckets.values()) for (const g of list) {
+      const a = g.attributes.position.array;
+      for (let i = 0; i < a.length; i += 3) { a[i] = clamp(a[i], -w / 2, w / 2); a[i + 1] = Math.max(0, a[i + 1] * sy); a[i + 2] = clamp(a[i + 2], -d / 2, d / 2); }
+      g.boundingBox = null;
+    }
+    return this;
+  }
   /** Merge and return a Group with one mesh per material. */
   build(group = new THREE.Group()) {
     for (const [material, list] of this.buckets) {
@@ -276,17 +297,15 @@ function bez(a, c, b, n = 5) {
 const taper = (r0, r1, n) => Array.from({ length: n + 1 }, (_, i) => lerp(r0, r1, i / n));
 
 /**
- * A cloud of n small two-sided leaf “cards” (diamonds) on an ellipsoid shell — breaks up blob silhouettes.
- * o: { aspect width/length, hang 0..1 (leaves point down), colors: [hex…], up: keep to the upper part }
+ * Small two-sided leaf “cards” (diamonds) at the given samples [[x, y, z, nx, ny, nz], …] — they break up blob silhouettes.
+ * o: { aspect width/length, hang 0..1 (leaves point down), colors: [hex…] }. Normals are “puffy” (the sample's direction).
  */
-function leafCloudG(c, r, n, size, rnd, o = {}) {
-  const pos = new Float32Array(n * 18), col = new Float32Array(n * 18), nrm = new Float32Array(n * 18), aspect = o.aspect ?? 0.45, colors = o.colors || ['#5c8a45'];
+function cardsG(samples, size, rnd, o = {}) {
+  const n = samples.length, pos = new Float32Array(n * 18), col = new Float32Array(n * 18), nrm = new Float32Array(n * 18), aspect = o.aspect ?? 0.45, colors = o.colors || ['#5c8a45'];
   const d = new THREE.Vector3(), u = new THREE.Vector3(), v = new THREE.Vector3(), q = new THREE.Vector3();
   for (let i = 0; i < n; i++) {
-    const cy = o.up ? rnd() * 1.2 - 0.2 : rnd() * 1.7 - 0.7, a = rnd() * TAU, sr = Math.sqrt(Math.max(0, 1 - Math.min(1, cy * cy)));
-    d.set(Math.cos(a) * sr, clamp(cy, -1, 1), Math.sin(a) * sr);
-    const k = (o.shell ?? 0.98) + rnd() * (o.spread ?? 0.28);
-    const px = c[0] + d.x * r[0] * k, py = c[1] + d.y * r[1] * k, pz = c[2] + d.z * r[2] * k;
+    const [px, py, pz] = samples[i];
+    d.set(samples[i][3], samples[i][4], samples[i][5]);
     u.set(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).addScaledVector(d, 0.6);
     if (o.hang) u.lerp(q.set(d.x * 0.25, -1, d.z * 0.25), o.hang);
     u.normalize();
@@ -304,6 +323,27 @@ function leafCloudG(c, r, n, size, rnd, o = {}) {
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
   return g;
+}
+/** Leaf cards on an ellipsoid shell (centre c, radii r). o as cardsG + { up: keep to the upper part, shell, spread }. */
+function leafCloudG(c, r, n, size, rnd, o = {}) {
+  const samples = [];
+  for (let i = 0; i < n; i++) {
+    const cy = clamp(o.up ? rnd() * 1.2 - 0.2 : rnd() * 1.7 - 0.7, -1, 1), a = rnd() * TAU, sr = Math.sqrt(1 - cy * cy), k = (o.shell ?? 0.98) + rnd() * (o.spread ?? 0.28);
+    const dx = Math.cos(a) * sr, dz = Math.sin(a) * sr;
+    samples.push([c[0] + dx * r[0] * k, c[1] + cy * r[1] * k, c[2] + dz * r[2] * k, dx, cy, dz]);
+  }
+  return cardsG(samples, size, rnd, o);
+}
+/** Leaf cards on the top and sides of a box w × h × d standing on y = 0 (trimmed hedges). */
+function leafBoxG(w, h, d, n, size, rnd, o = {}) {
+  const samples = [], aT = w * d, aF = w * h, aS = d * h, tot = aT + 2 * aF + 2 * aS;
+  for (let i = 0; i < n; i++) {
+    const r = rnd() * tot, u = rnd() - 0.5, v = rnd();
+    if (r < aT) samples.push([u * w, h, (v - 0.5) * d, 0, 1, 0]);
+    else if (r < aT + 2 * aF) { const sg = r < aT + aF ? 1 : -1; samples.push([u * w, v * h, sg * d / 2, 0, 0.1, sg]); }
+    else { const sg = r < aT + 2 * aF + aS ? 1 : -1; samples.push([sg * w / 2, v * h, u * d, sg, 0.1, 0]); }
+  }
+  return cardsG(samples, size, rnd, o);
 }
 
 /**

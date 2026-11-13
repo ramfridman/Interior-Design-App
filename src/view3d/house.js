@@ -238,7 +238,7 @@ function buildFloorSoups(grid, plan) {
   const { X, Y, nx, ny, kind, ref } = grid;
   const roomIds = new Set(plan.rooms.map((r) => r.id));
   const floors = new Map(plan.rooms.map((r) => [r.id, new Soup()]));
-  const ceilings = new Map(plan.rooms.map((r) => [r.id, new Soup()]));
+  const ceilings = new Soup();
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
     const k = j * nx + i;
     let id = null;
@@ -248,7 +248,7 @@ function buildFloorSoups(grid, plan) {
     const x0 = X[i] / 100, x1 = X[i + 1] / 100, z0 = Y[j] / 100, z1 = Y[j + 1] / 100;
     const uv = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
     floors.get(id).quad([[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1]], [0, 1, 0], uv);
-    if (kind[k] === ROOM) ceilings.get(id).quad([[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1]], [0, -1, 0], uv);
+    if (kind[k] === ROOM) ceilings.quad([[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1]], [0, -1, 0], uv);
   }
   return { floors, ceilings };
 }
@@ -323,7 +323,8 @@ export function prism(outline, holes, y0, y1, soups) {
 function buildRoofSoups(outline, H, slab, parapet) {
   const ext = new Soup(), topSoup = new Soup(), coping = new Soup();
   if (!outline) return { ext, top: topSoup, coping };
-  prism(outline, [], H, H + slab, { top: topSoup, bottom: ext });
+  prism(outline, [], H, H + slab, { top: topSoup });
+  prism(insetLoop(outline, 4), [], H, H + slab, { bottom: ext });       // soffit (shadow caster) kept clear of the facade plane → no acne line
   prism(outline, [], H - 0.015, H + slab, { side: ext });               // laps the wall head so no hairline can open at the joint
   if (parapet > 0.01) {
     const inner = insetLoop(outline, PARAPET_T), y = H + slab;
@@ -391,9 +392,9 @@ export function buildHouse(ctx) {
   for (const room of plan.rooms) {
     const mesh = setMesh('floor:' + room.id, fc.floors.get(room.id), shell, false, true);
     if (mesh) { mesh.userData.spaceId = room.id; floorMeshes.push(mesh); }
-    const ceil = setMesh('ceiling:' + room.id, fc.ceilings.get(room.id), roof, false, false);
-    if (ceil) ceil.material = own.ceiling;
   }
+  const ceilingMesh = setMesh('ceilings', fc.ceilings, roof, false, false);
+  if (ceilingMesh) ceilingMesh.material = own.ceiling;
 
   function rebuildShell() {
     const { soups, aoFloor, aoCeiling } = buildShellSoups(grid, plan, sides, topH(), state.H, plinthDepth, dryRooms);
@@ -411,7 +412,7 @@ export function buildHouse(ctx) {
     setMesh('roof:ext', r.ext, roof, true, true);
     setMesh('roof:top', r.top, roof, true, true);
     setMesh('roof:coping', r.coping, roof, true, true);
-    for (const room of plan.rooms) { const c = meshes.get('ceiling:' + room.id); if (c) c.position.y = state.H - 0.002; }
+    if (ceilingMesh) ceilingMesh.position.y = state.H - 0.002;
   }
   const openingOpts = () => ({ ceilingH: state.H, cutH: state.cut == null ? null : topH(), doorsOpen: state.doorsOpen, frameColor: state.frameColor });
 
@@ -449,7 +450,7 @@ export function buildHouse(ctx) {
     update() {
       const H = ceilingH();
       if (H !== state.H) { state.H = H; rebuildShell(); rebuildRoof(); openings.rebuild(openingOpts()); }
-      applyMaterials();
+      applyMaterials(); applyRoofVisibility();
     },
     /** Show / hide roof slab, parapet and room ceilings (always hidden while a cutaway is active). */
     setRoofVisible(v) { state.roofVisible = !!v; applyRoofVisibility(); },

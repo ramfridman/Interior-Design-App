@@ -265,7 +265,7 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
     },
     /** Per-frame hook: keeps the sky centred on the camera and moves the fill lights to the rooms around it. */
     update(camera) {
-      if (!camera) return;
+      if (!camera || state.disposed) return;
       camera.getWorldPosition(_v);
       sky.position.copy(_v);
       if (camera.far) { sky.scale.setScalar(camera.far * 0.95); scene.fog.far = Math.min(330, camera.far * 0.9); }
@@ -289,6 +289,7 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
       }
     },
     dispose() {
+      state.disposed = true;
       scene.remove(sun, sun.target, hemisphere, ambient, fills, sky);
       sun.shadow.map?.dispose(); sun.dispose();
       sky.geometry.dispose(); skyMaterial.dispose();
