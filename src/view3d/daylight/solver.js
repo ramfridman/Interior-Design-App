@@ -42,7 +42,8 @@ const CS = CELL_M, CELL_CM = 5;
 const OUT = 0, ROOM = 1, WALL = 2, OPEN = 3;
 export const SURF = { FLOOR: 0, CEILING: 1, WALL: 2, SILL: 3, LINTEL: 4, THRESHOLD: 5, AVERAGE: 6 };
 const PAD = 1;                                     // atlas padding (texels) around every chart
-const HIT_NONE = 0, HIT_PATCH = 1, HIT_SKY = 2, HIT_GROUND = 3, HIT_FACADE = 4, HIT_EXITED = 5;
+const HIT_NONE = 0, HIT_PATCH = 1, HIT_SKY = 2, HIT_GROUND = 3, HIT_FACADE = 4, HIT_EXITED = 5, HIT_FURN = 6, HIT_REACHED = 7;
+export const FURNITURE_ALBEDO = 0.35;              // mean reflectance of furniture (wood, fabric, lacquer) — occluder proxy surface
 const DIRS6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 export const PROBE_HEIGHTS = [0.8, 1.7];           // m — work plane and upper body / eye height
 const FIELD_CELLS = 2;                             // field texel = 2 × 2 cells = 10 cm
@@ -118,6 +119,35 @@ export function sceneInputFromPlan(plan, o = {}) {
   };
 }
 
+/**
+ * Chebyshev clearance (in cells, ≤ 250) of every cell to the nearest cell of another class — empty-space skipping
+ * for the ray marcher. Classes: room air, garden, outdoor slab; walls, openings and furniture cells are their own
+ * (always "edge") class, so a ray never jumps over them.
+ */
+function clearance(kind, gcls, furHi, nx, ny) {
+  const nc = nx * ny, clear = new Uint8Array(nc), cls = new Uint8Array(nc);
+  for (let c = 0; c < nc; c++) cls[c] = kind[c] === ROOM ? (furHi && furHi[c] > 0 ? 0 : 1) : kind[c] === OUT ? 2 + gcls[c] : 0;
+  const queue = new Int32Array(nc); let qh = 0, qt = 0;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const c = j * nx + i, k = cls[c];
+    let edge = k === 0 || i === 0 || j === 0 || i === nx - 1 || j === ny - 1;
+    if (!edge) {
+      const u = c - nx, d = c + nx;
+      edge = cls[u - 1] !== k || cls[u] !== k || cls[u + 1] !== k || cls[c - 1] !== k || cls[c + 1] !== k || cls[d - 1] !== k || cls[d] !== k || cls[d + 1] !== k;
+    }
+    if (edge) { clear[c] = 1; queue[qt++] = c; }
+  }
+  while (qh < qt) {
+    const c = queue[qh++], i = c % nx, j = (c - i) / nx, k = cls[c], d = clear[c];
+    if (d >= 250 || i === 0 || j === 0 || i === nx - 1 || j === ny - 1) continue;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      const n = c + dj * nx + di;
+      if (!clear[n] && cls[n] === k) { clear[n] = d + 1; queue[qt++] = n; }
+    }
+  }
+  return clear;
+}
+
 // ───────────────────────── scene: grid, charts, patches, atlas ─────────────────────────
 /**
  * Rasterise the building and lay out patches + lightmap atlas. Fast (≈ 10–40 ms); deterministic, so the page and the
@@ -175,29 +205,7 @@ export function buildScene(input, opts = {}) {
   }
 
   // empty-space skipping: Chebyshev clearance (in cells) to the nearest cell of another class
-  const clear = new Uint8Array(nc);
-  if (!O.layoutOnly) {                                                     // the page only needs the layout (UVs)
-    const cls = new Uint8Array(nc);
-    for (let c = 0; c < nc; c++) cls[c] = kind[c] === ROOM ? 1 : kind[c] === OUT ? 2 + gcls[c] : 0;
-    const queue = new Int32Array(nc); let qh = 0, qt = 0;
-    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-      const c = j * nx + i, k = cls[c];
-      let edge = k === 0 || i === 0 || j === 0 || i === nx - 1 || j === ny - 1;
-      if (!edge) {
-        const u = c - nx, d = c + nx;
-        edge = cls[u - 1] !== k || cls[u] !== k || cls[u + 1] !== k || cls[c - 1] !== k || cls[c + 1] !== k || cls[d - 1] !== k || cls[d] !== k || cls[d + 1] !== k;
-      }
-      if (edge) { clear[c] = 1; queue[qt++] = c; }
-    }
-    while (qh < qt) {
-      const c = queue[qh++], i = c % nx, j = (c - i) / nx, k = cls[c], d = clear[c];
-      if (d >= 250 || i === 0 || j === 0 || i === nx - 1 || j === ny - 1) continue;
-      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-        const n = c + dj * nx + di;
-        if (!clear[n] && cls[n] === k) { clear[n] = d + 1; queue[qt++] = n; }
-      }
-    }
-  }
+  const clear = O.layoutOnly ? new Uint8Array(nc) : clearance(kind, gcls, null, nx, ny);   // the page only needs the layout (UVs)
 
   // ── charts & patches ──
   const nRows = Math.max(4, Math.round((H * 100) / O.rowCm)), rowH = H / nRows;
@@ -421,9 +429,84 @@ export function buildScene(input, opts = {}) {
     charts, chartByKey, floorChart, ceilChart, faceChart, patch, texelOf, avgTexel,
     atlas: { width: W, height: AH, fillDst: Int32Array.from(fillDst), fillSrcStart: Int32Array.from(fillSrcStart), fillSrc: Int32Array.from(fillSrc) },
     probes, ground: { ox: gox, oz: goz, nx: gnx, nz: gnz, kind: groundKind },
+    furLo: null, furHi: null, occluders: [],                               // furniture occluders (setOccluders)
   };
   scene.field = fieldLayout(scene);
   return scene;
+}
+
+// ───────────────────────── furniture occluders ─────────────────────────
+/**
+ * Cells (indices) of the room air whose centres lie inside an occluder's (rotated) footprint.
+ * box = { id, corners: [[xcm, ycm] × 4], y0, y1 (m, above the finished floor) }
+ */
+function occluderCells(S, box, fn) {
+  const P = box.corners;
+  if (!Array.isArray(P) || P.length < 3) return;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of P) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  const oxcm = S.ox * 100, ozcm = S.oz * 100;
+  const i0 = Math.max(0, Math.floor((x0 - oxcm) / CELL_CM)), i1 = Math.min(S.nx - 1, Math.ceil((x1 - oxcm) / CELL_CM));
+  const j0 = Math.max(0, Math.floor((y0 - ozcm) / CELL_CM)), j1 = Math.min(S.ny - 1, Math.ceil((y1 - ozcm) / CELL_CM));
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const c = j * S.nx + i;
+    if (S.kind[c] !== ROOM) continue;
+    if (pointInPolygon(oxcm + (i + 0.5) * CELL_CM, ozcm + (j + 0.5) * CELL_CM, P)) fn(c);
+  }
+}
+/** Room regions (indices) an occluder box touches. */
+export function occluderRegions(S, box, out = new Set()) {
+  occluderCells(S, box, (c) => out.add(S.reg[c]));
+  return out;
+}
+/**
+ * Furniture as occluders: every room cell under an item box becomes solid between the box's bottom and top, so
+ * hemisphere rays, sky / sun rays and lamp rays stop there (a hit links to a furniture proxy surface whose radiosity is
+ * FURNITURE_ALBEDO × the room's mean irradiance). Only the clearance field is rebuilt (a few ms); the chart / patch /
+ * atlas layout does not change, so the page's layout-only scene stays valid.
+ * @param {Array<{ id?: string, corners: number[][], y0: number, y1: number }>} boxes
+ * @returns {{ cells: number, ms: number }}
+ */
+export function setOccluders(S, boxes = []) {
+  const t0 = Date.now(), nc = S.nx * S.ny;
+  const lo = new Float32Array(nc), hi = new Float32Array(nc);
+  let cells = 0;
+  for (const b of boxes || []) {
+    const y0 = Math.max(0, +b.y0 || 0), y1 = Math.min(S.H - 0.02, +b.y1 || 0);
+    if (!(y1 > y0 + 0.05)) continue;
+    occluderCells(S, b, (c) => {
+      if (hi[c] > 0) { lo[c] = Math.min(lo[c], y0); hi[c] = Math.max(hi[c], y1); }
+      else { lo[c] = y0; hi[c] = y1; cells++; }
+    });
+  }
+  S.furLo = cells ? lo : null; S.furHi = cells ? hi : null; S.occluders = (boxes || []).slice();
+  if (!S.opts.layoutOnly) S.clear = clearance(S.kind, S.gcls, S.furHi, S.nx, S.ny);
+  return { cells, ms: Date.now() - t0 };
+}
+/** True if a point is inside a furniture occluder. */
+function insideFurniture(S, x, y, z) {
+  if (!S.furHi) return false;
+  const i = Math.floor((x - S.ox) / CS), j = Math.floor((z - S.oz) / CS);
+  if (i < 0 || j < 0 || i >= S.nx || j >= S.ny) return false;
+  const c = j * S.nx + i;
+  return S.furHi[c] > 0 && y >= S.furLo[c] && y <= S.furHi[c];
+}
+/**
+ * Receivers to gather again after occluders changed in these room regions: their patches, the reveals / sills of the
+ * openings into them, and all six directions of their probes. (Rays from other rooms that cross the changed boxes
+ * through a doorway are not re-gathered — a second-order effect; a full visibility pass fixes it.)
+ */
+export function receiversFor(S, regions) {
+  const nP = S.patch.count, mask = new Uint8Array(nP + S.probes.length * 6);
+  const ids = new Set([...regions].filter((r) => r >= 0 && r < S.nR).map((r) => S.roomIds[r]));
+  const hit = new Uint8Array(S.nRegions);
+  for (const r of regions) if (r >= 0 && r < S.nR) hit[r] = 1;
+  for (let o = 0; o < S.nO; o++) if ((S.openingRooms[o] || []).some((id) => ids.has(id))) hit[S.nR + o] = 1;
+  let n = 0;
+  for (let p = 0; p < nP; p++) if (hit[S.patch.region[p]]) { mask[p] = 1; n++; }
+  S.probes.forEach((q, k) => { if (hit[q.room]) for (let d = 0; d < 6; d++) { mask[nP + k * 6 + d] = 1; n++; } });
+  mask.count = n;
+  return mask;
 }
 
 // ───────────────────────── ray marching ─────────────────────────
@@ -442,8 +525,8 @@ function groundElement(S, x, z) {
  * @param stopOut  true → stop with HIT_EXITED as soon as the ray reaches an outdoor cell (hemisphere gathering)
  * Fills R: type, idx (patch / sky bin / ground element / facade key), T (glass transmittance), hit point, exitOpen.
  */
-function march(S, px, py, pz, dx, dy, dz, stopOut, R) {
-  const { nx, ny, ox, oz, kind, reg, clear, H, roofTop } = S;
+function march(S, px, py, pz, dx, dy, dz, stopOut, R, tMax = Infinity) {
+  const { nx, ny, ox, oz, kind, reg, clear, H, roofTop, furLo, furHi } = S;
   R.type = HIT_NONE; R.idx = -1; R.T = 1; R.exitOpen = -1;
   let T = 1, lastOpen = -1, exited = false;
   const adx = Math.abs(dx), adz = Math.abs(dz), amax = Math.max(adx, adz);
@@ -458,6 +541,7 @@ function march(S, px, py, pz, dx, dy, dz, stopOut, R) {
   };
   reinit();
   for (let guard = 0; guard < 20000; guard++) {
+    if (t > tMax) { R.type = HIT_REACHED; R.T = T; return R; }
     if (i < 0 || j < 0 || i >= nx || j >= ny) {                          // left the grid: open land, nothing to hit but the ground
       if (stopOut) { R.type = HIT_EXITED; return R; }
       if (!exited) R.exitOpen = lastOpen;
@@ -480,6 +564,13 @@ function march(S, px, py, pz, dx, dy, dz, stopOut, R) {
       const cl = clear[c];
       if (cl > 1 && amax > 1e-9) { const ts = t + ((cl - 1) * CS) / amax; if (ts > tEnd) { tEnd = ts; jump = true; } }
       if (k === ROOM) {
+        if (furHi !== null && furHi[c] > 0) {                            // furniture box in this column (never jumped over)
+          let ta = t, tb = tExit;
+          const lo = furLo[c], hi = furHi[c];
+          if (dy > 1e-12 || dy < -1e-12) { const t0 = (lo - py) / dy, t1 = (hi - py) / dy; ta = Math.max(ta, Math.min(t0, t1)); tb = Math.min(tb, Math.max(t0, t1)); }
+          else if (yIn < lo || yIn > hi) tb = -1;
+          if (ta <= tb) { R.type = HIT_FURN; R.idx = reg[c]; R.x = px + dx * ta; R.y = py + dy * ta; R.z = pz + dz * ta; R.T = T; return R; }
+        }
         if (dy > 1e-12) {
           const tc = (H - py) / dy;
           if (tc <= tEnd) { const x = px + dx * tc, z = pz + dz * tc; return hitH(S, x, H, z, -1, T, R); }
@@ -499,7 +590,7 @@ function march(S, px, py, pz, dx, dy, dz, stopOut, R) {
       lastOpen = o;
       if (S.oGlass[o] < 1) {
         const a = S.oAxisN[o], tp = a === 0 ? (adx > 1e-12 ? (S.oPlane[o] - px) / dx : -1) : (adz > 1e-12 ? (S.oPlane[o] - pz) / dz : -1);
-        if (tp > t - 1e-9 && tp <= tExit) T *= S.oGlass[o];
+        if (tp > t - 1e-9 && tp <= tExit && tp <= tMax) T *= S.oGlass[o];
       }
       if (dy < -1e-12) {
         const ts = (S.oSill[o] - py) / dy;
@@ -583,16 +674,23 @@ const apPoint = (ap, u, v, out) => {                                     // u, v
  *   const vis = job.result();
  * `coarse`: only every other texel per chart direction (+ fewer rays); the others copy their neighbour's links.
  */
-export function createVisibilityJob(S, { coarse = false } = {}) {
+export function createVisibilityJob(S, { coarse = false, base = null, redo = null } = {}) {
   const O = S.opts, nP = S.patch.count, probes = S.probes;
   const nRec = nP + probes.length * 6;
   const G = S.ground, nGround = G.nx * G.nz;
-  const facadeIndex = new Map(), facades = [];                              // facade key → index
+  // incremental pass: receivers not in `redo` keep their links from the (full, not coarse) `base` visibility
+  if (base && (base.coarse || base.nRec !== nRec || !redo)) base = null;
+  if (base) coarse = false;
+  const facadeIndex = new Map(), facades = [], facadeKeys = [];             // facade key → index
+  if (base) for (let f = 0; f < base.nFacades; f++) {
+    facadeIndex.set(base.facadeKeys[f], f); facadeKeys.push(base.facadeKeys[f]);
+    const b = base.facades; facades.push({ x: b[f * 5], y: b[f * 5 + 1], z: b[f * 5 + 2], nx: b[f * 5 + 3], nz: b[f * 5 + 4], hits: 1e9 });
+  }
   const SRC_SKY = nP, SRC_GROUND = nP + SKY_BINS, SRC_FACADE = nP + SKY_BINS + nGround;
   const facadeSrc = (R) => {
     let f = facadeIndex.get(R.idx);
     if (f === undefined) {
-      f = facades.length; facadeIndex.set(R.idx, f);
+      f = facades.length; facadeIndex.set(R.idx, f); facadeKeys.push(R.idx);
       facades.push({ x: R.x, y: R.y, z: R.z, nx: R.side === 0 ? 1 : R.side === 1 ? -1 : 0, nz: R.side === 2 ? 1 : R.side === 3 ? -1 : 0, hits: 1 });
     } else { const F = facades[f]; F.hits++; F.x += (R.x - F.x) / F.hits; F.y += (R.y - F.y) / F.hits; F.z += (R.z - F.z) / F.hits; }
     return SRC_FACADE + f;
@@ -606,6 +704,10 @@ export function createVisibilityJob(S, { coarse = false } = {}) {
   const sideN = Math.round(Math.sqrt(hemiN));
   // dense accumulator for merging duplicate links per receiver
   let acc = new Float32Array(SRC_FACADE + 1024), touched = new Int32Array(4096), nt = 0;
+  // furniture proxy sources (one per room region) are encoded as negative link indices: −1 − region
+  const furnAcc = new Float32Array(S.nRegions), furnTouched = [];
+  const addFurn = (region, w) => { if (region < 0) return; if (furnAcc[region] === 0) furnTouched.push(region); furnAcc[region] += w; };
+  const probeInside = new Uint8Array(probes.length);
   const add = (src, w) => {
     if (src >= acc.length) { const a = new Float32Array(Math.max(src + 1, acc.length * 2)); a.set(acc); acc = a; }
     if (acc[src] === 0) { if (nt === touched.length) { const t2 = new Int32Array(nt * 2); t2.set(touched); touched = t2; } touched[nt++] = src; }
@@ -613,7 +715,8 @@ export function createVisibilityJob(S, { coarse = false } = {}) {
   };
   const flush = () => {
     for (let q = 0; q < nt; q++) { const s = touched[q]; if (acc[s] > 1e-7) links.push(s, acc[s]); acc[s] = 0; }
-    nt = 0; links.close();
+    for (const r of furnTouched) { if (furnAcc[r] > 1e-7) links.push(-1 - r, furnAcc[r]); furnAcc[r] = 0; }
+    nt = 0; furnTouched.length = 0; links.close();
   };
   const R = hitRecord(), ap3 = [0, 0, 0];
   const isSeed = (p) => {
@@ -638,6 +741,7 @@ export function createVisibilityJob(S, { coarse = false } = {}) {
       const dx = t1[0] * lx + t2[0] * ly + n[0] * lz, dy = t1[1] * lx + t2[1] * ly + n[1] * lz, dz = t1[2] * lx + t2[2] * ly + n[2] * lz;
       march(S, sx, sy, sz, dx, dy, dz, true, R);
       if (R.type === HIT_PATCH) add(R.idx, w * R.T);
+      else if (R.type === HIT_FURN) addFurn(R.idx, w * R.T);
     }
     // B) apertures: everything outdoors (sky, ground, facades) and what re-enters
     for (const A of aps) {
@@ -689,12 +793,19 @@ export function createVisibilityJob(S, { coarse = false } = {}) {
     while (next < nRec) {
       const r = next++;
       curRec = r;
+      if (base && !redo[r]) {                                              // unchanged receiver: copy its links
+        for (let q = base.start[r]; q < base.start[r + 1]; q++) links.push(base.idx[q], base.w[q]);
+        links.close(); apMask[r] = base.apMask[r];
+        if (r >= nP && (r - nP) % 6 === 0 && base.probeInside) probeInside[(r - nP) / 6] = base.probeInside[(r - nP) / 6];
+        continue;
+      }
       if (r < nP) {
         if (!isSeed(r)) { links.close(); owner[r] = -2; continue; }
         const p3 = r * 3;
         gather(S.patch.pos[p3], S.patch.pos[p3 + 1], S.patch.pos[p3 + 2], [S.patch.nrm[p3], S.patch.nrm[p3 + 1], S.patch.nrm[p3 + 2]], hemiN, r);
       } else {
         const q = r - nP, pr = probes[Math.floor(q / 6)];
+        if (q % 6 === 0) probeInside[q / 6] = insideFurniture(S, pr.x, pr.y, pr.z) ? 1 : 0;
         gather(pr.x, pr.y, pr.z, DIRS6[q % 6], probeN, r);
       }
       if ((next & 15) === 0 && Date.now() > end) return false;
@@ -707,6 +818,10 @@ export function createVisibilityJob(S, { coarse = false } = {}) {
     const nOut = () => nGround + facades.length;
     while (outNext < nOut()) {
       const e = outNext++;
+      if (base && e < nGround + base.nFacades) {                           // outdoor elements do not see the furniture
+        for (let q = base.outdoor.start[e]; q < base.outdoor.start[e + 1]; q++) outdoor.push(base.outdoor.idx[q], base.outdoor.w[q]);
+        outdoor.close(); continue;
+      }
       let x, y, z, n;
       if (e < nGround) { const a = e % G.nx, b = (e - a) / G.nx; x = G.ox + a + 0.5; z = G.oz + b + 0.5; y = (G.kind[e] === 1 ? -0.02 : -S.drop) + 0.01; n = [0, 1, 0]; }
       else { const F = facades[e - nGround]; x = F.x + F.nx * 0.01; y = F.y; z = F.z + F.nz * 0.01; n = [F.nx, 0, F.nz]; }
@@ -758,7 +873,8 @@ export function createVisibilityJob(S, { coarse = false } = {}) {
       }
       return {
         coarse, nP, nRec, nGround, SRC_SKY, SRC_GROUND, SRC_FACADE, nFacades: facades.length,
-        facades: Float32Array.from(facades.flatMap((F) => [F.x, F.y, F.z, F.nx, F.nz])),
+        facades: Float32Array.from(facades.flatMap((F) => [F.x, F.y, F.z, F.nx, F.nz])), facadeKeys: Float64Array.from(facadeKeys),
+        probeInside, incremental: !!base, redone: base ? redo.count || 0 : nRec, occluderCells: S.furHi ? S.occluders.length : 0,
         start: L.start, idx: L.idx, w: L.w, owner, apMask, outdoor: outdoor.pack(), ms: stats.ms,
         apertures: aps.map((A) => ({ k: A.k, axisN: A.axisN, plane: A.plane, a0: A.a0, a1: A.a1, y0: A.y0, y1: A.y1 })),
       };
@@ -967,19 +1083,43 @@ export function relight(S, vis, L) {
   }
 
   // ── diffuse bounces (Jacobi) ──
+  // ── lamps: point emitters with cached visibility; their direct light is part of the lightmap (no real-time lamp
+  //    lights indoors) and is bounced like the sun ──
+  const nPr = S.probes.length;
+  const lampD = new Float32Array(nP * 3), lampP = new Float32Array(nPr * 18);
+  const lampStats = lampLight(S, vis, L.lamps, lampD, lampP);
+  const src0 = new Float32Array(nP * 3);                                    // first-order irradiance: sun + lamps + outdoors
+  for (let k = 0; k < nP * 3; k++) src0[k] = direct[k] + lampD[k] + outside[k];
+  // ── furniture proxy surfaces: radiosity = FURNITURE_ALBEDO × the mean irradiance of the room they stand in ──
+  const FB = new Float32Array(S.nRegions * 3), regArea = new Float64Array(S.nRegions), regSum = new Float64Array(S.nRegions * 3);
+  const furn = !!S.furHi;
+  if (furn) for (let p = 0; p < nP; p++) regArea[S.patch.region[p]] += S.patch.area[p];
+  const updateFB = (indNow) => {
+    if (!furn) return;
+    regSum.fill(0);
+    for (let p = 0; p < nP; p++) {
+      const r3 = S.patch.region[p] * 3, a = S.patch.area[p], p3 = p * 3;
+      regSum[r3] += a * (src0[p3] + indNow[p3]); regSum[r3 + 1] += a * (src0[p3 + 1] + indNow[p3 + 1]); regSum[r3 + 2] += a * (src0[p3 + 2] + indNow[p3 + 2]);
+    }
+    for (let r = 0; r < S.nRegions; r++) { const k = regArea[r] > 0 ? FURNITURE_ALBEDO / regArea[r] : 0; FB[r * 3] = regSum[r * 3] * k; FB[r * 3 + 1] = regSum[r * 3 + 1] * k; FB[r * 3 + 2] = regSum[r * 3 + 2] * k; }
+  };
+
   const bounces = L.bounces == null ? 5 : L.bounces;
   let ind = new Float32Array(nP * 3), nxt = new Float32Array(nP * 3);
   const B = new Float32Array(nP * 3);                                      // radiosity × π  (= ρ · E_total)
   const iterations = [];
   for (let it = 0; it < bounces; it++) {
-    for (let k = 0; k < nP * 3; k++) B[k] = rho[k] * (direct[k] + outside[k] + ind[k]);
+    for (let k = 0; k < nP * 3; k++) B[k] = rho[k] * (src0[k] + ind[k]);
+    updateFB(ind);
     let delta = 0, total = 0;
     for (let p = 0; p < nP; p++) {
       let r = 0, g = 0, b = 0;
       const o = linkOf(p);
       for (let q = vis.start[o]; q < vis.start[o + 1]; q++) {
         const s = vis.idx[q]; if (s >= nP) continue;
-        const w = vis.w[q], s3 = s * 3; r += w * B[s3]; g += w * B[s3 + 1]; b += w * B[s3 + 2];
+        const w = vis.w[q];
+        if (s < 0) { const f = (-1 - s) * 3; r += w * FB[f]; g += w * FB[f + 1]; b += w * FB[f + 2]; continue; }
+        const s3 = s * 3; r += w * B[s3]; g += w * B[s3 + 1]; b += w * B[s3 + 2];
       }
       const p3 = p * 3;
       delta += Math.abs(r - ind[p3]) + Math.abs(g - ind[p3 + 1]) + Math.abs(b - ind[p3 + 2]);
@@ -997,14 +1137,16 @@ export function relight(S, vis, L) {
   // hemisphere sampling of small bright sources (sun patches) is noisy: smooth the bounce term inside each chart
   if (L.filter !== false) ind = filterCharts(S, ind, L.filterRadius || 2, L.filterSigma || 1.1);
   // after the last pass, B for the probes (radiosity of every patch)
-  for (let k = 0; k < nP * 3; k++) B[k] = rho[k] * (direct[k] + outside[k] + ind[k]);
+  for (let k = 0; k < nP * 3; k++) B[k] = rho[k] * (src0[k] + ind[k]);
+  updateFB(ind);
 
   // ── lightmap: irradiance without the direct sun (drawn by the shadow-mapped sun) ──
   const A = S.atlas, lightmap = new Float32Array(A.width * A.height * 4);
   const regionSum = new Float64Array(S.nRegions * 4);
   for (let p = 0; p < nP; p++) {
     const t = S.texelOf[p] * 4, p3 = p * 3;
-    lightmap[t] = outside[p3] + ind[p3]; lightmap[t + 1] = outside[p3 + 1] + ind[p3 + 1]; lightmap[t + 2] = outside[p3 + 2] + ind[p3 + 2]; lightmap[t + 3] = sunFrac[p];
+    lightmap[t] = outside[p3] + ind[p3] + lampD[p3]; lightmap[t + 1] = outside[p3 + 1] + ind[p3 + 1] + lampD[p3 + 1]; lightmap[t + 2] = outside[p3 + 2] + ind[p3 + 2] + lampD[p3 + 2];
+    lightmap[t + 3] = sunFrac[p];
     const r4 = S.patch.region[p] * 4, a = S.patch.area[p];
     regionSum[r4] += lightmap[t] * a; regionSum[r4 + 1] += lightmap[t + 1] * a; regionSum[r4 + 2] += lightmap[t + 2] * a; regionSum[r4 + 3] += a;
   }
@@ -1020,19 +1162,130 @@ export function relight(S, vis, L) {
   }
 
   // ── probes: ambient cubes (6 × RGB), no direct sun (the 3D view's sun light adds it) ──
-  const nPr = S.probes.length, probes = new Float32Array(nPr * 18);
+  const probes = new Float32Array(nPr * 18);
   for (let q = 0; q < nPr * 6; q++) {
     let r = 0, g = 0, b = 0;
     sources(nP + q, (s, w) => {
-      if (s < nP) { const s3 = s * 3; r += w * B[s3]; g += w * B[s3 + 1]; b += w * B[s3 + 2]; }
+      if (s < 0) { const f = (-1 - s) * 3; r += w * FB[f]; g += w * FB[f + 1]; b += w * FB[f + 2]; }
+      else if (s < nP) { const s3 = s * 3; r += w * B[s3]; g += w * B[s3 + 1]; b += w * B[s3 + 2]; }
       else if (s < vis.SRC_GROUND) { const k = (s - vis.SRC_SKY) * 3, ww = w * Math.PI; r += ww * sky[k]; g += ww * sky[k + 1]; b += ww * sky[k + 2]; }
       else { const k = (s - vis.SRC_GROUND) * 3, ww = w * Math.PI; r += ww * outL[k]; g += ww * outL[k + 1]; b += ww * outL[k + 2]; }
     });
     probes[q * 3] = r; probes[q * 3 + 1] = g; probes[q * 3 + 2] = b;
   }
+  for (let k = 0; k < nPr * 18; k++) probes[k] += lampP[k];
+  // probes that stand inside a furniture box see only its inside: use the mean of their room's free probes instead
+  if (vis.probeInside && vis.probeInside.some((v) => v)) {
+    const sum = new Map();
+    S.probes.forEach((pr, k) => {
+      if (vis.probeInside[k]) return;
+      const key = pr.room * 2 + pr.layer; let e = sum.get(key); if (!e) { e = { n: 0, v: new Float64Array(18) }; sum.set(key, e); }
+      e.n++; for (let i = 0; i < 18; i++) e.v[i] += probes[k * 18 + i];
+    });
+    S.probes.forEach((pr, k) => { if (!vis.probeInside[k]) return; const e = sum.get(pr.room * 2 + pr.layer); if (e) for (let i = 0; i < 18; i++) probes[k * 18 + i] = e.v[i] / e.n; });
+  }
   const field = fieldTexture(S, probes);
-  return { direct, sunFraction: sunFrac, outside, indirect: ind, lightmap, probes, field, sky, sunE, ms: Date.now() - t0, iterations, outdoorE: outE };
+  return { direct, lamp: lampD, lampStats, sunFraction: sunFrac, outside, indirect: ind, lightmap, probes, field, sky, sunE, ms: Date.now() - t0, iterations, outdoorE: outE };
 }
+// ───────────────────────── lamps ─────────────────────────
+export const LAMP_RANGE = 15;                      // m — beyond this a lamp's direct light is ignored (< 0.5 lx for 1500 lm)
+const LAMP_R0 = 0.12;                              // m — luminaire size: softens the 1/d² singularity next to the lamp
+const lampCache = new WeakMap();                   // visibility → Map(lamp key → cached geometric factors)
+/** Luminous-intensity distribution (normalised: mean over the sphere = 1) towards unit direction d (lamp → receiver). */
+const lobe = (lamp, dy) => (lamp.down ? 4 * Math.max(0, -dy) : Math.max(0, 1 + Math.max(-1, Math.min(1, +lamp.lobe || 0)) * dy));
+/** The lamp's emitting point, moved into the room air if it sits in a wall / at the ceiling plane. */
+function lampPoint(S, lamp) {
+  let x = +lamp.x, y = Math.max(0.05, Math.min(S.H - 0.05, +lamp.y)), z = +lamp.z;
+  const i0 = Math.floor((x - S.ox) / CS), j0 = Math.floor((z - S.oz) / CS);
+  const ok = (i, j) => i >= 0 && j >= 0 && i < S.nx && j < S.ny && S.kind[j * S.nx + i] === ROOM;
+  if (!ok(i0, j0)) {
+    let best = null, bd = Infinity;
+    for (let dj = -4; dj <= 4; dj++) for (let di = -4; di <= 4; di++) if (ok(i0 + di, j0 + dj) && di * di + dj * dj < bd) { bd = di * di + dj * dj; best = [i0 + di, j0 + dj]; }
+    if (!best) return null;
+    x = S.ox + (best[0] + 0.5) * CS; z = S.oz + (best[1] + 0.5) * CS;
+  }
+  return [x, y, z];
+}
+/** Is the segment start → lamp (length d) free? Returns the glass transmittance along it (0 = blocked). */
+function lampVis(S, x, y, z, dx, dy, dz, d, R) {
+  march(S, x, y, z, dx, dy, dz, false, R, d - 0.02);
+  if (R.type === HIT_REACHED || R.type === HIT_SKY) return R.T;
+  if (R.type === HIT_NONE || R.type === HIT_EXITED) return 0;
+  const h = Math.hypot(R.x - x, R.y - y, R.z - z);
+  return h >= d - 0.03 ? R.T : 0;
+}
+/**
+ * Geometric factors of one lamp (cached per visibility and lamp position / distribution):
+ * G = transmittance × distribution × cosθ / (4π (d² + r0²)); irradiance = Φ[lm] / LUX_PER_UNIT × colour × G.
+ */
+function lampFactors(S, vis, lamp) {
+  let m = lampCache.get(vis); if (!m) { m = new Map(); lampCache.set(vis, m); }
+  const key = [lamp.x, lamp.y, lamp.z].map((v) => (+v).toFixed(3)).join(',') + `|${lamp.down ? 'd' : (+lamp.lobe || 0).toFixed(2)}`;
+  let F = m.get(key);
+  if (F) { F.hit = true; return F; }
+  const t0 = Date.now(), R = hitRecord(), nP = S.patch.count;
+  const P = lampPoint(S, lamp);
+  const pi = [], pg = [], qi = [], qg = [];
+  let rays = 0;
+  if (P) {
+    const [lx, ly, lz] = P, k4 = 1 / (4 * Math.PI);
+    for (let p = 0; p < nP; p++) {
+      const p3 = p * 3, nx = S.patch.nrm[p3], ny = S.patch.nrm[p3 + 1], nz = S.patch.nrm[p3 + 2];
+      const x = S.patch.pos[p3] + nx * 0.003, y = S.patch.pos[p3 + 1] + ny * 0.003, z = S.patch.pos[p3 + 2] + nz * 0.003;
+      let vx = lx - x, vy = ly - y, vz = lz - z;
+      const d2 = vx * vx + vy * vy + vz * vz;
+      if (d2 > LAMP_RANGE * LAMP_RANGE || d2 < 1e-6) continue;
+      const d = Math.sqrt(d2); vx /= d; vy /= d; vz /= d;
+      const cos = nx * vx + ny * vy + nz * vz;
+      if (cos <= 0) continue;
+      const f = lobe(lamp, -vy);
+      if (f <= 0) continue;
+      rays++;
+      const T = lampVis(S, x, y, z, vx, vy, vz, d, R);
+      if (T <= 0) continue;
+      pi.push(p); pg.push((T * f * cos * k4) / (d2 + LAMP_R0 * LAMP_R0));
+    }
+    S.probes.forEach((pr, k) => {
+      let vx = lx - pr.x, vy = ly - pr.y, vz = lz - pr.z;
+      const d2 = vx * vx + vy * vy + vz * vz;
+      if (d2 > LAMP_RANGE * LAMP_RANGE || d2 < 1e-6 || insideFurniture(S, pr.x, pr.y, pr.z)) return;
+      const d = Math.sqrt(d2); vx /= d; vy /= d; vz /= d;
+      const f = lobe(lamp, -vy);
+      if (f <= 0) return;
+      rays++;
+      const T = lampVis(S, pr.x, pr.y, pr.z, vx, vy, vz, d, R);
+      if (T <= 0) return;
+      const g = (T * f * k4) / (d2 + LAMP_R0 * LAMP_R0);
+      for (let i = 0; i < 6; i++) { const D = DIRS6[i], cos = D[0] * vx + D[1] * vy + D[2] * vz; if (cos > 0) { qi.push(k * 6 + i); qg.push(g * cos); } }
+    });
+  }
+  F = { pi: Int32Array.from(pi), pg: Float32Array.from(pg), qi: Int32Array.from(qi), qg: Float32Array.from(qg), rays, ms: Date.now() - t0, hit: false };
+  if (m.size > 64) m.clear();
+  m.set(key, F);
+  return F;
+}
+/**
+ * Direct light of the lamps on patches (lampD, RGB per patch) and probe directions (lampP, 18 per probe).
+ * lamp = { x, y, z (world m), lm (luminous flux, lumen), color: [r, g, b] linear (normalised to unit luminance),
+ *          lobe?: −1…1 (−1 mostly down, +1 mostly up), down?: true (Lambertian downlight) }
+ */
+function lampLight(S, vis, lamps, lampD, lampP) {
+  const stats = { lamps: 0, ms: 0, rays: 0, cached: 0, lm: 0 };
+  if (!Array.isArray(lamps) || !lamps.length) return stats;
+  const t0 = Date.now();
+  for (const lamp of lamps) {
+    if (!lamp || !(lamp.lm > 0) || ![lamp.x, lamp.y, lamp.z].every(Number.isFinite)) continue;
+    const F = lampFactors(S, vis, lamp);
+    const c = Array.isArray(lamp.color) ? lamp.color : [1, 1, 1], k = lamp.lm / LUX_PER_UNIT;
+    const cr = c[0] * k, cg = c[1] * k, cb = c[2] * k;
+    for (let q = 0; q < F.pi.length; q++) { const p3 = F.pi[q] * 3, g = F.pg[q]; lampD[p3] += cr * g; lampD[p3 + 1] += cg * g; lampD[p3 + 2] += cb * g; }
+    for (let q = 0; q < F.qi.length; q++) { const o = F.qi[q] * 3, g = F.qg[q]; lampP[o] += cr * g; lampP[o + 1] += cg * g; lampP[o + 2] += cb * g; }
+    stats.lamps++; stats.lm += lamp.lm; if (F.hit) stats.cached++; else stats.rays += F.rays;
+  }
+  stats.ms = Date.now() - t0;
+  return stats;
+}
+
 /** Gaussian filter of a per-patch RGB array over each chart's texel grid (never across charts / regions). */
 function filterCharts(S, src, radius, sigma) {
   const out = new Float32Array(src.length), k = [];

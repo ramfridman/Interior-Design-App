@@ -198,5 +198,82 @@ group('Plan edit: remove the partition between Bedroom 1 and Bedroom 2 (plan-edi
   E.resetPlan();
 }
 
+// ───────────────────────── lamps (point emitters in the same solve) ─────────────────────────
+group('Lamps at night: emitters with cached visibility, bounced like the sun');
+const NIGHT = { sunDir: sunDir('2026-06-21', 23.5) };
+const roomCentre = (id) => { const r = PLAN.rooms.find((q) => q.id === id), xs = r.polygon.map((p) => p[0]), ys = r.polygon.map((p) => p[1]); return [(Math.min(...xs) + Math.max(...xs)) / 200, (Math.min(...ys) + Math.max(...ys)) / 200]; };
+const pendant = (id, lm = 1100) => { const [x, z] = roomCentre(id); return { x, y: 2.3, z, lm, lobe: -0.8, color: [1, 1, 1] }; };
+{
+  const shut = solve({ ...input, doorsOpen: false });
+  const dark = D.relight(shut.S, shut.V, NIGHT);
+  const lit = D.relight(shut.S, shut.V, { ...NIGHT, lamps: [pendant('bedroom-1')] });
+  const f1 = mean(shut.S, lit, roomFloor(shut.S, 'bedroom-1'), (p) => lum(lit.lightmap, shut.S.texelOf[p] * 4));
+  const f1dark = mean(shut.S, dark, roomFloor(shut.S, 'bedroom-1'), (p) => lum(dark.lightmap, shut.S.texelOf[p] * 4));
+  const f2 = mean(shut.S, lit, roomFloor(shut.S, 'bedroom-2'), (p) => lum(lit.lightmap, shut.S.texelOf[p] * 4));
+  const hall = mean(shut.S, lit, roomFloor(shut.S, 'main'), (p) => lum(lit.lightmap, shut.S.texelOf[p] * 4));
+  check('a 1100 lm pendant lights its bedroom to a plausible 20–300 lx (floor mean, direct + bounced)', f1 * LUX_PER_UNIT >= 20 && f1 * LUX_PER_UNIT <= 300, `${lux(f1)} (unlit: ${lux(f1dark)})`);
+  check('…and nothing behind the closed doors (bedroom 2, living room stay black)', f2 <= 1e-9 && hall <= 1e-9, `${f2.toExponential(1)}, ${hall.toExponential(1)}`);
+  // energy: the flux the room's surfaces receive directly ≈ the lamp's flux (minus what leaves through the window)
+  let flux = 0, out = 0;
+  for (let p = 0; p < shut.S.patch.count; p++) flux += shut.S.patch.area[p] * lum(lit.lamp, p * 3);
+  flux *= LUX_PER_UNIT;
+  for (let p = 0; p < shut.S.patch.count; p++) out += shut.S.patch.area[p] * lum(lit.indirect, p * 3);
+  check('direct flux on the surfaces = 80–102 % of the lamp\'s 1100 lm (the rest leaves through the window)', flux >= 0.8 * 1100 && flux <= 1.02 * 1100, `${flux.toFixed(0)} lm`);
+  // closed room: the inter-reflected flux of a diffuse enclosure ≈ direct × ρ̄ / (1 − ρ̄) (ρ̄ = area-weighted albedo)
+  const rho = D.albedoArrays(shut.S, shut.V).patch;
+  let ra = 0, aa = 0; for (let p = 0; p < shut.S.patch.count; p++) if (shut.S.patch.region[p] === shut.S.roomIds.indexOf('bedroom-1')) { ra += lum(rho, p * 3) * shut.S.patch.area[p]; aa += shut.S.patch.area[p]; }
+  const rb = ra / aa, expect = flux * rb / (1 - rb), inter = out * LUX_PER_UNIT;
+  check('inter-reflected flux matches the enclosure estimate ρ̄/(1−ρ̄) × direct (±35 %)', Math.abs(inter / expect - 1) < 0.35, `${inter.toFixed(0)} lm vs ${expect.toFixed(0)} lm (ρ̄ = ${rb.toFixed(2)})`);
+  let wallUp = 0; for (let p = 0; p < shut.S.patch.count; p++) if (roomWalls(shut.S, 'bedroom-1')(p) && shut.S.patch.pos[p * 3 + 1] > 2.5) wallUp = Math.max(wallUp, lum(lit.lightmap, shut.S.texelOf[p] * 4));
+  check('lamp light is in the lightmap (no real-time lamp light indoors), probes see it too', lit.lampStats.lamps === 1 && lum(lit.probes, nearestProbe(shut.S, 'bedroom-1', ...roomCentre('bedroom-1').map((v) => v * 100)) * 18 + 6) > 0, `${lit.lampStats.rays} rays, ${lit.lampStats.ms} ms; top-of-wall max ${lux(wallUp)}`);
+  const t1 = now(); const again = D.relight(shut.S, shut.V, { ...NIGHT, lamps: [pendant('bedroom-1')] }); const relMs = now() - t1;
+  check('second relight with the same lamp reuses its cached visibility', again.lampStats.cached === 1, `${relMs.toFixed(0)} ms relight (first: ${lit.ms} ms incl. ${lit.lampStats.ms} ms of lamp rays)`);
+  // doors open: the living-room lamp spills into the bedroom through its door
+  const Lopen = D.relight(S, V, { ...NIGHT, lamps: [{ x: 11.0, y: 2.3, z: 10.0, lm: 1500, lobe: -0.5, color: [1, 1, 1] }] });
+  const spill = mean(S, Lopen, roomFloor(S, 'bedroom-1'), (p) => lum(Lopen.lightmap, S.texelOf[p] * 4));
+  const nearLamp = mean(S, Lopen, (p) => roomFloor(S, 'main')(p) && Math.hypot(pos(S, p)[0] - 1100, pos(S, p)[2] - 1000) < 150, (p) => lum(Lopen.lightmap, S.texelOf[p] * 4));
+  check('doors open: a hall lamp spills into the bedroom through the doorway, dimmer than under the lamp', spill > 0 && spill < nearLamp * 0.3, `${lux(spill)} in bedroom 1, ${lux(nearLamp)} under the lamp`);
+}
+
+// ───────────────────────── sky switch ─────────────────────────
+group('Sky: clear vs overcast at noon');
+{
+  const noon = sunDir('2026-03-20', 12.5);
+  const Lc = D.relight(S, V, { sunDir: noon, sky: 'clear' }), Lov = D.relight(S, V, { sunDir: noon, sky: 'overcast' });
+  let sunC = 0, sunO = 0; for (let p = 0; p < S.patch.count; p++) { sunC += Lc.sunFraction[p] > 0; sunO += Lov.sunFraction[p] > 0 || lum(Lov.direct, p * 3) > 0; }
+  check('overcast: no direct sun anywhere (no sun patches, lightmap alpha 0)', sunO === 0 && sunC > 20, `${sunC} sunlit patches when clear`);
+  const mc = mean(S, Lc, roomFloor(S, 'main')), mo = mean(S, Lov, roomFloor(S, 'main'));
+  check('overcast living room is darker than under the clear sky + sun', mo < mc, `${lux(mo)} vs ${lux(mc)}`);
+  const hz = skyRadiance({ sunDir: noon, type: 'overcast' }).horizontal * LUX_PER_UNIT;
+  check('overcast sky follows the Krochmann level (≈ 0.3 + 21·sin h klux)', hz > 10000 && hz < 22000, `${Math.round(hz)} lx diffuse horizontal`);
+}
+
+// ───────────────────────── furniture occluders ─────────────────────────
+group('Furniture blocks bounced light and sun (item boxes as occluders, incremental visibility)');
+{
+  const box = (id, x0, y0, x1, y1, h) => ({ id, corners: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], y0: 0, y1: h });
+  const wardrobe = box('wardrobe', 1215, 1300, 1435, 1360, 2.2), bed = box('bed', 1330, 1130, 1500, 1290, 0.55);
+  const L0 = D.relight(S, V, OVERCAST), Ls0 = D.relight(S, V, { sunDir: sunDir('2026-06-21', 8) });
+  const occ = D.setOccluders(S, [wardrobe, bed]);
+  const regions = new Set(); D.occluderRegions(S, wardrobe, regions); D.occluderRegions(S, bed, regions);
+  const redo = D.receiversFor(S, regions);
+  let t2 = now(); const job = D.createVisibilityJob(S, { base: V, redo }); job.step(1e12); const Vi = job.result(); const incMs = now() - t2;
+  t2 = now(); const Vf = D.computeVisibility(S); const fullMs = now() - t2;
+  check('incremental visibility (only the furnished room) is much cheaper than a full pass', incMs < fullMs * 0.5, `${incMs.toFixed(0)} ms for ${redo.count} of ${redo.length} receivers vs ${fullMs.toFixed(0)} ms full (${occ.cells} occluder cells, rasterised in ${occ.ms} ms)`);
+  const L1 = D.relight(S, Vi, OVERCAST), Lf = D.relight(S, Vf, OVERCAST), Ls1 = D.relight(S, Vi, { sunDir: sunDir('2026-06-21', 8) });
+  const under = (p) => roomFloor(S, 'bedroom-1')(p) && (() => { const [x, , y] = pos(S, p); return x > 1240 && x < 1410 && y > 1310; })();
+  const front = (p) => roomFloor(S, 'bedroom-1')(p) && (() => { const [x, , y] = pos(S, p); return x > 1215 && x < 1330 && y > 1250 && y < 1300; })();
+  const u0 = mean(S, L0, under), u1 = mean(S, L1, under), f0 = mean(S, L0, front), f1 = mean(S, L1, front);
+  check('floor under the wardrobe goes (nearly) dark', u1 < 0.15 * u0, `${lux(u0)} → ${lux(u1)}`);
+  check('floor in front of the wardrobe gets darker (it sees less of the room and window)', f1 < f0 * 0.97, `${lux(f0)} → ${lux(f1)}`);
+  const room0 = mean(S, L0, roomFloor(S, 'bedroom-1')), roomI = mean(S, L1, roomFloor(S, 'bedroom-1')), roomF = mean(S, Lf, roomFloor(S, 'bedroom-1'));
+  check('incremental result agrees with a full pass (room mean ±5 %)', Math.abs(roomI / roomF - 1) < 0.05, `${lux(roomI)} vs ${lux(roomF)} (empty room ${lux(room0)})`);
+  const lit = (L) => { let n = 0; for (let p = 0; p < S.patch.count; p++) if (roomFloor(S, 'bedroom-1')(p) && L.sunFraction[p] > 0) n++; return n; };
+  check('08:00 sun patch: the bed blocks part of it (sunlit floor texels drop)', lit(Ls1) < lit(Ls0) * 0.8, `${lit(Ls0)} → ${lit(Ls1)} texels`);
+  const other = mean(S, L1, roomFloor(S, 'bedroom-2')), other0 = mean(S, L0, roomFloor(S, 'bedroom-2'));
+  check('the neighbouring bedroom is (all but) unchanged', Math.abs(other / other0 - 1) < 0.01, `${lux(other0)} → ${lux(other)}`);
+  D.setOccluders(S, []);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
