@@ -73,3 +73,17 @@ Climate: summer highs of 38-42 C, mild frost-free winters, under 300 mm rain, br
 **Irrigation**
 * Put every tree and bed on drip lines with a timer or controller (battery or mains). Water deeply and early (before 6 a.m.).
 * Salinity: flush root zones with extra water in winter if the local water is brackish.
+
+## Gap pass 13 Nov 2026 (20 added); every page opened and price read on 13 Nov 2026
+* Water features (type water-feature, subcategory water-features): Aquarium King / Beit Hobby Online (aquarium-king.co.il; price + "גובה/רוחב/עומק" in the product text): classic 2-tier 1790, classic 3-tier 3290, palace tiers 4790, ball tiers 3000, rock 11 1190, stone ball 995. Tropical Fish (tropicalfish.co.il) waterfall TGF-8537 1949 (45 x 25.5 x 82.5 cm; delivery 100 extra). All include pump. Delivery fees are extra.
+* Stepping stones (subcategory paving, price per stone, pickup only): Bialik Nurseries (bialik-mashtelot.com) large off-white 40X60X4 (55) and basalt amorphous 40X50X3 (79 sale). Sizes are stated as approximate, stones are irregular.
+* Palm: Gan Yarak Online (gan-yarak.co.il) Phoenix roebelenii 25 L, 180. The page states height 3 m and planting spacing 1.5 m; w = d = 150 cm is that spacing (tag `spread-from-planting-spacing`).
+* Clothes racks / wall rack (subcategory clotheslines): IKEA MULIG 125 and JALL 39 (measurements block); ACE Almog 76.19, Milano 137.30, Liberty 169.42 (ACE page JSON-LD price, dimensions in description); Home Center CLEANIC wall rack 69.90 (online special price; 79.90 in store).
+* Composters (type utility variant compost, category outdoor-storage / bins because no composter subcategory exists): Composter.co.il Harmony 420 L 435 and rotating 160 L 335 (sale prices, regular 580/420); gardensheds.co.il (Adar for all) L105 tumbler 199.95 and 300 L 278 (sale prices; dimensions are in the site's catalogue listing text).
+* Dropped / not found:
+  * Bird baths: no free-standing bird bath sold by an Israeli shop with price and size was found.
+  * WPC / composite decking: Carmel Floor UH100R boards (140 x 25 mm, 2.20 / 4.05 m, 295) and 30x30 tiles (265 per 9) show no price unit (per board or per m2) or tile thickness; Avieli 30x30 tile (149 per m2) states no material or thickness; take-deck.co.il shows prices ex VAT only; Decoplus page blocked / empty. None added.
+  * Concrete pavers: no Israeli retailer page with concrete pavers or stepping stones, price and size was found online. Knv.co.il Hadassah stone is sold as "50-90 cm" (range only), Bialik round basalt has no thickness, small off-white stone size "30X40X40" is ambiguous, hadarnoy.co.il lists no dimensions.
+  * Date palms / large specimen palms: nurseries list pot sizes without trunk height or canopy (e.g. Phoenix dactylifera 25 L 480 at mashtelaadhabait.com has no height); Zeraviv roebelenii 50 L (250, final height 2.5 m) and Gan Yarak ring palm 25 L (250, 2 m) have no spread, so not added.
+  * Heat-pump water heaters: Mashav (mashav.com and electra.mashav.com) lists Tadiran WATEC 150/200 (5450/5790) and Electra EcoWater 150-300 (4490-5990 on mashav.com, 5990-8890 on electra.mashav.com, the two sites disagree) with no dimensions on the page; Keter Dudim Chromagen Eco-Heat has none either; Thermostar Electra 150L page gives an unlabeled 500/500/1670. None added.
+  * Rotary clotheslines (Leifheit Linomatic 500/600 on Home Center): sold by an unnamed external seller and no height on the page. Composters at gardencenter.co.il (GREEN 60 / 130 L): volume only, no dimensions.

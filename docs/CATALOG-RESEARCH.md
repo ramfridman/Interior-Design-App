@@ -46,3 +46,20 @@ You own exactly two files: `src/catalog/data/<your-file>.js` (`export default [ 
    why, caveats (e.g. price varies by fabric).
 4. Final report (concise): product count per sub-category and per retailer, price range, sample re-verification
    result, retailers that blocked access.
+
+## Gap-fill pass, 13 Nov 2026
+Added 28 real products (catalogue 850 -> 878; no validation warnings, no duplicate ids). Details and URLs in `src/catalog/data/lighting-decor.sources.md` and `garden-landscape.sources.md`.
+
+| Gap | Added | File |
+|---|---|---|
+| Long linear pendants | 8 (IKEA 3, LED Market 5) | lighting-decor.js |
+| Fountains / water features | 7 (Aquarium King 6, Tropical Fish 1) | garden-landscape.js |
+| Bird baths | 0 | - |
+| WPC decking | 0 | - |
+| Paving / stepping stones | 2 (Bialik Nurseries, natural stone; no concrete pavers found) | garden-landscape.js |
+| Date and specimen palms | 1 (Phoenix roebelenii, published height 3 m) | garden-landscape.js |
+| Heat-pump water heaters | 0 | - |
+| Clothes racks / wall rack | 6 (IKEA 2, ACE 3, Home Center 1) | garden-landscape.js |
+| Composters | 4 (Composter.co.il 2, gardensheds.co.il 2) | garden-landscape.js |
+
+Could not be found with all required data: bird baths with price and size from an Israeli shop; WPC decking with a stated price unit and thickness (Carmel Floor UH100R lists no unit); concrete pavers sold online; large date palms with published trunk height and spread; heat-pump boilers with published dimensions (Mashav lists prices only, and the two Mashav sites disagree); rotary clotheslines with a height (Leifheit via Home Center external seller). Composters have no own subcategory, so they use `outdoor-storage` / `bins`.

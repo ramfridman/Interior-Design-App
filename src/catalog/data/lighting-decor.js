@@ -5197,5 +5197,293 @@ export default [
    "spread-estimated"
   ],
   "description": "Live potted plant in 15 L pot; the shop states a height of about 130 cm; pot diameter not stated for litre pots so spread 55 cm is an estimate."
+ },
+ {
+  "id": "ikea-pilskott-led-pendant-97-black",
+  "name": "PILSKOTT LED pendant lamp, smart, black, 97 cm",
+  "nameHe": "PILSKOTT מנורת תלייה LED, smart שחור, 97 ס\"מ",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/pilskott-led-pendant-lamp-smart-black-30477878/",
+  "price": 495,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 97,
+   "d": 4,
+   "h": 150
+  },
+  "type": "pendant",
+  "params": {
+   "variant": "linear",
+   "shade": "#1c1c1c",
+   "color": "#1c1c1c",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "pendants",
+  "tags": [
+   "linear",
+   "dining-table",
+   "kitchen-island",
+   "led",
+   "smart",
+   "black"
+  ],
+  "description": "Slim curved LED bar 97 x 4 cm, 16.5 W, 1100 lm; cord adjustable from 21 to 150 cm overall height (h = stated maximum 150 cm)."
+ },
+ {
+  "id": "ikea-backstorn-led-pendant-108-aluminium",
+  "name": "BACKSTORN LED pendant lamp, dimmable, matt aluminium, 108 cm",
+  "nameHe": "BACKSTÖRN מנורת תלייה LED, ניתן לעמעם/מט אלומיניום, 108 ס\"מ",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/backstoern-led-pendant-lamp-dimmable-matt-aluminium-60577876/",
+  "price": 395,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 108,
+   "d": 33,
+   "h": 220
+  },
+  "type": "pendant",
+  "params": {
+   "variant": "linear",
+   "shade": "#b9bcbf",
+   "color": "#b9bcbf",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "pendants",
+  "tags": [
+   "linear",
+   "dining-table",
+   "kitchen-island",
+   "led",
+   "dimmable",
+   "aluminium"
+  ],
+  "description": "Linear LED pendant with adjustable shades, length 108 cm, width 33 cm, 13.5 W 2700 K; overall height adjustable 25-220 cm (h = stated maximum 220 cm)."
+ },
+ {
+  "id": "ikea-sambord-pendant-3-lamps-110",
+  "name": "SAMBORD pendant lamp with 3 lamps, black/white, 110 cm",
+  "nameHe": "SAMBORD מנורת תלייה ל-3 נורות, שחור/לבן",
+  "brand": "IKEA",
+  "retailer": "IKEA Israel",
+  "url": "https://www.ikea.com/il/he/p/sambord-pendant-lamp-with-3-lamps-black-white-50586961/",
+  "price": 195,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 110,
+   "d": 15,
+   "h": 150
+  },
+  "type": "pendant",
+  "params": {
+   "variant": "linear",
+   "count": 3,
+   "shade": "#f2f2f2",
+   "color": "#1c1c1c",
+   "color2": "#f2f2f2",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "pendants",
+  "tags": [
+   "linear",
+   "dining-table",
+   "kitchen-island",
+   "3-lamps"
+  ],
+  "description": "3-shade linear pendant, rail length 110 cm, shade diameter 15 cm, height of fitting 11 cm; cords adjustable 25-150 cm overall (h = stated maximum 150 cm; d = shade diameter)."
+ },
+ {
+  "id": "ledmarket-vorin-linear-pendant-109",
+  "name": "VORIN linear LED pendant, 109 cm, 32 W",
+  "nameHe": "מנורת תלייה VORIN",
+  "brand": "LED Market",
+  "retailer": "LED Market (ledmarket.co.il)",
+  "url": "https://ledmarket.co.il/products/%D7%9E%D7%A0%D7%95%D7%A8%D7%AA-%D7%AA%D7%9C%D7%99%D7%99%D7%94-vorin",
+  "price": 2370,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 109,
+   "d": 29.6,
+   "h": 130
+  },
+  "type": "pendant",
+  "params": {
+   "variant": "linear",
+   "material": "aluminium",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "pendants",
+  "tags": [
+   "linear",
+   "dining-table",
+   "led",
+   "32w",
+   "3000k"
+  ],
+  "description": "Aluminium linear LED body 32 W 3000 K, stated size about 1090 x 296 x 1300 mm including suspension. Colour not stated on the page."
+ },
+ {
+  "id": "ledmarket-aeria-linear-pendant-115",
+  "name": "AERIA 6-element gold LED pendant, 115 cm",
+  "nameHe": "מנורת תלייה AÉRIA",
+  "brand": "LED Market",
+  "retailer": "LED Market (ledmarket.co.il)",
+  "url": "https://ledmarket.co.il/products/%D7%9E%D7%A0%D7%95%D7%A8%D7%AA-%D7%AA%D7%9C%D7%99%D7%99%D7%94-a-ria",
+  "price": 4900,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 115,
+   "d": 18,
+   "h": 233
+  },
+  "type": "pendant",
+  "params": {
+   "variant": "linear",
+   "count": 6,
+   "shade": "#c9a24a",
+   "color": "#c9a24a",
+   "material": "aluminium",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "pendants",
+  "tags": [
+   "linear",
+   "dining-table",
+   "kitchen-island",
+   "led",
+   "gold",
+   "50w"
+  ],
+  "description": "Six rounded elements on one bar, gold aluminium, OSRAM LED 50 W 3000 K, stated size 1150 x 180 x 233H mm."
+ },
+ {
+  "id": "ledmarket-duet-art-pendant-106",
+  "name": "DUET ART asymmetric LED bar pendant, black and gold, 106 cm",
+  "nameHe": "מנורת תלייה DUET ART",
+  "brand": "LED Market",
+  "retailer": "LED Market (ledmarket.co.il)",
+  "url": "https://ledmarket.co.il/products/%D7%9E%D7%A0%D7%95%D7%A8%D7%AA-%D7%AA%D7%9C%D7%99%D7%99%D7%94-duet-art",
+  "price": 3350,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 106,
+   "d": 70,
+   "h": 150
+  },
+  "type": "pendant",
+  "params": {
+   "variant": "linear",
+   "color": "#1c1c1c",
+   "color2": "#c9a24a",
+   "material": "aluminium",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "pendants",
+  "tags": [
+   "linear",
+   "dining-table",
+   "led",
+   "black",
+   "gold",
+   "art"
+  ],
+  "description": "Aluminium LED bar with asymmetric composition, black and gold, stated size 1061 x 700 x 97 mm, hanging height up to 1500 mm (h = 150 cm)."
+ },
+ {
+  "id": "ledmarket-dualis-art-pendant-106",
+  "name": "DUALIS ART LED bar pendant with coloured discs, 106 cm, 56 W",
+  "nameHe": "מנורת תלייה DUALIS ART",
+  "brand": "LED Market",
+  "retailer": "LED Market (ledmarket.co.il)",
+  "url": "https://ledmarket.co.il/products/%D7%9E%D7%A0%D7%95%D7%A8%D7%AA-%D7%AA%D7%9C%D7%99%D7%99%D7%94-dualis-art",
+  "price": 3150,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 106,
+   "d": 50,
+   "h": 150
+  },
+  "type": "pendant",
+  "params": {
+   "variant": "linear",
+   "color": "#1c1c1c",
+   "color2": "#3a7f6e",
+   "material": "aluminium",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "pendants",
+  "tags": [
+   "linear",
+   "dining-table",
+   "kitchen-island",
+   "led",
+   "56w",
+   "art"
+  ],
+  "description": "Black aluminium bar with green and blue discs, 56 W LED 3000 K, stated bar size about 1061 x 500 x 97 mm, hanging height up to about 1500 mm (h = 150 cm)."
+ },
+ {
+  "id": "ledmarket-ski-pendant-110-5-globes",
+  "name": "SKI linear pendant with 5 white glass globes, gold, 110 cm",
+  "nameHe": "מנורת תלייה SKI",
+  "brand": "LED Market",
+  "retailer": "LED Market (ledmarket.co.il)",
+  "url": "https://ledmarket.co.il/products/%D7%9E%D7%A0%D7%95%D7%A8%D7%AA-%D7%AA%D7%9C%D7%99%D7%99%D7%94-ski",
+  "price": 901,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 110,
+   "d": 15,
+   "h": 200
+  },
+  "type": "pendant",
+  "params": {
+   "variant": "linear",
+   "count": 5,
+   "shade": "#f5f3ee",
+   "color": "#c9a24a",
+   "color2": "#f5f3ee",
+   "material": "metal",
+   "style": "modern"
+  },
+  "zone": "indoor",
+  "category": "lighting",
+  "subcategory": "pendants",
+  "tags": [
+   "linear",
+   "dining-table",
+   "kitchen-island",
+   "globes",
+   "gold",
+   "g9"
+  ],
+  "description": "Gold metal bar 110 cm with five 15 cm white glass globes (5 x G9, max 9 W each), transparent cables adjustable up to 200 cm (h = 200 cm)."
  }
 ];

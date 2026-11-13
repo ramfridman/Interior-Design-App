@@ -29,7 +29,8 @@ Small follow-ups noted: island stools do not travel with the island; overlap of 
 - [x] **Carpentry in 3D** — published in version 7 (13 Nov): every unit is built in 3D from the same data as the drawings (fronts, handles, worktops with cut-outs, corner pantry in its true L shape); 3D tab in the carpentry workbench with section cut, Open fronts, fit warnings pinned on the units. Follow-ups: the interior is dim at some hours (add a neutral studio-light option for inspecting carpentry); splashbacks / upstands not modelled; lift-off doors look like hinged doors while closed; sliding wardrobe doors do not follow the run's door split; corner pantry shape checked by numeric tests only, not by eye; phone layout of the 3D tab unchecked.
 - [ ] Touch gestures for the structure tools are untested on a real device.
 - [ ] Performance check on a real graphics card (only a software renderer has been measured).
-- [ ] Catalogue gaps: long linear pendants, fountains / bird baths, composite decking, concrete pavers, date palms, heat-pump water heaters, clotheslines / composters.
+- [x] Catalogue gaps, first pass (878 products): added 8 linear pendants, 7 fountains, 2 stepping stones, 1 palm, 6 clothes racks, 4 composters — all read from the seller's page with price and size.
+- [ ] Catalogue gaps still open (no Israeli page found with both a price and published dimensions): bird baths, composite (WPC) decking, concrete pavers, heat-pump water heaters, date palms / large specimen palms, rotary clotheslines. Details in `docs/CATALOG-RESEARCH.md`.
 - [ ] Merge branch `ccr-70c095fe-io3e41` into the default branch (pull request).
 
 ## Later
