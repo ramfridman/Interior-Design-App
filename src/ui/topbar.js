@@ -3,7 +3,6 @@
  * the live budget and the file / settings / help menus.
  */
 import { h, debounce, isMac } from './dom.js';
-import { icon } from './icons.js';
 import { iconBtn, segmented } from './components.js';
 import { openMenu } from './dialogs.js';
 import { canPrint } from './exporter.js';
@@ -125,4 +124,3 @@ export function initTopbar(root, app) {
   syncHistory(); syncUI(); refreshBudget();
 }
 
-export { icon };

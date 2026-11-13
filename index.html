@@ -2,17 +2,55 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>E7 House — Interior &amp; Garden Designer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>E7 House Designer</title>
 <script type="importmap">
 { "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
 </script>
+<link rel="stylesheet" href="./src/styles/tokens.css">
+<link rel="stylesheet" href="./src/styles/base.css">
+<link rel="stylesheet" href="./src/styles/components.css">
+<link rel="stylesheet" href="./src/styles/layout.css">
+<link rel="stylesheet" href="./src/styles/panels.css">
+<link rel="stylesheet" href="./src/styles/print.css">
 </head>
 <body>
-<!-- Placeholder shell: replaced by the UX/UI team. Mount points #view2d / #view3d and #boot / #boot-status are part of the contract. -->
-<div id="boot"><p id="boot-status">Loading…</p></div>
-<div id="view2d" style="position:fixed;inset:0 50% 0 0"></div>
-<div id="view3d" style="position:fixed;inset:0 0 0 50%"></div>
+<!--
+  Shell. Part of the team contract: the mount points #view2d and #view3d, the splash #boot with #boot-status,
+  the import map and the src/main.js module. Everything else is filled in by src/ui/index.js (initUI).
+-->
+<div id="app" class="app" data-mode="2d">
+  <header id="topbar" class="topbar" role="toolbar" aria-label="Design tools"></header>
+  <aside id="left" class="side side-left" aria-label="Catalogue"></aside>
+  <main id="stage" class="stage">
+    <div id="viewport" class="viewport" data-mode="2d">
+      <section id="pane2d" class="pane pane-2d" aria-label="Plan view">
+        <div id="view2d" class="view"></div>
+        <div id="ov2d" class="ov"></div>
+      </section>
+      <div id="split-handle" class="split-handle" hidden></div>
+      <section id="pane3d" class="pane pane-3d" aria-label="3D view">
+        <div id="view3d" class="view"></div>
+        <div id="ov3d" class="ov"></div>
+      </section>
+    </div>
+  </main>
+  <aside id="right" class="side side-right" aria-label="Inspector, shopping list, rooms and checks"></aside>
+  <footer id="statusbar" class="statusbar"></footer>
+</div>
+<div id="ui-layer"></div>
+<div id="print-root"></div>
+
+<div id="boot" role="status" aria-live="polite">
+  <div class="boot__inner">
+    <div id="boot-plan" aria-hidden="true"></div>
+    <p class="boot__title">E7 House Designer</p>
+    <p id="boot-status">Loading…</p>
+  </div>
+</div>
+
+<script type="module" src="./src/ui/boot.js"></script>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

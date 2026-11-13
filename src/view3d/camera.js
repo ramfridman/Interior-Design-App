@@ -23,7 +23,7 @@ const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(pre
 const _v = new THREE.Vector3();
 
 /** Distance at which `box` fits the frustum when looked at from the spherical direction (theta, phi) around `target`. */
-function fitRadius(box, target, theta, phi, fovDeg, aspect, margin = 1.1) {
+export function fitRadius(box, target, theta, phi, fovDeg, aspect, margin = 1.1) {
   const dir = new THREE.Vector3().setFromSphericalCoords(1, Math.max(phi, 1e-4), theta);
   const right = new THREE.Vector3(Math.cos(theta), 0, -Math.sin(theta));
   const up = new THREE.Vector3().crossVectors(dir, right);
@@ -95,7 +95,7 @@ export function createOrbitRig({ camera, dom, plan, onChange }) {
   function presetPose(name) {
     if (name === 'aerial') {
       const d = streetDiagonal();
-      const theta = Math.atan2(d[0], d[1]), phi = THREE.MathUtils.degToRad(54), fov = 40;
+      const theta = Math.atan2(d[0], d[1]), phi = THREE.MathUtils.degToRad(57), fov = 40;
       const target = lotC.clone().setY(0);
       return { target, theta, phi, fov, radius: fitRadius(lotBox, target, theta, phi, fov, aspect(), 1.02) };
     }

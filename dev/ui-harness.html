@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>UI harness — E7 House Designer</title>
+<!--
+  DEV ONLY. Runs the whole UI without the real views or catalogue:
+    ?products=600|10|0|real   fixture catalogue size (default: real catalogue if it has products, else 120 fixtures)
+    ?views=stub|real          stub views (default) or the real src/view2d + src/view3d if they load
+    ?theme=light|dark  ?mode=2d|3d|walk|split  ?panel=inspector|budget|rooms|checks  ?select=N (select N items)
+    ?welcome=1  ?sandbox=1 (simulate the sandboxed viewer)  ?zone=outdoor
+  The shell markup is taken from ../index.html at load time so the two can never drift apart.
+-->
+<script type="importmap">
+{ "imports": { "three": "../vendor/three/three.module.min.js", "three/addons/": "../vendor/three/addons/" } }
+</script>
+<link rel="stylesheet" href="../src/styles/tokens.css">
+<link rel="stylesheet" href="../src/styles/base.css">
+<link rel="stylesheet" href="../src/styles/components.css">
+<link rel="stylesheet" href="../src/styles/layout.css">
+<link rel="stylesheet" href="../src/styles/panels.css">
+<link rel="stylesheet" href="../src/styles/print.css">
+</head>
+<body>
+<script type="module">
+const q = new URLSearchParams(location.search);
+if (q.get('sandbox')) window.APP_ENV = { sandboxed: true };
+if (q.get('theme')) document.documentElement.dataset.theme = q.get('theme');
+
+const shell = new DOMParser().parseFromString(await (await fetch('../index.html')).text(), 'text/html');
+for (const id of ['app', 'ui-layer', 'print-root']) document.body.append(document.adoptNode(shell.getElementById(id)));
+
+const { store } = await import('../src/core/store.js');
+const { PLAN } = await import('../src/core/plan.js');
+const { initialLayout } = await import('../src/core/initial-layout.js');
+const realCatalog = await import('../src/catalog/index.js');
+const models = await import('../src/models/index.js');
+const { makeFixtureCatalog } = await import('./ui-fixtures.js');
+const stubs = await import('./ui-stub-views.js');
+const prefs = await import('../src/ui/prefs.js');
+
+store.persist = false;
+await Promise.all([models.loadModels(), realCatalog.loadCatalog()]);
+store.load({ items: initialLayout() });
+
+const want = q.get('products');
+const catalog = want === 'real' || (want == null && realCatalog.allProducts().length) ? realCatalog : makeFixtureCatalog(realCatalog, want == null ? 120 : Number(want));
+const ctx = { store, plan: PLAN, catalog, models };
+
+let createView2D = stubs.createStubView2D, createView3D = stubs.createStubView3D;
+if (q.get('views') === 'real') {
+  try { ({ createView2D } = await import('../src/view2d/index.js')); } catch (e) { console.warn('real 2D view unavailable, using the stub'); }
+  try { ({ createView3D } = await import('../src/view3d/index.js')); } catch (e) { console.warn('real 3D view unavailable, using the stub'); }
+}
+if (q.get('theme')) prefs.setPref('theme', q.get('theme'));
+prefs.setPref('welcomed', !q.get('welcome'));
+if (q.get('zone')) store.setUI({ catalogZone: q.get('zone') });
+if (q.get('panel')) store.setUI({ rightPanel: q.get('panel') });
+
+const view2d = createView2D(document.getElementById('view2d'), ctx);
+const view3d = createView3D(document.getElementById('view3d'), ctx);
+const { initUI } = await import('../src/ui/index.js');
+const ui = initUI({ ...ctx, view2d, view3d });
+window.app = { store, plan: PLAN, catalog, models, view2d, view3d, ui, resetToArchitectLayout() { store.load({ items: initialLayout() }, { recordUndo: true }); } };
+
+if (q.get('mode')) store.setUI({ mode: q.get('mode') });
+if (q.get('select')) store.select(store.items.slice(20, 20 + Number(q.get('select'))).map((i) => i.id));
+document.documentElement.classList.add('app-ready');
+</script>
+</body>
+</html>

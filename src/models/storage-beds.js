@@ -12,12 +12,12 @@ import * as K from './kit.js';
 
 // ───────────────────────── constants ─────────────────────────
 const T = 0.018;      // carcass / front panel thickness
-const GAP = 0.003;    // reveal between fronts
+const GAP = 0.004;    // reveal between fronts
 const BACK = 0.006;   // back panel thickness
 const MATERIALS = ['fabric', 'leather', 'velvet', 'wood', 'metal', 'rattan', 'plastic', 'glass', 'stone', 'ceramic', 'concrete', 'laminate', 'lacquer', 'aluminium', 'teak', 'textile'];
 const SOFT = ['fabric', 'leather', 'velvet', 'textile'];
 const MUTED = ['#b9a48c', '#8c9a8b', '#cbbdaa', '#6f7f8f', '#ded6c9', '#a0725b', '#434a54', '#ece7de', '#9aa7ad', '#b88f7a', '#7d6f63'];
-const BOOKS = ['#e9e3d6', '#d9cdb8', '#b9a48c', '#8a9a86', '#5f7361', '#aab4b8', '#56667a', '#2f3640', '#c08a6a', '#a6553f', '#d2b25f', '#f3f0ea', '#77706a'];
+const BOOKS = ['#e9e3d6', '#d9cdb8', '#b9a48c', '#8a9a86', '#5f7361', '#aab4b8', '#56667a', '#2f3640', '#c08a6a', '#9c6250', '#cdb47a', '#f3f0ea', '#77706a'];
 const CERAMICS = ['#ebe5d9', '#c9b9a3', '#8a9a86', '#3f4650', '#c08a6a', '#f4f1ea'];
 const WHITE_LINEN = '#f4f1ea';
 
@@ -45,7 +45,7 @@ function hex(c, fallback) {
 }
 const _col = new THREE.Color();
 function hsl(c) { const o = { h: 0, s: 0, l: 0 }; _col.set(c).getHSL(o, THREE.SRGBColorSpace); return o; }
-const isNeutral = (c) => { const { s, l } = hsl(c); return s < 0.16 || l > 0.9 || l < 0.1; };
+const isNeutral = (c) => { const { s, l } = hsl(c); return s < 0.2 || l > 0.86 || l < 0.1; };
 const seeded = (item, type) => K.rng(K.hashStr((item && item.id) || type));
 const pickFrom = (rnd, list) => list[Math.min(list.length - 1, Math.floor(rnd() * list.length))];
 
@@ -116,7 +116,7 @@ function grainGeometry(w, h, d) {
     const axis = n.indexOf(Math.max(...n));
     const [a, b] = [0, 1, 2].filter((j) => j !== axis);
     const along = b === long ? b : a, across = b === long ? a : b;
-    U.setXY(i, p[along] / 0.9 + 0.31, p[across] / 0.5 + 0.17);
+    U.setXY(i, p[along] / 1.5 + 0.31, p[across] / 0.3 + 0.17);
   }
   _grain.set(k, g);
   return g;
@@ -155,11 +155,12 @@ class Batch {
   }
   box(w, h, d, color, x, y, z, rot = {}) { return this.add(_unitBox, color, x, y, z, { ...rot, sx: pos(w), sy: pos(h), sz: pos(d) }); }
   span(x0, x1, y0, y1, z0, z1, color) { return this.box(x1 - x0, y1 - y0, z1 - z0, color, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); }
-  /** Cylinder (axis Y unless rotated). taper = top radius / bottom radius. */
+  /** Cylinder (axis Y unless rotated). r may be [rx, rz]; taper = top radius / bottom radius. */
   cyl(r, h, color, x, y, z, rot = {}, taper = 1, seg = 10) {
     const k = `${seg}|${taper}`;
     if (!_unitCyl.has(k)) _unitCyl.set(k, new THREE.CylinderGeometry(taper, 1, 1, seg).toNonIndexed());
-    return this.add(_unitCyl.get(k), color, x, y, z, { ...rot, sx: pos(r), sy: pos(h), sz: pos(r) });
+    const [rx, rz] = Array.isArray(r) ? r : [r, r];
+    return this.add(_unitCyl.get(k), color, x, y, z, { ...rot, sx: pos(rx), sy: pos(h), sz: pos(rz) });
   }
   get empty() { return this.parts.length === 0; }
   mesh(material = batchMat()) {
@@ -180,7 +181,7 @@ const _pillow = new Map();
 function pillowGeometry(w, h, d) {
   const k = `${r3(w)}|${r3(h)}|${r3(d)}`;
   if (_pillow.has(k)) return _pillow.get(k);
-  const nx = 10, nz = 8, P = [], I = [];
+  const nx = 8, nz = 6, P = [], I = [];
   const prof = (s) => Math.pow(1 - Math.pow(Math.abs(s), 3.2), 0.55);
   for (let side = 0; side < 2; side++) {
     for (let iz = 0; iz <= nz; iz++) for (let ix = 0; ix <= nx; ix++) {
@@ -217,19 +218,30 @@ function prismZY(points, x0, x1, material) {
   return m;
 }
 
-/** Hanging garment silhouette added to a batch. plane 'zy' = hanging on a rail that runs along X; 'xy' = flat against a wall. */
-function garment(batch, { x, y, z, sw, len, t, color, flare = 0.92, plane = 'zy', hanger = true }) {
-  const hw = Math.max(0.03, sw / 2 - 0.012), n = Math.min(0.05, hw * 0.4), sh = 0.06;
-  const s = new THREE.Shape();
-  s.moveTo(-n, 0); s.lineTo(n, 0); s.lineTo(hw, -sh); s.lineTo(hw * flare, -len); s.lineTo(-hw * flare, -len); s.lineTo(-hw, -sh);
-  const geo = new THREE.ExtrudeGeometry(s, { depth: t * 0.5, bevelEnabled: true, bevelThickness: t * 0.25, bevelSize: 0.012, bevelSegments: 1, steps: 1, curveSegments: 1 });
-  geo.translate(0, -0.012, -t * 0.25);
+/**
+ * Hanging garment silhouette added to a batch. plane 'zy' = on a rail that runs along X; 'xy' = flat against a wall.
+ * `sleeves` gives a jacket outline (used where the garment is seen face-on).
+ */
+function garment(batch, { x, y, z, sw, len, t, color, flare = 0.92, plane = 'zy', hanger = true, sleeves = false }) {
+  const b = sleeves ? 0.008 : 0.012, s = new THREE.Shape();
+  if (sleeves && sw > 0.26) {
+    const hw = sw / 2 - b - 0.075, n = Math.min(0.06, hw * 0.5), sl = Math.min(len * 0.74, 0.6), bw = (hw - 0.045) * Math.max(1, flare);
+    const half = [[n, 0], [hw, -0.04], [hw + 0.075, -sl + 0.012], [hw, -sl], [hw - 0.045, -0.2], [bw, -len]];
+    s.moveTo(-n, 0);
+    half.forEach(([px, py]) => s.lineTo(px, py));
+    half.slice().reverse().forEach(([px, py]) => { if (px !== n) s.lineTo(-px, py); });
+  } else {
+    const hw = Math.max(0.03, sw / 2 - b), n = Math.min(0.055, hw * 0.4);
+    s.moveTo(-n, 0); s.lineTo(n, 0); s.lineTo(hw, -0.055); s.lineTo(hw * flare, -len); s.lineTo(-hw * flare, -len); s.lineTo(-hw, -0.055);
+  }
+  const geo = new THREE.ExtrudeGeometry(s, { depth: t * 0.5, bevelEnabled: true, bevelThickness: t * 0.25, bevelSize: b, bevelSegments: 1, steps: 1, curveSegments: 1 });
+  geo.translate(0, -b, -t * 0.25);
   if (plane === 'zy') geo.rotateY(Math.PI / 2);
   batch.add(geo, color, x, y, z);
   geo.dispose();
   if (hanger) {
-    if (plane === 'zy') batch.box(0.012, 0.012, sw * 0.8, '#b89b72', x, y + 0.004, z).box(0.004, 0.06, 0.004, '#8a8d90', x, y + 0.035, z);
-    else batch.box(sw * 0.8, 0.012, 0.012, '#b89b72', x, y + 0.004, z);
+    if (plane === 'zy') batch.box(0.012, 0.012, sw * 0.7, '#b89b72', x, y + 0.004, z).box(0.004, 0.06, 0.004, '#8a8d90', x, y + 0.035, z);
+    else batch.box(sw * 0.7, 0.012, 0.012, '#b89b72', x, y + 0.004, z);
   }
 }
 /** A pair of shoes, toes towards +Z. */
@@ -463,7 +475,8 @@ function addHandle(hb, kind, style, hp, colour, darkHex, { x0, x1, y0, y1, hinge
     }
     return;
   }
-  len = Math.min(len, (horizontal ? cw : ch) - 0.02);
+  len = clamp(Math.min(len, (horizontal ? cw : ch) - 0.02), 0.01, 0.4);
+  if (!horizontal) yc = clamp(yc, y0 + len / 2, Math.max(y0 + len / 2, y1 - len / 2));
   const zb = zf + hp - 0.0045, off = len / 2 - 0.014, so = hp - 0.009;
   if (horizontal) {
     hb.box(len, 0.009, 0.009, colour, cx, yc, zb);
@@ -497,7 +510,7 @@ function buildCabinet({ w, d, h, p }) {
   const hp = fronts ? o.hp : 0;
   const zBack = -d / 2, zFace = fronts ? d / 2 - Math.max(hp, o.ov) : d / 2;
   const tf = Math.min(T, d * 0.2);
-  const zc = fronts ? zFace - tf - GAP : zFace - o.ov;
+  const zc = fronts ? zFace - tf - 0.002 : zFace - o.ov;
   const pt = Math.min(T, wc * 0.2, (yT - yB) * 0.2);
   const m = o.carcass;
   g.add(span(-wc / 2, -wc / 2 + pt, yB, yT, zBack, zc, m), span(wc / 2 - pt, wc / 2, yB, yT, zBack, zc, m),
@@ -529,7 +542,7 @@ function buildCabinet({ w, d, h, p }) {
     const f = { x0: x0 + GAP / 2, x1: x1 - GAP / 2, y0: y0 + GAP / 2, y1: y1 - GAP / 2, hinge: c.hinge };
     if (seeThrough) framedFront(g, f.x0, f.x1, f.y0, f.y1, zFace - tf, zFace, o.body, K.glass());
     else {
-      g.add(span(x0, x1, y0, y1, zc, zc + GAP - 0.001, dark));
+      g.add(span(x0, x1, y0, y1, zc, zc + 0.001, dark));
       if (o.cane) framedFront(g, f.x0, f.x1, f.y0, f.y1, zFace - tf, zFace, o.body, caneMat());
       else g.add(span(f.x0, f.x1, f.y0, f.y1, zFace - tf, zFace, o.body));
     }
@@ -555,11 +568,11 @@ function drawCabinet(ctx, { w, d, h, p, px }) {
     for (const c of base) {
       const x1 = -w / 2 + o.ov * 100 + c.x1 * 100, x0 = -w / 2 + o.ov * 100 + c.x0 * 100;
       if (x1 < w / 2 - 1) K.line(ctx, x1, yf - ft, x1, yf, K.INK, px * 0.8);
-      if (c.kind === 'open') { ctx.fillStyle = K.tint(o.bodyHex, 0.75); ctx.fillRect(x0 + 1.8, yf - ft - px, x1 - x0 - 3.6, ft + px); }
       if (hp && c.kind !== 'open' && d / px > 30) {
-        const len = c.kind === 'door' ? 1 : Math.min(18, (x1 - x0) * 0.3);
+        const len = c.kind === 'door' ? 0.9 : Math.min(18, (x1 - x0) * 0.3);
         const xc = c.kind === 'door' ? (c.hinge === 'l' ? x1 - 4 : x0 + 4) : (x0 + x1) / 2;
-        rect2(ctx, xc - len / 2, yf, xc + len / 2, d / 2, K.tint(o.handleHex, 0.2), K.INK, px * 0.6);
+        rect2(ctx, xc - len / 2, yf + hp * 0.55, xc + len / 2, d / 2, K.tint(o.handleHex, 0.2), K.INK, px * 0.6);
+        if (c.kind !== 'door') for (const s of [-1, 1]) K.line(ctx, xc + s * (len / 2 - 1.2), yf, xc + s * (len / 2 - 1.2), yf + hp * 0.55, K.INK, px * 0.8);
       }
     }
   }
@@ -644,7 +657,7 @@ function openWardrobe(g, w, d, h, o, rnd) {
       if (rnd() < 0.14) continue;
       const len = Math.min(room, kind === 'short' ? 0.55 + rnd() * 0.22 : 0.8 + rnd() * 0.5);
       if (len < 0.2) break;
-      garment(cloth, { x: x0 + 0.05 + ((bw - 0.1) * (j + 0.5)) / count, y: yRail - 0.062, z: zc, sw: sw * (0.9 + rnd() * 0.1), len, t: 0.03 + rnd() * 0.02, color: pickFrom(rnd, MUTED), flare: 0.86 + rnd() * 0.2 });
+      garment(cloth, { x: x0 + 0.05 + ((bw - 0.1) * (j + 0.5)) / count, y: yRail - 0.062, z: zc, sw: sw * (0.9 + rnd() * 0.1), len, t: 0.03 + rnd() * 0.02, color: pickFrom(rnd, MUTED), flare: 0.86 + rnd() * 0.2, sleeves: j === 0 || j === count - 1 });
     }
     if (kind === 'hang' && room > 1.2) for (let s = 0; s < Math.min(3, Math.floor(bw / 0.26)); s++) shoePair(cloth, rnd, x0 + 0.14 + s * 0.26, yLo, zF - 0.06 - Math.min(0.27, d - 0.1) / 2, Math.min(0.27, d - 0.1), pickFrom(rnd, ['#3f4650', '#a0725b', '#ece7de', '#7d6f63']));
   }
@@ -711,10 +724,10 @@ function drawWardrobe(ctx, { w, d, h, p, px }) {
     K.line(ctx, w / 2 - 1.8, -d / 2, w / 2 - 1.8, yf - ft, K.INK_SOFT, px * 0.8);
     K.line(ctx, -w / 2 + 1.8, -d / 2 + 0.8, w / 2 - 1.8, -d / 2 + 0.8, K.INK_SOFT, px * 0.8);
     // hanging rail with hangers
-    const yr = -hp / 2 - ft / 2, x0 = -w / 2 + 4, x1 = w / 2 - 4, hl = Math.min(22, d * 0.36);
+    const yr = -hp / 2 - ft / 2, x0 = -w / 2 + 4, x1 = w / 2 - 4, hl = Math.min(19, d * 0.3);
     const hang = (a, b) => {
       dashed(ctx, [Math.max(9, 5 * px), Math.max(3, 2 * px), Math.max(1.5, px), Math.max(3, 2 * px)], () => K.line(ctx, a, yr, b, yr, K.INK, px));
-      if (w / px > 90) { const n = Math.floor((b - a) / 7); for (let i = 0; i < n; i++) { const x = a + 3.5 + i * 7, s = (i % 3) - 1; K.line(ctx, x - s * 1.6, yr - hl, x + s * 1.6, yr + hl, K.INK_SOFT, px * 0.8); } }
+      if (w / px > 90) { const n = Math.floor((b - a) / 11); for (let i = 0; i < n; i++) { const x = a + ((b - a) * (i + 0.5)) / n, s = ((i * 7) % 5) - 2; K.line(ctx, x - s * 0.9, yr - hl, x + s * 0.9, yr + hl, K.INK_SOFT, px * 0.8); } }
     };
     if (o.open) {
       for (let i = 0; i < o.bays; i++) {
@@ -762,8 +775,8 @@ function fillShelves(batch, comps, rnd) {
   };
   for (const c of comps) {
     const cw = c.x1 - c.x0, ch = c.y1 - c.y0, cd = c.z1 - c.z0;
-    if (cw < 0.12 || ch < 0.1 || cd < 0.09) continue;
-    const r = rnd(), zf = c.z1 - 0.018;
+    if (cw < 0.12 || ch < 0.1 || cd < 0.14) continue;
+    const r = rnd(), zf = c.z1 - 0.018, zo = Math.max(zf - 0.07, c.z0 + 0.06);
     if (r < 0.1) continue;
     if (c.bin && r < 0.36) {
       const col = pickFrom(rnd, ['#d9d0c1', '#b9b2a6', '#8f9aa0', '#c5ae93']);
@@ -780,24 +793,25 @@ function fillShelves(batch, comps, rnd) {
       }
       if (rnd() < 0.55 && cw - x > 0.1) {   // one book leaning against the row
         const a = 0.22, t = 0.022, bh = Math.min(base * 0.95, ch - 0.03), off = x + t / 2 + Math.sin(a) * bh / 2 + 0.004;
-        batch.box(t, bh, Math.min(cd - 0.03, 0.15), pickFrom(rnd, BOOKS), side > 0 ? c.x0 + off : c.x1 - off, c.y0 + (Math.cos(a) * bh) / 2 + (Math.sin(a) * t) / 2, zf - 0.08, { rz: side * a });
+        batch.box(t, bh, Math.min(cd - 0.03, 0.15), pickFrom(rnd, BOOKS), side > 0 ? c.x0 + off : c.x1 - off, c.y0 + (Math.cos(a) * bh) / 2 + (Math.sin(a) * t) / 2, zf - Math.min(cd - 0.03, 0.15) / 2, { rz: side * a });
         x = off + 0.06;
       }
-      if (cw - x > 0.16 && rnd() < 0.6) vase(side > 0 ? c.x1 - 0.07 : c.x0 + 0.07, c.y0, zf - 0.07, ch - 0.04);
+      if (cw - x > 0.16 && rnd() < 0.6) vase(side > 0 ? c.x1 - 0.07 : c.x0 + 0.07, c.y0, zo, ch - 0.04);
     } else if (r < 0.84) {
       const sx = c.x0 + cw * (0.3 + rnd() * 0.15);
       let top = c.y0;
       for (let i = 0, n = 2 + Math.floor(rnd() * 3); i < n && books > 0 && top + 0.04 < c.y1 - 0.02; i++, books--) {
         const t = 0.018 + rnd() * 0.02;
-        batch.box(Math.min(cw - 0.03, 0.19 + rnd() * 0.05), t, Math.min(cd - 0.035, 0.14 + rnd() * 0.03), pickFrom(rnd, BOOKS), sx, top + t / 2, zf - 0.09, { ry: (rnd() - 0.5) * 0.12 });
+        const sd = Math.min(cd - 0.05, 0.14 + rnd() * 0.03);
+        batch.box(Math.min(cw - 0.03, 0.19 + rnd() * 0.05), t, sd, pickFrom(rnd, BOOKS), sx, top + t / 2, zf - 0.012 - sd / 2, { ry: (rnd() - 0.5) * 0.12 });
         top += t;
       }
-      if (cw > 0.36) vase(c.x1 - 0.09, c.y0, zf - 0.07, ch - 0.04);
-    } else if (r < 0.92 || ch < 0.2) vase(c.x0 + cw * (0.35 + rnd() * 0.3), c.y0, zf - 0.07, ch - 0.04);
+      if (cw > 0.36) vase(c.x1 - 0.09, c.y0, zo, ch - 0.04);
+    } else if (r < 0.92 || ch < 0.2) vase(c.x0 + cw * (0.35 + rnd() * 0.3), c.y0, zo, ch - 0.04);
     else {   // potted plant
-      const x = c.x0 + cw * (0.35 + rnd() * 0.3), ph = Math.min(0.09, ch * 0.3), fr = Math.min(0.075, (ch - ph) * 0.45, cd * 0.3);
-      batch.cyl(0.045, ph, pickFrom(rnd, CERAMICS), x, c.y0 + ph / 2, zf - 0.07, {}, 1.2, 12);
-      batch.add(_ico, '#6f8a66', x, c.y0 + ph + fr * 0.8, zf - 0.07, { sx: fr, sy: fr, sz: fr, ry: rnd() * 3 });
+      const x = c.x0 + cw * (0.35 + rnd() * 0.3), ph = Math.min(0.09, ch * 0.3), fr = Math.min(0.075, (ch - ph) * 0.45, 0.055);
+      batch.cyl(0.045, ph, pickFrom(rnd, CERAMICS), x, c.y0 + ph / 2, zo, {}, 1.2, 12);
+      batch.add(_ico, '#6f8a66', x, c.y0 + ph + fr * 0.8, zo, { sx: fr, sy: fr, sz: fr, ry: rnd() * 3 });
     }
   }
 }
@@ -908,7 +922,7 @@ function shelfOptions(w, d, h, p) {
   let variant = oneOf(p.variant, ['floating', 'bracket', 'box', 'pegboard'], 'floating');
   if (variant === 'floating' && flag(p.brackets)) variant = 'bracket';
   const single = h <= 0.085;
-  const n = int(p.shelves, 0, 1, 12) || (variant === 'box' ? Math.max(1, Math.round(h / 0.32)) : single ? 1 : Math.max(2, Math.round(h / 0.34) + 1));
+  const n = int(p.shelves, 0, 1, 12) || (variant === 'box' ? Math.max(1, Math.round(h / 0.32)) : single || (variant === 'bracket' && h <= 0.32) ? 1 : Math.max(2, Math.round(h / 0.34) + 1));
   return { variant, n: variant === 'floating' && !single ? Math.max(2, n) : n, single, bodyHex: hex(p.color, variant === 'pegboard' ? '#e6d5b8' : '#c8a476'),
     body: finish(p.material, p.color, variant === 'pegboard' ? '#e6d5b8' : '#c8a476'), metalHex: hex(p.color2, '#26282b') };
 }
@@ -1019,18 +1033,20 @@ function dressBed(g, m, o) {
   const len = m.z1 - m.z0, td = 0.055, white = K.fabric(WHITE_LINEN);
   const zFold = m.z0 + clamp(len * 0.34, 0.24, 0.74);
   const half = Math.min(m.hw + 0.02, m.maxHalf), zEnd = Math.min(m.z1 + 0.012, m.zMax), dh = td + m.drop;
-  g.add(K.rbox(half * 2, dh, zEnd - zFold, K.fabric(o.bedding), 0, m.top + td - dh / 2, (zFold + zEnd) / 2, 0.04));
+  g.add(K.rbox(half * 2, dh, zEnd - zFold, K.fabric(o.bedding), 0, m.top + td - dh / 2, (zFold + zEnd) / 2, 0.055, 3));
   const fl = Math.min(0.24, len * 0.14), fh = td + 0.022 + m.drop * 0.9, fhalf = Math.min(half + 0.007, m.maxHalf);
-  g.add(K.rbox(fhalf * 2, fh, fl, K.fabric(o.foldHex), 0, m.top + td + 0.022 - fh / 2, zFold + fl / 2 - 0.02, 0.035));
+  g.add(K.rbox(fhalf * 2, fh, fl, K.fabric(o.foldHex), 0, m.top + td + 0.022 - fh / 2, zFold + fl / 2 - 0.02, 0.035, 2));
   if (o.throwHex && len > 1.5) {
     const tl = Math.min(0.5, len * 0.24), th = td + 0.016 + m.drop * 0.8, thalf = Math.min(half + 0.012, m.maxHalf);
-    g.add(K.rbox(thalf * 2, th, tl, K.fabric(o.throwHex), 0, m.top + td + 0.016 - th / 2, zEnd - 0.14 - tl / 2, 0.03));
+    g.add(K.rbox(thalf * 2, th, tl, K.fabric(o.throwHex), 0, m.top + td + 0.016 - th / 2, zEnd - 0.14 - tl / 2, 0.03, 2));
   }
   const mw = m.hw * 2, per = mw < 1.15 ? 1 : mw > 2.3 ? 3 : 2, zone = zFold - 0.02 - m.z0, slot = (mw - 0.04) / per;
   for (let left = o.pillows, row = 0; left > 0 && row < 3; row++) {
     const k = Math.min(left, per), accent = row > 0;
     const pw = Math.min(accent ? 0.58 : 0.72, slot - 0.03), pd = Math.min(accent ? 0.4 : 0.46, zone * 0.8), ph = accent ? 0.12 : o.ph || 0.13;
-    const lean = m.lean ? (row === 0 ? 0.42 : 0.72) : 0;
+    let lean = m.lean ? (row === 0 ? 0.42 : 0.72) : 0;
+    if (m.lean && m.maxY != null) lean = Math.min(lean, Math.asin(clamp((m.maxY - m.top - ph) / pd, 0, 1)));
+    if (m.lean && row > 0 && lean < 0.3) break;
     const zc = m.lean ? m.z0 + 0.035 + (pd / 2) * Math.cos(lean) + row * 0.15 : m.z0 + 0.03 + pd / 2 + row * (pd + 0.02);
     if (!m.lean && row > 0 && zc + pd / 2 > zFold + 0.04) break;
     const yc = m.top + ph / 2 + (pd / 2) * Math.sin(lean) * 0.92;
@@ -1043,9 +1059,9 @@ function headboard(g, o, w, h, y0, zo, style) {
   const xo = w / 2, z0 = -zo, z1 = -zo + o.thb, f = o.frame;
   if (o.hbKind === 'upholstered') {
     if (style === 'classic') {
-      const n = Math.max(3, Math.round(w / 0.17));
+      const n = Math.max(3, Math.round(w / 0.2));
       for (let i = 0; i < n; i++) g.add(K.rbox(w / n, h - y0, o.thb, f, -xo + (w * (i + 0.5)) / n, (y0 + h) / 2, (z0 + z1) / 2, 0.028, 1));
-    } else g.add(K.rbox(w, h - y0, o.thb, f, 0, (y0 + h) / 2, (z0 + z1) / 2, 0.03));
+    } else g.add(K.rbox(w, h - y0, o.thb, f, 0, (y0 + h) / 2, (z0 + z1) / 2, 0.03, 2));
   } else if (o.hbKind === 'wood') g.add(span(-xo, xo, y0, h, z0, z1, f));
   else if (o.hbKind === 'rattan') {
     const yp = Math.min(h - 0.2, Math.max(y0, o.mBot));
@@ -1080,9 +1096,9 @@ function bedCore(w, d, h, p, variant) {
   if (o.platform) g.add(span(-xo, xo, y0, o.mBot, zr0, zo, f));
   else if (o.soft) {
     const mid = (y0 + y1) / 2;
-    for (const s of [-1, 1]) g.add(K.rbox(tr, y1 - y0, zo - zr0, f, s * (xo - tr / 2), mid, (zr0 + zo) / 2, 0.02, 2));
-    g.add(K.rbox(w, y1 - y0, tr, f, 0, mid, zo - tr / 2, 0.02, 2));
-    if (none) g.add(K.rbox(w, y1 - y0, tr, f, 0, mid, -zo + tr / 2, 0.02, 2));
+    for (const s of [-1, 1]) g.add(K.rbox(tr, y1 - y0, zo - zr0, f, s * (xo - tr / 2), mid, (zr0 + zo) / 2, 0.02, 1));
+    g.add(K.rbox(w, y1 - y0, tr, f, 0, mid, zo - tr / 2, 0.02, 1));
+    if (none) g.add(K.rbox(w, y1 - y0, tr, f, 0, mid, -zo + tr / 2, 0.02, 1));
   } else {
     const ya = o.metalFrame ? o.mBot - 0.045 : y0, yb = o.metalFrame ? o.mBot : y1;
     for (const s of [-1, 1]) {
@@ -1107,8 +1123,8 @@ function bedCore(w, d, h, p, variant) {
       if (w >= 1.4) g.add(metal ? K.cylOn(0.013, 0.013, o.legH, lm, 0, 0, 0, 10) : K.cylOn(0.022, 0.016, o.legH, lm, 0, 0, 0, 12));
     }
   }
-  g.add(K.rbox(o.hw * 2, o.mh, o.z1 - o.z0, K.fabric(WHITE_LINEN), 0, o.mBot + o.mh / 2, (o.z0 + o.z1) / 2, 0.035));
-  dressBed(g, { hw: o.hw, z0: o.z0, z1: o.z1, top: o.mTop, drop: o.platform || o.metalFrame ? o.mh * 0.7 : clamp(o.mh - o.sink - 0.015, 0.02, 0.17), lean: !none,
+  g.add(K.rbox(o.hw * 2, o.mh, o.z1 - o.z0, K.fabric(WHITE_LINEN), 0, o.mBot + o.mh / 2, (o.z0 + o.z1) / 2, 0.035, 2));
+  dressBed(g, { hw: o.hw, z0: o.z0, z1: o.z1, top: o.mTop, drop: o.platform || o.metalFrame ? o.mh * 0.7 : clamp(o.mh - o.sink - 0.015, 0.02, 0.17), lean: !none, maxY: h - 0.004,
     maxHalf: xo - 0.002, zMax: o.youth ? o.z1 + 0.003 : zo - (o.platform ? 0.01 : tr * 0.4) }, o);
   hb.into(g, batchMat(0.9));
   return g;
@@ -1124,12 +1140,13 @@ function lounge(W, D, h, p, sofa) {
     g.add(span(-xo + 0.02, xo - 0.02, legH, legH + 0.05, -zo + 0.02, zo - 0.03, K.mat(K.shade(cHex, -0.45), { roughness: 0.9 })));
     for (let i = 0; i < n; i++) {
       const x = -xo + (W * (i + 0.5)) / n;
-      g.add(K.rbox(W / n, seatTop - legH - 0.04, D - bt * 0.5, f, x, (legH + 0.04 + seatTop) / 2, bt * 0.25, 0.05));
-      g.add(K.rbox(W / n, h - seatTop + 0.07, bt, f, x, (seatTop - 0.07 + h) / 2, -zo + bt / 2, 0.06));
+      g.add(K.rbox(W / n, seatTop - legH - 0.04, D - bt * 0.5, f, x, (legH + 0.04 + seatTop) / 2, bt * 0.25, 0.05, 2));
+      g.add(K.rbox(W / n, h - seatTop + 0.07, bt, f, x, (seatTop - 0.07 + h) / 2, -zo + bt / 2, 0.06, 2));
     }
     if (p.legs !== 'none') for (const x of W > 1.6 ? [-xo + 0.08, 0, xo - 0.08] : [-xo + 0.08, xo - 0.08]) for (const z of [-zo + 0.08, zo - 0.09]) g.add(K.cylOn(0.02, 0.014, legH, lm, x, 0, z, 12));
     const acc = K.fabric(hex(p.color3, '#c9b8a2'));
-    for (const s of [-1, 1]) g.add(pillow(0.44, 0.13, 0.44, acc, s * (xo - 0.27), seatTop + 0.2, -zo + bt + 0.09, 1.2));
+    const cs = Math.min(0.44, (h - seatTop - 0.05) / 0.93, W * 0.3);
+    for (const s of [-1, 1]) g.add(pillow(cs, 0.13, cs, acc, s * (xo - cs * 0.62), seatTop + cs * 0.47 + 0.02, -zo + bt + 0.09, 1.2));
     return g;
   }
   const fHex = hex(p.color, '#f1eee8'), f = finish(oneOf(p.material, SOFT, null) ? null : p.material, p.color, '#f1eee8');
@@ -1155,9 +1172,9 @@ function lounge(W, D, h, p, sofa) {
   }
   sl.into(g, batchMat(0.55));
   const mx = xo - rt - 0.004, mz0 = -zo + rt + 0.004, mz1 = zo - rt - 0.004;
-  g.add(K.rbox(mx * 2, mh, mz1 - mz0, K.fabric(hex(p.bedding, '#e6e0d4')), 0, mBot + mh / 2, (mz0 + mz1) / 2, 0.04));
+  g.add(K.rbox(mx * 2, mh, mz1 - mz0, K.fabric(hex(p.bedding, '#e6e0d4')), 0, mBot + mh / 2, (mz0 + mz1) / 2, 0.04, 2));
   const k = clamp(Math.round(W / 0.62), 2, 4), cols = [hex(p.color3, '#b9a48c'), '#8c9a8b', WHITE_LINEN, '#cbbdaa'];
-  const cw = Math.min(0.56, (mx * 2 - 0.1) / k - 0.02), ch = Math.min(0.44, (cap - mTop) * 1.1, D * 0.5);
+  const cw = Math.min(0.56, (mx * 2 - 0.1) / k - 0.02), ch = Math.min(0.44, (h - mTop - 0.05) / 0.92, D * 0.5);
   for (let i = 0; i < k; i++) g.add(pillow(cw, 0.14, ch, K.fabric(cols[i % cols.length]), (i - (k - 1) / 2) * ((mx * 2 - 0.1) / k), mTop + ch * 0.45 + 0.02, mz0 + 0.13, 1.15));
   g.add(K.rbox(Math.min(0.5, W * 0.25), 0.03, mz1 - mz0 + 0.004, K.fabric(hex(p.color3, '#a89a8a')), mx - Math.min(0.5, W * 0.25) / 2 - 0.06, mTop + 0.012, (mz0 + mz1) / 2, 0.012));
   return g;
@@ -1204,7 +1221,7 @@ function bedding2d(ctx, px, hw, y0, y1, o) {
   K.line(ctx, x0, yb, x1 - c, yb, K.INK_SOFT, px);
   if (o.throwHex && len > 150) {
     const tl = Math.min(50, len * 0.24);
-    rect2(ctx, x0, ye - 14 - tl, x1, ye - 14, K.tint(o.throwHex, 0.35), K.INK_SOFT, px * 0.8);
+    rect2(ctx, x0, ye - 14 - tl, x1, ye - 14, K.tint(o.throwHex, 0.6), K.INK_SOFT, px * 0.8);
   }
 }
 
@@ -1224,9 +1241,9 @@ function drawLounge(ctx, w, d, p, px, sofa) {
   K.fillRR(ctx, 0, 0, w - 2 * rt, d - 2 * rt, 4, K.tint(hex(p.bedding, '#e6e0d4'), 0.4), K.INK, px * 0.8);
   if (w / px < 30) return;
   const k = clamp(Math.round(w / 62), 2, 4), cols = [hex(p.color3, '#b9a48c'), '#8c9a8b', WHITE_LINEN, '#cbbdaa'], cw = Math.min(56, (w - 16) / k - 2);
-  for (let i = 0; i < k; i++) K.fillRR(ctx, (i - (k - 1) / 2) * ((w - 16) / k), -d / 2 + rt + 11, cw, 18, 6, K.tint(cols[i % 4], 0.35), K.INK, px * 0.8);
   const tw = Math.min(50, w * 0.25);
-  rect2(ctx, w / 2 - rt - 6 - tw, -d / 2 + rt, w / 2 - rt - 6, d / 2 - rt, K.tint(hex(p.color3, '#a89a8a'), 0.35), K.INK_SOFT, px * 0.8);
+  rect2(ctx, w / 2 - rt - 6 - tw, -d / 2 + rt, w / 2 - rt - 6, d / 2 - rt, K.tint(hex(p.color3, '#a89a8a'), 0.6), K.INK_SOFT, px * 0.8);
+  for (let i = 0; i < k; i++) K.fillRR(ctx, (i - (k - 1) / 2) * ((w - 16) / k), -d / 2 + rt + 11, cw, 18, 6, K.tint(cols[i % 4], 0.35), K.INK, px * 0.8);
 }
 
 function drawBed(ctx, { w, d, h, p, px }) {
@@ -1255,14 +1272,15 @@ function bunkOptions(p) {
   return { variant: oneOf(p.variant, ['bunk', 'loft', 'trundle'], 'bunk'), side: oneOf(p.ladder, ['left', 'right', 'front'], 'right'),
     fHex: hex(p.color, '#e3cfa8'), bed1: hex(p.bedding, '#c9d5dc'), bed2: hex(p.color3, '#e2cfc0') };
 }
-function bunkCore(W, L, h, p) {
+/** W = short side, L = long side. `rotated`: the long side faces the front, so ladder / trundle move to it. */
+function bunkCore(W, L, h, p, rotated = false) {
   const g = new THREE.Group(), o = bunkOptions(p), f = finish(p.material, p.color, '#e3cfa8');
   const xo = W / 2, zo = L / 2, t = 0.022;
   const dress = (hw, z0, z1, top, bedding) => {
     dressBed(g, { hw, z0, z1, top, drop: 0.03, lean: false, maxHalf: hw + 0.004, zMax: z1 }, { bedding, foldHex: K.shade(bedding, 0.45), accent: '#ffffff', pillows: 1, throwHex: null, ph: 0.1 });
   };
   if (o.variant === 'trundle') {
-    const pt = 0.03, mTop = clamp(h * 0.55, 0.3, 0.52), mh = 0.16, mBot = mTop - mh, s = o.side === 'left' ? -1 : 1, hb = new Batch(), darkHex = K.shade(o.fHex, -0.65);
+    const pt = 0.03, mTop = clamp(h * 0.55, 0.3, 0.52), mh = 0.16, mBot = mTop - mh, s = rotated || o.side === 'left' ? -1 : 1, hb = new Batch(), darkHex = K.shade(o.fHex, -0.65);
     g.add(span(-xo, xo, 0, h, -zo, -zo + pt, f), span(-xo, xo, 0, Math.max(mTop + 0.06, h * 0.62), zo - pt, zo, f));
     for (const sx of [-1, 1]) g.add(span(sx > 0 ? xo - t : -xo, sx > 0 ? xo : -xo + t, mBot - 0.1, mBot + 0.05, -zo + pt, zo - pt, f));
     const ty = Math.max(0.05, mBot - 0.11);
@@ -1271,8 +1289,8 @@ function bunkCore(W, L, h, p) {
     for (const z of [-L * 0.2, L * 0.2]) hb.box(0.002, 0.022, 0.13, darkHex, s * (xo - 0.0006), ty - 0.035, z);
     hb.into(g, batchMat(0.9));
     const hw = xo - t - 0.006;
-    g.add(K.rbox(hw * 2, mh, L - 2 * pt - 0.012, K.fabric(WHITE_LINEN), 0, mBot + mh / 2, 0, 0.03));
-    dressBed(g, { hw, z0: -zo + pt + 0.006, z1: zo - pt - 0.006, top: mTop, drop: 0.06, lean: true, maxHalf: xo - 0.002, zMax: zo - pt - 0.004 },
+    g.add(K.rbox(hw * 2, mh, L - 2 * pt - 0.012, K.fabric(WHITE_LINEN), 0, mBot + mh / 2, 0, 0.03, 2));
+    dressBed(g, { hw, z0: -zo + pt + 0.006, z1: zo - pt - 0.006, top: mTop, drop: 0.06, lean: true, maxY: h - 0.004, maxHalf: xo - 0.002, zMax: zo - pt - 0.004 },
       { bedding: o.bed1, foldHex: K.shade(o.bed1, 0.45), accent: o.bed2, pillows: 2, throwHex: null });
     return g;
   }
@@ -1283,17 +1301,17 @@ function bunkCore(W, L, h, p) {
   const level = (yTop, bedding) => {
     for (const s of [-1, 1]) { sideX(s, yTop - 0.15, yTop, -zo + P, zo - P); endZ(s, yTop - 0.15, yTop, -xo + P, xo - P); }
     const hw = xo - P + 0.005;
-    g.add(K.rbox(hw * 2, 0.13, L - 2 * P + 0.01, K.fabric(WHITE_LINEN), 0, yTop - 0.025, 0, 0.03));
+    g.add(K.rbox(hw * 2, 0.13, L - 2 * P + 0.01, K.fabric(WHITE_LINEN), 0, yTop - 0.025, 0, 0.03, 2));
     dress(hw - 0.01, -zo + P, zo - P, yTop + 0.04, bedding);
   };
   level(yU, o.bed1);
   // guard rails and ladder
-  const lw = Math.min(0.38, L * 0.25), front = o.side === 'front', ls = o.side === 'left' ? -1 : 1;
+  const lw = Math.min(0.38, L * 0.25), front = o.side === 'front' && !rotated, ls = rotated || o.side === 'left' ? -1 : 1, end = rotated && o.side === 'left' ? -1 : 1;
   const slats = [[gTop - 0.07, gTop]];
   if (gTop - 0.07 - yU > 0.15) slats.push([(yU + gTop - 0.07) / 2 - 0.03, (yU + gTop - 0.07) / 2 + 0.03]);
-  const zl1 = zo - P - 0.04, zl0 = zl1 - lw, xl1 = xo - P - 0.04, xl0 = xl1 - lw;
+  const zl1 = end > 0 ? zo - P - 0.04 : -zo + P + 0.04 + lw, zl0 = zl1 - lw, xl1 = xo - P - 0.04, xl0 = xl1 - lw;
   for (const [a, b] of slats) {
-    for (const s of [-1, 1]) sideX(s, a, b, -zo + P, !front && s === ls ? zl0 : zo - P);
+    for (const s of [-1, 1]) sideX(s, a, b, !front && s === ls && end < 0 ? zl1 : -zo + P, !front && s === ls && end > 0 ? zl0 : zo - P);
     endZ(-1, a, b, -xo + P, xo - P);
     endZ(1, a, b, -xo + P, front ? xl0 : xo - P);
   }
@@ -1319,20 +1337,21 @@ function bunkCore(W, L, h, p) {
   } else for (const s of [-1, 1]) endZ(s, 0.3, 0.38, -xo + P, xo - P);
   return g;
 }
-function buildBunk({ w, d, h, p }) { return w > d * 1.05 ? turned(bunkCore(d, w, h, p)) : bunkCore(w, d, h, p); }
+function buildBunk({ w, d, h, p }) { return w > d * 1.05 ? turned(bunkCore(d, w, h, p, true)) : bunkCore(w, d, h, p); }
 
 function drawBunk(ctx, { w, d, p, px }) {
-  if (w > d * 1.05) { ctx.rotate(-Math.PI / 2); [w, d] = [d, w]; }
+  const rotated = w > d * 1.05;
+  if (rotated) { ctx.rotate(-Math.PI / 2); [w, d] = [d, w]; }
   const o = bunkOptions(p), tr = o.variant === 'trundle', P = tr ? 3 : 5;
   rect2(ctx, -w / 2, -d / 2, w / 2, d / 2, K.tint(o.fHex, 0.45), K.INK, px);
   if (tr) rect2(ctx, -w / 2, -d / 2, w / 2, -d / 2 + 3, K.tint(o.fHex, 0.2), K.INK, px);
   else for (const sx of [-1, 1]) for (const sz of [-1, 1]) rect2(ctx, sx > 0 ? w / 2 - P : -w / 2, sz > 0 ? d / 2 - P : -d / 2, sx > 0 ? w / 2 : -w / 2 + P, sz > 0 ? d / 2 : -d / 2 + P, K.tint(o.fHex, 0.2), K.INK, px * 0.8);
   bedding2d(ctx, px, w / 2 - (tr ? 3 : P - 0.5), -d / 2 + P, d / 2 - P, { pillows: tr ? 2 : 1, bedding: o.bed1, foldHex: K.shade(o.bed1, 0.45), accent: o.bed2, throwHex: null });
   if (w / px < 24) return;
-  if (tr) { const s = o.side === 'left' ? -1 : 1; dashed(ctx, [5 * px, 3 * px], () => K.line(ctx, s * (w / 2 - 2.2), -d / 2 + 6, s * (w / 2 - 2.2), d / 2 - 6, K.INK, px)); return; }
+  if (tr) { const s = rotated || o.side === 'left' ? -1 : 1; dashed(ctx, [5 * px, 3 * px], () => K.line(ctx, s * (w / 2 - 2.2), -d / 2 + 6, s * (w / 2 - 2.2), d / 2 - 6, K.INK, px)); return; }
   const lw = Math.min(38, d * 0.25);
-  if (o.side === 'front') { const x1 = w / 2 - P - 4; rect2(ctx, x1 - lw, d / 2 - 3, x1, d / 2, '#ffffff', K.INK, px); for (let i = 1; i < 4; i++) K.line(ctx, x1 - (lw * i) / 4, d / 2 - 3, x1 - (lw * i) / 4, d / 2, K.INK, px * 0.8); }
-  else { const s = o.side === 'left' ? -1 : 1, z1 = d / 2 - P - 4, xa = s > 0 ? w / 2 - 3 : -w / 2; rect2(ctx, xa, z1 - lw, xa + 3, z1, '#ffffff', K.INK, px); for (let i = 1; i < 4; i++) K.line(ctx, xa, z1 - (lw * i) / 4, xa + 3, z1 - (lw * i) / 4, K.INK, px * 0.8); }
+  if (o.side === 'front' && !rotated) { const x1 = w / 2 - P - 4; rect2(ctx, x1 - lw, d / 2 - 3, x1, d / 2, '#ffffff', K.INK, px); for (let i = 1; i < 4; i++) K.line(ctx, x1 - (lw * i) / 4, d / 2 - 3, x1 - (lw * i) / 4, d / 2, K.INK, px * 0.8); }
+  else { const s = rotated || o.side === 'left' ? -1 : 1, z1 = rotated && o.side === 'left' ? -d / 2 + P + 4 + lw : d / 2 - P - 4, xa = s > 0 ? w / 2 - 3 : -w / 2; rect2(ctx, xa, z1 - lw, xa + 3, z1, '#ffffff', K.INK, px); for (let i = 1; i < 4; i++) K.line(ctx, xa, z1 - (lw * i) / 4, xa + 3, z1 - (lw * i) / 4, K.INK, px * 0.8); }
   dashed(ctx, [6 * px, 4 * px], () => {   // upper level hint
     rect2(ctx, -w / 2 + 2.2, -d / 2 + 2.2, w / 2 - 2.2, d / 2 - 2.2, null, K.INK_SOFT, px);
     if (o.variant === 'loft') { K.line(ctx, -w / 2 + 2.2, -d / 2 + 2.2, w / 2 - 2.2, d / 2 - 2.2, K.INK_SOFT, px); K.line(ctx, w / 2 - 2.2, -d / 2 + 2.2, -w / 2 + 2.2, d / 2 - 2.2, K.INK_SOFT, px); }
@@ -1356,8 +1375,8 @@ function cribCore(W, L, h, p, toddler) {
       for (let i = 1; i <= 4; i++) bars.box(0.012, gy - 0.04 - mBot - 0.03, 0.03, fHex, s * (xo - t / 2), (gy - 0.04 + mBot + 0.03) / 2, -zo + pt + (gl * i) / 4 - 0.015);
     }
     const hw = xo - t - 0.006;
-    g.add(K.rbox(hw * 2, mh, L - 2 * pt - 0.012, sheet, 0, mBot + mh / 2, 0, 0.025));
-    dressBed(g, { hw, z0: -zo + pt + 0.006, z1: zo - pt - 0.006, top: mTop, drop: 0.03, lean: true, maxHalf: hw + 0.004, zMax: zo - pt - 0.004 },
+    g.add(K.rbox(hw * 2, mh, L - 2 * pt - 0.012, sheet, 0, mBot + mh / 2, 0, 0.025, 2));
+    dressBed(g, { hw, z0: -zo + pt + 0.006, z1: zo - pt - 0.006, top: mTop, drop: 0.03, lean: true, maxY: h - 0.004, maxHalf: hw + 0.004, zMax: zo - pt - 0.004 },
       { bedding: hex(p.bedding, '#d5dfd8'), foldHex: '#f6f3ec', accent: blanket, pillows: 1, throwHex: null, ph: 0.09 });
   } else {
     const P = Math.min(0.04, W * 0.1), mTop = clamp(h * 0.52, 0.14, 0.5), mh = Math.min(0.1, mTop * 0.5), mBot = mTop - mh, sideTop = h - 0.04, rt = 0.028;
@@ -1367,11 +1386,11 @@ function cribCore(W, L, h, p, toddler) {
       const xa = s > 0 ? xo - rt - 0.004 : -xo + 0.004, xb = xa + rt;
       g.add(span(xa, xb, sideTop - 0.035, sideTop, -zo + P, zo - P, f), span(xa, xb, mBot - 0.07, mBot + 0.01, -zo + P, zo - P, f));
       const n = Math.max(3, Math.round((L - 2 * P) / 0.07));
-      for (let i = 1; i < n; i++) bars.cyl(0.0075, sideTop - 0.035 - mBot - 0.01, fHex, (xa + xb) / 2, (sideTop - 0.035 + mBot + 0.01) / 2, -zo + P + ((L - 2 * P) * i) / n);
+      for (let i = 1; i < n; i++) bars.cyl(0.0075, sideTop - 0.035 - mBot - 0.01, fHex, (xa + xb) / 2, (sideTop - 0.035 + mBot + 0.01) / 2, -zo + P + ((L - 2 * P) * i) / n, {}, 1, 6);
     }
     const hw = xo - rt - 0.012, ml = L - 2 * P - 0.01;
-    g.add(K.rbox(hw * 2, mh, ml, sheet, 0, mBot + mh / 2, 0, 0.025));
-    g.add(K.rbox(hw * 2 - 0.02, 0.035, ml * 0.42, K.fabric(blanket), 0, mTop + 0.012, ml * 0.27, 0.015), K.rbox(hw * 2 - 0.016, 0.03, 0.09, K.fabric(K.shade(blanket, 0.4)), 0, mTop + 0.024, ml * 0.07, 0.014));
+    g.add(K.rbox(hw * 2, mh, ml, sheet, 0, mBot + mh / 2, 0, 0.025, 2));
+    g.add(K.rbox(hw * 2 - 0.02, 0.035, ml * 0.42, K.fabric(blanket), 0, mTop + 0.012, ml * 0.27, 0.015, 2), K.rbox(hw * 2 - 0.016, 0.03, 0.09, K.fabric(K.shade(blanket, 0.4)), 0, mTop + 0.024, ml * 0.07, 0.014, 1));
   }
   bars.into(g, batchMat(0.5));
   return g;
@@ -1433,16 +1452,19 @@ function buildCoatRack({ w, d, h, p, item }) {
     const y1 = Math.max(h * 0.5, h - 0.3);
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const tip = [dx * (xo - kr), h - 0.06, dz * (zo - kr)];
-      g.add(K.bar([0, y1, 0], tip, 0.009, m), K.sphere(kr, m, ...tip));
+      g.add(K.bar([0, y1, 0], tip, 0.009, m, 8), K.sphere(kr, m, ...tip, 12, 8));
     }
     const y2 = Math.max(h * 0.4, h - 0.55);
     for (const [dx, dz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
       const tip = [dx * xo * 0.55, y2 + 0.17, dz * zo * 0.55];
-      g.add(K.bar([0, y2, 0], tip, 0.008, m), K.sphere(0.011, m, ...tip));
+      g.add(K.bar([0, y2, 0], tip, 0.008, m, 8), K.sphere(0.011, m, ...tip, 12, 8));
     }
-    if (h > 1.2) {
-      garment(cloth, { x: 0, y: y2 + 0.15, z: Math.min(zo - 0.04, pr + 0.07), sw: Math.min(0.42, w - 0.03), len: Math.min(0.85, y2 - 0.1), t: 0.065, color: pickFrom(rnd, MUTED), plane: 'xy', hanger: false });
-      cloth.box(0.07, 0.5, 0.02, hex(p.color3, '#b88f7a'), -Math.min(xo * 0.5, 0.12), y2 - 0.1, -Math.min(zo * 0.5, 0.1), { ry: 0.6 });
+    if (h > 1.2) {   // a coat draped from one hook, a tote bag on another
+      const hy = y2 + 0.15, ch = Math.min(0.85, hy - 0.2), cx = xo * 0.55, cz = zo * 0.55, cc = pickFrom(rnd, MUTED);
+      cloth.cyl([Math.min(0.14, xo * 0.42), Math.min(0.1, zo * 0.42)], ch, cc, cx, hy - ch / 2, cz, { ry: 0.5 }, 0.3, 12);
+      cloth.cyl([0.05, 0.04], 0.07, K.shade(cc, -0.15), cx, hy + 0.01, cz, { ry: 0.5 }, 0.7, 10);
+      const bw = Math.min(0.2, xo * 0.8);
+      cloth.box(bw, 0.24, 0.05, hex(p.color3, '#cbbdaa'), -cx, hy - 0.42, cz).box(0.01, 0.32, 0.01, '#7d6f63', -cx, hy - 0.15, cz);
     }
   } else if (o.variant === 'stand') {   // hall stand: hat shelf, hook rail and shoe bench
     const P = 0.03, seat = Math.min(0.45, h * 0.3), sd = Math.min(d, 0.3);
@@ -1452,7 +1474,7 @@ function buildCoatRack({ w, d, h, p, item }) {
     const n = Math.max(2, Math.round((w - 0.12) / 0.17)), xs = range(n).map((i) => -xo + 0.1 + ((w - 0.2) * i) / Math.max(1, n - 1));
     for (const x of xs) hw.cyl(0.007, 0.05, o.accHex, x, h - 0.27, -zo + 0.047, { rx: Math.PI / 2 }).cyl(0.012, 0.01, o.accHex, x, h - 0.27, -zo + 0.075, { rx: Math.PI / 2 });
     const room = h - 0.3 - seat - 0.12;
-    if (room > 0.45) xs.forEach((x, i) => { if (i % 2 === 0 && i < 3) garment(cloth, { x: clamp(x, -xo + 0.2, xo - 0.2), y: h - 0.285, z: -zo + 0.065, sw: Math.min(0.4, w * 0.45), len: Math.min(room, 0.7 + rnd() * 0.25), t: 0.05, color: pickFrom(rnd, MUTED), plane: 'xy', hanger: false }); });
+    if (room > 0.45) xs.forEach((x, i) => { if (i % 2 === 0 && i < 3) garment(cloth, { x: clamp(x, -Math.max(0, xo - Math.min(0.2, w * 0.225) - 0.01), Math.max(0, xo - Math.min(0.2, w * 0.225) - 0.01)), y: h - 0.285, z: -zo + 0.065, sw: Math.min(0.4, w * 0.45), len: Math.min(room, 0.7 + rnd() * 0.25), t: 0.05, color: pickFrom(rnd, MUTED), plane: 'xy', hanger: false, sleeves: true }); });
     for (let i = 0; i < Math.min(3, Math.floor((w - 0.1) / 0.27)); i++) shoePair(cloth, rnd, -xo + 0.2 + i * 0.27, 0.168, 0, shoeLen, pickFrom(rnd, shoeCols));
   } else if (o.variant === 'rail') {
     const r = 0.012, wood = K.wood(o.accHex);
@@ -1461,7 +1483,7 @@ function buildCoatRack({ w, d, h, p, item }) {
     const count = Math.floor((w - 0.16) / 0.068), sw = Math.min(0.44, d - 0.02);
     for (let i = 0; i < count; i++) {
       if (rnd() < 0.25) continue;
-      garment(cloth, { x: -xo + 0.08 + ((w - 0.16) * (i + 0.5)) / count, y: h - 0.075, z: 0, sw: sw * (0.9 + rnd() * 0.1), len: Math.min(h - 0.4, 0.65 + rnd() * 0.5), t: 0.03 + rnd() * 0.02, color: pickFrom(rnd, MUTED), flare: 0.86 + rnd() * 0.2 });
+      garment(cloth, { x: -xo + 0.08 + ((w - 0.16) * (i + 0.5)) / count, y: h - 0.075, z: 0, sw: sw * (0.9 + rnd() * 0.1), len: Math.min(h - 0.4, 0.65 + rnd() * 0.5), t: 0.03 + rnd() * 0.02, color: pickFrom(rnd, MUTED), flare: 0.86 + rnd() * 0.2, sleeves: i === 0 || i === count - 1 });
     }
     for (let i = 0; i < Math.min(2, Math.floor((w - 0.1) / 0.3)); i++) shoePair(cloth, rnd, -xo + 0.22 + i * 0.3, 0.168, 0, Math.min(shoeLen, d * 0.7), pickFrom(rnd, shoeCols));
   } else if (o.variant === 'shoe-rack') {
@@ -1485,8 +1507,8 @@ function buildCoatRack({ w, d, h, p, item }) {
     const xs = range(n).map((i) => -xo + (w * (i + 0.5)) / n), kr = Math.min(0.015, h * 0.3);
     for (const x of xs) hw.cyl(kr * 0.5, len, o.accHex, x, yh, -zo + bt + len / 2, { rx: Math.PI / 2 }).cyl(kr, 0.012, o.accHex, x, yh, -zo + bt + len - 0.006, { rx: Math.PI / 2 }, 1, 12);
     if (tall && h > 1) {
-      garment(cloth, { x: xs[0] + 0.02, y: yh - 0.015, z: -zo + bt + 0.04, sw: Math.min(0.4, w * 0.5), len: Math.min(0.85, yh - 0.25), t: 0.05, color: pickFrom(rnd, MUTED), plane: 'xy', hanger: false });
-      if (n > 2) cloth.box(0.26, 0.3, 0.05, hex(p.color3, '#cbbdaa'), xs[n - 1] - 0.04, yh - 0.42, -zo + bt + 0.035).box(0.012, 0.3, 0.012, '#7d6f63', xs[n - 1] - 0.04, yh - 0.14, -zo + bt + 0.03);
+      garment(cloth, { x: -xo + Math.min(0.2, w * 0.25) + 0.02, y: yh - 0.015, z: -zo + bt + 0.04, sw: Math.min(0.4, w * 0.5), len: Math.min(0.85, yh - 0.25), t: 0.05, color: pickFrom(rnd, MUTED), plane: 'xy', hanger: false, sleeves: true });
+      if (n > 2) cloth.box(0.26, 0.3, 0.05, hex(p.color3, '#cbbdaa'), xo - 0.16, yh - 0.42, -zo + bt + 0.035).box(0.012, 0.3, 0.012, '#7d6f63', xo - 0.16, yh - 0.14, -zo + bt + 0.03);
     }
   }
   hw.into(g, o.metal || o.variant === 'stand' || !isNeutral(o.accHex) ? batchMat(0.5, o.metal ? 0 : 0.5) : batchMat(0.4, 0.7));
@@ -1495,7 +1517,7 @@ function buildCoatRack({ w, d, h, p, item }) {
 }
 function drawCoatRack(ctx, { w, d, p, px, item }) {
   const o = rackOptions(w / 100, d / 100, p), fill = K.tint(o.bodyHex, 0.55), rnd = seeded(item, 'coat-rack');
-  const hangers = (y, a, b, len) => { const n = Math.floor((b - a) / 6.8); for (let i = 0; i < n; i++) { const x = a + ((b - a) * (i + 0.5)) / n, s = (i % 3) - 1; K.line(ctx, x - s * 1.5, y - len, x + s * 1.5, y + len, K.INK_SOFT, px * 0.9); } };
+  const hangers = (y, a, b, len) => { const n = Math.floor((b - a) / 10); for (let i = 0; i < n; i++) { const x = a + ((b - a) * (i + 0.5)) / n, s = ((i * 7) % 5) - 2; K.line(ctx, x - s * 0.9, y - len, x + s * 0.9, y + len, K.INK_SOFT, px * 0.9); } };
   if (o.pole) {
     const R = Math.min(w, d) / 2;
     K.fillCircle(ctx, 0, 0, R * 0.74, K.tint(o.bodyHex, 0.7), K.INK_SOFT, px);
@@ -1512,7 +1534,7 @@ function drawCoatRack(ctx, { w, d, p, px, item }) {
     for (const s of [-1, 1]) K.fillRR(ctx, s * (w / 2 - 1.2), 0, 2.4, d, 1.2, fill, K.INK, px);
     K.fillRR(ctx, 0, 0, w - 4.8, d * 0.72, 1, K.tint(o.accHex, 0.7), K.INK_SOFT, px * 0.8);
     K.line(ctx, -w / 2 + 2.4, 0, w / 2 - 2.4, 0, K.INK, px * 1.8);
-    if (w / px > 40) hangers(0, -w / 2 + 8, w / 2 - 8, Math.min(22, d / 2 - 1));
+    if (w / px > 40) hangers(0, -w / 2 + 8, w / 2 - 8, Math.min(19, d / 2 - 3));
   } else if (o.variant === 'shoe-rack') {
     rect2(ctx, -w / 2, -d / 2, w / 2, d / 2, fill, K.INK, px);
     if (w / px > 40) {

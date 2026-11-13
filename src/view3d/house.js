@@ -23,7 +23,30 @@ const OUT = 0, WALL = 1, OPENING = 2, ROOM = 3;
 const SKIRT_H = 0.07, SKIRT_T = 0.012;        // skirting board (m)
 const PARAPET_T = 20;                         // parapet thickness (cm) — same as the exterior block walls
 const COPING_H = 0.04, COPING_OVER = 2;       // parapet coping: 4 cm slab, 2 cm overhang (cm)
+const AO_FLOOR = { width: 0.45, alpha: 0.34 }, AO_CEILING = { width: 0.4, alpha: 0.2 };   // baked contact shading strips
+const WALL_FADE = 0.45;                       // height (m) of the soft darkening at the foot / head of interior walls
 const IDENTITY = new THREE.Matrix4();
+
+/** Soft contact-shadow strips (black, per-vertex alpha) laid on floors and ceilings along the walls. */
+class ShadeStrips {
+  constructor() { this.pos = []; this.col = []; this.idx = []; }
+  /** Strip from the wall line a→b (alpha at the wall) to a2→b2 inside the room (alpha 0); all points [x, y, z]. */
+  add(a, b, b2, a2, alpha, up) {
+    const base = this.pos.length / 3;
+    for (const [p, al] of [[a, alpha], [b, alpha], [b2, 0], [a2, 0]]) { this.pos.push(p[0], p[1], p[2]); this.col.push(0.09, 0.075, 0.06, al); }
+    _e1.set(b[0] - a[0], 0, b[2] - a[2]); _e2.set(a2[0] - a[0], 0, a2[2] - a[2]);
+    const ccwUp = _e1.cross(_e2).y > 0;
+    if (ccwUp === up) this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3); else this.idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
+  }
+  toGeometry() {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 4));
+    g.setIndex(this.idx);
+    return g;
+  }
+}
+const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3();
 
 /**
  * Look of a space's floor or walls: catalogue product → store overrides (`wallColor`, `floorParams`) → defaults.
@@ -106,9 +129,9 @@ function subtract(a, b) {
 }
 
 // ───────────────────────── shell: walls, reveals, caps, skirting ─────────────────────────
-function buildShellSoups(grid, plan, sides, top, plinthDepth, dryRooms) {
+function buildShellSoups(grid, plan, sides, top, ceiling, plinthDepth, dryRooms) {
   const { X, Y, nx, ny, kind, ref } = grid;
-  const soups = new Map();
+  const soups = new Map(), aoFloor = new ShadeStrips(), aoCeiling = new ShadeStrips();
   const soup = (key) => { if (!soups.has(key)) soups.set(key, new Soup()); return soups.get(key); };
   const faces = new Map();                                             // merge key → [{a0, a1}]
   const addFace = (axis, c, s, a0, a1, y0, y1, mat) => {
@@ -168,23 +191,40 @@ function buildShellSoups(grid, plan, sides, top, plinthDepth, dryRooms) {
     const c = f.c / 100, n = f.axis === 'x' ? [f.s, 0, 0] : [0, 0, f.s];
     for (const [a0, a1] of runs) {
       const p0 = a0 / 100, p1 = a1 / 100;
-      const pts = f.axis === 'x'
-        ? [[c, f.y0, p0], [c, f.y0, p1], [c, f.y1, p1], [c, f.y1, p0]]
-        : [[p0, f.y0, c], [p1, f.y0, c], [p1, f.y1, c], [p0, f.y1, c]];
-      soup(f.mat).quad(pts, n, [[p0, f.y0], [p1, f.y0], [p1, f.y1], [p0, f.y1]]);
+      const band = (y0, y1, s0, s1) => {
+        const q = f.axis === 'x' ? [[c, y0, p0], [c, y0, p1], [c, y1, p1], [c, y1, p0]] : [[p0, y0, c], [p1, y0, c], [p1, y1, c], [p0, y1, c]];
+        soup(f.mat).quad(q, n, [[p0, y0], [p1, y0], [p1, y1], [p0, y1]], [s0, s0, s1, s1]);
+      };
+      if (!f.mat.startsWith('room:')) { band(f.y0, f.y1, 1, 1); continue; }
 
-      if (f.y0 !== 0 || f.y1 < SKIRT_H || !f.mat.startsWith('room:') || !dryRooms.has(f.mat.slice(5))) continue;
-      const ext = [a0, a1].map((e, q) => {                              // wrap convex corners, stop at doors / concave corners
+      // interior wall: gentle darkening towards floor and ceiling + contact strips on floor / ceiling (cheap fake GI)
+      const atFloor = f.y0 === 0, atCeiling = f.y1 >= ceiling - 1e-6, tall = f.y1 - f.y0 > 2.2 * WALL_FADE;
+      let lo = f.y0, hi = f.y1;
+      if (atFloor && tall) { band(lo, lo + WALL_FADE, 0.8, 1); lo += WALL_FADE; }
+      if (atCeiling && tall) { band(hi - WALL_FADE, hi, 1, 0.88); hi -= WALL_FADE; }
+      band(lo, hi, 1, 1);
+      const ends = [a0, a1].map((e, q) => {                             // what happens past each end of the run
         const along = e + (q ? 1 : -1), wallPt = f.c - f.s, roomPt = f.c + f.s;
         const W = f.axis === 'x' ? [wallPt, along] : [along, wallPt], R = f.axis === 'x' ? [roomPt, along] : [along, roomPt];
-        return !floorSolid(R[0], R[1]) && !floorSolid(W[0], W[1]) && !isDoor(W[0], W[1]) ? SKIRT_T : 0;
+        return floorSolid(R[0], R[1]) ? 'concave' : floorSolid(W[0], W[1]) ? 'straight' : isDoor(W[0], W[1]) ? 'door' : 'convex';
       });
+      const strip = (S, y, cfg, up) => {
+        const t0 = ends[0] === 'concave' || ends[0] === 'straight' ? 0 : cfg.width, t1 = ends[1] === 'concave' || ends[1] === 'straight' ? 0 : cfg.width;
+        if (p1 - p0 < t0 + t1 + 0.02) return;
+        const P = (along, off) => (f.axis === 'x' ? [c + f.s * off, y, along] : [along, y, c + f.s * off]);
+        S.add(P(p0, 0), P(p1, 0), P(p1 - t1, cfg.width), P(p0 + t0, cfg.width), cfg.alpha, up);
+      };
+      if (atFloor) strip(aoFloor, 0.003, AO_FLOOR, true);
+      if (atCeiling) strip(aoCeiling, ceiling - 0.005, AO_CEILING, false);
+
+      if (!atFloor || f.y1 < SKIRT_H || !dryRooms.has(f.mat.slice(5))) continue;
+      const ext = ends.map((e) => (e === 'convex' ? SKIRT_T : 0));       // wrap convex corners, stop at doors / concave corners
       const b0 = p0 - ext[0], b1 = p1 + ext[1], d0 = Math.min(c, c + f.s * SKIRT_T), d1 = Math.max(c, c + f.s * SKIRT_T);
       if (f.axis === 'x') soup('skirting').box(IDENTITY, d0, d1, 0, SKIRT_H, b0, b1, 'b');
       else soup('skirting').box(IDENTITY, b0, b1, 0, SKIRT_H, d0, d1, 'b');
     }
   }
-  return soups;
+  return { soups, aoFloor, aoCeiling };
 }
 
 // ───────────────────────── floors & ceilings ─────────────────────────
@@ -251,8 +291,8 @@ function insetLoop(loop, d) {
   });
 }
 
-/** Vertical prism between y0 and y1 over a plan polygon (cm) with optional holes; parts → named soups. */
-function prism(outline, holes, y0, y1, soups) {
+/** Vertical prism between y0 and y1 (m) over a plan polygon (cm, traced like traceFootprint) with optional holes; parts → named soups { top, bottom, side }. */
+export function prism(outline, holes, y0, y1, soups) {
   const v2 = (l) => l.map(([x, y]) => new THREE.Vector2(x / 100, y / 100));
   const contour = v2(outline), holeV = holes.map(v2);
   const all = contour.concat(...holeV);
@@ -264,9 +304,10 @@ function prism(outline, holes, y0, y1, soups) {
   const side = (loop, sign) => {
     if (!soups.side) return;
     loop.forEach((p, q) => {
-      const b = loop[(q + 1) % loop.length], dx = Math.sign(b[0] - p[0]), dy = Math.sign(b[1] - p[1]);
+      const b = loop[(q + 1) % loop.length], len = Math.hypot(b[0] - p[0], b[1] - p[1]) || 1;
+      const dx = (b[0] - p[0]) / len, dy = (b[1] - p[1]) / len;
       const n = [dy * sign, 0, -dx * sign];                             // outward for the traced orientation
-      const u0 = (dx ? p[0] : p[1]) / 100, u1 = (dx ? b[0] : b[1]) / 100;
+      const u0 = (Math.abs(dx) >= Math.abs(dy) ? p[0] : p[1]) / 100, u1 = (Math.abs(dx) >= Math.abs(dy) ? b[0] : b[1]) / 100;
       soups.side.quad([[p[0] / 100, y0, p[1] / 100], [b[0] / 100, y0, b[1] / 100], [b[0] / 100, y1, b[1] / 100], [p[0] / 100, y1, p[1] / 100]], n, [[u0, y0], [u1, y0], [u1, y1], [u0, y1]]);
     });
   };
@@ -315,6 +356,7 @@ export function buildHouse(ctx) {
     skirting: new THREE.MeshStandardMaterial({ color: '#f6f4ef', roughness: 0.5 }),
     ceiling: new THREE.MeshStandardMaterial({ color: '#fbf8f2', roughness: 0.96 }),
     coping: new THREE.MeshStandardMaterial({ color: '#dcd8d0', roughness: 0.85 }),
+    shade: new THREE.MeshBasicMaterial({ color: '#ffffff', vertexColors: true, transparent: true, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }),
   };
   const meshes = new Map();
 
@@ -323,9 +365,9 @@ export function buildHouse(ctx) {
     let mesh = meshes.get(name);
     if (!soup || soup.empty) { if (mesh) mesh.visible = false; return mesh; }
     if (!mesh) {
-      mesh = new THREE.Mesh(soup.toGeometry(), own.cap);
+      mesh = new THREE.Mesh(soup.toGeometry(name.startsWith('wall:room:')), own.cap);
       mesh.name = name; meshes.set(name, mesh); parent.add(mesh);
-    } else { mesh.geometry.dispose(); mesh.geometry = soup.toGeometry(); mesh.visible = true; }
+    } else { mesh.geometry.dispose(); mesh.geometry = soup.toGeometry(name.startsWith('wall:room:')); mesh.visible = true; }
     mesh.castShadow = cast; mesh.receiveShadow = receive;
     return mesh;
   }
@@ -347,7 +389,11 @@ export function buildHouse(ctx) {
   }
 
   function rebuildShell() {
-    const soups = buildShellSoups(grid, plan, sides, topH(), plinthDepth, dryRooms);
+    const { soups, aoFloor, aoCeiling } = buildShellSoups(grid, plan, sides, topH(), state.H, plinthDepth, dryRooms);
+    for (const [name, strips, parent] of [['ao:floor', aoFloor, shell], ['ao:ceiling', aoCeiling, roof]]) {
+      const mesh = setMesh(name, strips.idx.length ? { empty: false, toGeometry: () => strips.toGeometry() } : null, parent, false, false);
+      if (mesh) { mesh.material = own.shade; mesh.renderOrder = 1; }
+    }
     for (const key of new Set([...soups.keys(), ...[...meshes.keys()].filter((n) => n.startsWith('wall:')).map((n) => n.slice(5))])) {
       const mesh = setMesh('wall:' + key, soups.get(key), shell, true, true);
       if (mesh && key === 'skirting') mesh.castShadow = false;
@@ -376,7 +422,11 @@ export function buildHouse(ctx) {
     }
     if (p.frameColor && p.frameColor !== state.frameColor) { state.frameColor = p.frameColor; openings.setFrameColor(p.frameColor); }
   }
-  const applyRoofVisibility = () => { roof.visible = state.roofVisible && state.cut == null; };
+  const applyRoofVisibility = () => {
+    roof.visible = state.roofVisible && state.cut == null;
+    const cap = meshes.get('wall:cap');                                 // hidden under the slab (its edge would show as a hairline)
+    if (cap && cap.geometry.index.count) cap.visible = !roof.visible;
+  };
 
   state.H = ceilingH();
   state.frameColor = (store.project && store.project.frameColor) || '#2b2d31';

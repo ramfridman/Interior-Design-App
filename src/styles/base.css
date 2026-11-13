@@ -24,6 +24,21 @@
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/* Neither family has the shekel sign. Map it to a regular-weight system sans under both family names, declared for
+   the whole weight range so browsers never fake a bold ₪ next to prices. */
+@font-face {
+  font-family: 'Hanken Grotesk Variable';
+  font-style: normal; font-weight: 100 900;
+  src: local('Arial'), local('Helvetica Neue'), local('Segoe UI'), local('Roboto'), local('Noto Sans Hebrew'), local('Liberation Sans'), local('DejaVu Sans');
+  unicode-range: U+20AA;
+}
+@font-face {
+  font-family: 'Jost Variable';
+  font-style: normal; font-weight: 100 900;
+  src: local('Arial'), local('Helvetica Neue'), local('Segoe UI'), local('Roboto'), local('Noto Sans Hebrew'), local('Liberation Sans'), local('DejaVu Sans');
+  unicode-range: U+20AA;
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }

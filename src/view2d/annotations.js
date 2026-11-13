@@ -4,7 +4,7 @@
  */
 import { polygonBounds, pointInPolygon, areaM2, itemAABB, clamp } from '../core/geometry.js';
 import { css } from './color.js';
-import { exteriorChains, interiorDims, dimText } from './dimensions.js';
+import { exteriorChains, interiorDims, dimText, spanThrough } from './dimensions.js';
 import { isBelowWalls, isFloating } from './items.js';
 
 const chainCache = new WeakMap();
@@ -53,20 +53,29 @@ function wrapName(name) {
 function placeLabel(G, poly, pref, w, h, obstacles, boxes, reachCm) {
   const b = polygonBounds(poly);
   if (w > b.w * G.k - 4 * G.dpr || h > b.h * G.k - 4 * G.dpr) return null;
-  const step = Math.max(15, 12 / G.scale);
-  const n = Math.min(9, Math.ceil(reachCm / step));
-  const hw = w / 2 / G.k, hh = h / 2 / G.k;
+  const rect = poly.length === 4;
+  const hw = w / 2 / G.k, hh = h / 2 / G.k, d2 = G.dpr * G.dpr;
+  const inside = (x, y) => (rect
+    ? x - hw >= b.x && x + hw <= b.x + b.w && y - hh >= b.y && y + hh <= b.y + b.h
+    : pointInPolygon(x - hw, y - hh, poly) && pointInPolygon(x + hw, y - hh, poly) && pointInPolygon(x + hw, y + hh, poly) && pointInPolygon(x - hw, y + hh, poly));
+  const evaluate = (x, y, distPx) => {
+    const cx = G.X(x), cy = G.Y(y);
+    const box = { x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2 };
+    return { cost: overlap(box, obstacles) / d2 + boxes.overlapArea(box) * 25 / d2 + distPx * distPx * 0.1, x: cx, y: cy, box };
+  };
+  // the architect's label point wins outright when nothing is in the way
+  if (inside(pref[0], pref[1])) { const at = evaluate(pref[0], pref[1], 0); if (at.cost < 1) return at; }
+  const step = Math.max(20, 14 / G.scale);
+  const n = Math.min(6, Math.ceil(reachCm / step));
   let best = null;
   for (let iy = -n; iy <= n; iy++) {
     for (let ix = -n; ix <= n; ix++) {
+      const distPx = Math.hypot(ix, iy) * step * G.scale;
+      if (best && distPx * distPx * 0.1 >= best.cost) continue;
       const x = pref[0] + ix * step, y = pref[1] + iy * step;
-      if (!pointInPolygon(x - hw, y - hh, poly) || !pointInPolygon(x + hw, y - hh, poly) ||
-          !pointInPolygon(x + hw, y + hh, poly) || !pointInPolygon(x - hw, y + hh, poly) || !pointInPolygon(x, y, poly)) continue;
-      const cx = G.X(x), cy = G.Y(y);
-      const box = { x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2 };
-      const dist = Math.hypot(ix, iy) * step * G.k / G.dpr;
-      const cost = overlap(box, obstacles) / (G.dpr * G.dpr) + boxes.overlapArea(box) * 25 / (G.dpr * G.dpr) + dist * dist * 0.1;
-      if (!best || cost < best.cost) best = { cost, x: cx, y: cy, box };
+      if (!inside(x, y)) continue;
+      const at = evaluate(x, y, distPx);
+      if (!best || at.cost < best.cost) best = at;
     }
   }
   return best;
@@ -98,10 +107,12 @@ export function drawRoomLabels(G, env, boxes) {
     if (!G.visible(b.x, b.y, b.x + b.w, b.y + b.h)) continue;
     const area = { text: `${areaM2(sp.polygon).toFixed(1)} m²`, size: small, weight: 400, color: pal.inkSoft };
     const name = (t) => ({ text: t, size, weight: 600, color: pal.ink });
+    const bx0 = G.X(b.x), by0 = G.Y(b.y), bx1 = G.X(b.x + b.w), by1 = G.Y(b.y + b.h);
+    const near = obstacles.filter((o) => o.x1 > bx0 && o.x0 < bx1 && o.y1 > by0 && o.y0 < by1);
     const variants = [[name(sp.name), area], [...wrapName(sp.name).map(name), area], wrapName(sp.name).map(name)];
     for (const lines of variants) {
       const m = measureBlock(lines);
-      const at = placeLabel(G, sp.polygon, sp.label, m.w, m.h, obstacles, boxes, 260);
+      const at = placeLabel(G, sp.polygon, sp.label, m.w, m.h, near, boxes, 260);
       if (!at) continue;
       drawBlock(lines, at);
       boxes.add(at.box);
@@ -152,6 +163,7 @@ export function drawExteriorDims(G, env, boxes) {
   const { chains } = plansDims(plan);
   const env0 = envelope(plan);
   const ink = pal.dim, size = 10.5, subSize = 8.5;
+  const halo = css(ui.showSite ? pal.garden : pal.paper, 0.85);
   const unitSuffix = ui.units === 'cm' ? ' cm' : ' m';
 
   for (const side of ['n', 's', 'w', 'e']) {
@@ -201,6 +213,7 @@ export function drawExteriorDims(G, env, boxes) {
         let above = true, box = mk(true);
         if (boxes.collides(box, 1.5 * d)) { above = false; box = mk(false); if (boxes.collides(box, 1.5 * d)) continue; }
         boxes.add(box);
+        ctx.fillStyle = halo; ctx.fillRect(box.x0 - d, box.y0, box.x1 - box.x0 + 2 * d, box.y1 - box.y0);
         const opts = { size, weight, color: seg.total ? pal.ink : ink, baseline: above ? 'alphabetic' : 'top', angle: horiz ? 0 : -Math.PI / 2 };
         if (horiz) G.text(label, mid, above ? pos - 4 * d : pos + 5 * d, opts);
         else G.text(label, above ? pos - 4 * d : pos + 5 * d, mid, opts);
@@ -231,6 +244,23 @@ export function drawExteriorDims(G, env, boxes) {
   }
 }
 
+/**
+ * Positions for a zone dimension: just beside the zone label (so the line does not strike through the text),
+ * as long as the clear span is the same there; otherwise through the label point itself.
+ */
+function zoneOffsets(room, dim, G) {
+  if (!room) return [dim.at];
+  const horiz = dim.dir === 'h';
+  const mid = (dim.from + dim.to) / 2;
+  const out = [];
+  for (const off of horiz ? [13, -13] : [-46, 46]) {
+    const at = dim.at + off / G.scale;
+    const span = horiz ? spanThrough(room.polygon, mid, at + 0.5, 'h') : spanThrough(room.polygon, at + 0.5, mid, 'v');
+    if (span && span[0] === dim.from && span[1] === dim.to) out.push(at);
+  }
+  return out.length ? out : [dim.at];
+}
+
 export function drawInteriorDims(G, env, boxes) {
   const { plan, pal, ui } = env, { ctx } = G, d = G.dpr;
   if (G.scale < 0.3) return;
@@ -247,7 +277,7 @@ export function drawInteriorDims(G, env, boxes) {
     const b = room ? polygonBounds(room.polygon) : null;
     const positions = dim.primary && b
       ? (horiz ? [b.y + inset, b.y + b.h - inset] : [b.x + inset, b.x + b.w - inset])
-      : [dim.at];
+      : zoneOffsets(room, dim, G);
     let best = null;
     for (const at of positions) {
       for (const t of [0.5, 0.32, 0.68, 0.18, 0.82]) {
@@ -280,6 +310,7 @@ export function drawInteriorDims(G, env, boxes) {
       ctx.closePath();
     }
     ctx.fillStyle = css(ink, 0.7); ctx.fill();
-    G.text(label, best.cx, best.cy + (horiz ? 0.5 * d : 0), { size, weight: 500, color: ink, halo: pal.halo, angle: horiz ? 0 : -Math.PI / 2 });
+    ctx.fillStyle = pal.halo; ctx.fillRect(Math.round(best.box.x0), Math.round(best.box.y0), Math.round(best.box.x1 - best.box.x0), Math.round(best.box.y1 - best.box.y0));
+    G.text(label, best.cx, best.cy + (horiz ? 0.5 * d : 0), { size, weight: 500, color: ink, angle: horiz ? 0 : -Math.PI / 2 });
   }
 }

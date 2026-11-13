@@ -23,8 +23,7 @@ export function initCatalogPanel(root, app) {
   const rail = h('nav', { class: 'rail', 'aria-label': 'Categories' });
   const zone = segmented({ options: [{ value: 'indoor', label: 'Indoor' }, { value: 'outdoor', label: 'Outdoor' }], value: store.ui.catalogZone, label: 'Catalogue section', cls: 'seg--block', onChange: (v) => store.setUI({ catalogZone: v }) });
   const title = h('h2', { class: 'cat__title display truncate' }, 'Catalogue');
-  const count = h('span', { class: 'cat__count num' }, '');
-  const search = h('input', { class: 'search__input', type: 'search', placeholder: 'Search products, brands, retailers', 'aria-label': 'Search the catalogue', autocomplete: 'off', spellcheck: 'false' });
+  const search = h('input', { class: 'search__input', type: 'search', placeholder: 'Search the catalogue', 'aria-label': 'Search the catalogue', autocomplete: 'off', spellcheck: 'false' });
   const clearSearch = iconBtn('close', 'Clear search', { size: 14, tip: false, class: 'search__clear', onClick: () => { search.value = ''; state.query = ''; clearSearch.hidden = true; refresh(); search.focus(); } });
   clearSearch.hidden = true;
   const filterBadge = h('span', { class: 'badge', hidden: true });
@@ -41,7 +40,7 @@ export function initCatalogPanel(root, app) {
   scroller.append(spacer, empty);
 
   root.append(rail, h('div', { class: 'cat' },
-    h('header', { class: 'side__head' }, title, count, iconBtn('panel-left', 'Hide the catalogue', { onClick: () => app.setPanelOpen('left', false) })),
+    h('header', { class: 'side__head' }, title, iconBtn('panel-left', 'Hide the catalogue', { onClick: () => app.setPanelOpen('left', false) })),
     h('div', { class: 'cat__controls' }, zone,
       h('div', { class: 'cat__searchrow' }, h('div', { class: 'search' }, icon('search', { size: 16 }), search, clearSearch), filterBtn),
       chips),
@@ -93,7 +92,6 @@ export function initCatalogPanel(root, app) {
     results = list;
 
     title.textContent = state.query ? 'Search results' : cat ? cat.name : (z === 'indoor' ? 'Indoor catalogue' : 'Outdoor catalogue');
-    count.textContent = '';
     resultCount.textContent = `${list.length} ${list.length === 1 ? 'product' : 'products'}`;
     const n = activeFilterCount();
     filterBadge.hidden = !n;

@@ -5,6 +5,8 @@
  *   k      device px per plan cm          scale  CSS px per cm        dpr  device px per CSS px
  *   ox/oy  device px position of the plan origin (always integers)
  */
+const HALO = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
+
 export function createGfx(ctx, { scale, dpr, ox, oy, width, height, font }) {
   const k = scale * dpr;
   const G = {
@@ -69,8 +71,10 @@ export function createGfx(ctx, { scale, dpr, ox, oy, width, height, font }) {
       ctx.translate(Math.round(x), Math.round(y));
       if (angle) ctx.rotate(angle);
       if (halo) {
-        ctx.lineJoin = 'round'; ctx.strokeStyle = halo; ctx.lineWidth = Math.max(2, 3 * dpr);
-        ctx.strokeText(str, 0, 0);
+        // eight offset copies: far cheaper than strokeText (glyphs come from the raster cache) and just as legible
+        const r = Math.max(1, 1.3 * dpr);
+        ctx.fillStyle = halo;
+        for (const [hx, hy] of HALO) ctx.fillText(str, hx * r, hy * r);
       }
       ctx.fillStyle = color;
       ctx.fillText(str, 0, 0);

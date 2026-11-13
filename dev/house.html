@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>view3d — house · site · environment test bench</title>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three/three.module.min.js", "three/addons/": "../vendor/three/addons/" } }
+</script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #111; font: 12px/1.3 system-ui, sans-serif; color: #eee; }
+  canvas { display: block; }
+  #bar { position: fixed; left: 8px; top: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; pointer-events: none; }
+  #bar > * { pointer-events: auto; }
+  button, select { font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid #0006; background: #fffd; color: #111; cursor: pointer; }
+  button.on { background: #2b6cff; color: #fff; }
+  #stats { position: fixed; left: 8px; bottom: 8px; background: #000a; padding: 4px 8px; border-radius: 6px; white-space: pre; }
+  label { background: #000a; padding: 3px 8px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="roof">Roof</button><button id="cut">Cutaway 1.2 m</button><button id="doors">Doors open</button><button id="furn">Furniture</button>
+  <label>Time <input id="time" type="range" min="0" max="24" step="0.25" value="13"> <span id="timeLabel">13:00</span></label>
+  <button data-t="9">09:00</button><button data-t="13">13:00</button><button data-t="18.5">18:30</button><button data-t="19.6">19:35</button><button data-t="22">22:00</button>
+  <select id="view"></select>
+  <select id="floor"><option value="">Floor finish (main)…</option></select>
+  <select id="wall"><option value="">Wall finish (main)…</option></select>
+  <button id="ext">Exterior colour</button><button id="ceil">Ceiling 2.7 / 3.0</button>
+</div>
+<div id="stats"></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { store } from '../src/core/store.js';
+import { PLAN } from '../src/core/plan.js';
+import { initialLayout } from '../src/core/initial-layout.js';
+import * as catalog from '../src/catalog/index.js';
+import * as models from '../src/models/index.js';
+import { buildHouse } from '../src/view3d/house.js';
+import { buildSite } from '../src/view3d/site.js';
+import { createEnvironment } from '../src/view3d/environment.js';
+
+store.persist = false;
+await Promise.allSettled([catalog.loadCatalog(), models.loadModels()]);
+const ctx = { store, plan: PLAN, catalog, models };
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.08, 1200);
+const ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 500);
+let active = camera;
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.maxPolarAngle = Math.PI / 2 - 0.02;
+
+const house = buildHouse(ctx), site = buildSite(ctx), env = createEnvironment({ scene, renderer, ctx });
+scene.add(site.group, house.group);
+
+// furniture from the architect's layout (whatever model modules exist; boxes otherwise)
+const furniture = new THREE.Group(); furniture.visible = false; scene.add(furniture);
+const G = -PLAN.heights.floorAboveGround / 100;
+for (const it of initialLayout()) {
+  try {
+    const o = models.buildModel({ id: 'dev', ...it });
+    const outdoors = it.zone === 'outdoor';
+    o.position.set(it.x / 100, (it.elev || 0) / 100 + (outdoors ? G : 0), it.y / 100); o.rotation.y = -(it.rot || 0) * Math.PI / 180;
+    furniture.add(o);
+  } catch (e) { console.warn('model failed', it.type, e); }
+}
+
+const B = PLAN.bounds, L = PLAN.site.bounds, c = [(B.x + B.w / 2) / 100, (B.y + B.h / 2) / 100];
+const room = (id) => PLAN.rooms.find((r) => r.id === id), zone = (id) => room('main').zones.find((z) => z.id === id).label.map((v) => v / 100);
+const opening = (id) => { const o = PLAN.openings.find((q) => q.id === id); return [(o.x + o.w / 2) / 100, (o.y + o.h / 2) / 100]; };
+const lab = (id) => room(id).label.map((v) => v / 100);
+const eye = 1.6;
+const VIEWS = {
+  aerial: () => [[c[0] + 19, 17, c[1] - 21], [c[0], 0.5, c[1]], 45],
+  'aerial-sw': () => [[c[0] - 22, 16, c[1] + 20], [c[0], 0.5, c[1]], 45],
+  top: () => 'top',
+  east: () => [[(L.x + L.w) / 100 + 9, eye, c[1] - 1], [c[0], 1.5, c[1] - 1], 55],
+  north: () => [[c[0], eye, L.y / 100 - 8], [c[0], 1.5, c[1]], 55],
+  west: () => [[L.x / 100 - 4, eye, c[1] - 2], [c[0], 1.5, c[1] - 2], 55],
+  south: () => [[c[0] + 1, eye, (L.y + L.h) / 100 + 7], [c[0] + 1, 1.5, c[1]], 55],
+  'entry-approach': () => { const d = opening('door-entry'); return [[d[0] + 7.5, eye, d[1] - 3.2], [d[0], 1.3, d[1]], 55]; },
+  'terrace-corner': () => { const d = opening('door-terrace'); return [[d[0] - 6.5, eye, d[1] - 6], [d[0] + 1, 1.3, d[1]], 55]; },
+  living: () => { const l = zone('living'), d = opening('door-terrace'); return [[l[0] + 1.2, eye, l[1] + 0.4], [d[0], 1.25, d[1]], 72]; },
+  kitchen: () => { const k = zone('kitchen'), d = zone('dining'); return [[d[0] + 2.6, eye, d[1] + 0.6], [k[0] - 1.2, 1.2, k[1]], 72]; },
+  corridor: () => { const h = zone('hall'), p = opening('door-parents'); return [[h[0] - 0.9, eye, p[1]], [p[0], 1.3, p[1]], 65]; },
+  hall: () => { const h = zone('hall'), f = zone('foyer'); return [[f[0] - 0.3, eye, f[1] + 0.3], [h[0], 1.3, h[1] + 1], 72]; },
+  bedroom: () => { const d = opening('door-bedroom-1'), l = lab('bedroom-1'); return [[d[0] + 0.5, eye, d[1] - 0.1], [l[0] + 1.3, 1.1, l[1] + 1], 75]; },
+  'master-bedroom': () => { const d = opening('door-parents'), l = lab('parents-bedroom'); return [[d[0] - 0.5, eye, d[1] - 0.2], [l[0] - 1.2, 1.1, l[1] + 0.8], 75]; },
+  bathroom: () => { const d = opening('door-bath'), l = lab('bath'); return [[d[0] - 0.35, eye, d[1]], [l[0] - 0.6, 1.2, l[1] + 1.6], 78]; },
+  mamad: () => { const d = opening('door-mamad'), l = lab('mamad'); return [[d[0] + 2.6, eye, d[1] - 0.9], [d[0], 1.1, d[1]], 60]; },
+};
+function setCam(pos, target, fov = 50) {
+  active = camera; camera.fov = fov; camera.position.set(...pos); controls.target.set(...target); camera.updateProjectionMatrix(); controls.update();
+}
+function setView(name) {
+  const v = VIEWS[name] && VIEWS[name]();
+  if (v === 'top') {
+    active = ortho; const hw = L.w / 200 + 1.5, hh = hw * innerHeight / innerWidth;
+    ortho.left = -hw; ortho.right = hw; ortho.top = hh; ortho.bottom = -hh; ortho.updateProjectionMatrix();
+    ortho.position.set((L.x + L.w / 2) / 100, 120, (L.y + L.h / 2) / 100); ortho.up.set(0, 0, -1); ortho.lookAt(ortho.position.x, 0, ortho.position.z);
+  } else if (v) setCam(...v);
+}
+const viewSel = document.getElementById('view');
+Object.keys(VIEWS).forEach((k) => viewSel.add(new Option('View: ' + k, k)));
+viewSel.onchange = () => setView(viewSel.value);
+
+const flags = { roof: false, cut: false, doors: false, furn: false };
+const btn = (id, fn) => { const b = document.getElementById(id); b.onclick = () => { fn(); b.classList.toggle('on'); }; };
+const setRoof = (v) => { flags.roof = v; house.setRoofVisible(v); env.setInteriorMode(v); document.getElementById('roof').classList.toggle('on', v); };
+btn('roof', () => { flags.roof = !flags.roof; house.setRoofVisible(flags.roof); env.setInteriorMode(flags.roof); });
+btn('cut', () => { flags.cut = !flags.cut; house.setCutaway(flags.cut ? 120 : null); });
+btn('doors', () => { flags.doors = !flags.doors; house.setDoorsOpen(flags.doors); });
+btn('furn', () => { flags.furn = !flags.furn; furniture.visible = flags.furn; });
+const timeEl = document.getElementById('time');
+const setTime = (h) => { timeEl.value = h; env.setTimeOfDay(+h); document.getElementById('timeLabel').textContent = `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`; };
+timeEl.oninput = () => setTime(+timeEl.value);
+document.querySelectorAll('button[data-t]').forEach((b) => (b.onclick = () => setTime(+b.dataset.t)));
+
+// finish swaps: a "product" is faked through a tiny catalogue shim so resolveFinish sees it like a real one
+const FLOORS = {
+  'oak herringbone': { pattern: 'herringbone', tileW: 60, tileH: 12, color: '#c8a172', color2: '#a9844f', gloss: 0.3 },
+  'oak chevron': { pattern: 'chevron', tileW: 60, tileH: 12, color: '#b98f5f', color2: '#9a7445', gloss: 0.3 },
+  'walnut plank': { pattern: 'plank', tileW: 180, tileH: 22, color: '#7b5a41', color2: '#5f432f', gloss: 0.3 },
+  'terrazzo': { pattern: 'terrazzo', tileW: 60, tileH: 60, color: '#dcd8cf', color2: '#8c877d', gloss: 0.4 },
+  'marble 80': { pattern: 'marble', tileW: 80, tileH: 80, color: '#ecebe7', color2: '#cfcdc8', gloss: 0.75 },
+  'concrete': { pattern: 'concrete', color: '#b9b7b2', gloss: 0.15 },
+  'checker 30': { pattern: 'checker', tileW: 30, tileH: 30, color: '#f0eee9', color2: '#2e3034', gloss: 0.5 },
+  'hex 20': { pattern: 'hex', tileW: 20, color: '#e7e3da', color2: '#9a958b', gloss: 0.3 },
+  'mosaic': { pattern: 'mosaic', tileW: 2.5, color: '#7fa7a6', color2: '#e8e6e0', gloss: 0.5 },
+  'stone': { pattern: 'stone', tileW: 50, tileH: 30, color: '#cfc6b4', color2: '#8f887a', gloss: 0.05 },
+  'deck': { pattern: 'deck', tileW: 240, tileH: 14, color: '#a9743f', color2: '#8a5a2c', gloss: 0.1 },
+  'tile 60 grey': { pattern: 'tile', tileW: 60, tileH: 60, color: '#b9bbbb', color2: '#8f9191', gloss: 0.3 },
+};
+const WALLS = {
+  'sage paint': { kind: 'paint', color: '#b9c4b2', gloss: 0.05 },
+  'terracotta paint': { kind: 'paint', color: '#c98f73', gloss: 0.05 },
+  'subway tile': { kind: 'tile', pattern: 'subway', tileW: 15, tileH: 7.5, color: '#f3f1ec', color2: '#b9b6ae', gloss: 0.7 },
+  'tile 60×120': { kind: 'tile', tileW: 60, tileH: 120, color: '#e3ded3', color2: '#c6c0b4', gloss: 0.4 },
+  'stripes wallpaper': { kind: 'wallpaper', pattern: 'stripes', tileW: 8, color: '#eee9dd', color2: '#cfd6cf' },
+  'motif wallpaper': { kind: 'wallpaper', tileW: 16, color: '#e9e4d8', color2: '#b7a98c' },
+  'oak slats': { kind: 'wood-panel', pattern: 'slats', tileW: 4, color: '#c39a69', color2: '#a57f52' },
+  'brick': { kind: 'brick', color: '#b5654a', color2: '#d8d2c6' },
+  'stone': { kind: 'stone', color: '#d2c9b8', color2: '#9a9284' },
+  'microcement': { kind: 'microcement', color: '#bdb8ae', gloss: 0.25 },
+};
+const fake = new Map();
+const shim = { ...catalog, getProduct: (id) => fake.get(id) || catalog.getProduct(id) };
+ctx.catalog = shim;
+function setFinish(spaceIds, kind, name) {
+  const params = (kind === 'floor' ? FLOORS : WALLS)[name];
+  for (const id of spaceIds) {
+    if (!params) { store.setFinish(id, { [kind]: null }); continue; }
+    fake.set(`dev-${kind}-${name}`, { id: `dev-${kind}-${name}`, params });
+    store.setFinish(id, { [kind]: `dev-${kind}-${name}` });
+  }
+}
+store.on('finishes', () => { house.update(); site.update(); });
+store.on('project', () => { house.update(); env.setTimeOfDay(+timeEl.value); });
+const fsel = document.getElementById('floor'), wsel = document.getElementById('wall');
+Object.keys(FLOORS).forEach((k) => fsel.add(new Option('Floor: ' + k, k)));
+Object.keys(WALLS).forEach((k) => wsel.add(new Option('Wall: ' + k, k)));
+fsel.onchange = () => setFinish(['main'], 'floor', fsel.value);
+wsel.onchange = () => setFinish(['main'], 'wall', wsel.value);
+const EXT = ['#efece6', '#d9cdb8', '#c9d0cf', '#e5d2c0', '#8f9a94'];
+let exti = 0;
+document.getElementById('ext').onclick = () => store.setProject({ exteriorColor: EXT[++exti % EXT.length] });
+document.getElementById('ceil').onclick = () => store.setProject({ ceilingHeight: store.project.ceilingHeight === 300 ? 270 : 300 });
+
+addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
+setView('aerial'); setTime(13);
+
+const statsEl = document.getElementById('stats');
+let frames = 0, last = performance.now(), fps = 0;
+function frame() {
+  if (active === camera) controls.update();
+  env.update(active);
+  renderer.render(scene, active);
+  frames++;
+  const now = performance.now();
+  if (now - last > 500) { fps = (frames * 1000) / (now - last); frames = 0; last = now; statsEl.textContent = `${fps.toFixed(0)} fps · ${renderer.info.render.calls} draw calls · ${renderer.info.render.triangles.toLocaleString()} tris · ${renderer.info.memory.textures} textures`; }
+  requestAnimationFrame(frame);
+}
+frame();
+
+/** Test handle for Playwright. */
+window.dev = {
+  THREE, scene, camera, renderer, house, site, env, store, furniture, controls,
+  setView, setCam, setTime, setRoof, setFinish,
+  setCut: (cm) => house.setCutaway(cm), setDoors: (v) => house.setDoorsOpen(v), setFurniture: (v) => { furniture.visible = v; },
+  hideUI: () => { document.getElementById('bar').style.display = 'none'; statsEl.style.display = 'none'; },
+  info: () => { renderer.render(scene, active); return { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries }; },
+  ready: true,
+};
+</script>
+</body>
+</html>

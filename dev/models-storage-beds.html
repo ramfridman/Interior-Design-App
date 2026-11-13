@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Models — storage &amp; beds (contact sheet)</title>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three/three.module.min.js", "three/addons/": "../vendor/three/addons/" } }
+</script>
+<style>
+  body { margin: 0; padding: 16px 20px 60px; font: 13px/1.4 system-ui, sans-serif; background: #f4f2ee; color: #26282e; }
+  h1 { font-size: 18px; margin: 0 0 4px; } h2 { font-size: 15px; margin: 26px 0 8px; text-transform: capitalize; }
+  .hint { color: #777; margin-bottom: 10px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--tile, 400px), 1fr)); gap: 10px; }
+  figure { margin: 0; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  figure img { display: block; width: 100%; }
+  figcaption { padding: 5px 8px 7px; font-size: 11.5px; } figcaption b { font-size: 12.5px; }
+  figcaption .bad { color: #c22; font-weight: 600; } figcaption .ok { color: #2a7; }
+  canvas.plan { display: block; background: #fff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.12); margin-bottom: 8px; }
+  pre { background: #fff; padding: 10px; border-radius: 6px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Storage &amp; beds — model contact sheet</h1>
+<div class="hint">Query: <code>?only=bed,cabinet</code> · <code>?az=32&amp;el=18</code> camera · <code>?tile=400</code> · <code>?mode=3d|2d|test</code>. Results of the assertions: <code>window.__report</code>.</div>
+<div id="root"></div>
+<pre id="report">running…</pre>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { buildModel, drawSymbol, getModel } from '../src/models/registry.js';
+import { MODEL_TYPES } from '../src/models/types.js';
+import '../src/models/storage-beds.js';
+
+const V = (name, w, d, h, p = {}) => ({ name, w, d, h, p });
+const VARIANTS = {
+  cabinet: [
+    V('default (auto)', 120, 42, 75), V('sideboard auto', 180, 45, 75), V('nightstand auto', 45, 40, 50),
+    V('nightstand drawer + niche', 50, 40, 55, { drawers: 1, open: 1, color: '#f1eee8', handles: 'knob' }),
+    V('dresser 6 drawers', 160, 48, 80, { drawers: 6, color: '#f1eee8', color2: '#c8a476' }),
+    V('tall chest 5, cutout', 80, 48, 120, { drawers: 5, handles: 'cutout', color: 'walnut', legs: 'wood' }),
+    V('TV unit auto', 180, 40, 45), V('TV unit wall-hung 2-tone', 200, 38, 36, { legs: 'wall', drawers: 2, open: 1, color: '#f1eee8', color2: '#c8a476', material2: 'wood', handles: 'none' }),
+    V('buffet 3 doors + 3 drawers', 150, 45, 90, { doors: 3, drawers: 3, style: 'classic', color: '#46524c', top: 'wood', color2: '#c8a476' }),
+    V('vitrine glass', 90, 40, 180, { glassDoors: true, doors: 2, color: '#26221f', legs: 'metal', legHeight: 12 }),
+    V('shoe cabinet (flaps)', 80, 24, 125, { doors: 3, color: '#f1eee8' }),
+    V('console 2 drawers', 110, 35, 80, { drawers: 2, legs: 'metal', legHeight: 62 }),
+    V('rattan sideboard', 160, 42, 78, { material: 'rattan', doors: 4, handles: 'knob', color: '#b98a5e' }),
+    V('stone top, no handles', 200, 50, 70, { doors: 2, drawers: 3, top: 'stone', color: 'walnut', handles: 'none', legs: 'metal' }),
+    V('utility cupboard auto', 60, 35, 180, { color: '#f1eee8' }),
+    V('open cubes 6 / 3 cols', 120, 35, 90, { open: 6, columns: 3, legs: 'none', color: '#f1eee8' }),
+    V('bathroom doors+open', 100, 35, 60, { doors: 2, open: 2, legs: 'wall', color: '#8c9a8b', handles: 'cutout' }),
+    V('4 doors, plinth', 200, 45, 85, { doors: 4, legs: 'plinth', color: '#3a3d42', top: 'wood' }),
+  ],
+  wardrobe: [
+    V('default', 200, 60, 236), V('3 doors, 1 mirror, 2 drawers', 150, 58, 220, { doors: 3, mirror: 1, drawers: 2, color: 'oak' }),
+    V('sliding 2, 1 mirror', 180, 65, 236, { sliding: true, mirror: 1 }), V('sliding 3 oak', 270, 65, 240, { sliding: true, color: '#c8a476', doors: 3 }),
+    V('single door', 50, 55, 200, { handles: 'knob' }), V('walnut knobs + drawers', 100, 58, 200, { doors: 2, drawers: 2, handles: 'knob', color: 'walnut' }),
+    V('open system', 200, 58, 220, { open: true }), V('open narrow', 100, 50, 200, { open: true, color: '#c8a476' }), V('open wide', 280, 58, 236, { open: true, color: '#e9e4da' }),
+    V('no handles anthracite', 250, 60, 240, { handles: 'none', color: '#3a3d42', mirror: 2 }),
+  ],
+  bookcase: [
+    V('panel filled', 80, 30, 200, { filled: true }), V('panel + 4 doors', 160, 35, 200, { doors: 4, filled: true, color: '#f1eee8' }),
+    V('metal frame', 100, 35, 180, { frame: 'metal', filled: true }), V('ladder', 65, 38, 190, { frame: 'ladder', filled: true, color: '#f1eee8' }),
+    V('cube 4×4', 147, 39, 147, { frame: 'cube', filled: true, color: '#f1eee8' }), V('cube 2×4 empty', 77, 39, 147, { frame: 'cube', color: 'walnut' }),
+    V('low, no back', 120, 30, 80, { back: false, shelves: 2, columns: 3, filled: true }), V('metal wide', 180, 40, 200, { frame: 'metal', columns: 2, shelves: 5, filled: true, color: 'walnut' }),
+  ],
+  'shelf-wall': [
+    V('default floating', 110, 26, 4), V('3 floating', 80, 20, 90, { shelves: 3, color: 'walnut' }), V('bracket', 100, 25, 22, { variant: 'bracket' }),
+    V('3 on rails', 90, 25, 100, { brackets: true, shelves: 3, color: '#f1eee8' }), V('box', 90, 20, 30, { variant: 'box', color: '#f1eee8' }),
+    V('box tall', 40, 18, 100, { variant: 'box' }), V('pegboard', 76, 12, 56, { variant: 'pegboard' }),
+  ],
+  bed: [
+    V('default', 160, 200, 100), V('wood walnut', 180, 200, 110, { headboard: 'wood', color: 'walnut', bedding: '#d9d4c8' }),
+    V('metal', 140, 200, 95, { headboard: 'metal' }), V('rattan', 160, 200, 110, { headboard: 'rattan', color: '#b98a5e' }),
+    V('no headboard, low', 90, 200, 42, { headboard: 'none' }), V('platform', 180, 215, 80, { variant: 'platform', color: 'oak', bedding: '#8c9a8b' }),
+    V('storage upholstered', 160, 200, 105, { storage: true, color: '#6f7f8f', material: 'velvet' }), V('storage drawers wood', 140, 200, 90, { storage: true, headboard: 'wood', color: '#f1eee8' }),
+    V('canopy', 160, 200, 210, { canopy: true, headboard: 'wood', color: '#26221f' }), V('daybed', 205, 90, 85, { variant: 'daybed', storage: true }),
+    V('daybed (narrow)', 90, 200, 85, { variant: 'daybed', color: 'oak' }), V('sofa-bed', 200, 95, 85, { variant: 'sofa-bed' }),
+    V('youth', 90, 200, 70, { variant: 'youth', color: '#f1eee8' }), V('king classic channels', 200, 200, 125, { style: 'classic', color: '#46524c', material: 'velvet', pillows: 6 }),
+    V('single 80×190', 80, 190, 90), V('upholstered, 2 pillows', 140, 190, 100, { pillows: 2, color: '#cbbdaa', bedding: '#b9a48c', legs: 'metal' }),
+  ],
+  'bunk-bed': [
+    V('default', 100, 200, 160), V('ladder left, white', 97, 208, 157, { ladder: 'left', color: '#f1eee8' }), V('ladder front', 100, 200, 170, { ladder: 'front' }),
+    V('loft + desk', 100, 200, 185, { variant: 'loft' }), V('low loft', 97, 207, 115, { variant: 'loft', color: '#f1eee8' }),
+    V('trundle', 95, 205, 80, { variant: 'trundle' }), V('rotated (w > d)', 200, 100, 160, {}),
+  ],
+  crib: [
+    V('default', 66, 124, 85), V('wood', 70, 140, 90, { color: 'beech' }), V('toddler', 75, 145, 60, { variant: 'toddler' }),
+    V('changing table', 75, 55, 95, { variant: 'changing-table' }), V('rotated crib', 124, 66, 85, { color: '#cfd8d2' }),
+  ],
+  'coat-rack': [
+    V('default (hall stand)', 80, 35, 170), V('pole stand', 45, 45, 175, { variant: 'stand' }), V('pole metal', 40, 40, 170, { material: 'metal' }),
+    V('rail', 100, 50, 160, { variant: 'rail' }), V('shoe rack', 80, 30, 60, { variant: 'shoe-rack' }), V('shoe rack tall metal', 60, 30, 120, { variant: 'shoe-rack', material: 'metal' }),
+    V('wall hooks', 60, 8, 15, { variant: 'wall-hooks' }), V('wall panel', 80, 25, 170, { variant: 'wall-hooks' }),
+  ],
+};
+const JUNK = { doors: 'x', drawers: -3, columns: 99, open: {}, legs: 7, legHeight: 'tall', glassDoors: 'maybe', handles: null, top: 'unobtainium', color: 'constructor', color2: 12,
+  color3: '#zzz', material: 'vibranium', material2: [], style: 4, variant: 'nope', shelves: 1e9, pillows: NaN, mattressHeight: -4, headboard: [], canopy: 'yes', sliding: 2, mirror: 'all',
+  frame: null, ladder: 0, filled: 'true', storage: 'x', bedding: {}, headboardHeight: Infinity, back: 3, brackets: 'no' };
+const JUNK2 = { doors: 1e6, drawers: 1e6, open: 1e6, columns: -1, legHeight: 1e6, mirror: -5, shelves: -2, pillows: 1e9, mattressHeight: 1e9, headboardHeight: -1, canopy: true, filled: true, storage: true, sliding: true, glassDoors: true, top: 'glass', color: '__proto__' };
+
+const q = new URLSearchParams(location.search);
+const only = q.get('only') ? q.get('only').split(',') : Object.keys(VARIANTS);
+const mode = q.get('mode') || 'all';
+const TILE = +q.get('tile') || 400;
+const root = document.getElementById('root');
+document.documentElement.style.setProperty('--tile', TILE + 'px');
+window.__dbg = { THREE, buildModel, VARIANTS, measure: (o) => measure(o) };
+const item = (type, v, i = 0) => ({ id: `${type}-${i}`, type, w: v.w, d: v.d, h: v.h, params: v.p });
+
+// ───────── assertions ─────────
+function measure(obj) {
+  obj.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(obj, true), s = b.getSize(new THREE.Vector3());
+  let meshes = 0, tris = 0;
+  obj.traverse((o) => { if (o.isMesh) { meshes++; tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3; } });
+  return { b, s, meshes, tris: Math.round(tris) };
+}
+function bboxError(it) {
+  const { b } = measure(buildModel(it)), w = it.w / 100, d = it.d / 100, h = it.h / 100;
+  return Math.max(Math.abs(b.min.x + w / 2), Math.abs(b.max.x - w / 2), Math.abs(b.min.z + d / 2), Math.abs(b.max.z - d / 2), Math.abs(b.min.y), Math.abs(b.max.y - h)) * 100;
+}
+function runTests() {
+  const fails = [], ctx = document.createElement('canvas').getContext('2d');
+  let checks = 0, worst = 0, maxTris = 0, maxMeshes = 0;
+  const errors = [];
+  const origError = console.error; console.error = (...a) => { errors.push(a.map(String).join(' ')); };
+  const tryBoth = (type, it, label, strict) => {
+    const def = getModel(type);
+    try {
+      const obj = def.build({ w: it.w / 100, d: it.d / 100, h: it.h / 100, p: it.params, item: it });
+      if (strict) {
+        const e = bboxError(it), m = measure(obj); checks++; worst = Math.max(worst, e); maxTris = Math.max(maxTris, m.tris); maxMeshes = Math.max(maxMeshes, m.meshes);
+        if (!(e <= 1)) fails.push(`${type} [${label}] ${it.w}×${it.d}×${it.h}: bbox off by ${e.toFixed(2)} cm`);
+      }
+    } catch (e) { fails.push(`${type} [${label}] build threw: ${e.message}`); }
+    for (const px of [0.15, 1, 6]) { try { ctx.save(); def.draw2d(ctx, { w: it.w, d: it.d, h: it.h, p: it.params, px, item: it }); ctx.restore(); } catch (e) { fails.push(`${type} [${label}] draw2d threw: ${e.message}`); } }
+  };
+  for (const type of Object.keys(VARIANTS)) {
+    const def = MODEL_TYPES[type].size, vs = VARIANTS[type];
+    if (!getModel(type)) { fails.push(`${type}: not registered`); continue; }
+    vs.forEach((v, i) => {
+      tryBoth(type, item(type, v, i), v.name, true);
+      for (const [fw, fd, fh] of [[0.7, 0.85, 0.8], [1.4, 1.15, 1.2], [1, 1, 0.6], [0.55, 1, 1.35]]) tryBoth(type, item(type, { ...v, w: Math.round(v.w * fw), d: Math.round(v.d * fd), h: Math.round(v.h * fh) }, i), v.name + ' resized', true);
+    });
+    tryBoth(type, { type, w: def.w, d: def.d, h: def.h, params: {} }, 'p = {}', true);
+    for (const [k, junk] of [['junk', JUNK], ['junk2', JUNK2]]) {
+      tryBoth(type, { type, w: def.w, d: def.d, h: def.h, params: junk }, k, true);
+      for (const v of vs) tryBoth(type, { type, w: v.w, d: v.d, h: v.h, params: { ...v.p, ...junk, variant: v.p.variant, frame: v.p.frame } }, k + ' + ' + v.name, true);
+    }
+    for (const [w, d, h] of [[1, 1, 1], [5, 5, 5], [800, 3, 400], [3, 600, 2], [20, 20, 300]]) for (const v of vs) tryBoth(type, { type, w, d, h, params: v.p }, `extreme ${w}×${d}×${h}`, false);
+    for (const bad of [null, 'str', 42, []]) { try { getModel(type).build({ w: 1, d: 1, h: 1, p: bad }); getModel(type).build({ w: NaN, d: -1, h: undefined, p: bad }); getModel(type).draw2d(ctx, { w: NaN, d: 0, h: -4, p: bad, px: 0 }); } catch (e) { fails.push(`${type} bad args threw: ${e.message}`); } }
+  }
+  console.error = origError;
+  return { ok: fails.length === 0 && errors.length === 0, checks, worstCm: +worst.toFixed(3), maxTris, maxMeshes, fails, errors: errors.slice(0, 20) };
+}
+
+// ───────── 3D contact sheet ─────────
+let renderer, scene, camera, sun;
+function init3d() {
+  renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(1); renderer.setSize(TILE * 2, Math.round(TILE * 1.6));
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.82;
+  scene = new THREE.Scene(); scene.background = new THREE.Color('#dedad3');
+  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environmentIntensity = 0.45;
+  scene.add(new THREE.HemisphereLight('#ffffff', '#b9b2a6', 0.6));
+  sun = new THREE.DirectionalLight('#fff4e4', 2.3);
+  sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02; sun.shadow.radius = 5;
+  scene.add(sun, sun.target);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: '#cfcac1', roughness: 0.95 }));
+  floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(40, 12), new THREE.MeshStandardMaterial({ color: '#dcd8d1', roughness: 0.95 }));
+  wall.receiveShadow = true; wall.name = 'wall'; scene.add(wall);
+  camera = new THREE.PerspectiveCamera(26, TILE / (TILE * 0.8), 0.05, 100);
+}
+function shoot(it, az, el) {
+  const obj = buildModel(it), m = measure(obj), w = it.w / 100, d = it.d / 100, h = it.h / 100;
+  const wallItem = MODEL_TYPES[it.type].placement === 'wall' || (it.type === 'coat-rack' && it.params.variant === 'wall-hooks');
+  const lift = wallItem ? Math.max(0.9, 1.5 - h) : 0;
+  obj.position.y = lift; scene.add(obj);
+  scene.getObjectByName('wall').position.set(0, 6, -d / 2 - (wallItem ? 0.001 : 0.25));
+  const c = new THREE.Vector3(0, lift + h / 2, 0), r = Math.hypot(w, d, h) / 2;
+  const a = (az * Math.PI) / 180, e = (el * Math.PI) / 180, dist = (r / Math.sin((camera.fov * Math.PI) / 360)) * 1.02;
+  camera.position.set(c.x + Math.sin(a) * Math.cos(e) * dist, c.y + Math.sin(e) * dist, c.z + Math.cos(a) * Math.cos(e) * dist);
+  camera.lookAt(c);
+  sun.position.set(c.x - r * 1.6, c.y + r * 2.6, c.z + r * 2.2); sun.target.position.copy(c);
+  const sc = sun.shadow.camera; sc.left = sc.bottom = -r * 2.2; sc.right = sc.top = r * 2.2; sc.near = 0.1; sc.far = r * 8; sc.updateProjectionMatrix();
+  renderer.render(scene, camera);
+  const url = renderer.domElement.toDataURL('image/jpeg', 0.9);
+  scene.remove(obj);
+  obj.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+  return { url, ...m, err: bboxError(it) };
+}
+
+// ───────── 2D sheets ─────────
+function sheet2d(type, scale, width) {
+  const vs = VARIANTS[type], pad = 34 / scale, dpr = 2;
+  let x = pad, y = pad, rowH = 0;
+  const cells = vs.map((v, i) => {
+    const extra = type === 'wardrobe' ? v.w / Math.max(1, v.p.doors || 4) : 0;
+    if (x + v.w + pad > width / scale && x > pad) { x = pad; y += rowH + pad + 14 / scale; rowH = 0; }
+    const c = { v, i, x: x + v.w / 2, y: y + v.d / 2 }; x += v.w + pad; rowH = Math.max(rowH, v.d + extra);
+    return c;
+  });
+  const cv = document.createElement('canvas'); cv.className = 'plan';
+  const H = (y + rowH + pad) * scale;
+  cv.width = width * dpr; cv.height = H * dpr; cv.style.width = width + 'px'; cv.style.height = H + 'px';
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr * scale, dpr * scale);
+  for (const c of cells) {
+    ctx.save(); ctx.translate(c.x, c.y);
+    drawSymbol(ctx, item(type, c.v, c.i), 1 / (scale * dpr) * 1.5);
+    ctx.restore();
+    ctx.fillStyle = '#888'; ctx.font = `${10 / scale}px system-ui`; ctx.textAlign = 'center';
+    if (scale >= 0.8) ctx.fillText(c.v.name, c.x, c.y - c.v.d / 2 - 5 / scale);
+  }
+  return cv;
+}
+
+async function main() {
+  const report = mode === '3d' || mode === '2d' ? null : runTests();
+  window.__report = report;
+  document.getElementById('report').textContent = report ? JSON.stringify(report, null, 1) : 'tests skipped';
+  if (mode === 'test') { window.__done = true; return; }
+  const az = +(q.get('az') ?? 32), el = +(q.get('el') ?? 17);
+  if (mode !== '2d') init3d();
+  for (const type of only) {
+    if (!VARIANTS[type]) continue;
+    const sec = document.createElement('section'); sec.id = 'sec-' + type;
+    sec.innerHTML = `<h2>${type}</h2>`; root.appendChild(sec);
+    if (mode !== '2d') {
+      const grid = document.createElement('div'); grid.className = 'grid'; grid.id = '3d-' + type; sec.appendChild(grid);
+      VARIANTS[type].forEach((v, i) => {
+        const r = shoot(item(type, v, i), az, el);
+        const f = document.createElement('figure');
+        f.innerHTML = `<img src="${r.url}"><figcaption><b>${v.name}</b> · ${v.w}×${v.d}×${v.h}<br>${JSON.stringify(v.p)}<br>${r.meshes} meshes · ${r.tris} tris · <span class="${r.err <= 1 ? 'ok' : 'bad'}">bbox Δ ${r.err.toFixed(2)} cm</span></figcaption>`;
+        grid.appendChild(f);
+      });
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    if (mode !== '3d') {
+      const wrap = document.createElement('div'); wrap.id = '2d-' + type; sec.appendChild(wrap);
+      wrap.appendChild(sheet2d(type, 1.5, 1500)); wrap.appendChild(sheet2d(type, 0.35, 1500));
+    }
+  }
+  window.__done = true;
+}
+main().catch((e) => { document.getElementById('report').textContent = 'FAILED: ' + e.stack; window.__done = true; window.__crash = String(e.stack); });
+</script>
+</body>
+</html>

@@ -92,7 +92,7 @@ export function createTheme(container, onChange) {
     theme.font = font;
     theme.insets = insets;
     theme.version++;
-    if (onChange) onChange();
+    if (onChange) onChange(theme);
   };
 
   const mo = new MutationObserver(theme.refresh);

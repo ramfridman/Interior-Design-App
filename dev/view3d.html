@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>E7 — 3D view test page</title>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three/three.module.min.js", "three/addons/": "../vendor/three/addons/" } }
+</script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #e9e6df; font: 13px/1.3 system-ui, sans-serif; }
+  #view { position: fixed; inset: 0; --accent: #2f7cf6; }
+  #bar { position: fixed; left: 10px; top: 10px; display: flex; flex-wrap: wrap; gap: 4px; max-width: calc(100% - 20px); z-index: 5; }
+  #bar button, #bar label { border: 0; border-radius: 8px; padding: 6px 10px; background: rgba(20, 22, 26, .72); color: #fff; font: inherit; cursor: pointer; backdrop-filter: blur(6px); }
+  #bar button:hover { background: rgba(20, 22, 26, .9); }
+  #bar input[type=range] { vertical-align: middle; width: 110px; }
+  #info { position: fixed; right: 10px; bottom: 10px; padding: 6px 10px; border-radius: 8px; background: rgba(20, 22, 26, .72); color: #fff; font: 12px/1.4 ui-monospace, monospace; white-space: pre; z-index: 5; pointer-events: none; }
+  body.bare #bar, body.bare #info { display: none; }
+</style>
+</head>
+<body>
+<div id="view"></div>
+<div id="bar"></div>
+<div id="info"></div>
+<script type="module">
+import { store } from '../src/core/store.js';
+import { PLAN } from '../src/core/plan.js';
+import { initialLayout } from '../src/core/initial-layout.js';
+import * as catalog from '../src/catalog/index.js';
+import * as models from '../src/models/index.js';
+import { createView3D } from '../src/view3d/index.js';
+import { getThumbnail } from '../src/view3d/thumbs.js';
+
+const q = new URLSearchParams(location.search);
+if (q.has('bare')) document.body.classList.add('bare');
+store.persist = false;
+await Promise.all([models.loadModels(), catalog.loadCatalog()]);
+// store.load() keeps items as given, so give the architect layout stable ids here.
+store.load({ items: initialLayout().map((it, i) => ({ ...it, id: it.id || `arch-${i + 1}` })) });
+const ctx = { store, plan: PLAN, catalog, models };
+const view = createView3D(document.getElementById('view'), ctx);
+
+const bar = document.getElementById('bar');
+const button = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.onclick = fn; bar.appendChild(b); return b; };
+for (const p of ['aerial', 'top', 'front', 'garden', 'interior', ...PLAN.rooms.map((r) => r.id), ...PLAN.outdoorAreas.map((r) => r.id)]) button(p, () => view.setCameraPreset(p));
+button('▶ walk', () => view.setMode(view.getMode() === 'walk' ? 'orbit' : 'walk'));
+button('roof', () => store.setUI({ showRoof: !store.ui.showRoof }));
+button('cutaway', () => store.setUI({ wallsCutaway: !store.ui.wallsCutaway }));
+button('place sofa', () => view.startPlacing({ type: 'sofa', name: 'Test sofa', w: 220, d: 95, h: 82, params: { seats: 3, color: '#7d8c7a' }, placement: 'floor' }));
+button('place art', () => view.startPlacing({ type: 'wall-art', name: 'Test art', w: 90, d: 3, h: 60, elev: 130, params: {}, placement: 'wall' }));
+button('snapshot', async () => { const url = await view.snapshot({ width: 2400, height: 1350 }); const a = document.createElement('a'); a.href = url; a.download = 'e7.png'; a.click(); });
+button('undo', () => store.undo());
+const label = document.createElement('label');
+const time = Object.assign(document.createElement('input'), { type: 'range', min: 0, max: 24, step: 0.25, value: store.ui.timeOfDay });
+time.oninput = () => store.setUI({ timeOfDay: Number(time.value) });
+label.append('time ', time); bar.appendChild(label);
+
+const info = document.getElementById('info');
+let walkPos = null;
+view.on('walk-position', (p) => { walkPos = p; });
+view.on('mode', () => { walkPos = null; });
+setInterval(() => {
+  if (!view.debug) return;
+  const s = view.debug.stats();
+  info.textContent = `${view.getMode()}  ${s.fps.toFixed(0)} fps  render ${s.renderMs.toFixed(1)} ms  ${s.calls} calls  ${(s.triangles / 1000).toFixed(0)}k tris  ${s.items} items`
+    + (walkPos ? `\nwalk ${walkPos.x.toFixed(0)}, ${walkPos.y.toFixed(0)}  ${walkPos.heading.toFixed(0)}°  ${walkPos.spaceId}` : '')
+    + `\nstand-ins: ${Object.entries(view.debug.standIns).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none'}`;
+}, 400);
+
+Object.assign(window, { view, store, PLAN, catalog, models, getThumbnail, ctx });
+view.on('ready', () => document.documentElement.classList.add('view-ready'));
+</script>
+</body>
+</html>

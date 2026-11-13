@@ -357,16 +357,16 @@ function paintPlaster(p, r, strength = 1) {
 // ───────────────────────── site / envelope painters ─────────────────────────
 function paintEarth(r) {
   const S = surface(700, 700, 2), { g } = S;
-  const base = [186, 164, 128];
+  const base = [168, 143, 104];
   g.fillStyle = css(base); g.fillRect(0, 0, S.w, S.h);
-  clouds(S, r, 90, 40, 190, 0.09);
+  clouds(S, r, 60, 60, 220, 0.035);
   // dry-grass patches: thin straw / dull-olive blades in loose clusters
   const blades = [[203, 186, 128], [176, 168, 108], [150, 152, 96], [214, 200, 150], [128, 134, 84]];
   for (let c = 0; c < 150; c++) {
     const cx = r() * S.w, cy = r() * S.h, rad = 14 + r() * 60, n = 30 + Math.floor(r() * 110), col = blades[Math.floor(r() * blades.length)];
     for (let i = 0; i < n; i++) {
-      const a = r() * 6.283, d = Math.sqrt(r()) * rad, x = cx + Math.cos(a) * d, y = cy + Math.sin(a) * d, l = 2 + r() * 5, t = r() * 6.283;
-      wrapped(S, () => { g.strokeStyle = css(shade(col, (r() - 0.5) * 0.2), 0.5 + r() * 0.4); g.lineWidth = S.px * (0.8 + r() * 0.6); g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(t) * l, y + Math.sin(t) * l); g.stroke(); });
+      const a = r() * 6.283, d = Math.sqrt(r()) * rad, x = cx + Math.cos(a) * d, y = cy + Math.sin(a) * d, l = 1.2 + r() * 2.6, t = r() * 6.283;
+      wrapped(S, () => { g.strokeStyle = css(shade(col, (r() - 0.5) * 0.2), 0.3 + r() * 0.35); g.lineWidth = S.px * (0.8 + r() * 0.6); g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(t) * l, y + Math.sin(t) * l); g.stroke(); });
     }
   }
   for (let i = 0; i < 500; i++) { // pebbles
@@ -469,7 +469,7 @@ export function wallMaterial(params) {
         default: break;                                           // paint
       }
     } catch (e) { S = null; }
-    const m = standard(S, rough);
+    const m = standard(S, rough, { vertexColors: true });       // house.js bakes soft floor / ceiling shading into vertex colours
     if (!S) m.color.set(hex(rgb(p.color, '#f4f1ea')));
     m.userData.finish = 'wall';
     return m;
@@ -488,11 +488,11 @@ export function surfaceMaterial(kind, opts = {}) {
       case 'earth': return standard(paintEarth(r), 1, { vertexColors: true });
       case 'asphalt': return standard(paintAsphalt(r), 0.95);
       case 'render': { // fine sprayed render: the colour lives on the material so it can be re-tinted live
-        const m = standard(paintPlaster({ color: '#ffffff' }, r, 0.9), 0.94);
+        const m = standard(paintPlaster({ color: '#ffffff' }, r, 0.35), 0.94);
         m.color.set(opts.color || '#efece6');
         return m;
       }
-      case 'roof': return standard(paintConcrete({ color: '#cfd0cc' }, r, { cloud: 0.035, grain: 0.05 }), 0.9);
+      case 'roof': return standard(paintConcrete({ color: '#cfd0cc' }, r, { cloud: 0.018, grain: 0.05 }), 0.9);
       case 'pavers': return standard(paintHerringbone({ tileW: 20, tileH: 10, color: '#a9a39a', color2: '#8f8a83' }, r), 0.95);
       case 'path': return standard(paintTiles({ tileW: 40, tileH: 40, color: '#bdb6aa', color2: '#9a948a' }, r, { vary: 0.045, mottle: 0.04, groutW: 0.5 }), 0.95);
       case 'sidewalk': return standard(paintConcrete({ color: '#b9b6ae', tileW: 100, tileH: 100, color2: '#8f8c85' }, r), 0.96);

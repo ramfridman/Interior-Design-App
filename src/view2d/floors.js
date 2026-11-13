@@ -78,7 +78,7 @@ export function drawGrid(G, env) {
   for (const step of GRID_LEVELS) {
     const px = step * G.scale;
     if (px < 7) continue;
-    const alpha = clamp((px - 7) / 70, 0, 1) * (pal.dark ? 0.1 : 0.085) + 0.012;
+    const alpha = clamp((px - 7) / 90, 0, 1) * (pal.dark ? 0.075 : 0.06) + 0.01;
     ctx.beginPath();
     for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) { const X = G.RX(x) + 0.5; ctx.moveTo(X, 0); ctx.lineTo(X, G.height); }
     for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) { const Y = G.RY(y) + 0.5; ctx.moveTo(0, Y); ctx.lineTo(G.width, Y); }

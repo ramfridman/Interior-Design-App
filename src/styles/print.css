@@ -1,0 +1,19 @@
+/* Paper: only the shopping list (#print-root, filled just before printing) is printed — black on white, no chrome. */
+#print-root { display: none; }
+
+@media print {
+  @page { margin: 16mm 14mm; }
+  html, body { height: auto; overflow: visible; background: #fff; color: #000; }
+  body > *:not(#print-root) { display: none !important; }
+  #print-root { display: block; font: 10pt/1.4 var(--font-ui); color: #000; }
+  #print-root h1 { font: 500 18pt/1.2 var(--font-display); }
+  #print-root .print__sub { margin: 2pt 0 12pt; color: #444; font-size: 9pt; }
+  #print-root h2 { display: flex; justify-content: space-between; margin: 14pt 0 4pt; padding-bottom: 3pt; border-bottom: 1pt solid #000; font: 600 11pt/1.3 var(--font-ui); break-after: avoid; }
+  #print-root table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  #print-root th { padding: 3pt 4pt 3pt 0; text-align: left; font-weight: 500; font-size: 8pt; color: #555; }
+  #print-root td { padding: 4pt 4pt 4pt 0; border-bottom: 0.5pt solid #bbb; vertical-align: top; }
+  #print-root tr { break-inside: avoid; }
+  #print-root td small { display: block; color: #555; font-size: 7.5pt; overflow-wrap: anywhere; }
+  #print-root .r { text-align: right; white-space: nowrap; padding-right: 0; }
+  #print-root .print__total { margin-top: 14pt; padding-top: 6pt; border-top: 1.5pt solid #000; text-align: right; font-size: 12pt; }
+}

@@ -5,7 +5,7 @@
  */
 import { normDeg } from '../core/geometry.js';
 import { getSpace, floorAreaM2, resolveFinish } from '../core/finishes.js';
-import { h, setKids, call } from './dom.js';
+import { h, setKids } from './dom.js';
 import { icon } from './icons.js';
 import { btn, iconBtn, numField, section, swatch, extLink, emptyState } from './components.js';
 import { fmtPrice, fmtDims, fmtArea, fmtUnitPrice, toUnit, fromUnit, unitDigits, RESIZABLE_TYPES } from './format.js';
@@ -279,4 +279,3 @@ function rotationDial(value, { onStart, onTurn, onEnd }) {
   return el;
 }
 
-export { call };

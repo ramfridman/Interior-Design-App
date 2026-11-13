@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>view2d — plan editor test page</title>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three/three.module.min.js", "three/addons/": "../vendor/three/addons/" } }
+</script>
+<link rel="stylesheet" href="../src/styles/tokens.css">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font: 13px/1.4 var(--font-ui, system-ui, sans-serif); background: var(--bg, #e3e6e1); color: var(--ink, #172026); }
+  #view { position: fixed; inset: 0; --plan-inset-top: 44px; }
+  #bar { position: fixed; top: 8px; left: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; z-index: 2; pointer-events: none; }
+  #bar > * { pointer-events: auto; }
+  button, select { font: inherit; padding: 4px 9px; border-radius: 6px; border: 1px solid var(--line-strong, #0003); background: var(--raised, #fff); color: inherit; cursor: pointer; }
+  button.on { background: var(--accent, #1d4e89); color: var(--accent-ink, #fff); border-color: transparent; }
+  #status { margin-left: auto; padding: 4px 9px; border-radius: 6px; background: var(--overlay-bg, #fffc); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div id="view"></div>
+<div id="bar">
+  <button data-fit="lot">Lot</button><button data-fit="house">House</button><button data-fit="selection">Selection</button>
+  <button data-zoom="1.5">+</button><button data-zoom="0.667">−</button>
+  <button data-tool="select">Select</button><button data-tool="pan">Pan</button><button data-tool="measure">Measure</button>
+  <button data-ui="snap">Snap</button><button data-ui="showGrid">Grid</button><button data-ui="showDimensions">Dims</button>
+  <button data-ui="showRoomLabels">Labels</button><button data-ui="showSite">Site</button><button data-ui="showItems">Items</button>
+  <button id="units">Units</button><button id="theme">Theme</button>
+  <button id="place-sofa">Place sofa</button><button id="place-art">Place wall art</button><button id="place-tree">Place tree</button>
+  <button id="stress">150 items</button><button id="undo">Undo</button><button id="redo">Redo</button><button id="export">Export PNG</button>
+  <span id="status"></span>
+</div>
+<script type="module">
+import { store } from '../src/core/store.js';
+import { PLAN } from '../src/core/plan.js';
+import { initialLayout } from '../src/core/initial-layout.js';
+import * as catalog from '../src/catalog/index.js';
+import * as models from '../src/models/index.js';
+import { createView2D } from '../src/view2d/index.js';
+
+const q = new URLSearchParams(location.search);
+if (q.get('theme')) document.documentElement.dataset.theme = q.get('theme');
+store.persist = false;
+await Promise.all([models.loadModels(), catalog.loadCatalog()]);
+store.load({ items: initialLayout() });
+
+const view = createView2D(document.getElementById('view'), { store, plan: PLAN, catalog, models });
+window.app = { store, plan: PLAN, catalog, models, view2d: view };
+
+const $ = (s) => document.querySelector(s), status = $('#status');
+let cursor = '', zoom = '';
+const show = () => { status.textContent = `${cursor}  ·  ${zoom}  ·  ${view._debug.stats.ms.toFixed(2)} ms (${view._debug.stats.mode})`; };
+view.on('cursor', (e) => { cursor = `${e.x.toFixed(0)}, ${e.y.toFixed(0)} ${e.space ? e.space.name : '—'}`; show(); });
+view.on('zoom', (e) => { zoom = `${e.scale.toFixed(3)} px/cm`; show(); });
+view.on('contextmenu', (e) => { status.textContent = `context menu: ${e.item ? e.item.name : 'empty'}`; });
+view.on('item-dblclick', (e) => { status.textContent = `double-click: ${e.item.name}`; });
+window.events = [];
+for (const n of ['placing', 'contextmenu', 'item-dblclick']) view.on(n, (e) => window.events.push([n, e.state || (e.item && e.item.name) || null]));
+
+const sync = () => {
+  document.querySelectorAll('[data-ui]').forEach((b) => b.classList.toggle('on', !!store.ui[b.dataset.ui]));
+  document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', store.ui.tool === b.dataset.tool));
+  $('#units').textContent = `Units: ${store.ui.units}`;
+};
+store.on('ui', sync); sync();
+document.querySelectorAll('[data-fit]').forEach((b) => b.addEventListener('click', () => view.fit(b.dataset.fit)));
+document.querySelectorAll('[data-zoom]').forEach((b) => b.addEventListener('click', () => view.zoomBy(+b.dataset.zoom)));
+document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => store.setUI({ tool: b.dataset.tool })));
+document.querySelectorAll('[data-ui]').forEach((b) => b.addEventListener('click', () => store.setUI({ [b.dataset.ui]: !store.ui[b.dataset.ui] })));
+$('#units').addEventListener('click', () => store.setUI({ units: store.ui.units === 'm' ? 'cm' : 'm' }));
+$('#theme').addEventListener('click', () => { const r = document.documentElement; r.dataset.theme = r.dataset.theme === 'dark' ? 'light' : 'dark'; });
+$('#place-sofa').addEventListener('click', () => view.startPlacing({ type: 'sofa', name: 'Sofa', w: 220, d: 95, h: 82, params: { seats: 3, color: '#8c9aa3' }, generic: true }));
+$('#place-art').addEventListener('click', () => view.startPlacing({ type: 'wall-art', name: 'Wall art', w: 100, d: 4, h: 70, placement: 'wall', elev: 115, params: {} }));
+$('#place-tree').addEventListener('click', () => view.startPlacing({ type: 'tree', name: 'Olive tree', w: 300, d: 300, h: 400, zone: 'outdoor', params: { species: 'olive' } }));
+$('#undo').addEventListener('click', () => store.undo());
+$('#redo').addEventListener('click', () => store.redo());
+$('#stress').addEventListener('click', () => window.stress(150));
+$('#export').addEventListener('click', async () => {
+  const blob = await view.exportPNG({ scale: 2 });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'e7-plan.png'; a.click();
+});
+/** Fill the design up to `n` items with a deterministic mix of indoor and garden pieces. */
+window.stress = (n = 150) => {
+  const types = [['tree', 300, 300, 400, 'outdoor'], ['shrub', 100, 100, 100, 'outdoor'], ['planter', 50, 50, 60, 'outdoor'], ['lounger', 70, 195, 35, 'outdoor'],
+    ['chair', 48, 52, 82, 'indoor'], ['plant', 50, 50, 120, 'indoor'], ['floor-lamp', 40, 40, 160, 'indoor'], ['armchair', 80, 85, 85, 'indoor']];
+  const b = PLAN.site.bounds; let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const add = [];
+  for (let i = store.items.length; i < n; i++) {
+    const [type, w, d, h, zone] = types[i % types.length];
+    const indoor = zone === 'indoor';
+    add.push({ type, name: type, w, d, h, zone, generic: true, params: {}, rot: Math.round(rnd() * 24) * 15,
+      x: indoor ? 380 + rnd() * 900 : b.x + 150 + rnd() * (b.w - 300), y: indoor ? 60 + rnd() * 420 : b.y + 150 + rnd() * (b.h - 300) });
+  }
+  store.addItems(add, { select: false });
+  return store.items.length;
+};
+if (q.get('items')) window.stress(+q.get('items'));
+window.ready = true;
+</script>
+</body>
+</html>

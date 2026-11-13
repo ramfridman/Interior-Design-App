@@ -52,6 +52,7 @@
   --shadow-2: 0 2px 4px rgba(18, 26, 32, 0.06), 0 10px 28px rgba(18, 26, 32, 0.16);
   --shadow-3: 0 4px 10px rgba(18, 26, 32, 0.08), 0 24px 64px rgba(18, 26, 32, 0.26);
   --overlay-bg: rgba(250, 251, 249, 0.92);   /* floating controls over the viewports */
+  --thumb-bg: #eceeea;                       /* paper tile behind product pictures and plan symbols */
 
   /* ── Type ── */
   --font-ui: 'Hanken Grotesk Variable', 'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -129,6 +130,7 @@
     --shadow-2: 0 2px 4px rgba(0, 0, 0, 0.35), 0 10px 28px rgba(0, 0, 0, 0.5);
     --shadow-3: 0 4px 10px rgba(0, 0, 0, 0.4), 0 24px 64px rgba(0, 0, 0, 0.6);
     --overlay-bg: rgba(22, 30, 38, 0.9);
+    --thumb-bg: #cdd2ce;
   }
 }
 
@@ -167,6 +169,7 @@
   --shadow-2: 0 2px 4px rgba(0, 0, 0, 0.35), 0 10px 28px rgba(0, 0, 0, 0.5);
   --shadow-3: 0 4px 10px rgba(0, 0, 0, 0.4), 0 24px 64px rgba(0, 0, 0, 0.6);
   --overlay-bg: rgba(22, 30, 38, 0.9);
+  --thumb-bg: #cdd2ce;
 }
 
 @media (pointer: coarse) {

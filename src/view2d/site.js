@@ -106,14 +106,13 @@ export function drawSiteLines(G, env) {
     const [a, b] = [site.buildingLine[0], site.buildingLine[1]];
     const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, ux = (b[0] - a[0]) / len, uy = (b[1] - a[1]) / len;
     if (len * G.scale > 220) {
-      G.text('Building line', G.X(a[0]) + ux * 10 * d - uy * -8 * d * 0 , G.Y(a[1]) - 8 * d,
+      G.text('Building line', G.X(a[0]) + ux * 10 * d, G.Y(a[1]) - 8 * d,
         { size: 9.5, weight: 500, color: pal.building, align: 'left', angle: upright(ux, uy), halo: css(pal.garden, 0.9) });
     }
   }
 
   // setbacks: a short dimension between the property line and the building line on each side
   if (site.setbacks && site.buildingLine?.length && G.scale > 0.22) {
-    const bl = polygonBounds(site.buildingLine);
     for (const side of ['n', 'e', 's', 'w']) {
       const dist = site.setbacks[side];
       if (!dist) continue;
@@ -132,7 +131,6 @@ export function drawSiteLines(G, env) {
       const label = fmtLen(dist, ui.units);
       if (horiz) G.text(label, mx, my - 7 * G.dpr, { size: 9.5, color: pal.building, halo: css(pal.garden, 0.9) });
       else G.text(label, mx - 7 * G.dpr, my, { size: 9.5, color: pal.building, angle: -Math.PI / 2, halo: css(pal.garden, 0.9) });
-      void bl;
     }
   }
 
@@ -145,18 +143,6 @@ export function drawSiteLines(G, env) {
     ctx.beginPath(); ctx.arc(G.X(x), G.Y(y), 3.5 * G.dpr, 0, Math.PI * 2);
     ctx.fillStyle = pal.paper; ctx.fill(); ctx.strokeStyle = pal.property; ctx.lineWidth = G.px(1.25); ctx.stroke();
   }
-  site.boundary.forEach((a, i) => {
-    const b = site.boundary[(i + 1) % site.boundary.length];
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    if (len * G.scale < 90) return;
-    const ux = (b[0] - a[0]) / len, uy = (b[1] - a[1]) / len;
-    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
-    // outward normal = away from the lot centre
-    let nx = -uy, ny = ux;
-    if ((mx - cx) * nx + (my - cy) * ny < 0) { nx = -nx; ny = -ny; }
-    G.text(fmtLen(len, ui.units), G.X(mx) + nx * 11 * G.dpr, G.Y(my) + ny * 11 * G.dpr,
-      { size: 10.5, weight: 600, color: pal.property, angle: upright(ux, uy), halo: pal.halo });
-  });
   if (site.lot != null && G.scale > 0.2) {
     const [x, y] = site.boundary[0];
     G.text(`Lot ${site.lot}`, G.X(x) + 12 * G.dpr, G.Y(y) + 16 * G.dpr, { size: 10.5, weight: 600, color: pal.property, align: 'left', halo: css(pal.garden, 0.9) });
@@ -176,4 +162,26 @@ export function drawSiteLines(G, env) {
       G.text(label, toRight ? x + r + 5 * G.dpr : x, toRight ? y : y + r + 9 * G.dpr, { size: 9.5, color: col, align: toRight ? 'left' : 'center', halo: css(pal.garden, 0.9) });
     }
   }
+}
+
+/** Side lengths of the property line — part of the annotation layer so dimension text can avoid them. */
+export function drawSiteLabels(G, env, boxes) {
+  const { plan, pal, ui } = env, site = plan.site;
+  const bb = polygonBounds(site.boundary);
+  const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
+  site.boundary.forEach((a, i) => {
+    const b = site.boundary[(i + 1) % site.boundary.length];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (len * G.scale < 90) return;
+    const ux = (b[0] - a[0]) / len, uy = (b[1] - a[1]) / len;
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+    let nx = -uy, ny = ux;                                   // outward normal = away from the lot centre
+    if ((mx - cx) * nx + (my - cy) * ny < 0) { nx = -nx; ny = -ny; }
+    const label = fmtLen(len, ui.units), size = 10.5;
+    const x = G.X(mx) + nx * 11 * G.dpr, y = G.Y(my) + ny * 11 * G.dpr;
+    const tw = G.measure(label, size, 600) / 2 + 3 * G.dpr, th = size * G.dpr * 0.7;
+    const flat = Math.abs(ux) > Math.abs(uy);
+    boxes.add(flat ? { x0: x - tw, x1: x + tw, y0: y - th, y1: y + th } : { x0: x - th, x1: x + th, y0: y - tw, y1: y + tw });
+    G.text(label, x, y, { size, weight: 600, color: pal.property, angle: upright(ux, uy), halo: pal.halo });
+  });
 }

@@ -18,14 +18,15 @@ const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3
 
 /** Growable triangle soup: positions, normals and metre-scaled UVs; one BufferGeometry per material. */
 export class Soup {
-  constructor() { this.pos = []; this.nor = []; this.uv = []; this.idx = []; }
+  constructor() { this.pos = []; this.nor = []; this.uv = []; this.idx = []; this.shades = []; }
   get empty() { return this.idx.length === 0; }
 
   /**
    * Add a planar quad. `pts` = 4 corners [x, y, z] in loop order (either winding); the winding is fixed so that
    * the front face looks along `n`. `uvs` = 4 [u, v] pairs matching `pts` (defaults to zeros).
+   * `shades` = optional 4 grey factors (vertex colour, used for baked soft shading on walls).
    */
-  quad(pts, n, uvs) {
+  quad(pts, n, uvs, shades) {
     _a.fromArray(pts[0]); _b.fromArray(pts[1]).sub(_a); _c.fromArray(pts[2]).sub(_a);
     const flip = _b.cross(_c).dot(_n.set(n[0], n[1], n[2])) < 0;
     const base = this.pos.length / 3;
@@ -34,6 +35,7 @@ export class Soup {
       this.pos.push(pts[i][0], pts[i][1], pts[i][2]);
       this.nor.push(n[0], n[1], n[2]);
       if (uvs) this.uv.push(uvs[i][0], uvs[i][1]); else this.uv.push(0, 0);
+      if (shades && shades[i] !== 1) this.shades.push(base + k, shades[i]);
     }
     this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
   }
@@ -82,8 +84,14 @@ export class Soup {
     }
   }
 
-  toGeometry() {
+  /** @param {boolean} [withColor] also write a vertex-colour attribute (white unless a quad gave `shades`). */
+  toGeometry(withColor = false) {
     const g = new THREE.BufferGeometry();
+    if (withColor) {
+      const col = new Float32Array(this.pos.length).fill(1);
+      for (let i = 0; i < this.shades.length; i += 2) col.fill(this.shades[i + 1], this.shades[i] * 3, this.shades[i] * 3 + 3);
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    }
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
@@ -334,7 +342,7 @@ function makeMaterials(frameColor) {
     steel: std('#8b978c', 0.55, 0.35),
     handle: std('#c4c6c8', 0.3, 0.9),
     stone: std('#d8d2c6', 0.75),
-    glass: std('#bcd6dc', 0.06, 0, { transparent: true, opacity: 0.2, depthWrite: false, envMapIntensity: 1.6 }),
+    glass: std('#6f8b96', 0.05, 0, { transparent: true, opacity: 0.3, depthWrite: false, envMapIntensity: 3 }),
   };
 }
 
