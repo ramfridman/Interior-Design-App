@@ -224,9 +224,9 @@ export function buildScene(input, opts = {}) {
       floorChart[c] = f.id; ceilChart[c] = cl.id; contribH.push(c, f.id, c, cl.id);
     } else if (k === OPEN) {
       const o = reg[c], r = nR + o;
-      const f = oSill[o] > 1e-6 ? hChart(SURF.SILL, r, O.tile, oSill[o], 1) : hChart(SURF.THRESHOLD, r, O.tile, 0, 1);
+      const f = oSill[o] > 1e-6 ? hChart(SURF.SILL, r, 2, oSill[o], 1) : hChart(SURF.THRESHOLD, r, 2, 0, 1);
       floorChart[c] = f.id; contribH.push(c, f.id);
-      if (oHead[o] < H - 1e-6) { const l = hChart(SURF.LINTEL, r, O.tile, oHead[o], -1); ceilChart[c] = l.id; contribH.push(c, l.id); }
+      if (oHead[o] < H - 1e-6) { const l = hChart(SURF.LINTEL, r, 2, oHead[o], -1); ceilChart[c] = l.id; contribH.push(c, l.id); }
     }
     if (k !== WALL && k !== OPEN) continue;
     const solid = solidOf(c);
@@ -239,7 +239,7 @@ export function buildScene(input, opts = {}) {
       if (!iv.length) continue;
       const region = regionOf(n), plane = s === 0 ? i + 1 : s === 1 ? i : s === 2 ? j + 1 : j, along = s < 2 ? j : i;
       const ch = getChart(`v:${s}:${plane}:${region}`, () => ({
-        type: 'v', surf: SURF.WALL, region, side: s, plane, tile: O.tile, a0: Infinity, a1: -Infinity,
+        type: 'v', surf: SURF.WALL, region, side: s, plane, tile: region >= nR ? 2 : O.tile, a0: Infinity, a1: -Infinity,
         normal: [s === 0 ? 1 : s === 1 ? -1 : 0, 0, s === 2 ? 1 : s === 3 ? -1 : 0],
       }));
       faceChart[c * 4 + s] = ch.id;
@@ -290,9 +290,19 @@ export function buildScene(input, opts = {}) {
     count: nP, chart: Int32Array.from(P.chart), texel: Int32Array.from(P.texel), area: Float32Array.from(P.area),
     pos: new Float32Array(nP * 3), nrm: new Int8Array(nP * 3), surf: new Uint8Array(nP), region: new Int16Array(nP),
   };
+  const airRegion = (px, py, pz) => {
+    const i = Math.floor((px - ox) / CS), j = Math.floor((pz - oz) / CS);
+    if (i < 0 || j < 0 || i >= nx || j >= ny) return -1;
+    const c = j * nx + i;
+    if (kind[c] === ROOM) return py > 0 && py < H ? reg[c] : -1;
+    if (kind[c] === OPEN) return py > oSill[reg[c]] && py < oHead[reg[c]] ? nR + reg[c] : -1;
+    return -1;
+  };
   for (let p = 0; p < nP; p++) {
     const ch = charts[P.chart[p]], a = P.area[p] || 1;
     let x = P.sx[p] / a, y = P.sy[p] / a, z = P.sz[p] / a;
+    const n = ch.normal;
+    if (airRegion(x + n[0] * 0.01, y + n[1] * 0.01, z + n[2] * 0.01) !== ch.region) { x = P.ax[p]; y = P.ay[p]; z = P.az[p]; }
     patch.nrm[p * 3] = ch.normal[0]; patch.nrm[p * 3 + 1] = ch.normal[1]; patch.nrm[p * 3 + 2] = ch.normal[2];
     patch.surf[p] = ch.surf; patch.region[p] = ch.region;
     patch.pos[p * 3] = x; patch.pos[p * 3 + 1] = y; patch.pos[p * 3 + 2] = z;
@@ -555,8 +565,7 @@ export function createVisibilityJob(S, { coarse = false } = {}) {
     let f = facadeIndex.get(R.idx);
     if (f === undefined) {
       f = facades.length; facadeIndex.set(R.idx, f);
-      const n = DIRS6[[0, 1, 4, 5][R.side]];
-      facades.push({ x: R.x, y: R.y, z: R.z, nx: -n[0] * 0 + (R.side === 0 ? -1 : R.side === 1 ? 1 : 0), nz: R.side === 2 ? -1 : R.side === 3 ? 1 : 0, hits: 1 });
+      facades.push({ x: R.x, y: R.y, z: R.z, nx: R.side === 0 ? 1 : R.side === 1 ? -1 : 0, nz: R.side === 2 ? 1 : R.side === 3 ? -1 : 0, hits: 1 });
     } else { const F = facades[f]; F.hits++; F.x += (R.x - F.x) / F.hits; F.y += (R.y - F.y) / F.hits; F.z += (R.z - F.z) / F.hits; }
     return SRC_FACADE + f;
   };

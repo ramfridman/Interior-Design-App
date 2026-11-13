@@ -630,3 +630,20 @@ All pages were fetched by the researcher on 2026-11-13 (Hebrew-language Israeli 
 
 * Cross-check of whole-kitchen totals: container.org.il (6–8 m, standard custom) 18,000–40,000; kitchensdesign "modern all-in" 25,000–38,000 ex VAT; La Casa luxury 50,000–150,000+. Per-metre rates × length should land in this neighbourhood before worktop and appliances.
 * The ready-made sliding wardrobe at Home Center (200×240×57 cm, 1,699 sale / 2,222 list, delivery + installation 550 extra) is a catalogue product, not custom carpentry, and was not used.
+
+## Second-opinion check (kitchen per metre)
+
+Sources (figures as published; VAT almost never stated; "(i)" = I assumed incl. VAT and divided by 1.18):
+
+| Source | Figure as published | Includes | VAT |
+|---|---|---|---|
+| Midrag price page (via search summary; page itself returned HTTP 405) | 1,500-4,500 /running m kitchen | Lower + upper cabinets along the wall (per summary); akitchen's copy says "excl. worktop, island, appliances"; niches for fridge/oven not always counted | not stated (i) -> 1,271-3,814 |
+| akitchen.co.il 2026-10-22 (quotes Midrag) | 1,500-4,500 general; formica 1,200-1,800; veneer 1,700-2,700 | cabinets+fronts+hardware; worktop sometimes; excl. sink, demolition, services | not stated (i); not independent of Midrag |
+| la-casa.co.il 2026 | formica/sandwich 1,200-2,500; polymer/oven-painted 1,700-2,400; solid wood 4,000-7,000+; standard kitchen "from 25,000"; luxury 50,000-150,000+ | page does not say what the metre covers | not stated (i) |
+| container.org.il 2026 | cabinet bodies 3,000-8,000 /m; fronts 2,500-7,000 /m; worktop 1,200-3,500 /m; totals for 6-8 m: modular 12-17k/17-25k, standard custom 18-28k/28-40k, premium 40-65k/65-120k+ | totals exclude appliances, sink/taps, prep works; include measuring/planning | "most quotes incl. VAT" (i). Component rates do not reconcile with its own totals; derived per-m of totals (my arithmetic): standard 2,250-4,670 basic, 3,500-6,670 upgraded, premium 5,000-10,800 incl. VAT |
+| experts.co.il (updated 2026-07-23) | 1,200-1,800 /m, typical 1,450 | body, fronts, hardware, delivery, installation; worktop separate | not stated (i); search snippet of the same site also gave lower 1,200-2,200 and upper 900-1,600 per m (not verified on the fetched page) |
+| Previous researcher: pro.co.il, d.co.il, kitchensdesign (ex VAT) | formica 1,100-1,650, polymer 1,450-2,000, solid wood 2,600-3,250 | base cabinets per metre, no special hardware | see above |
+
+Reconciliation: the original `kitchen.cabinets.per-m.*` (1,270 / 1,710 / 3,520 ex VAT) were not an arithmetic error; they come from price-guide aggregators whose per-metre rates are lowest-spec (formica, base run) and are repeated across sites. They are a different, lower basis than what kitchen companies quote. Whole-kitchen totals (standard custom 18-28k for 6-8 m, from 25k) imply about 2,000-4,000 /m ex VAT, and Midrag's lower+upper figure is 1,500-4,500 /m. New keys `kitchen.complete.per-m.*` (lower + upper, no worktop, no appliances): basic 1,270/1,900/2,800, mid 1,900/2,900/4,000, premium 3,400/5,300/8,000 ex VAT. Base-only keys kept unchanged. Wall-units basic 760/1,060/1,360 is from one unverified snippet; tall-unit key unchanged; no wall-unit data for mid/premium.
+
+Remaining uncertainty: no source states inclusions precisely or VAT clearly; sources cite each other; complete.* ranges are judgement blends (confidence low). Several "several thousand per metre" claims hold only for mid/premium and whole-kitchen totals including worktop/extras. No wardrobe evidence encountered.
