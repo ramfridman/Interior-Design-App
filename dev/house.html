@@ -19,8 +19,10 @@
 </head>
 <body>
 <div id="bar">
-  <button id="roof">Roof</button><button id="cut">Cutaway 1.2 m</button><button id="doors">Doors open</button><button id="furn">Furniture</button>
+  <button id="roof">Roof</button><button id="study" class="on">Sun study</button><button id="cut">Cutaway 1.2 m</button><button id="doors">Doors open</button><button id="furn">Furniture</button>
   <label>Time <input id="time" type="range" min="0" max="24" step="0.25" value="13"> <span id="timeLabel">13:00</span></label>
+  <label>Date <input id="date" type="date"></label><button data-d="06-21">21 Jun</button><button data-d="12-21">21 Dec</button><button data-d="03-20">20 Mar</button>
+  <span id="sun" style="background:#000a;padding:3px 8px;border-radius:6px"></span>
   <button data-t="9">09:00</button><button data-t="13">13:00</button><button data-t="18.5">18:30</button><button data-t="19.6">19:35</button><button data-t="22">22:00</button>
   <select id="view"></select>
   <select id="floor"><option value="">Floor finish (main)…</option></select>
@@ -109,16 +111,26 @@ const viewSel = document.getElementById('view');
 Object.keys(VIEWS).forEach((k) => viewSel.add(new Option('View: ' + k, k)));
 viewSel.onchange = () => setView(viewSel.value);
 
-const flags = { roof: false, cut: false, doors: false, furn: false };
+const flags = { roof: false, cut: false, doors: false, furn: false, study: true };
 const btn = (id, fn) => { const b = document.getElementById(id); b.onclick = () => { fn(); b.classList.toggle('on'); }; };
-const setRoof = (v) => { flags.roof = v; house.setRoofVisible(v); env.setInteriorMode(v); document.getElementById('roof').classList.toggle('on', v); };
+const setRoof = (v) => { flags.roof = v; house.setRoofVisible(v); env.setInteriorMode(v); document.getElementById('roof').classList.toggle('on', v); syncStudy(); };
 btn('roof', () => { flags.roof = !flags.roof; house.setRoofVisible(flags.roof); env.setInteriorMode(flags.roof); });
-btn('cut', () => { flags.cut = !flags.cut; house.setCutaway(flags.cut ? 120 : null); });
+const syncStudy = () => { house.setSunStudy(flags.study); env.setSunStudy(flags.study && (!flags.roof || flags.cut)); };
+const setStudy = (v) => { flags.study = !!v; syncStudy(); document.getElementById('study').classList.toggle('on', flags.study); };
+document.getElementById('roof').addEventListener('click', syncStudy);
+document.getElementById('study').onclick = () => setStudy(!flags.study);
+btn('cut', () => { flags.cut = !flags.cut; house.setCutaway(flags.cut ? 120 : null); syncStudy(); });
 btn('doors', () => { flags.doors = !flags.doors; house.setDoorsOpen(flags.doors); });
 btn('furn', () => { flags.furn = !flags.furn; furniture.visible = flags.furn; });
 const timeEl = document.getElementById('time');
-const setTime = (h) => { timeEl.value = h; env.setTimeOfDay(+h); document.getElementById('timeLabel').textContent = `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`; };
+const clock = (h) => (h == null ? '—' : `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.floor((h % 1) * 60)).padStart(2, '0')}`);
+const showSun = () => { const s = env.getSunInfo(); document.getElementById('sun').textContent = `az ${s.azimuth.toFixed(1)}° ${s.compass} · el ${s.elevation.toFixed(1)}° · rise ${clock(s.sunrise)} · noon ${clock(s.solarNoon)} · set ${clock(s.sunset)}`; };
+const setTime = (h) => { timeEl.value = h; env.setTimeOfDay(+h); document.getElementById('timeLabel').textContent = clock(+h); showSun(); };
 timeEl.oninput = () => setTime(+timeEl.value);
+const dateEl = document.getElementById('date');
+const setDate = (d) => { env.setDate(d); dateEl.value = env.getSunInfo().date; showSun(); };
+dateEl.onchange = () => setDate(dateEl.value);
+document.querySelectorAll('button[data-d]').forEach((b) => (b.onclick = () => setDate(`${env.getSunInfo().date.slice(0, 4)}-${b.dataset.d}`)));
 document.querySelectorAll('button[data-t]').forEach((b) => (b.onclick = () => setTime(+b.dataset.t)));
 
 // finish swaps: a "product" is faked through a tiny catalogue shim so resolveFinish sees it like a real one
@@ -172,7 +184,8 @@ document.getElementById('ext').onclick = () => store.setProject({ exteriorColor:
 document.getElementById('ceil').onclick = () => store.setProject({ ceilingHeight: store.project.ceilingHeight === 300 ? 270 : 300 });
 
 addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
-setView('aerial'); setTime(13);
+setView('aerial'); setDate(store.ui.date); setTime(13); syncStudy();
+store.on('plan', () => { window.dev.rebuildMs = house.rebuildPlan(); env.refreshPlan(); });
 
 const statsEl = document.getElementById('stats');
 let frames = 0, last = performance.now(), fps = 0;
@@ -190,8 +203,8 @@ frame();
 /** Test handle for Playwright. */
 window.dev = {
   THREE, scene, camera, renderer, house, site, env, store, furniture, controls,
-  setView, setCam, setTime, setRoof, setFinish,
-  setCut: (cm) => house.setCutaway(cm), setDoors: (v) => house.setDoorsOpen(v), setFurniture: (v) => { furniture.visible = v; },
+  setView, setCam, setTime, setDate, setStudy, setRoof, setFinish, PLAN, ortho,
+  setCut: (cm) => { flags.cut = cm != null; house.setCutaway(cm); syncStudy(); }, setDoors: (v) => house.setDoorsOpen(v), setFurniture: (v) => { furniture.visible = v; },
   hideUI: () => { document.getElementById('bar').style.display = 'none'; statsEl.style.display = 'none'; },
   info: () => { renderer.render(scene, active); return { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries }; },
   ready: true,

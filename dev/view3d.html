@@ -54,20 +54,79 @@ const label = document.createElement('label');
 const time = Object.assign(document.createElement('input'), { type: 'range', min: 0, max: 24, step: 0.25, value: store.ui.timeOfDay });
 time.oninput = () => store.setUI({ timeOfDay: Number(time.value) });
 label.append('time ', time); bar.appendChild(label);
+const dateLabel = document.createElement('label');
+const date = Object.assign(document.createElement('input'), { type: 'date', value: store.ui.date });
+date.onchange = () => store.setUI({ date: date.value });
+dateLabel.append('date ', date); bar.appendChild(dateLabel);
+for (const d of ['06-21', '12-21', '03-20']) button(d, () => { date.value = `${store.ui.date.slice(0, 4)}-${d}`; store.setUI({ date: date.value }); });
+button('sun study', () => store.setUI({ sunStudy: !store.ui.sunStudy }));
+
+// ── live plan edits (what the plan editor will do): mutate PLAN in place, then store.emit('plan') ──
+const rectsTouch = (a, b) => a.x <= b.x + b.w && b.x <= a.x + a.w && a.y <= b.y + b.h && b.y <= a.y + a.h;
+const bounds = (poly) => { const xs = poly.map((p) => p[0]), ys = poly.map((p) => p[1]); return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }; };
+/** Interior wall pieces lying between two rooms (found from the data: the strip between their floor polygons). */
+function partitionBetween(idA, idB) {
+  const a = bounds(PLAN.rooms.find((r) => r.id === idA).polygon), b = bounds(PLAN.rooms.find((r) => r.id === idB).polygon);
+  const strip = { x: Math.max(a.x, b.x), y: Math.min(a.y + a.h, b.y + b.h), w: Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x), h: Math.abs(Math.max(a.y, b.y) - Math.min(a.y + a.h, b.y + b.h)) };
+  return PLAN.walls.filter((w) => w.kind === 'interior' && w.x >= strip.x && w.x + w.w <= strip.x + strip.w && w.y >= strip.y && w.y + w.h <= strip.y + strip.h);
+}
+const planEdit = {
+  original: JSON.stringify({ walls: PLAN.walls, openings: PLAN.openings, rooms: PLAN.rooms, wallOutline: PLAN.wallOutline }),
+  partitionBetween,
+  /** Join the two children's bedrooms: drop the partition, merge the floor polygons, fix the outline. */
+  removePartition(idA = 'bedroom-2', idB = 'bedroom-1') {
+    const gone = partitionBetween(idA, idB);
+    if (!gone.length) return null;
+    const A = PLAN.rooms.find((r) => r.id === idA), B = PLAN.rooms.find((r) => r.id === idB), a = bounds(A.polygon), b = bounds(B.polygon);
+    const merged = { ...A, name: 'Bedrooms 1 + 2', polygon: [[a.x, a.y], [a.x + a.w, a.y], [a.x + a.w, b.y + b.h], [a.x, b.y + b.h]], label: [a.x + a.w / 2, (a.y + b.y + b.h) / 2] };
+    PLAN.walls = PLAN.walls.filter((w) => !gone.includes(w));
+    PLAN.rooms = PLAN.rooms.filter((r) => r !== B).map((r) => (r === A ? merged : r));
+    PLAN.openings = PLAN.openings.map((o) => ({ ...o, rooms: (o.rooms || []).map((id) => (id === idB ? idA : id)) }));
+    PLAN.wallOutline = PLAN.wallOutline.filter(([x1, y1, x2, y2]) => !gone.some((w) => rectsTouch(w, { x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1) }) && x1 > w.x - 1 && x2 < w.x + w.w + 1 && y1 >= w.y && y2 <= w.y + w.h));
+    store.emit('plan', {});
+    return gone;
+  },
+  /** Add a free-standing partition (plan cm). */
+  addWall(x, y, w, h) {
+    PLAN.walls = [...PLAN.walls, { id: 'w-dev-' + PLAN.walls.length, x, y, w, h, kind: 'interior' }];
+    PLAN.wallOutline = [...PLAN.wallOutline, [x, y, x + w, y], [x, y + h, x + w, y + h], [x, y, x, y + h], [x + w, y, x + w, y + h]];
+    store.emit('plan', {});
+  },
+  /** Slide a window along its wall by `by` cm (the wall pieces on both sides are resized). */
+  moveWindow(id, by) {
+    const o = PLAN.openings.find((q) => q.id === id), ax = o.axis === 'h' ? 'x' : 'y', len = o.axis === 'h' ? 'w' : 'h';
+    const before = PLAN.walls.find((w) => w[ax] + w[len] === o[ax] && rectsTouch(w, o)), after = PLAN.walls.find((w) => w[ax] === o[ax] + o[len] && rectsTouch(w, o));
+    if (!before || !after) return false;
+    PLAN.walls = PLAN.walls.map((w) => (w === before ? { ...w, [len]: w[len] + by } : w === after ? { ...w, [ax]: w[ax] + by, [len]: w[len] - by } : w));
+    PLAN.openings = PLAN.openings.map((q) => (q === o ? { ...o, [ax]: o[ax] + by } : q));
+    store.emit('plan', {});
+    return true;
+  },
+  reset() { Object.assign(PLAN, JSON.parse(planEdit.original)); store.emit('plan', {}); },
+};
+button('− bedroom partition', () => planEdit.removePartition());
+button('+ wall', () => { const l = PLAN.rooms.find((r) => r.id === 'main').zones.find((z) => z.id === 'dining').label; planEdit.addWall(l[0] - 100, l[1], 200, 10); });
+button('window →', () => planEdit.moveWindow('win-living-n', 40));
+button('plan reset', () => planEdit.reset());
 
 const info = document.getElementById('info');
 let walkPos = null;
 view.on('walk-position', (p) => { walkPos = p; });
 view.on('mode', () => { walkPos = null; });
+let sun = null;
+const hhmm = (h) => (h == null ? '—' : `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.floor((h % 1) * 60)).padStart(2, '0')}`);
+view.on('sun', (s) => { sun = s; });
 setInterval(() => {
   if (!view.debug) return;
   const s = view.debug.stats();
   info.textContent = `${view.getMode()}  ${s.fps.toFixed(0)} fps  render ${s.renderMs.toFixed(1)} ms  ${s.calls} calls  ${(s.triangles / 1000).toFixed(0)}k tris  ${s.items} items`
+    + (sun ? `\nsun ${sun.date} ${hhmm(sun.hours)}  az ${sun.azimuth.toFixed(1)}° ${sun.compass}  el ${sun.elevation.toFixed(1)}°  rise ${hhmm(sun.sunrise)}  set ${hhmm(sun.sunset)}` : '')
+    + (s.planRebuilds ? `\nplan rebuild ${s.planRebuildMs.toFixed(1)} ms (×${s.planRebuilds})` : '')
     + (walkPos ? `\nwalk ${walkPos.x.toFixed(0)}, ${walkPos.y.toFixed(0)}  ${walkPos.heading.toFixed(0)}°  ${walkPos.spaceId}` : '')
     + `\nstand-ins: ${Object.entries(view.debug.standIns).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none'}`;
 }, 400);
 
-Object.assign(window, { view, store, PLAN, catalog, models, getThumbnail, ctx });
+Object.assign(window, { view, store, PLAN, catalog, models, getThumbnail, ctx, planEdit });
 view.on('ready', () => document.documentElement.classList.add('view-ready'));
 </script>
 </body>

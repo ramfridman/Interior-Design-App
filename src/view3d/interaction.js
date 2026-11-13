@@ -17,15 +17,19 @@ const ROT_FOR_NORMAL = (nx, ny) => (ny > 0.5 ? 0 : nx < -0.5 ? 90 : ny < -0.5 ? 
 
 // ───────────────────────── wall runs (merged collinear wall faces) ─────────────────────────
 const _runs = new WeakMap();
+/** Forget the snap targets derived from a plan (call after the plan was edited in place). */
+export function invalidateWallRuns(plan) { _runs.delete(plan); }
 /**
  * Wall faces merged along each straight wall line, bridging door / window openings.
+ * Cached per plan object and only while its wall / opening / outline arrays are the very same arrays.
  * @returns {{ nx: number, ny: number, c: number, a0: number, a1: number }[]}  c = coordinate across, a0..a1 = extent along
  */
 export function wallRuns(plan) {
-  if (_runs.has(plan)) return _runs.get(plan);
+  const hit = _runs.get(plan);
+  if (hit && hit.walls === plan.walls && hit.openings === plan.openings && hit.outline === plan.wallOutline) return hit.runs;
   const solid = (x, y) => plan.walls.some((w) => pointInRect(x, y, w)) || plan.openings.some((o) => pointInRect(x, y, o));
   const lines = new Map();
-  for (const f of wallFaces(plan)) {
+  for (const f of wallFaces({ ...plan })) {                             // copy → core's own face cache (keyed on PLAN) is bypassed
     const vertical = f.nx !== 0;
     const c = vertical ? f.x1 : f.y1;
     const a0 = vertical ? Math.min(f.y1, f.y2) : Math.min(f.x1, f.x2), a1 = vertical ? Math.max(f.y1, f.y2) : Math.max(f.x1, f.x2);
@@ -44,7 +48,7 @@ export function wallRuns(plan) {
       else { cur = { nx, ny, c, a0, a1 }; runs.push(cur); }
     }
   }
-  _runs.set(plan, runs);
+  _runs.set(plan, { walls: plan.walls, openings: plan.openings, outline: plan.wallOutline, runs });
   return runs;
 }
 
@@ -473,6 +477,8 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
 
   return {
     pick, floorPoint,
+    /** The plan was edited: drop the cached wall snap targets (they are re-derived on the next drag). */
+    refreshPlan() { invalidateWallRuns(plan); },
     /** Where a walk-mode click should take the walker: plan cm, pulled back from walls / furniture. */
     walkTarget(clientX, clientY) {
       const hit = pick(clientX, clientY);

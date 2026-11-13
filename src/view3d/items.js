@@ -210,6 +210,8 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
     has: (id) => entries.has(id),
     /** World-space bounding box of an item (analytic: footprint × height). */
     boxOf: (id) => (entries.get(id) ? entries.get(id).box : null),
+    /** The plan was edited: items stand on the house floor or on garden level depending on where the walls now are. */
+    refreshPlan() { for (const item of store.items) { const entry = entries.get(item.id); if (entry) pose(entry, item); } },
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     /** Put exactly these item ids on an outline layer (LAYER_SELECTED / LAYER_HOVER). */
     setMarked(layer, ids) {

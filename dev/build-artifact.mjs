@@ -25,8 +25,10 @@ function resolveSpec(spec, from) {
 // Modules loaded through computed dynamic imports (template strings) that a static scan cannot see.
 const { MODEL_FILES } = await import(path.join(root, 'src/models/types.js'));
 const { CATALOG_FILES } = await import(path.join(root, 'src/catalog/index.js'));
+const walk = (dir) => fs.readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${dir}/${e.name}`) : [`${dir}/${e.name}`]));
 const entries = [
   'src/main.js',
+  ...walk('src').filter((f) => f.endsWith('.js')),
   ...MODEL_FILES.map((f) => `src/models/${f}.js`),
   ...CATALOG_FILES.map((f) => `src/catalog/data/${f}.js`),
 ];
@@ -85,10 +87,19 @@ const page = [
   body.trim(),
 ].filter(Boolean).join('\n');
 
+fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'page.html'), page);
+// Snapshot every side file under dist/artifact/site/ so the published set is exactly what was tested.
 const files = {};
-for (const f of [...seen, ...assets].sort()) files[f] = f;
+for (const f of [...seen, ...assets].sort()) {
+  const dest = path.join(out, 'site', f);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.copyFileSync(path.join(root, f), dest);
+  files[f] = posix(path.relative(root, dest));
+}
+// Local preview that mimics the host's document skeleton.
+fs.writeFileSync(path.join(out, 'site', 'index.html'), `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light}body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}</style></head><body>${page}</body></html>`);
 fs.writeFileSync(path.join(out, 'files.json'), JSON.stringify(files, null, 1));
 const bytes = Object.values(files).reduce((s, f) => s + fs.statSync(path.join(root, f)).size, 0);
 console.log(`page.html ${(page.length / 1024).toFixed(1)} KB · ${Object.keys(files).length} side files · ${(bytes / 1048576).toFixed(2)} MB`);

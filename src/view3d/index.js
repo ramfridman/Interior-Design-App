@@ -12,6 +12,7 @@ import { createOrbitRig, STALL_MS } from './camera.js';
 import { createItemsLayer } from './items.js';
 import { createInteraction } from './interaction.js';
 import { createWalk, walkFov } from './walk.js';
+import { sunPosition, sunTimes, sunDirectionWorld, compassPoint, todayAt } from './sun.js';
 
 const CUTAWAY_CM = 120;
 const WALK_NEAR = 0.05, ORBIT_NEAR = 0.1, FAR = 600;
@@ -19,7 +20,7 @@ const ROOF_OFF_PRESETS = new Set(['top', 'interior']);
 const ROOF_ON_PRESETS = new Set(['front', 'garden']);
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-const isNight = (hours) => hours < 6.5 || hours > 17.5;
+const LAMPS_ON_BELOW = 5;   // degrees of sun elevation under which lamps are lit in orbit mode
 
 /**
  * @param {HTMLElement} container mount point (#view3d)
@@ -64,6 +65,7 @@ export function createView3D(container, ctx) {
   let slow = false;         // last measured frame interval was > 250 ms: camera animations are skipped, not played in slow motion
   let mode = 'orbit', fly = null, saved = null;
   let house = null, site = null, env = null;
+  let sunInfo = null, planRebuildMs = 0, planRebuilds = 0;
   const standIns = { house: false, site: false, environment: false };
   const stats = { frameMs: 0, renderMs: 0, fps: 0, frames: 0 };
   const lastCam = new THREE.Matrix4();
@@ -95,7 +97,45 @@ export function createView3D(container, ctx) {
     call(house, 'setCutaway', !walking && store.ui.wallsCutaway ? CUTAWAY_CM : null);
     call(house, 'setRoofVisible', walking || !!store.ui.showRoof);
     call(house, 'setDoorsOpen', mode === 'walk');
+    // sun study: a hidden roof / cut-away walls keep blocking the sun (invisible shadow casters in house.js)
+    const study = store.ui.sunStudy !== false;
+    call(house, 'setSunStudy', study);
+    call(env, 'setSunStudy', study && !walking && (!store.ui.showRoof || !!store.ui.wallsCutaway));
     call(env, 'setInteriorMode', mode === 'walk');
+    invalidate();
+  }
+
+  /** Sun position and today's key times: from the environment, or straight from the ephemeris while a stand-in is used. */
+  function readSun() {
+    const info = call(env, 'getSunInfo');
+    if (info) return info;
+    const meta = plan.meta || {}, where = { latitude: meta.latitude, longitude: meta.longitude, timeZone: meta.timeZone };
+    const date = store.ui.date || todayAt(meta.timeZone), hours = Number(store.ui.timeOfDay) || 0;
+    const p = sunPosition({ date, hours, ...where }), t = sunTimes(date, where);
+    return { date, hours, azimuth: p.azimuth, elevation: p.elevation, compass: compassPoint(p.azimuth), sunrise: t.sunrise, sunset: t.sunset, solarNoon: t.solarNoon, dayLength: t.dayLength, isDay: p.elevation > -0.3 };
+  }
+  /** Push store.ui.date / timeOfDay into the environment and tell the UI where the sun now is. */
+  function applySun() {
+    call(env, 'setDate', store.ui.date);
+    call(env, 'setTimeOfDay', store.ui.timeOfDay);
+    sunInfo = readSun();
+    emit('sun', sunInfo);
+    invalidate();
+  }
+
+  /**
+   * The plan object was edited in place (store event 'plan'): rebuild everything derived from it — shell, floors,
+   * roof, openings, walk blockers, snap faces, fill-light anchors, item ground levels. Camera, mode, selection,
+   * roof / cut-away / door / sun state are untouched. All synchronous: the next frame shows the finished house.
+   */
+  function rebuildFromPlan() {
+    if (!house || destroyed) return;
+    const t0 = performance.now();
+    call(house, 'rebuildPlan');
+    call(env, 'refreshPlan');
+    walk.refreshPlan(); interaction.refreshPlan(); items.refreshPlan();
+    if (mode === 'walk' && !fly) walk.syncCamera();
+    planRebuildMs = performance.now() - t0; planRebuilds++;
     invalidate();
   }
 
@@ -114,10 +154,9 @@ export function createView3D(container, ctx) {
     site = build('site', siteMod && siteMod.buildSite && (() => siteMod.buildSite(ctx)), () => standInSite(ctx), (s) => s.group && s.group.isObject3D);
     scene.add(house.group, site.group);
     env = build('environment', envMod && envMod.createEnvironment && (() => envMod.createEnvironment({ scene, renderer, ctx, shadowMapSize: softwareGL(gl) ? 2048 : undefined })), () => standInEnvironment({ scene, renderer, ctx }), (e) => typeof e.setTimeOfDay === 'function');
-    call(env, 'setTimeOfDay', store.ui.timeOfDay);
     applyHouseState();
     ready = true;
-    invalidate();
+    applySun();
     emit('ready', { standIns: { ...standIns } });
   }
 
@@ -126,7 +165,7 @@ export function createView3D(container, ctx) {
     if (destroyed || contextLost || !canvas.width || !canvas.height) return;
     const t0 = performance.now();
     call(env, 'update', camera);
-    items.updateLamps(camera, mode === 'walk' || isNight(store.ui.timeOfDay));
+    items.updateLamps(camera, mode === 'walk' || !sunInfo || sunInfo.elevation < LAMPS_ON_BELOW);
     renderer.render(scene, camera);
     interaction.renderOverlay(renderer);
     dirty = false;
@@ -263,9 +302,9 @@ export function createView3D(container, ctx) {
   // ───────────── store wiring ─────────────
   const offs = [
     store.on('ui', ({ keys = [] }) => {
-      if (keys.includes('timeOfDay')) call(env, 'setTimeOfDay', store.ui.timeOfDay);
+      if (keys.includes('timeOfDay') || keys.includes('date')) applySun();
       if (keys.includes('showItems')) items.group.visible = store.ui.showItems !== false;
-      if (keys.includes('showRoof') || keys.includes('wallsCutaway')) applyHouseState();
+      if (keys.includes('showRoof') || keys.includes('wallsCutaway') || keys.includes('sunStudy')) applyHouseState();
       if (keys.includes('mode')) {
         if (store.ui.mode === 'walk' && mode !== 'walk') enterWalk();
         else if (store.ui.mode !== 'walk' && mode === 'walk') exitWalk({ animate: false });
@@ -275,6 +314,7 @@ export function createView3D(container, ctx) {
     store.on('project', () => { houseDirty = true; invalidate(); }),
     store.on('finishes', () => { houseDirty = true; invalidate(); }),
     store.on('selection', invalidate),
+    store.on('plan', rebuildFromPlan),
   ];
 
   resize();
@@ -345,11 +385,17 @@ export function createView3D(container, ctx) {
       }
       return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, visible: front };
     },
-    /** Events: 'mode' {mode} · 'walk-position' {x,y,heading,spaceId} · 'ready' · 'select' {ids,spaceId} · 'drag' · 'placing' · 'camera' */
+    /**
+     * Events: 'mode' {mode} · 'walk-position' {x,y,heading,spaceId} · 'ready' · 'select' {ids,spaceId} · 'drag' · 'placing' · 'camera'
+     * · 'sun' { date, hours, azimuth, elevation, compass, sunrise, sunset, solarNoon, dayLength, isDay } — angles in degrees
+     *   (azimuth clockwise from true north), times in decimal local clock hours; sent whenever store.ui.date / timeOfDay
+     *   change and once to every new subscriber.
+     */
     on(event, fn) {
       if (!handlers.has(event)) handlers.set(event, new Set());
       handlers.get(event).add(fn);
       if (event === 'ready' && ready) queueMicrotask(() => fn({ standIns: { ...standIns } }));
+      if (event === 'sun' && ready && sunInfo) queueMicrotask(() => fn(sunInfo));
       return () => handlers.get(event)?.delete(fn);
     },
     destroy() {
@@ -374,7 +420,8 @@ export function createView3D(container, ctx) {
       standIns,
       isReady: () => ready,
       isFlying: () => !!fly,
-      stats: () => ({ ...stats, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, items: items.count() }),
+      stats: () => ({ ...stats, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, items: items.count(), planRebuildMs, planRebuilds }),
+      house: () => house, environment: () => env, sun: () => sunInfo,
       renderNow,
     },
   };
@@ -465,6 +512,17 @@ function standInHouse({ plan, store }) {
   return {
     group, floorMeshes,
     update: rebuild,
+    rebuildPlan() {
+      for (const m of floorMeshes) { group.remove(m); m.geometry.dispose(); }
+      floorMeshes.length = 0;
+      for (const room of plan.rooms) {
+        const m = new THREE.Mesh(flatShape(room.polygon, 0), floorMat);
+        m.receiveShadow = true; m.userData.spaceId = room.id;
+        group.add(m); floorMeshes.push(m);
+      }
+      rebuild();
+    },
+    setSunStudy() {},
     setRoofVisible(v) { roofOn = !!v; if (roof) roof.visible = roofOn && cut == null; },
     setCutaway(h) { if (h === cut) return; cut = h; rebuild(); },
     setDoorsOpen() {},
@@ -509,21 +567,23 @@ function standInEnvironment({ scene, ctx }) {
   sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03;
   sun.target.position.set(cx, 0, cz);
   scene.add(hemi, sun, sun.target);
-  let interior = false, day = 1;
+  let interior = false, day = 1, date = todayAt(plan.meta.timeZone), clock = 13;
   const applyLevels = () => { hemi.intensity = (0.25 + 0.85 * day) * (interior ? 1.5 : 1); };
+  function place() {
+    const p = sunPosition({ date, hours: clock, latitude: plan.meta.latitude, longitude: plan.meta.longitude, timeZone: plan.meta.timeZone });
+    const elev = Math.sin(p.elevation * Math.PI / 180);
+    const d = sunDirectionWorld(p.azimuth, Math.max(p.elevation, 4), plan.meta.northAngle || 0);
+    day = THREE.MathUtils.clamp(elev * 2.2 + 0.1, 0, 1);
+    sun.position.set(cx + d[0] * 45, d[1] * 45, cz + d[2] * 45);
+    sun.intensity = 2.8 * THREE.MathUtils.clamp(p.elevation / 3, 0, 1) * day;
+    sun.color.set('#ffb070').lerp(new THREE.Color('#fff4e2'), THREE.MathUtils.clamp(elev * 2, 0, 1));
+    sky.set('#141a2a').lerp(new THREE.Color('#cfe3f4'), day);
+    applyLevels();
+  }
   return {
     sun,
-    setTimeOfDay(hours) {
-      const a = ((hours - 6) / 12) * Math.PI, north = (plan.meta.northAngle || 0) * Math.PI / 180;
-      const elev = Math.sin(a), east = Math.cos(a);
-      day = THREE.MathUtils.clamp(elev * 2.2 + 0.1, 0, 1);
-      const sx = east * Math.cos(north) - 0.45 * Math.sin(north), sz = east * Math.sin(north) + 0.45 * Math.cos(north);
-      sun.position.set(cx + sx * 45, Math.max(0.08, elev) * 45, cz + sz * 45);
-      sun.intensity = 2.8 * day;
-      sun.color.set('#ffb070').lerp(new THREE.Color('#fff4e2'), THREE.MathUtils.clamp(elev * 2, 0, 1));
-      sky.set('#141a2a').lerp(new THREE.Color('#cfe3f4'), day);
-      applyLevels();
-    },
+    setTimeOfDay(hours) { clock = Number.isFinite(+hours) ? +hours : 13; place(); },
+    setDate(d) { date = typeof d === 'string' && d ? d : todayAt(plan.meta.timeZone); place(); },
     setInteriorMode(on) { interior = !!on; applyLevels(); },
     update() {},
     dispose() { scene.remove(hemi, sun, sun.target); scene.background = prevBackground; sun.shadow.map?.dispose(); },

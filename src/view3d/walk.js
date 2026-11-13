@@ -102,7 +102,9 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
   const { store, plan } = ctx;
   const sb = plan.site.bounds;
   const lot = { x0: sb.x / 100 - LOT_MARGIN, x1: (sb.x + sb.w) / 100 + LOT_MARGIN, y0: sb.y / 100 - LOT_MARGIN, y1: (sb.y + sb.h) / 100 + LOT_MARGIN };
-  const walls = walkBlockers(plan).map(rectBlocker);
+  // a shallow copy defeats any per-plan cache in core: the plan's arrays are replaced when the owner edits the house
+  const readWalls = () => walkBlockers({ ...plan }).map(rectBlocker);
+  let walls = readWalls();
 
   let active = false;
   let blockers = walls, blockersDirty = true;
@@ -420,6 +422,14 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
       return (furniture ? blockers : walls).some((b) => gap(q, b) < WALKER_RADIUS - 2e-3);
     },
     blockerCount: () => (blockersDirty ? (rebuildBlockers(), blockers.length) : blockers.length),
+    /** The plan was edited: re-read walls / windows; a walker now standing inside a wall is let out, not trapped. */
+    refreshPlan() {
+      walls = readWalls();
+      for (const b of [...ignore]) if (b.wall) ignore.delete(b);
+      glide = null;
+      rebuildBlockers();
+      if (active) gy = groundY(p.x * 100, p.y * 100, plan);
+    },
     dispose() { this.stop(); offItems(); },
   };
 }
