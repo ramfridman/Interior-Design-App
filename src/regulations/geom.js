@@ -1,7 +1,7 @@
 /**
  * Geometry helpers for the regulation checks. Pure functions; plan space (cm, +x east, +y south).
  */
-import { itemCorners, polygonBounds, pointInPolygon, DEG } from '../core/geometry.js';
+import { polygonBounds, pointInPolygon, DEG } from '../core/geometry.js';
 
 export const rectPoly = (r) => [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]];
 export const m = (cm, digits = 2) => (cm / 100).toFixed(digits);
@@ -27,9 +27,6 @@ export function pointPolyEdgeDist(px, py, poly) {
   }
   return best;
 }
-
-/** Distance from a point to a filled polygon (0 when inside). */
-export const pointPolyDist = (px, py, poly) => (pointInPolygon(px, py, poly) ? 0 : pointPolyEdgeDist(px, py, poly));
 
 const segsCross = (a, b, c, d) => {
   const o = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
@@ -62,13 +59,6 @@ export function overshoot(poly, outer) {
   let worst = 0;
   for (const [x, y] of poly) if (!pointInPolygon(x, y, outer)) worst = Math.max(worst, pointPolyEdgeDist(x, y, outer));
   return worst;
-}
-
-/** Do two polygons (not necessarily convex) intersect? */
-export function polysIntersect(A, B) {
-  const ba = polygonBounds(A), bb = polygonBounds(B);
-  if (ba.x > bb.x + bb.w || bb.x > ba.x + ba.w || ba.y > bb.y + bb.h || bb.y > ba.y + ba.h) return false;
-  return polyDist(A, B) === 0;
 }
 
 /**
@@ -136,12 +126,8 @@ export function freeDepth(frame, max, obstacles, { inset = 3, a0 = -frame.hw, a1
   return { depth, hit };
 }
 
-/** Obstacle record for a plan rectangle or an item. */
+/** Obstacle record for a plan rectangle. */
 export const rectObstacle = (r, extra) => ({ poly: rectPoly(r), bb: { x: r.x, y: r.y, w: r.w, h: r.h }, ...extra });
-export function itemObstacle(it) {
-  const poly = itemCorners(it);
-  return { poly, bb: polygonBounds(poly), item: it };
-}
 
 /** Quarter-circle swept by a hinged door leaf, as a convex polygon; null for sliding doors / windows. */
 export function doorSwing(o) {
@@ -188,7 +174,11 @@ export function makeGrid(bounds, cell) {
   const nx = Math.ceil(bounds.w / cell), ny = Math.ceil(bounds.h / cell);
   return { x0: bounds.x, y0: bounds.y, cell, nx, ny, free: new Uint8Array(nx * ny) };
 }
-export const cloneGrid = (g) => ({ ...g, free: g.free.slice() });
+/** Copy of a grid; pass a scratch `free` buffer of the same size to avoid allocating. */
+export function cloneGrid(g, buffer) {
+  if (buffer && buffer.length === g.free.length) { buffer.set(g.free); return { ...g, free: buffer }; }
+  return { ...g, free: g.free.slice() };
+}
 
 /** Scan-line fill of a polygon with `value`. */
 export function fillPoly(g, poly, value) {
@@ -210,43 +200,47 @@ export function fillPoly(g, poly, value) {
 }
 
 /** Clear radius (cm) of every cell: distance from the cell to the nearest non-free cell edge (chamfer transform). */
-export function clearance(g) {
+export function clearance(g, buffer) {
   const { nx, ny, free, cell } = g;
-  const d = new Float32Array(nx * ny);
+  const d = buffer && buffer.length === nx * ny ? buffer : new Float32Array(nx * ny);
   const BIG = 1e6, D = Math.SQRT2;
   for (let i = 0; i < d.length; i++) d[i] = free[i] ? BIG : 0;
+  // forward pass (cells outside the grid count as blocked)
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
-      const k = j * nx + i; if (!d[k]) continue;
-      let v = d[k];
-      v = Math.min(v, (i > 0 ? d[k - 1] : 0) + 1, (j > 0 ? d[k - nx] : 0) + 1,
-        (i > 0 && j > 0 ? d[k - nx - 1] : 0) + D, (i < nx - 1 && j > 0 ? d[k - nx + 1] : 0) + D);
+      const k = j * nx + i;
+      let v = d[k]; if (v === 0) continue;
+      let t = (i > 0 ? d[k - 1] : 0) + 1; if (t < v) v = t;
+      t = (j > 0 ? d[k - nx] : 0) + 1; if (t < v) v = t;
+      t = (i > 0 && j > 0 ? d[k - nx - 1] : 0) + D; if (t < v) v = t;
+      t = (i < nx - 1 && j > 0 ? d[k - nx + 1] : 0) + D; if (t < v) v = t;
       d[k] = v;
     }
   }
+  // backward pass
   for (let j = ny - 1; j >= 0; j--) {
     for (let i = nx - 1; i >= 0; i--) {
-      const k = j * nx + i; if (!d[k]) continue;
-      let v = d[k];
-      v = Math.min(v, (i < nx - 1 ? d[k + 1] : 0) + 1, (j < ny - 1 ? d[k + nx] : 0) + 1,
-        (i < nx - 1 && j < ny - 1 ? d[k + nx + 1] : 0) + D, (i > 0 && j < ny - 1 ? d[k + nx - 1] : 0) + D);
+      const k = j * nx + i;
+      let v = d[k]; if (v === 0) continue;
+      let t = (i < nx - 1 ? d[k + 1] : 0) + 1; if (t < v) v = t;
+      t = (j < ny - 1 ? d[k + nx] : 0) + 1; if (t < v) v = t;
+      t = (i < nx - 1 && j < ny - 1 ? d[k + nx + 1] : 0) + D; if (t < v) v = t;
+      t = (i > 0 && j < ny - 1 ? d[k + nx - 1] : 0) + D; if (t < v) v = t;
       d[k] = v;
     }
   }
-  for (let i = 0; i < d.length; i++) d[i] = Math.max(0, (d[i] - 0.5) * cell);
+  for (let i = 0; i < d.length; i++) d[i] = d[i] > 0.5 ? (d[i] - 0.5) * cell : 0;
   return d;
 }
 
-export const cellOf = (g, x, y) => {
-  const i = Math.floor((x - g.x0) / g.cell), j = Math.floor((y - g.y0) / g.cell);
-  return i < 0 || j < 0 || i >= g.nx || j >= g.ny ? -1 : j * g.nx + i;
-};
-
-/** Flood fill from seed cells through free cells whose clear radius is at least `minR`. Returns reached mask. */
-export function flood(g, dist, minR, seeds) {
+/**
+ * Flood fill from seed cells through free cells whose clear radius is at least `minR`. Returns the reached mask.
+ * `seen` / `queue` are optional scratch buffers to avoid allocating on every run.
+ */
+export function flood(g, dist, minR, seeds, seen, queue) {
   const { nx, ny, free } = g;
-  const seen = new Uint8Array(nx * ny);
-  const queue = new Int32Array(nx * ny);
+  if (seen && seen.length === nx * ny) seen.fill(0); else seen = new Uint8Array(nx * ny);
+  if (!queue || queue.length !== nx * ny) queue = new Int32Array(nx * ny);
   let head = 0, tail = 0;
   for (const s of seeds) if (s >= 0 && free[s] && !seen[s]) { seen[s] = 1; queue[tail++] = s; }
   while (head < tail) {

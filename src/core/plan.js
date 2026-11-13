@@ -35,9 +35,11 @@ export const META = {
   drawingScale: '1:100',
   grossFloorArea: 163,        // m² — "שטח קומת קרקע" as written on the drawing
   floors: 1,
-  // North is ~8° counter-clockwise from "up" on the drawing (read from the compass rose).
+  // North is 7° counter-clockwise from "up" on the drawing (measured from the compass-rose needle in the vector PDF).
   // northAngle = clockwise degrees from plan "up" (-y) to true north.
-  northAngle: -8,
+  northAngle: -7,
+  // Site coordinates for solar geometry (Kibbutz Afikim) and the civil time zone.
+  latitude: 32.68, longitude: 35.58, timeZone: 'Asia/Jerusalem',
   // Site datum from the survey: about -201.5 m (below sea level) — hot Jordan Valley climate.
   elevation: -201.5,
 };
@@ -68,7 +70,7 @@ export const WALLS = [
   [0, 720, 20, 100, 'exterior'], [1070, 730, 10, 20, 'interior'], [1120, 730, 415, 20, 'exterior'],
   [960, 740, 90, 10, 'interior'], [1135, 750, 20, 130, 'interior'], [1515, 750, 20, 80, 'exterior'],
   [360, 770, 325, 20, 'interior'], [950, 850, 10, 80, 'interior'], [960, 870, 175, 10, 'interior'],
-  [1145, 880, 10, 70, 'interior'], [340, 890, 20, 490, 'interior'], [0, 900, 20, 180, 'exterior'],
+  [1145, 880, 10, 70, 'interior'], [340, 890, 20, 10, 'interior'], [340, 900, 20, 400, 'mamad'], [340, 1300, 20, 80, 'exterior'], [0, 900, 20, 180, 'exterior'],
   [360, 900, 325, 20, 'mamad'], [660, 920, 25, 15, 'mamad'], [1515, 970, 20, 170, 'exterior'],
   [660, 1015, 25, 285, 'mamad'], [1145, 1040, 10, 30, 'interior'], [685, 1050, 230, 10, 'interior'],
   [1155, 1050, 360, 10, 'interior'], [905, 1060, 10, 10, 'interior'], [0, 1160, 20, 220, 'exterior'],
@@ -103,6 +105,8 @@ export const WALL_OUTLINE = [[0,700,0,820],[0,700,340,700],[0,820,20,820],[0,900
  *   rooms      : [roomIdA, roomIdB] the two spaces it connects ('outside' allowed)
  *   label      : dimension text as written on the drawing
  *   assumed    : list of fields that are NOT on the drawing (see ASSUMPTIONS)
+ *   innerDoor  : optional second leaf hung in the same doorway on the opposite face of the wall
+ *                { style, width, height, hinge, swing } — used by the safe room (blast door + inner door)
  */
 export const OPENINGS = [
   // ---- Windows (width / height (+sill) exactly as annotated on the dimension drawing) ----
@@ -125,7 +129,10 @@ export const OPENINGS = [
   { id: 'door-terrace', kind: 'sliding-door', style: 'glass-sliding', axis: 'v', x: 340, y: 390, w: 20, h: 280, width: 280, height: 210, sill: 0, exterior: true, outside: 'w', rooms: ['main', 'terrace'], label: '280 / 210' },
   { id: 'door-parents', kind: 'door', style: 'interior', axis: 'v', x: 340, y: 800, w: 20, h: 90, width: 90, height: 210, sill: 0, hinge: 'n', swing: 'w', rooms: ['main', 'parents-bedroom'], assumed: ['height'] },
   { id: 'door-parents-bath', kind: 'door', style: 'interior', axis: 'h', x: 240, y: 1190, w: 90, h: 10, width: 90, height: 210, sill: 0, hinge: 'e', swing: 's', rooms: ['parents-bedroom', 'parents-bath'], assumed: ['height'] },
-  { id: 'door-mamad', kind: 'door', style: 'mamad', axis: 'v', x: 660, y: 935, w: 25, h: 80, width: 80, height: 200, sill: 0, hinge: 's', swing: 'e', rooms: ['main', 'mamad'], assumed: ['height'] },
+  // The safe-room doorway carries TWO doors, both drawn on the plan: the heavy steel blast door (solid swing,
+  // opens OUT into the hall) and a regular inner door (dashed swing, opens INTO the room) — see `innerDoor`.
+  { id: 'door-mamad', kind: 'door', style: 'mamad', axis: 'v', x: 660, y: 935, w: 25, h: 80, width: 80, height: 200, sill: 0, hinge: 's', swing: 'e', rooms: ['main', 'mamad'], assumed: ['height'],
+    innerDoor: { style: 'interior', width: 80, height: 200, hinge: 'n', swing: 'w' } },
   { id: 'door-bath', kind: 'door', style: 'interior', axis: 'v', x: 905, y: 1070, w: 10, h: 90, width: 90, height: 210, sill: 0, hinge: 'n', swing: 'w', rooms: ['main', 'bath'], assumed: ['height'] },
   { id: 'door-service', kind: 'door', style: 'interior', axis: 'h', x: 1005, y: 1170, w: 90, h: 10, width: 90, height: 210, sill: 0, hinge: 'e', swing: 's', rooms: ['main', 'service'], assumed: ['height'] },
   { id: 'door-bedroom-1', kind: 'door', style: 'interior', axis: 'v', x: 1145, y: 1070, w: 10, h: 90, width: 90, height: 210, sill: 0, hinge: 'n', swing: 'e', rooms: ['main', 'bedroom-1'], assumed: ['height'] },
@@ -218,7 +225,8 @@ export const ASSUMPTIONS = [
   { id: 'ceiling', status: 'confirmed', text: 'Ceiling height 3.00 m — confirmed by owner (not on drawing).' },
   { id: 'roof', status: 'confirmed', text: 'Flat roof — confirmed by owner (not on drawing).' },
   { id: 'interior-door-height', status: 'assumed', text: 'Interior door height 2.10 m (drawing gives 210 only for exterior doors).' },
-  { id: 'mamad-door', status: 'assumed', text: 'Mamad blast door 80 × 200 cm, opening outwards (standard Home Front Command door).' },
+  { id: 'mamad-door', status: 'assumed', text: 'Safe-room doorway: steel blast door opening outwards plus an inner door opening inwards, as drawn; 80 × 200 cm is the standard size (height not written).' },
+  { id: 'mamad-ceiling', status: 'assumed', text: 'Safe-room ceiling is modelled at the house height (3.00 m). Civil Defence regulations cap a mamad at 2.80 m unless the Home Front Command approves more — confirm the safe-room slab height with the architect.' },
   { id: 'wc-window', status: 'assumed', text: 'Guest-WC window: 40 cm wide as drawn; height 60 cm and sill 150 cm assumed (not written).' },
   { id: 'roof-build', status: 'assumed', text: 'Roof slab 20 cm with 40 cm parapet; floor 15 cm above garden level.' },
   { id: 'window-style', status: 'assumed', text: 'Window opening styles (sliding / tilt) follow the drawing symbols; frame colour assumed.' },

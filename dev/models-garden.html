@@ -127,7 +127,7 @@ function bboxIssue(type, s, obj) {
   obj.traverse((m) => { if (m.isMesh) { const a = m.geometry.attributes.position.array; for (let i = 0; i < a.length; i++) if (!Number.isFinite(a[i])) { issues.push('NaN vertex in ' + m.material.name); break; } } });
   if (Math.abs(b.min.x + w / 200) > e || Math.abs(b.max.x - w / 200) > e) issues.push(`x ${(b.min.x * 100).toFixed(1)}..${(b.max.x * 100).toFixed(1)} ≠ ±${w / 2}`);
   if (Math.abs(b.min.z + d / 200) > e || Math.abs(b.max.z - d / 200) > e) issues.push(`z ${(b.min.z * 100).toFixed(1)}..${(b.max.z * 100).toFixed(1)} ≠ ±${d / 2}`);
-  const below = type === 'pool', above = type === 'raised-bed' || (type === 'pool' && b.min.y < -0.05);
+  const below = type === 'pool', above = type === 'raised-bed' || (type === 'pool' && ['in-ground', 'plunge', 'lap', 'natural', undefined].includes(s.p.variant));   // in-ground pools: coping only above ground; raised beds: crops above the frame
   if (!below && Math.abs(b.min.y) > e) issues.push(`y0 ${(b.min.y * 100).toFixed(1)}`);
   if (!above && Math.abs(b.max.y - h / 100) > e) issues.push(`top ${(b.max.y * 100).toFixed(1)} ≠ ${h}`);
   if (type === 'raised-bed' && b.max.y < h / 100 - e) issues.push(`top ${(b.max.y * 100).toFixed(1)} < ${h}`);
@@ -201,6 +201,12 @@ function corner3D() {
   renderer.setSize(W, H, false); camera.fov = 55; camera.aspect = W / H; camera.updateProjectionMatrix();
   camera.position.set(-1.2, 1.65, 5.6); camera.lookAt(-2.6, 0.6, -2.5); renderer.render(scene, camera); g.drawImage(renderer.domElement, 0, H);
   camera.fov = 30; scene.remove(grp);
+  // close-up: in-ground pool laid over a lawn slab, low sun-lounger angle (checks the “hole in the ground” illusion)
+  const g2 = section('pool closeup', W, 560), cg = new THREE.Group();
+  [['surface', { kind: 'lawn' }, [1000, 700, 2]], ['pool', { variant: 'in-ground', steps: 'corner', deck: 35 }, [600, 300, 150]]].forEach(([type, p, sz], i) => cg.add(buildModel({ id: 'cu' + i, type, params: p, w: sz[0], d: sz[1], h: sz[2] })));
+  scene.add(cg); renderer.setSize(W, 560, false); camera.fov = 40; camera.aspect = W / 560; camera.updateProjectionMatrix();
+  camera.position.set(3.4, 2.3, 4.4); camera.lookAt(-0.6, -0.5, -0.2); renderer.render(scene, camera); g2.drawImage(renderer.domElement, 0, 0);
+  camera.fov = 30; scene.remove(cg);
 }
 function corner2D() {
   const g = section('corner 2d', 1500, 760);

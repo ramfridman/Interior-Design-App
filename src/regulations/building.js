@@ -74,7 +74,7 @@ function checkRooms(plan, H, out) {
       `A dwelling with two or more rooms needs at least one habitable room of 12.0 m²; ${big.r.name} has ${big.area.toFixed(1)} m².`, { spaceId: big.r.id, at: spot(big.r) }));
   }
   const habit = H >= 250, serv = H >= 205;
-  out.push(finding('ceiling-height', habit ? 'pass' : serv ? 'fail' : 'fail', 'all', `Ceiling height ${m(H)} m`,
+  out.push(finding('ceiling-height', habit ? 'pass' : 'fail', 'all', `Ceiling height ${m(H)} m`,
     habit ? `The ${m(H)} m ceiling is above the 2.50 m minimum for habitable rooms and the 2.05 m minimum for bathrooms, service rooms and corridors.`
       : `A ${m(H)} m ceiling is below the 2.50 m minimum for habitable rooms${serv ? ' (it would only be acceptable in bathrooms, service rooms and internal corridors, minimum 2.05 m)' : ''}.`));
   out.push(finding('plan-consistency', mismatches.length ? 'info' : 'pass', 'areas', mismatches.length ? 'Room areas differ from the drawing' : 'Room areas match the drawing',
@@ -162,7 +162,7 @@ function checkDoors(plan, out) {
     }
     const svc = inner.find((r) => SERVICE.has(r.type));
     const other = inner.find((r) => r.type !== 'living') || inner[0];
-    const name = svc ? svc.name : other ? other.name : 'Door';
+    const name = (svc ? svc.name : other ? other.name : 'Door') + (o.exterior ? ' outside' : '');
     if (svc) {
       serviceDoors.push({ o, svc });
       if (o.width >= 70) wideToiletDoor = true;

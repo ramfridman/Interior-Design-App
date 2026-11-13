@@ -145,9 +145,9 @@ class Batch {
     }
     return this;
   }
-  /** Clamp x into [x0, x1] (keeps climbers on their trellis). */
-  clampX(x0, x1) {
-    for (const list of this.buckets.values()) for (const g of list) { const a = g.attributes.position.array; for (let i = 0; i < a.length; i += 3) a[i] = clamp(a[i], x0, x1); g.boundingBox = null; }
+  /** Clamp x into [x0, x1] and z into [z0, z1] (keeps climbers on their trellis, reeds inside their pond). */
+  clampXZ(x0, x1, z0 = -Infinity, z1 = Infinity) {
+    for (const list of this.buckets.values()) for (const g of list) { const a = g.attributes.position.array; for (let i = 0; i < a.length; i += 3) { a[i] = clamp(a[i], x0, x1); a[i + 2] = clamp(a[i + 2], z0, z1); } g.boundingBox = null; }
     return this;
   }
   /** Merge and return a Group with one mesh per material. */
@@ -184,14 +184,6 @@ function barG(a, b, r, seg = 6) {
   const g = new THREE.CylinderGeometry(r, r, len, seg);
   const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), vb.clone().sub(va).normalize());
   return g.applyQuaternion(q).translate((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
-}
-/** Flat quad from four corners (counter-clockwise seen from its front). */
-function quadG(a, b, c, d) {
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([...a, ...b, ...c, ...a, ...c, ...d]), 3));
-  g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]), 2));
-  g.computeVertexNormals();
-  return g;
 }
 /** Non-indexed geometry from a flat list of triangle vertex coordinates. */
 function trisG(arr) {
@@ -390,12 +382,12 @@ function roundRectPts(w, d, r, seg = 5) {
 /** Organic closed outline: an ellipse whose radius is modulated by a few harmonics. */
 function organicPts(rx, rz, rnd, n = 36, amp = 0.12) {
   const ph = [rnd() * TAU, rnd() * TAU, rnd() * TAU], out = [];
-  let mx = 0, mz = 0;
+  let x0 = 0, x1 = 0, z0 = 0, z1 = 0;
   for (let i = 0; i < n; i++) {
     const a = (i / n) * TAU, k = 1 + amp * (Math.sin(a * 2 + ph[0]) + 0.6 * Math.sin(a * 3 + ph[1]) + 0.35 * Math.sin(a * 5 + ph[2]));
-    out.push([Math.cos(a) * k, Math.sin(a) * k]); mx = Math.max(mx, Math.abs(out[i][0])); mz = Math.max(mz, Math.abs(out[i][1]));
+    out.push([Math.cos(a) * k, Math.sin(a) * k]); x0 = Math.min(x0, out[i][0]); x1 = Math.max(x1, out[i][0]); z0 = Math.min(z0, out[i][1]); z1 = Math.max(z1, out[i][1]);
   }
-  return out.map(([x, z]) => [(x / mx) * rx, (z / mz) * rz]);
+  return out.map(([x, z]) => [(x / (x >= 0 ? x1 : -x0)) * rx, (z / (z >= 0 ? z1 : -z0)) * rz]);    // touches the box on all four sides
 }
 /** Offset a closed counter-clockwise outline inwards (dist > 0) with mitred corners. */
 function insetPts(pts, dist) {
@@ -598,7 +590,7 @@ function drawVoronoi(g, cw, ch, rnd, cells, o) {
       if (dd < d1) { d2 = d1; d1 = dd; best = p; } else if (dd < d2) d2 = dd;
     }
     const edge = (d2 - d1) / 2, k = (y * cw + x) * 4, n = 0.94 + 0.12 * Math.sin(x * 12.9898 + y * 78.233) * Math.sin(x * 3.7 + y * 1.3);
-    const c = edge < jw ? jc : best[2], f = edge < jw ? 1 : clamp(0.82 + (edge - jw) / (cell * 0.12), 0.82, 1) * n;
+    const c = edge < jw ? jc : best[2], f = edge < jw || o.flat ? 1 : clamp(0.82 + (edge - jw) / (cell * 0.12), 0.82, 1) * n;
     data[k] = srgb(c.r * f); data[k + 1] = srgb(c.g * f); data[k + 2] = srgb(c.b * f); data[k + 3] = 255;
   }
   g.putImageData(img, 0, 0);
@@ -607,15 +599,15 @@ function drawVoronoi(g, cw, ch, rnd, cells, o) {
 const SURFACE_KINDS = ['lawn', 'synthetic-grass', 'deck-wood', 'deck-composite', 'paving-concrete', 'paving-stone', 'porcelain-tile', 'gravel', 'tuff', 'mulch', 'soil', 'sand',
   'stepping-stones', 'concrete', 'asphalt', 'brick', 'terrazzo', 'rubber', 'cobble', 'crazy-paving', 'bark'];
 const SURFACE_DEF = {
-  lawn: { color: '#5d9440', color2: '#7fae4f', rough: 0.95 }, 'synthetic-grass': { color: '#4f9a3c', color2: '#5fa848', rough: 0.9 },
+  lawn: { color: '#4d8235', color2: '#6f9c45', rough: 0.95 }, 'synthetic-grass': { color: '#43882f', color2: '#52963c', rough: 0.9 },
   'deck-wood': { color: '#a9774a', color2: '#3a2c20', tile: 14, rough: 0.7 }, 'deck-composite': { color: '#7d7068', color2: '#2e2a27', tile: 14.5, rough: 0.75 },
-  'paving-concrete': { color: '#b5afa4', color2: '#8a857b', tile: 20, pattern: 'running-bond', rough: 0.9 }, 'paving-stone': { color: '#c9bca4', color2: '#8f8676', tile: 60, pattern: 'random', rough: 0.85 },
-  'porcelain-tile': { color: '#cfcac1', color2: '#9a958c', tile: 60, pattern: 'grid', rough: 0.45 }, gravel: { color: '#b9b2a4', color2: '#8c8679', rough: 1 },
-  tuff: { color: '#8e3f2c', color2: '#4a2219', rough: 1 }, mulch: { color: '#6e4a30', color2: '#3a2618', rough: 1 }, bark: { color: '#6e4a30', color2: '#3a2618', rough: 1 },
+  'paving-concrete': { color: '#a8a297', color2: '#7d786f', tile: 20, pattern: 'running-bond', rough: 0.9 }, 'paving-stone': { color: '#bfb199', color2: '#857c6c', tile: 60, pattern: 'random', rough: 0.85 },
+  'porcelain-tile': { color: '#bdb8ae', color2: '#8c877e', tile: 60, pattern: 'grid', rough: 0.45 }, gravel: { color: '#b9b2a4', color2: '#8c8679', rough: 1 },
+  tuff: { color: '#7c3626', color2: '#3f1d15', rough: 1 }, mulch: { color: '#6e4a30', color2: '#3a2618', rough: 1 }, bark: { color: '#6e4a30', color2: '#3a2618', rough: 1 },
   soil: { color: '#59402e', color2: '#3d2b1f', rough: 1 }, sand: { color: '#dfcda4', color2: '#cdb98c', rough: 1 }, 'stepping-stones': { color: '#bdb5a6', color2: '#5d9440', tile: 45, rough: 0.9 },
-  concrete: { color: '#b9b8b3', color2: '#8f8e89', tile: 200, rough: 0.9 }, asphalt: { color: '#4a4b4e', color2: '#333437', rough: 0.95 },
-  brick: { color: '#a8563c', color2: '#c9bfae', tile: 20, pattern: 'running-bond', rough: 0.9 }, terrazzo: { color: '#d9d2c4', color2: '#a9a294', tile: 30, pattern: 'grid', rough: 0.4 },
-  rubber: { color: '#b8503c', color2: '#7d3528', tile: 50, pattern: 'grid', rough: 0.95 }, cobble: { color: '#9a9690', color2: '#55524d', tile: 10, rough: 0.85 },
+  concrete: { color: '#aaa9a4', color2: '#84837e', tile: 200, rough: 0.9 }, asphalt: { color: '#4a4b4e', color2: '#333437', rough: 0.95 },
+  brick: { color: '#96492f', color2: '#b5ab9a', tile: 20, pattern: 'running-bond', rough: 0.9 }, terrazzo: { color: '#d9d2c4', color2: '#a9a294', tile: 30, pattern: 'grid', rough: 0.4 },
+  rubber: { color: '#a4452f', color2: '#6f2f22', tile: 50, pattern: 'grid', rough: 0.95 }, cobble: { color: '#9a9690', color2: '#55524d', tile: 10, rough: 0.85 },
   'crazy-paving': { color: '#c7b596', color2: '#8d8474', tile: 45, rough: 0.85 },
 };
 /** Resolve the look of a ground kind from params (colour, joint colour, tile size in metres, pattern). */
@@ -659,7 +651,7 @@ function groundTex(o) {
   } else if (kind === 'paving-concrete') {
     const sq = o.pattern === 'grid'; tiles(o.tile, sq ? o.tile : o.tile / 2, o.pattern === 'planks' ? 'running-bond' : o.pattern, { vary: 0.09, jointW: 0.005, bevel: 0.004, color3: hsl(o.color, 0.02, 0.06, -0.06), cloud: 0.06, grainN: 14000, grainA: 0.1 });
   } else if (kind === 'brick') {
-    const sq = o.pattern === 'grid'; tiles(o.tile, sq ? o.tile : o.tile / 2, o.pattern === 'planks' ? 'running-bond' : o.pattern, { vary: 0.12, jointW: 0.008, bevel: 0.003, color3: hsl(o.color, -0.02, 0, -0.1), cloud: 0.1, grainN: 12000, grainA: 0.09 });
+    const sq = o.pattern === 'grid'; tiles(o.tile, sq ? o.tile : o.tile / 2, o.pattern === 'planks' ? 'running-bond' : o.pattern, { vary: 0.07, jointW: 0.008, bevel: 0.003, color3: hsl(o.color, -0.015, 0, -0.07), cloud: 0.08, grainN: 12000, grainA: 0.09 });
   } else if (kind === 'paving-stone') {
     const sq = o.pattern === 'grid'; tiles(o.tile, sq ? o.tile : o.tile * 0.6, o.pattern === 'planks' ? 'random' : o.pattern, { vary: 0.07, jointW: 0.008, bevel: 0.004, veins: hsl(o.color, 0, -0.1, -0.2), color3: hsl(o.color, 0.03, -0.05, 0.03), cloud: 0.1, grainN: 9000, grainA: 0.07 });
   } else if (kind === 'porcelain-tile') {
@@ -846,7 +838,7 @@ function patternFill(ctx, key, pw, ph, px, flat, draw, ox = 0, oy = 0) {
 }
 /** Plan fill for a ground kind (see SURFACE_KINDS): planks lines, paver joints, gravel stipple, grass ticks… */
 function groundFill2D(ctx, o, px, ox, oy) {
-  const kind = o.kind, base = K.tint(o.color, ['lawn', 'synthetic-grass'].includes(kind) ? 0.42 : ['soil', 'mulch', 'bark', 'tuff', 'asphalt'].includes(kind) ? 0.3 : 0.25);
+  const kind = o.kind, base = K.tint(o.color, ['lawn', 'synthetic-grass'].includes(kind) ? 0.52 : ['soil', 'mulch', 'bark', 'tuff', 'asphalt'].includes(kind) ? 0.42 : 0.3);
   const ink = rgba(K.shade(o.color, -0.5), 0.5), key = ['g2', kind, o.color, o.color2, o.tile, o.pattern].join('|');
   const rnd = K.rng(K.hashStr(key));
   const stipple = (g, pw, ph, lw, n, r0, r1, cols) => { for (let i = 0; i < n; i++) { const x = rnd() * pw, y = rnd() * ph, r = lerp(r0, r1, rnd()); g.fillStyle = cols[i % cols.length]; for (const dx of [0, pw, -pw]) for (const dy of [0, ph, -ph]) { if (x + dx < -r || x + dx > pw + r || y + dy < -r || y + dy > ph + r) continue; g.beginPath(); g.arc(x + dx, y + dy, Math.max(r, lw * 0.7), 0, TAU); g.fill(); } } };
@@ -857,7 +849,7 @@ function groundFill2D(ctx, o, px, ox, oy) {
       for (const [x, y, w, h] of L.rects) for (const dx of [0, pw, -pw]) for (const dy of [0, ph, -ph]) {
         const X = x * 100 + dx, Y = y * 100 + dy, W = w * 100, H = h * 100;
         if (X > pw || Y > ph || X + W < 0 || Y + H < 0) continue;
-        if (dx === 0 && dy === 0 || true) { g.fillStyle = K.shade(base, (((Math.abs(Math.round(x * 131 + y * 71))) % 7) / 7 - 0.5) * vary * 2); g.fillRect(X, Y, W, H); }
+        g.fillStyle = K.shade(base, (((Math.abs(Math.round(x * 131 + y * 71))) % 7) / 7 - 0.5) * vary * 2); g.fillRect(X, Y, W, H);
         g.strokeStyle = col; g.lineWidth = lw; g.strokeRect(X, Y, W, H);
       }
     }, ox, oy);
@@ -867,9 +859,9 @@ function groundFill2D(ctx, o, px, ox, oy) {
     case 'lawn': case 'synthetic-grass':
       return patternFill(ctx, key, 120, 120, px, base, (g, pw, ph, lw) => {
         g.lineWidth = lw; g.lineCap = 'round';
-        for (let i = 0; i < 46; i++) {
-          const x = rnd() * pw, y = rnd() * ph, l = 5 + rnd() * 5;
-          g.strokeStyle = rgba(K.shade(o.color, -0.25), kind === 'lawn' ? 0.5 : 0.3);
+        for (let i = 0; i < 26; i++) {
+          const x = rnd() * pw, y = rnd() * ph, l = 4 + rnd() * 4;
+          g.strokeStyle = rgba(K.shade(o.color, -0.1), kind === 'lawn' ? 0.45 : 0.25);
           g.beginPath(); g.moveTo(x - l * 0.35, y); g.lineTo(x - l * 0.5, y - l * 0.8); g.moveTo(x, y); g.lineTo(x, y - l); g.moveTo(x + l * 0.35, y); g.lineTo(x + l * 0.5, y - l * 0.8); g.stroke();
         }
       }, ox, oy);
@@ -1268,7 +1260,7 @@ const SHRUBS = {
   pittosporum: { f: ['#6a9a55', '#7aa862', '#5a8a48'], k: 9, up: 0.3, leaf: { n: 14, s: 0.07, a: 0.6, c: ['#cfe0a8', '#8fba6a'] } },
   duranta: { f: ['#a8c040', '#b8cc4c', '#94ac38'], k: 8, up: 0.4, fl: { c: '#8f7ae0', c2: ['#f0a030'], mode: 'cluster', n: 20, s: 0.04 } },
   jasmine: { f: ['#3f7038', '#4c7c42'], k: 8, up: 0.1, fl: { c: '#fffdf4', mode: 'dots', n: 40, s: 0.024 } },
-  agave: { kind: 'rosette', f: ['#7f9c8c', '#8caa98', '#708c7e'], n: 26, wid: 0.2, el: [1.35, 0.05], curve: 0.45 },
+  agave: { kind: 'rosette', f: ['#7f9c8c', '#8caa98', '#708c7e'], n: 30, wid: 0.3, el: [1.35, 0.05], curve: 0.45 },
   aloe: { kind: 'rosette', f: ['#6f9a5a', '#7ca864'], n: 20, wid: 0.14, el: [1.4, 0.25], curve: 0.5, stalk: '#f06a2a', hK: 0.6 },
   cactus: { kind: 'cactus', f: ['#4f7a4a', '#5c8854', '#6a9a5a'], fl: { c: '#f2c63a' } },
   yucca: { kind: 'rosette', f: ['#5f8a5a', '#6c9864', '#52784e'], n: 44, wid: 0.075, el: [1.45, -0.55], curve: 0.25, trunk: 0.4, stalk: '#f4efd8', hK: 0.72 },
@@ -1283,16 +1275,16 @@ const SHRUBS = {
 /** Dome of foliage blobs with flowers by mode: cover | dots | cluster | star | rose. o: { f foliage tones, fl flower spec, custom } */
 function moundShrub(b, S, W, D, H, rnd, o) {
   const leafM = vmat('leaf'), rx = W / 2, rz = D / 2, up = S.up ?? 0.3, k = S.k || 8, f = o.f, fl = o.fl, blobs = [];
-  const sizeK = clamp(Math.sqrt(W * D), 0.45, 1.8), lf = S.leaf || { n: 10, s: 0.07, a: 0.5 };
+  const sizeK = clamp(Math.sqrt(W * D), 0.45, 1.8), lf = S.leaf || { n: 16, s: 0.08, a: 0.5 };
   const add = (x, y, z, bx, by, bz, main, forceFl) => {
     const cover = forceFl || (fl && fl.mode === 'cover' && !main && rnd() < fl.cover), col = cover ? K.shade(fl.c, (rnd() - 0.5) * 0.2) : f[Math.floor(rnd() * f.length)];
     b.add(leafM, paintFoliage(blobG(bx, by, bz, x, y, z, rnd, { detail: main ? 2 : 1, amp: 0.2, floor: 0 }), col, rnd, { lo: cover ? -0.2 : -0.36 }));
     b.add(leafM, leafCloudG([x, y, z], [bx, by, bz], Math.round(lf.n * (main ? 1.5 : 1)), lf.s * sizeK * 1.3, rnd, { aspect: lf.a, hang: 0, colors: cover ? [fl.c, K.shade(fl.c, 0.2)] : (lf.c && !o.custom ? lf.c : [K.shade(col, 0.15), col]), up: true }));
     blobs.push({ x, y, z, bx, by, bz });
   };
-  add(0, H * 0.5, 0, rx * lerp(0.62, 0.5, up), H * 0.5, rz * lerp(0.62, 0.5, up), true);
+  add(0, H * lerp(0.42, 0.5, up), 0, rx * lerp(0.66, 0.5, up), H * lerp(0.42, 0.5, up), rz * lerp(0.66, 0.5, up), true);
   for (let i = 0; i < k; i++) {
-    const a = (i / k) * TAU + rnd() * 0.5, R = lerp(0.55, 0.42, up), hh = H * clamp(lerp(0.5, 0.78, up) + (rnd() - 0.3) * 0.35, 0.3, 1);
+    const a = (i / k) * TAU + rnd() * 0.5, R = lerp(0.55, 0.42, up), hh = H * clamp(lerp(0.62, 0.78, up) + (rnd() - 0.3) * 0.35, 0.35, 1);
     add(Math.cos(a) * R * rx, hh * 0.56, Math.sin(a) * R * rz, rx * 0.42, hh * 0.46, rz * 0.42, false);
   }
   if (S.stems) for (let i = 0; i < 5; i++) { const bl = blobs[1 + i]; b.add(vmat('bark'), tubeG(bez([0, 0, 0], [bl.x * 0.3, bl.y * 0.7, bl.z * 0.3], [bl.x, bl.y, bl.z], 3), taper(0.016 * sizeK, 0.007 * sizeK, 3), 5), '#6a5a48'); }
@@ -1304,7 +1296,7 @@ function moundShrub(b, S, W, D, H, rnd, o) {
     const n = Math.min(90, Math.round(fl.n * clamp(W * D, 0.35, 4))), fm = vmat('frond'), tri = {};
     for (let i = 0; i < n; i++) {
       const bl = blobs[Math.floor(rnd() * blobs.length)], a = rnd() * TAU, dy = fl.top ? 0.55 + rnd() * 0.45 : 0.1 + rnd() * 0.85, sr = Math.sqrt(1 - dy * dy), dir = [Math.cos(a) * sr, dy, Math.sin(a) * sr];
-      const q = [bl.x + dir[0] * bl.bx * 1.05, bl.y + dir[1] * bl.by * 1.05 + (fl.raise || 0) * fl.s, bl.z + dir[2] * bl.bz * 1.05], s = fl.s * sizeK * (0.8 + rnd() * 0.4);
+      const q = [bl.x + dir[0] * bl.bx * 1.05, bl.y + dir[1] * bl.by * 1.05 + (fl.raise || 0) * fl.s, bl.z + dir[2] * bl.bz * 1.05], s = fl.s * sizeK * (1.1 + rnd() * 0.5);
       const col = fl.c2 && rnd() < 0.5 ? fl.c2[Math.floor(rnd() * fl.c2.length)] : fl.c;
       if (fl.mode === 'star') { (tri[col] = tri[col] || []).push(...starG(q, dir, s * 1.5)); b.add(leafM, blobG(s * 0.25, s * 0.5, s * 0.25, q[0] + dir[0] * s * 0.5, q[1] + dir[1] * s * 0.5, q[2] + dir[2] * s * 0.5, rnd, { detail: 0, amp: 0 }), '#f2d24a'); }
       else if (fl.mode === 'rose') { b.add(leafM, paintFoliage(blobG(s * 1.25, s, s * 1.25, q[0], q[1], q[2], rnd, { detail: 0, amp: 0.15 }), col, rnd, { lo: -0.3, hi: 0.1 })); b.add(leafM, blobG(s * 0.6, s * 0.6, s * 0.6, q[0] + dir[0] * s * 0.6, q[1] + dir[1] * s * 0.6, q[2] + dir[2] * s * 0.6, rnd, { detail: 0, amp: 0.1 }), K.shade(col, -0.2)); }
@@ -1315,7 +1307,7 @@ function moundShrub(b, S, W, D, H, rnd, o) {
 }
 /** Lavender / rosemary / sage: a low mound bristling with fine stems tipped by flower spikes. */
 function spikeShrub(b, S, W, D, H, rnd, o) {
-  const rx = W / 2, rz = D / 2, green = [], flower = [], base = S.upright ? 0.55 : 0.5;
+  const rx = W / 2, rz = D / 2, green = [], flower = [], base = S.upright ? 0.5 : 0.4;
   for (let i = 0; i < 4; i++) { const a = (i / 4) * TAU + rnd(); b.add(vmat('leaf'), paintFoliage(blobG(rx * 0.5, H * base * 0.6, rz * 0.5, Math.cos(a) * rx * 0.28, H * base * 0.5, Math.sin(a) * rz * 0.28, rnd, { amp: 0.25, floor: 0 }), o.f[i % o.f.length], rnd)); }
   for (let i = 0; i < S.n; i++) {
     const a = rnd() * TAU, el = S.upright ? 0.75 + rnd() * 0.8 : 0.3 + rnd() * 1.27, ce = Math.cos(el), se = Math.sin(el), k = 0.9 + rnd() * 0.1;
@@ -1491,14 +1483,14 @@ registerModel('hedge', {
       for (let i = 0; i < n; i++) { const sub = new Batch(), hh = h * (trimmed ? 1 : 0.9 + rnd() * 0.1); columnTree(sub, TREES.cypress, cw * 1.12, d, hh, rnd, { look: { f, bark: '#5a4a3c' }, young: false }); b.merge(sub.fit(cw * 1.12, d, hh), -w / 2 + (i + 0.5) * cw); }
     } else if (trimmed) {
       const sx = clamp(Math.round(w / 0.22), 2, 64), sy = clamp(Math.round(h / 0.24), 2, 10), sz = clamp(Math.round(d / 0.2), 2, 6);
-      const g = new THREE.BoxGeometry(w, h, d, sx, sy, sz).toNonIndexed().translate(0, h / 2, 0), a = g.attributes.position.array;
+      const gi = new THREE.BoxGeometry(w, h, d, sx, sy, sz).translate(0, h / 2, 0), a = gi.attributes.position.array;
       for (let i = 0; i < a.length; i += 3) {
         const x = a[i], y = a[i + 1], z = a[i + 2], n1 = 0.5 + 0.5 * Math.sin(x * 9.1 + y * 3.3) * Math.sin(y * 7.3 + z * 4.1) * Math.sin(z * 8.7 + x * 2.9), amt = 0.012 + 0.05 * n1;
         const ex = Math.pow(Math.abs(x) / (w / 2), 8), ez = Math.pow(Math.abs(z) / (d / 2), 8), ey = Math.pow(y / h, 8), round = 0.05 * ey;
         a[i] = x - Math.sign(x) * (amt * ex + round * ex); a[i + 2] = z - Math.sign(z) * (amt * ez + round * ez); a[i + 1] = y - amt * ey * 0.7 - 0.03 * ey * Math.max(ex, ez);
       }
-      g.computeVertexNormals();
-      b.add(leafM, paintFoliage(g, f[0], rnd, { lo: -0.3, hi: 0.1, sparkle: 0.16 }));
+      gi.computeVertexNormals();
+      b.add(leafM, paintFoliage(gi.toNonIndexed(), f[0], rnd, { lo: -0.3, hi: 0.1, sparkle: 0.07 }));
       const area = w * d + 2 * w * h + 2 * d * h;
       b.add(leafM, leafBoxG(w * 0.99, h * 0.99, d * 0.99, clamp(Math.round(area * 55), 30, 700), 0.075, rnd, { colors: S.lc || [f[1], K.shade(f[1], 0.14), f[2]], aspect: 0.55 }));
       if (fl) b.add(leafM, leafBoxG(w, h, d, clamp(Math.round(area * S.flN), 4, 300), 0.06, rnd, { colors: [fl, K.shade(fl, 0.2)], aspect: 0.9 }));
@@ -1506,11 +1498,11 @@ registerModel('hedge', {
       const n = Math.max(1, Math.round(w / Math.max(0.4, d * 0.95))), cw = w / n;
       for (let i = 0; i < n; i++) {
         const x = -w / 2 + (i + 0.5) * cw + (rnd() - 0.5) * cw * 0.2, hh = h * (0.82 + rnd() * 0.18);
-        for (let j = 0; j < 3; j++) {
-          const bx = cw * (j ? 0.5 : 0.68), by = hh * (j ? 0.34 : 0.5), ox = j ? (j === 1 ? -1 : 1) * cw * 0.3 : 0, y = j ? hh * (0.45 + rnd() * 0.35) : hh * 0.5, z = j ? (rnd() - 0.5) * d * 0.3 : 0, bz = d * (j ? 0.36 : 0.5);
+        for (let j = 0; j < 4; j++) {
+          const main = j < 2, bx = cw * (main ? 0.66 : 0.48), by = hh * (main ? 0.33 : 0.26), ox = main ? (j ? (rnd() - 0.5) * cw * 0.25 : 0) : (j === 2 ? -1 : 1) * cw * 0.32, y = main ? hh * (j ? 0.68 : 0.32) : hh * (0.35 + rnd() * 0.4), z = main ? 0 : (rnd() - 0.5) * d * 0.3, bz = d * (main ? 0.5 : 0.36);
           const flower = fl && rnd() < (S.flN > 20 ? 0.6 : 0), col = flower ? K.shade(fl, (rnd() - 0.5) * 0.2) : f[Math.floor(rnd() * f.length)];
-          b.add(leafM, paintFoliage(blobG(bx, by, bz, x + ox, y, z, rnd, { detail: j ? 1 : 2, amp: 0.2, floor: 0 }), col, rnd, { lo: flower ? -0.2 : -0.36 }));
-          b.add(leafM, leafCloudG([x + ox, y, z], [bx, by, bz], j ? 9 : 16, 0.1, rnd, { colors: flower ? [fl, K.shade(fl, 0.2)] : S.lc || [f[1], K.shade(f[1], 0.14)], aspect: 0.6, up: true }));
+          b.add(leafM, paintFoliage(blobG(bx, by, bz, x + ox, y, z, rnd, { detail: 1, amp: 0.2, floor: 0 }), col, rnd, { lo: flower ? -0.2 : -0.36, ao: lerp(0.85, 1.05, y / hh) }));
+          b.add(leafM, leafCloudG([x + ox, y, z], [bx, by, bz], main ? 14 : 9, 0.1, rnd, { colors: flower ? [fl, K.shade(fl, 0.2)] : S.lc || [f[1], K.shade(f[1], 0.14)], aspect: 0.6, up: true }));
         }
       }
     }
@@ -1550,7 +1542,7 @@ function miniPlant(b, kind, x, y, z, r, hgt, rnd, c, fl, lod) {
   const flowers = (n, top, spread, s) => { if (!fl) return; const tri = []; for (let i = 0; i < n; i++) { const a = rnd() * TAU, k = Math.sqrt(rnd()) * spread, q = [x + Math.cos(a) * k, y + top * (0.82 + rnd() * 0.2), z + Math.sin(a) * k]; tri.push(...budG([q[0], q[1] - s, q[2]], [q[0], q[1] + s * 0.6, q[2]], s)); } b.add(fm, paintFoliage(trisG(tri), fl, rnd, { lo: -0.1, hi: 0.15, sparkle: 0.2 })); };
   switch (kind) {
     case 'rock': b.add(vmat('flat'), paintFoliage(blobG(r, hgt * 0.7, r * 0.8, x, y + hgt * 0.3, z, rnd, { detail: 1, amp: 0.3, floor: y }), c, rnd, { lo: -0.25, hi: 0.1 })); break;
-    case 'grass': bladeFan(b, fm, [x, y, z], lod ? 7 : 12, hgt * 1.05, rnd, { wid: 0.05, el0: 1.5, el1: 0.85, curve: 1.1, colors: [c, K.shade(c, 0.12)], segs: 2, fold: 0.3 }); break;
+    case 'grass': bladeFan(b, fm, [x, y, z], lod ? 9 : 16, hgt * 1.05, rnd, { wid: 0.09, el0: 1.5, el1: 0.85, curve: 1.1, colors: [c, K.shade(c, 0.12)], segs: 2, fold: 0.3 }); break;
     case 'rosette': bladeFan(b, fm, [x, y, z], lod ? 7 : 11, Math.max(r * 1.1, hgt), rnd, { wid: 0.28, el0: 1.3, el1: 0.2, curve: 0.3, colors: [c, K.shade(c, 0.1)], segs: 2, fold: -0.3, profile: lanceolate }); break;
     case 'spikes': {
       b.add(leafM, paintFoliage(blobG(r * 0.8, hgt * 0.35, r * 0.8, x, y + hgt * 0.3, z, rnd, { detail: det, amp: 0.25, floor: y }), c, rnd));
@@ -1570,8 +1562,8 @@ function miniPlant(b, kind, x, y, z, r, hgt, rnd, c, fl, lod) {
     case 'mat': b.add(leafM, paintFoliage(blobG(r * 1.25, hgt * 0.8, r * 1.25, x, y + hgt * 0.25, z, rnd, { detail: det, amp: 0.3, floor: y }), c, rnd, { lo: -0.2 })); flowers(lod ? 4 : 7, hgt * 0.95, r, 0.012); break;
     case 'berry': bladeFan(b, fm, [x, y, z], lod ? 6 : 9, r * 1.1, rnd, { wid: 0.55, el0: 1.1, el1: 0.3, curve: 0.5, colors: [c, K.shade(c, 0.12)], segs: 2, fold: 0.1, profile: lanceolate }); for (let i = 0; i < 4; i++) { const a = rnd() * TAU; b.add(vmat('satin'), blobG(0.014, 0.018, 0.014, x + Math.cos(a) * r * 0.7, y + 0.03, z + Math.sin(a) * r * 0.7, rnd, { detail: 0, amp: 0, facet: 0 }), i % 4 ? '#d8242c' : '#f4f1e4'); } break;
     default:
-      b.add(leafM, paintFoliage(blobG(r, hgt * 0.5, r, x, y + hgt * 0.45, z, rnd, { detail: det, amp: 0.26, floor: y }), c, rnd));
-      if (!lod) b.add(leafM, leafCloudG([x, y + hgt * 0.45, z], [r, hgt * 0.5, r], 6, 0.05, rnd, { colors: [K.shade(c, 0.15)], up: true }));
+      b.add(leafM, paintFoliage(blobG(r, hgt * 0.5, r, x, y + hgt * 0.45, z, rnd, { detail: det, amp: 0.2, floor: y }), c, rnd));
+      if (!lod) b.add(leafM, leafCloudG([x, y + hgt * 0.45, z], [r, hgt * 0.5, r], 12, 0.07, rnd, { colors: [K.shade(c, 0.15)], up: true }));
       flowers(lod ? 4 : 7, hgt, r * 0.8, Math.max(0.014, r * 0.13));
   }
 }
@@ -1817,7 +1809,7 @@ registerModel('raised-bed', {
       const nv = Math.max(1, Math.round((x1 - x0) / 0.2)); for (let i = 1; i < nv; i++) b.add(m, boxOnG(0.012, top - h - 0.1, 0.012, lerp(x0, x1, i / nv), h + 0.08, z + 0.012));
       const vb = new Batch();
       for (let i = 0; i < nv; i++) { const x = lerp(x0, x1, (i + 0.5) / nv), hh = th * (0.5 + rnd() * 0.45); for (let q = 0; q < 3; q++) { const y = h + hh * (0.2 + q * 0.3); vb.add(vmat('leaf'), paintFoliage(blobG(0.11, 0.13, 0.06, x + (rnd() - 0.5) * 0.08, y, z + 0.03, rnd, { detail: 1, amp: 0.3 }), q % 2 ? '#5c9a3c' : '#4f8a3a', rnd)); } vb.add(vmat('leaf'), leafCloudG([x, h + hh * 0.5, z + 0.03], [0.12, hh * 0.5, 0.05], 12, 0.09, rnd, { colors: ['#6aa844', '#5c9a3c'], aspect: 0.8 })); }
-      b.merge(vb.clampX(-w / 2, w / 2));
+      b.merge(vb.clampXZ(-w / 2, w / 2));
     }
     return b.build();
   },
@@ -1828,5 +1820,645 @@ registerModel('raised-bed', {
     K.rr(ctx, 0, 0, w - 2 * t, d - 2 * t, Math.max(0, r - t)); ctx.fillStyle = groundFill2D(ctx, surfaceOpts('soil', {}), px, -w / 2, -d / 2); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px; ctx.stroke();
     ctx.save(); ctx.translate(0, S.trellis ? 5 : 0); plants2D(ctx, S.plan, px); ctx.restore();
     if (S.trellis) { const z = -d / 2 + t + 3; K.line(ctx, -w / 2 + t + 3, z, w / 2 - t - 3, z, '#8a6a40', px * 2); for (const x of [-w / 2 + t + 3, w / 2 - t - 3]) K.fillRR(ctx, x, z, 4, 4, 0, '#b08a5a', INK, px); }
+  },
+});
+
+// ═════════════════════════════════ 9. ground surfaces ═════════════════════════════════
+/** Stones of a stepping-stone path: [{ pts (plan outline, metres), tone }]. */
+function steppingStones(w, d, tile, rnd) {
+  const pitch = tile + 0.16, along = w >= d, L = along ? w : d, Wd = along ? d : w, n = Math.max(1, Math.floor((L + 0.1) / pitch)), rows = Math.max(1, Math.floor((Wd + 0.12) / pitch)), out = [];
+  for (let r = 0; r < rows; r++) for (let i = 0; i < n; i++) {
+    const a = -L / 2 + (i + 0.5) * (L / n), c = -Wd / 2 + (r + 0.5) * (Wd / rows) + (rows === 1 ? (rnd() - 0.5) * Math.max(0, Wd - tile) * 0.5 : 0);
+    const rx = Math.min(tile / 2, L / n / 2 - 0.02) * (0.9 + rnd() * 0.1), rz = Math.min(tile / 2, Wd / rows / 2 - 0.01) * (0.8 + rnd() * 0.2), rot = rnd() * TAU, ca = Math.cos(rot) * 0.3, o = organicPts(1, 1, rnd, 14, 0.07);
+    out.push({ pts: o.map(([x, z]) => { const px = x * rx * (1 + ca * z * 0.2), pz = z * rz; return along ? [a + px, c + pz] : [c + pz, a + px]; }), tone: (rnd() - 0.5) * 0.2 });
+  }
+  return out;
+}
+function surfaceSetup(P, w, d, item) {
+  const kind = oneOf(P.kind, SURFACE_KINDS, 'lawn'), o = surfaceOpts(kind, P);
+  if (kind !== 'stepping-stones') return { kind, o };
+  const baseKind = { grass: 'lawn', gravel: 'gravel', tuff: 'tuff', sand: 'sand' }[o.base];
+  return { kind, o, base: surfaceOpts(baseKind, baseKind === 'lawn' && P.color2 ? { color: P.color2 } : {}), stones: steppingStones(w, d, Math.min(o.tile, w, d), K.rng(seedOf(item, 'stones'))) };
+}
+registerModel('surface', {
+  build({ w, d, h, p, item }) {
+    const P = params(p), S = surfaceSetup(P, w, d, item), b = new Batch(), corner = [[0, 0], [w, 0], [w, d], [0, d]];
+    const top = S.stones ? Math.max(h * 0.55, h - 0.012) : h, opts = S.stones ? S.base : S.o, G = groundMat(opts);
+    b.add(G.mat, flatG(corner, top, G.pw, G.pd).translate(-w / 2, 0, -d / 2));           // pattern starts at the back-left corner
+    b.add(vmat('matte'), wallG(rectPts(w, d), 0, top), K.shade(G.avg, -0.12));
+    if (S.stones) for (const st of S.stones) { const g = extrudeG(st.pts, h, 0); b.add(vmat('flat'), paintFoliage(g, K.shade(S.o.color, st.tone), K.rng(7), { lo: -0.25, hi: 0.04, sparkle: 0.03 })); }
+    const grp = b.build();
+    grp.traverse((m) => { if (m.isMesh) { m.userData.noShadow = true; m.castShadow = false; } });   // thin ground slabs only receive shadows
+    return grp;
+  },
+  draw2d(ctx, { w, d, p, px, item }) {
+    const P = params(p), S = surfaceSetup(P, w / 100, d / 100, item);
+    ctx.beginPath(); ctx.rect(-w / 2, -d / 2, w, d);
+    ctx.fillStyle = groundFill2D(ctx, S.stones ? S.base : S.o, px, -w / 2, -d / 2); ctx.fill();
+    ctx.strokeStyle = K.INK_SOFT; ctx.lineWidth = px; ctx.stroke();
+    if (S.stones) for (const st of S.stones) { pathPts(ctx, st.pts.map(([x, z]) => [x * 100, z * 100])); ctx.fillStyle = K.tint(K.shade(S.o.color, st.tone), 0.3); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px; ctx.stroke(); }
+  },
+});
+
+// ═════════════════════════════════ 10. pools ═════════════════════════════════
+const _water = new Map();
+/** Semi-transparent water with a caustic network (world-scaled: one repeat = 1.6 m). */
+function waterMat(color = '#45b0dc', opacity = 0.62) {
+  const key = color + '|' + opacity;
+  let m = _water.get(key);
+  if (m) return m;
+  let map = null;
+  if (hasDom) {
+    const c = newCanvas(256, 256), g = c.getContext('2d');
+    drawVoronoi(g, 256, 256, K.rng(11), 6, { colors: [color, K.shade(color, 0.05), K.shade(color, -0.05)], joint: K.shade(color, 0.22), vary: 0.02, jointW: 1.2, flat: true });
+    map = new THREE.CanvasTexture(c); map.wrapS = map.wrapT = THREE.RepeatWrapping; map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = 4;
+  }
+  m = new THREE.MeshStandardMaterial({ color: map ? '#ffffff' : color, map, roughness: 0.06, metalness: 0, transparent: true, opacity, depthWrite: false });
+  m.name = 'garden-water'; m.userData.noShadow = true;
+  _water.set(key, m);
+  return m;
+}
+const WATER_UV = 1.6;
+const _poolMats = new Map();
+/** Basin tiles: slightly self-lit so the basin still reads as blue tile when the ground above it shades it. */
+function poolTileMat(color) {
+  let m = _poolMats.get(color);
+  if (!m) {
+    const tex = groundTex({ kind: 'porcelain-tile', color, color2: K.shade(color, 0.35), tile: 0.25, pattern: 'grid' });
+    m = new THREE.MeshStandardMaterial({ color: tex.map ? '#ffffff' : color, map: tex.map, roughness: 0.3, emissive: tex.map ? '#ffffff' : color, emissiveMap: tex.map, emissiveIntensity: 0.14 });
+    m.name = 'garden-pool-tile'; m.userData.pw = tex.pw;
+    _poolMats.set(color, m);
+  }
+  return m;
+}
+let _maskMat = null;
+/** Invisible depth mask: drawn before the ground so that the ground is not painted inside the pool opening. */
+function maskMat() {
+  if (!_maskMat) { _maskMat = new THREE.MeshBasicMaterial({ colorWrite: false }); _maskMat.name = 'garden-pool-mask'; _maskMat.userData.noShadow = true; }
+  return _maskMat;
+}
+const _fakeFloor = new Map();
+/** Flat “deep water” colour shown if the renderer drew the ground first (then the real basin is hidden below it). */
+function fakeFloorMat(color) {
+  let m = _fakeFloor.get(color);
+  if (!m) { m = new THREE.MeshBasicMaterial({ color, depthWrite: false }); m.name = 'garden-pool-fake-floor'; m.userData.noShadow = true; _fakeFloor.set(color, m); }
+  return m;
+}
+const POOL_VARIANTS = ['in-ground', 'above-ground-frame', 'above-ground-round', 'inflatable', 'plunge', 'lap', 'kids', 'natural'];
+function poolOutline(shape, w, d, rnd, natural) {
+  if (natural) return organicPts(w / 2, d / 2, rnd, 44, 0.1);
+  if (shape === 'round' || shape === 'oval') return ellipsePts(w / 2, d / 2, 48);
+  if (shape === 'kidney') {
+    const pts = ellipsePts(1, 1, 56).map(([x, z]) => [x, z < 0 ? z * (1 - 0.5 * Math.exp(-(x * x) / 0.12)) : z]);
+    const z0 = Math.min(...pts.map((q) => q[1])), z1 = Math.max(...pts.map((q) => q[1]));
+    return pts.map(([x, z]) => [x * w / 2, (((z - z0) / (z1 - z0)) * 2 - 1) * d / 2]);
+  }
+  if (shape === 'L') return [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, -d / 2 + d * 0.52], [-w / 2 + w * 0.48, -d / 2 + d * 0.52], [-w / 2 + w * 0.48, d / 2], [-w / 2, d / 2]];
+  return roundRectPts(w, d, Math.min(0.12, w * 0.1, d * 0.1), 4);
+}
+function poolSetup(P, w, d, h, item) {
+  const variant = oneOf(P.variant, POOL_VARIANTS, 'in-ground'), inGround = ['in-ground', 'plunge', 'lap', 'natural'].includes(variant), natural = variant === 'natural';
+  let shape = oneOf(P.shape, ['rect', 'round', 'oval', 'kidney', 'L'], 'rect');
+  if (['above-ground-round', 'inflatable', 'kids'].includes(variant)) shape = 'round'; else if (variant === 'above-ground-frame' || variant === 'lap') shape = 'rect';
+  const steps = oneOf(P.steps, ['none', 'corner', 'full-width', 'ladder'], { 'in-ground': 'corner', plunge: 'full-width', lap: 'ladder' }[variant] || 'none');
+  const deck = inGround ? clamp(num(P.deck, natural ? 35 : 30, 0, 1000) / 100, 0.06, Math.min(w, d) * 0.3) : 0;
+  const depth = clamp(num(P.depth, 0, 0, 1000) / 100 || (inGround ? h : h * 0.85), 0.2, 4), rnd = K.rng(seedOf(item, 'pool' + variant));
+  const outer = poolOutline(shape, w, d, rnd, natural);
+  const inner = natural ? insetPts(outer, deck) : shape === 'rect' ? roundRectPts(w - 2 * deck, d - 2 * deck, Math.min(0.1, w * 0.08, d * 0.08), 4) : shape === 'round' || shape === 'oval' ? ellipsePts(w / 2 - deck, d / 2 - deck, 48) : insetPts(outer, deck);
+  const xs = inner.map((q) => q[0]), zs = inner.map((q) => q[1]);
+  return { variant, inGround, natural, shape, steps, deck, depth, rnd, outer, inner, cover: P.cover === true || P.cover === 'true' || P.cover === 1,
+    coping: hexOf(P.coping, variant === 'plunge' ? '#a39d92' : '#ddd6c8'), water: hexOf(P.water, natural ? '#4f9488' : '#45b0dc'),
+    x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs), corner: inner.reduce((a, q) => (q[0] + q[1] < a[0] + a[1] ? q : a), inner[0]), stepR: clamp(Math.min(w, d) * 0.3, 0.5, 1.3) };
+}
+/** In-ground pool: coping ring above ground, real tiled basin below y = 0 revealed through a depth mask, water just under the coping. */
+function inGroundPool(b, S, w, d, P) {
+  const cop = 0.07, waterY = 0.05, maskY = 0.042, D = S.depth, tile = poolTileMat(K.shade(S.water, 0.3)), tu = tile.userData.pw || 1, rnd = S.rnd;
+  if (S.natural) {
+    const n = clamp(Math.round((w + d) * 2 / 0.3), 10, 90), flat = vmat('flat');
+    addGround(b, S.outer, 0.02, surfaceOpts('gravel', {}), [S.inner]);
+    for (let i = 0; i < n; i++) {
+      const k = Math.floor((i / n) * S.outer.length), o = S.outer[k], q = S.inner[k], t = 0.3 + rnd() * 0.45, r = S.deck * (0.3 + rnd() * 0.25), x = lerp(o[0], q[0], t), z = lerp(o[1], q[1], t);
+      const g = blobG(r * 1.2, r * 0.9, r, x, r * 0.35, z, rnd, { amp: 0.25, floor: 0 }), a = g.attributes.position.array;
+      for (let j = 0; j < a.length; j += 3) { a[j] = clamp(a[j], -w / 2, w / 2); a[j + 2] = clamp(a[j + 2], -d / 2, d / 2); }
+      b.add(flat, paintFoliage(g, K.shade(i % 3 ? '#a8a297' : '#8f897e', (rnd() - 0.5) * 0.2), rnd, { lo: -0.25, hi: 0.08 }));
+    }
+    b.add(vmat('matte'), wallG(S.outer, 0, 0.02), '#9a958a');
+    const reeds = new Batch();
+    for (let i = 0; i < 3; i++) { const q = S.inner[Math.floor(rnd() * S.inner.length)]; bladeFan(reeds, vmat('frond'), [q[0] * 0.96, 0.03, q[1] * 0.96], 16, 0.7 + rnd() * 0.4, rnd, { wid: 0.035, el0: 1.55, el1: 1.15, curve: 0.5, colors: ['#5c8a4a', '#6f9a52'], segs: 3 }); }
+    b.merge(reeds.clampXZ(-w / 2, w / 2, -d / 2, d / 2));
+  } else {
+    const G = groundMat(surfaceOpts('paving-stone', { color: S.coping, color2: K.shade(S.coping, -0.25), pattern: 'grid', tile: clamp(S.deck * 100, 20, 60) }));
+    b.add(G.mat, flatG(S.outer, cop, G.pw, G.pd, [S.inner]));
+    b.add(vmat('matte'), wallG(S.outer, 0, cop), K.shade(S.coping, -0.08));
+    b.add(vmat('matte'), wallG(S.inner, maskY - 0.01, cop, true), K.shade(S.coping, -0.03));
+  }
+  if (S.cover) {
+    const C2 = groundMat(surfaceOpts('deck-composite', { color: hexOf(P.color, '#7f9ab0'), color2: '#4a5a6a', tile: 8 }));
+    b.add(C2.mat, flatG(S.inner, cop - 0.012, C2.pw, C2.pd));
+    return;
+  }
+  const basin = S.natural ? groundMat(surfaceOpts('gravel', { color: '#8f9a8a', color2: '#4a5a52' })).mat : tile, bu = S.natural ? 1.2 : tu;
+  b.add(fakeFloorMat(K.shade(S.water, -0.2)), flatG(S.inner, maskY - 0.004));
+  b.add(basin, wallG(S.inner, -D, maskY + 0.004, true, bu));
+  b.add(S.natural ? basin : poolTileMat(K.shade(S.water, -0.04)), flatG(S.inner, -D, bu, bu));
+  if (!S.natural) b.add(poolTileMat(K.shade(S.water, -0.3)), wallG(insetPts(S.inner, 0.004), waterY - 0.16, maskY + 0.004, true, bu));   // waterline tile band
+  b.add(maskMat(), flatG(S.inner, maskY));
+  b.add(waterMat(S.water, S.natural ? 0.7 : 0.36), flatG(S.inner, waterY, WATER_UV));
+  // steps & ladder live inside the basin (anything outside the opening is hidden by the ground)
+  const stepM = S.natural ? basin : poolTileMat(K.shade(S.water, 0.55)), nS = clamp(Math.round(D / 0.28), 2, 5), sh = Math.min(0.28, D / (nS + 1));
+  if (S.steps === 'corner') for (let i = 0; i < nS; i++) { const r = S.stepR * (1 - i / (nS + 0.6)), g = cylG(r, r, D + waterY - 0.14 - (nS - 1 - i) * sh, S.corner[0], -D, S.corner[1], 28), a = g.attributes.position.array; for (let j = 0; j < a.length; j += 3) { a[j] = clamp(a[j], S.x0, S.x1); a[j + 2] = clamp(a[j + 2], S.z0, S.z1); } b.add(stepM, g); }
+  if (S.steps === 'full-width') for (let i = 0; i < nS; i++) { const len = 0.32 * (nS - i), top = waterY - 0.14 - i * sh; b.add(stepM, boxOnG(len, D + top, S.z1 - S.z0, S.x0 + len / 2, -D, (S.z0 + S.z1) / 2)); }
+  if (S.steps === 'ladder') {
+    const ch = K.chrome(), xe = S.x1, xo = Math.min(xe + 0.24, w / 2 - 0.03), zc = (S.z0 + S.z1) / 2, topY = cop + 0.7;
+    for (const sz of [-0.24, 0.24]) b.add(ch, tubeG([[xe - 0.16, -Math.min(D * 0.8, 1), zc + sz], [xe - 0.16, topY - 0.15, zc + sz], [xe - 0.1, topY - 0.03, zc + sz], [xe, topY, zc + sz], [lerp(xe, xo, 0.7), topY - 0.04, zc + sz], [xo, topY - 0.2, zc + sz], [xo, cop, zc + sz]], 0.019, 7));
+    for (let i = 0; i < 3; i++) b.add(ch, boxG(0.07, 0.02, 0.48, xe - 0.16, -0.12 - i * 0.26, zc));
+  }
+  if (S.variant === 'lap') b.add(poolTileMat(K.shade(S.water, -0.45)), boxOnG(S.x1 - S.x0 - 1.2, 0.004, 0.22, (S.x0 + S.x1) / 2, -D, (S.z0 + S.z1) / 2));
+}
+/** Above-ground pools: steel-frame rectangle, round steel-wall, inflatable ring pool, kids' ring pool. */
+function aboveGroundPool(b, S, w, d, h, P) {
+  const v = S.variant, wm = waterMat(S.water, 0.6), satin = vmat('satin');
+  const ladder = (xr, zc, m) => {
+    const mm = vmat('metal'), c = '#dfe3e6';
+    for (const sz of [-0.22, 0.22]) { b.add(mm, barG([xr + m - 0.03, 0, zc + sz], [xr + 0.04, h - 0.01, zc + sz], 0.016), c); b.add(mm, barG([xr - 0.3, 0.03, zc + sz], [xr - 0.06, h - 0.01, zc + sz], 0.016), c); }
+    b.add(satin, boxG(0.3, 0.025, 0.46, xr - 0.01, h - 0.0125, zc), '#f1f3f4');
+    for (let i = 1; i <= 2; i++) { const t = i / 3; b.add(satin, boxG(0.1, 0.02, 0.42, lerp(xr - 0.3, xr - 0.06, t), lerp(0.03, h, t), zc), '#f1f3f4'); b.add(satin, boxG(0.08, 0.02, 0.42, lerp(xr + m - 0.03, xr + 0.04, t), h * t, zc), '#f1f3f4'); }
+  };
+  if (v === 'above-ground-frame') {
+    const m = Math.min(0.13, w * 0.12, d * 0.12), L = roundRectPts(w - 2 * m, d - 2 * m, Math.min(0.14, w * 0.1), 4), inn = insetPts(L, 0.012), col = hexOf(P.color, '#66788a'), rail = '#e3e6e8', mm = vmat('metal');
+    b.add(satin, wallG(L, 0, h - 0.03), col); b.add(satin, wallG(insetPts(L, -0.003), h * 0.7, h * 0.8), K.shade(col, -0.3));
+    b.add(satin, wallG(inn, 0.02, h - 0.03, true), '#8fd2ec'); b.add(satin, flatG(inn, 0.02), '#7cc6e4');
+    b.add(mm, tubeG([...L, L[0], L[1]].map(([x, z]) => [x, h - 0.026, z]), 0.026, 7), rail);
+    const leg = (x, z, nx, nz) => { b.add(mm, barG([x, h - 0.04, z], [x + nx * (m - 0.02), 0.02, z + nz * (m - 0.02)], 0.018), rail); b.add(mm, barG([x, 0.02, z], [x + nx * (m - 0.02), 0.02, z + nz * (m - 0.02)], 0.018), rail); b.add(mm, barG([x + nx * 0.005, 0.02, z + nz * 0.005], [x + nx * 0.005, h - 0.04, z + nz * 0.005], 0.014), rail); };
+    const nx = Math.max(1, Math.round((w - 2 * m - 0.3) / 0.85)), nz = Math.max(1, Math.round((d - 2 * m - 0.3) / 0.85));
+    for (let i = 0; i < nx; i++) { const x = lerp(-w / 2 + m + 0.2, w / 2 - m - 0.2, nx === 1 ? 0.5 : i / (nx - 1)); leg(x, d / 2 - m, 0, 1); leg(x, -d / 2 + m, 0, -1); }
+    for (let i = 0; i < nz; i++) { const z = lerp(-d / 2 + m + 0.2, d / 2 - m - 0.2, nz === 1 ? 0.5 : i / (nz - 1)); if (S.steps === 'ladder' && Math.abs(z) < 0.3) { leg(-w / 2 + m, z, -1, 0); continue; } leg(w / 2 - m, z, 1, 0); leg(-w / 2 + m, z, -1, 0); }
+    if (!S.cover) b.add(wm, flatG(inn, h - 0.14, WATER_UV)); else b.add(satin, flatG(insetPts(L, -0.02), h + 0.001), hexOf(P.color2, '#3f4f5f'));
+    if (S.steps === 'ladder') ladder(w / 2 - m, 0, m);
+  } else if (v === 'above-ground-round') {
+    const m = Math.min(0.07, w * 0.08), rx = w / 2 - m, rz = d / 2 - m, col = hexOf(P.color, '#e9ecee'), E = ellipsePts(rx, rz, 48), inn = ellipsePts(rx - 0.012, rz - 0.012, 48), mm = vmat('metal');
+    b.add(satin, wallG(E, 0, h - 0.03), col); b.add(satin, wallG(inn, 0.02, h - 0.03, true), '#8fd2ec'); b.add(satin, flatG(inn, 0.02), '#7cc6e4');
+    b.add(satin, extrudeG(ellipsePts(w / 2 - 0.005, d / 2 - 0.005, 48), 0.03, h - 0.03, [ellipsePts(rx - 0.05, rz - 0.05, 48)]), K.shade(col, -0.06));
+    const n = Math.max(6, Math.round((Math.PI * (rx + rz)) / 0.9));
+    for (let i = 0; i < n; i++) { const a = (i / n) * TAU + 0.2; b.add(mm, placed(boxOnG(0.09, h - 0.03, m - 0.012, 0, 0, 0), Math.cos(a) * (rx + m / 2 - 0.004), 0, Math.sin(a) * (rz + m / 2 - 0.004), -a + Math.PI / 2), K.shade(col, -0.12)); }
+    if (!S.cover) b.add(wm, flatG(inn, h - 0.14, WATER_UV)); else b.add(satin, flatG(ellipsePts(rx + 0.02, rz + 0.02, 48), h + 0.001), hexOf(P.color2, '#3f4f5f'));
+    if (S.steps === 'ladder') ladder(rx, 0, m);
+  } else {
+    const kids = v === 'kids', two = vmat('two'), rx = w / 2, zs = d / w;
+    if (kids) {
+      const tr = h / 6, cols = [hexOf(P.color, '#4fb0e0'), hexOf(P.color2, '#f6f6f2'), hexOf(P.color3, '#f08a3a')];
+      for (let i = 0; i < 3; i++) b.add(satin, torusG(rx - tr, tr, 0, tr * (1 + 2 * i), 0, 10, 40).scale(1, 1, zs), cols[i]);
+      b.add(satin, flatG(ellipsePts(rx - tr, (rx - tr) * zs, 40), 0.012), '#8fd6f0');
+      if (!S.cover) b.add(wm, flatG(ellipsePts(rx - tr * 1.6, (rx - tr * 1.6) * zs, 40), h * 0.6, WATER_UV));
+    } else {
+      const tr = Math.min(h * 0.14, 0.14), col = hexOf(P.color, '#2f6db0'), top = h - 2 * tr;
+      b.add(two, latheG([[rx * 0.955, 0], [rx, top * 0.3], [rx * 0.975, top * 0.65], [rx * 0.9 - tr * 0.3, top + tr * 0.6]], 40).scale(1, 1, zs), col);
+      b.add(satin, torusG(rx * 0.9 - tr, tr, 0, h - tr, 0, 10, 40).scale(1, 1, zs), K.shade(col, 0.1));
+      b.add(satin, flatG(ellipsePts(rx * 0.95, rx * 0.95 * zs, 40), 0.012), '#7cc6e4');
+      if (!S.cover) b.add(wm, flatG(ellipsePts(rx * 0.9 - tr * 1.2, (rx * 0.9 - tr * 1.2) * zs, 40), top - 0.02, WATER_UV)); else b.add(satin, flatG(ellipsePts(rx * 0.9, rx * 0.9 * zs, 40), h - tr * 0.5), hexOf(P.color2, '#3f4f5f'));
+    }
+  }
+}
+registerModel('pool', {
+  build({ w, d, h, p, item }) {
+    const P = params(p), S = poolSetup(P, w, d, h, item), b = new Batch();
+    if (!S.inGround) { aboveGroundPool(b, S, w, d, h, P); return b.fit(w, d, h).build(); }
+    inGroundPool(b, S, w, d, P);
+    const grp = b.build();
+    // draw order of the “hole in the ground” trick: fake floor → basin and everything opaque → depth mask → (ground, drawn by the view) → water
+    grp.traverse((m) => { if (m.isMesh) m.renderOrder = m.material === maskMat() ? -1 : m.material.name === 'garden-pool-fake-floor' ? -3 : m.material.transparent ? 1 : -2; });
+    return grp;
+  },
+  draw2d(ctx, { w, d, h, p, px, item }) {
+    const P = params(p), S = poolSetup(P, w / 100, d / 100, h / 100, item), cm = (pts) => pts.map(([x, z]) => [x * 100, z * 100]), waterFill = K.tint(S.water, 0.38), ripple = () => {
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = px * 1.2; ctx.lineCap = 'round';
+      const n = clamp(Math.round((w * d) / 60000), 2, 9);
+      for (let i = 0; i < n; i++) { const x = (S.rnd() - 0.5) * w * 0.6, y = (S.rnd() - 0.5) * d * 0.55, l = Math.min(w, d) * 0.12; ctx.beginPath(); ctx.moveTo(x - l, y); ctx.bezierCurveTo(x - l / 2, y - l * 0.3, x, y + l * 0.3, x + l * 0.5, y); ctx.stroke(); }
+    };
+    if (S.inGround) {
+      const inner = cm(S.inner);
+      pathPts(ctx, cm(S.outer)); ctx.fillStyle = S.natural ? '#d9d5c9' : K.tint(S.coping, 0.3); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px; ctx.stroke();
+      if (S.natural) { const n = clamp(Math.round((w + d) * 2 / 30), 10, 90); for (let i = 0; i < n; i++) { const k = Math.floor((i / n) * S.outer.length), o = S.outer[k], q = S.inner[k], t = 0.3 + S.rnd() * 0.45, r = S.deck * 100 * (0.3 + S.rnd() * 0.25); ctx.beginPath(); ctx.ellipse(lerp(o[0], q[0], t) * 100, lerp(o[1], q[1], t) * 100, r * 1.2, r, 0, 0, TAU); ctx.fillStyle = '#c4beb2'; ctx.fill(); ctx.lineWidth = px * 0.8; ctx.stroke(); } }
+      pathPts(ctx, inner); ctx.fillStyle = S.cover ? '#b9c7d4' : waterFill; ctx.fill(); ctx.lineWidth = px; ctx.strokeStyle = INK; ctx.stroke();
+      ctx.save(); pathPts(ctx, inner); ctx.clip();
+      if (S.cover) { ctx.strokeStyle = 'rgba(60,80,100,0.45)'; ctx.lineWidth = px; for (let x = -w / 2; x < w / 2; x += Math.max(12, 4 * px)) { ctx.beginPath(); ctx.moveTo(x, -d / 2); ctx.lineTo(x, d / 2); ctx.stroke(); } }
+      else {
+        pathPts(ctx, cm(insetPts(S.inner, Math.min(0.12, w / 1200)))); ctx.strokeStyle = rgba(K.shade(S.water, -0.25), 0.35); ctx.lineWidth = px; ctx.stroke();
+        ctx.strokeStyle = rgba(K.shade(S.water, -0.4), 0.8); ctx.lineWidth = px;
+        if (S.steps === 'corner') for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(S.corner[0] * 100, S.corner[1] * 100, S.stepR * 100 * (1 - i / 3.6), 0, TAU); ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.fill(); ctx.stroke(); }
+        if (S.steps === 'full-width') for (let i = 1; i <= 3; i++) { ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(S.x0 * 100, -d / 2, 32 * (4 - i), d); K.line(ctx, S.x0 * 100 + 32 * i, -d / 2, S.x0 * 100 + 32 * i, d / 2, ctx.strokeStyle, px); }
+        if (S.variant === 'lap') K.line(ctx, S.x0 * 100 + 60, 0, S.x1 * 100 - 60, 0, rgba(K.shade(S.water, -0.5), 0.6), Math.max(px, 8));
+        if (S.natural) for (let i = 0; i < 5; i++) dot(ctx, (S.rnd() - 0.5) * w * 0.5, (S.rnd() - 0.5) * d * 0.5, Math.max(px * 1.5, 9), 'rgba(90,150,90,0.8)');
+        ripple();
+      }
+      ctx.restore();
+      if (S.steps === 'ladder' && !S.cover) { const x = S.x1 * 100, zc = (S.z0 + S.z1) * 50; for (const s of [-24, 24]) K.line(ctx, x - 20, zc + s, x + 22, zc + s, INK, px * 1.6); for (let i = 0; i < 3; i++) K.line(ctx, x - 16 + i * 8, zc - 24, x - 16 + i * 8, zc + 24, INK, px); }
+      return;
+    }
+    const round = S.shape === 'round', m = S.variant === 'above-ground-frame' ? Math.min(13, w * 0.12, d * 0.12) : S.variant === 'above-ground-round' ? Math.min(7, w * 0.08) : 0;
+    const body = (inset) => { if (round) { ctx.beginPath(); ctx.ellipse(0, 0, Math.max(1, w / 2 - inset), Math.max(1, d / 2 - inset), 0, 0, TAU); } else K.rr(ctx, 0, 0, w - 2 * inset, d - 2 * inset, 14); };
+    const col = hexOf(P.color, { 'above-ground-frame': '#66788a', 'above-ground-round': '#cfd4d8', inflatable: '#2f6db0', kids: '#4fb0e0' }[S.variant]);
+    if (m) {
+      ctx.strokeStyle = INK; ctx.lineWidth = px * 1.4;
+      if (round) { const n = Math.max(6, Math.round((Math.PI * (w + d - 4 * m) / 2) / 90)); for (let i = 0; i < n; i++) { const a = (i / n) * TAU + 0.2; K.line(ctx, Math.cos(a) * (w / 2 - m), Math.sin(a) * (d / 2 - m), Math.cos(a) * w / 2, Math.sin(a) * d / 2, INK, px * 2.5); } }
+      else { const nx = Math.max(1, Math.round((w - 2 * m - 30) / 85)), nz = Math.max(1, Math.round((d - 2 * m - 30) / 85)); for (let i = 0; i < nx; i++) { const x = lerp(-w / 2 + m + 20, w / 2 - m - 20, nx === 1 ? 0.5 : i / (nx - 1)); K.line(ctx, x, -d / 2, x, -d / 2 + m, INK, px * 2); K.line(ctx, x, d / 2, x, d / 2 - m, INK, px * 2); } for (let i = 0; i < nz; i++) { const z = lerp(-d / 2 + m + 20, d / 2 - m - 20, nz === 1 ? 0.5 : i / (nz - 1)); K.line(ctx, -w / 2, z, -w / 2 + m, z, INK, px * 2); K.line(ctx, w / 2, z, w / 2 - m, z, INK, px * 2); } }
+    }
+    body(m); ctx.fillStyle = K.tint(col, 0.25); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px; ctx.stroke();
+    const rim = m ? m + 4 : Math.max(w * (S.variant === 'kids' ? 0.1 : 0.09), 2 * px);
+    if (S.variant === 'kids') { body(rim * 0.5); ctx.fillStyle = K.tint(hexOf(P.color3, '#f08a3a'), 0.3); ctx.fill(); ctx.stroke(); }
+    body(rim); ctx.fillStyle = S.cover ? K.tint(hexOf(P.color2, '#3f4f5f'), 0.5) : waterFill; ctx.fill(); ctx.stroke();
+    if (!S.cover) { ctx.save(); body(rim); ctx.clip(); ripple(); ctx.restore(); }
+    if (S.steps === 'ladder' && m) { ctx.fillStyle = '#f1f3f4'; ctx.fillRect(w / 2 - m - 32, -23, 32 + m, 46); ctx.strokeRect(w / 2 - m - 32, -23, 32 + m, 46); for (let i = 1; i < 4; i++) K.line(ctx, w / 2 - m - 32 + i * (32 + m) / 4, -23, w / 2 - m - 32 + i * (32 + m) / 4, 23, INK, px); }
+  },
+});
+
+// ═════════════════════════════════ 11. spas & saunas ═════════════════════════════════
+const SPA_VARIANTS = ['square', 'round', 'inflatable', 'swim-spa', 'sauna-barrel', 'sauna-cabin', 'cold-plunge'];
+const flag = (v) => v === true || v === 'true' || v === 1;
+function spaSetup(P, w, d) {
+  const variant = oneOf(P.variant, SPA_VARIANTS, 'square'), steps = flag(P.steps) && (variant === 'square' || variant === 'swim-spa'), stepD = steps ? Math.min(0.62, d * 0.3) : 0;
+  return { variant, steps, stepD, cover: flag(P.cover), seats: Math.round(num(P.seats, variant === 'swim-spa' ? 3 : 5, 1, 10)), water: hexOf(P.water, variant === 'cold-plunge' ? '#a4dcec' : '#55b8dc') };
+}
+/**
+ * Moulded acrylic shell seen from above: rim, upper wall, seat shelf, footwell, water.
+ * o: { shell, rim width, margins [left, right, back, front] of the seat shelf (null = plain well), water, wet: draw water, top }
+ */
+function tubShell(b, w, d, h, o) {
+  const gl = vmat('gloss'), rw = Math.min(o.rim, w * 0.2, d * 0.2), r = Math.min(0.14, w * 0.12, d * 0.12), outer = roundRectPts(w, d, r, 4), A = roundRectPts(w - 2 * rw, d - 2 * rw, Math.max(0.03, r - rw * 0.5), 4);
+  const rimH = Math.min(0.05, h * 0.2), seatY = Math.max(h * 0.25, h - 0.42), floorY = Math.max(0.04, h - 0.82);
+  b.add(gl, extrudeG(outer, rimH, h - rimH, [A]), o.shell);
+  if (!o.wet) return A;
+  const m = o.margins, iw = w - 2 * rw, id = d - 2 * rw;
+  if (m && iw - m[0] - m[1] > 0.2 && id - m[2] - m[3] > 0.2) {
+    const B = roundRectPts(iw - m[0] - m[1], id - m[2] - m[3], 0.06, 3).map(([x, z]) => [x + (m[0] - m[1]) / 2, z + (m[2] - m[3]) / 2]);
+    b.add(gl, wallG(A, seatY, h - rimH * 0.5, true), o.shell); b.add(gl, flatG(A, seatY, 1, 1, [B]), K.shade(o.shell, -0.05));
+    b.add(gl, wallG(B, floorY, seatY, true), K.shade(o.shell, -0.02)); b.add(gl, flatG(B, floorY), K.shade(o.shell, -0.08));
+  } else { b.add(gl, wallG(A, floorY, h - rimH * 0.5, true), o.shell); b.add(gl, flatG(A, floorY), K.shade(o.shell, -0.06)); }
+  b.add(waterMat(o.water, 0.55), flatG(A, h - Math.min(0.13, h * 0.2), WATER_UV));
+  return A;
+}
+/** Acrylic hot tub / swim spa / cold plunge: cabinet + shell (+ pillows, control panel, cover). */
+function acrylicTub(b, S, w, d, h, P) {
+  const swim = S.variant === 'swim-spa', cold = S.variant === 'cold-plunge', cab = hexOf(P.color, cold ? '#2f3236' : '#6a5d52'), shell = hexOf(P.color2, '#eef0f2'), coverH = S.cover ? Math.min(0.1, h * 0.15) : 0, H = h - coverH;
+  const r = Math.min(0.14, w * 0.12, d * 0.12), skirt = roundRectPts(w - 0.02, d - 0.02, r, 4), matte = vmat('matte');
+  b.add(matte, wallG(skirt, 0.05, H - 0.04), cab); b.add(matte, wallG(roundRectPts(w - 0.04, d - 0.04, r, 4), 0, 0.05), K.shade(cab, -0.35));
+  for (let i = 1; i <= 3; i++) b.add(matte, wallG(roundRectPts(w - 0.016, d - 0.016, r, 4), lerp(0.05, H - 0.04, i / 4) - 0.004, lerp(0.05, H - 0.04, i / 4) + 0.004), K.shade(cab, -0.3));
+  const rim = cold ? 0.05 : swim ? 0.14 : 0.16, sm = swim ? [Math.min(1.5, w * 0.35), 0.12, 0.3, 0.3] : cold ? null : [0.42, 0.42, 0.42, 0.42];
+  const A = tubShell(b, w, d, H, { shell, rim, margins: sm, water: S.water, wet: !S.cover });
+  if (S.cover) {
+    const cc = hexOf(P.color3, '#4f463f');
+    for (const sx of [-1, 1]) b.add(matte, extrudeG(roundRectPts(w / 2 - 0.006, d, r, 4).map(([x, z]) => [x + sx * w / 4, z]), coverH, H), K.shade(cc, sx * 0.03));
+    b.add(matte, boxG(0.012, 0.012, d * 0.96, 0, h - 0.004, 0), K.shade(cc, -0.3));
+    return;
+  }
+  if (cold) { for (let i = 0; i < 7; i++) b.add(K.glass('#e8f6fa', 0.5), placed(boxG(0.045, 0.045, 0.045, 0, 0, 0), (S.rnd() - 0.5) * (w - 0.3), H - Math.min(0.13, H * 0.2) + 0.008, (S.rnd() - 0.5) * (d - 0.3), S.rnd() * 3)); return; }
+  const xs = A.map((q) => q[0]), zs = A.map((q) => q[1]), ax = Math.max(...xs), az = Math.max(...zs), dark = vmat('satin');
+  for (let i = 0; i < S.seats; i++) {                   // headrest pillows + jets on the seat backs
+    const side = i % 4, t = (Math.floor(i / 4) + 0.5) / Math.ceil((S.seats - side) / 4), u = lerp(-0.55, 0.55, t), pos = side === 0 ? [u * 2 * ax * 0.8, -az] : side === 1 ? [ax, u * 2 * az * 0.8] : side === 2 ? [-u * 2 * ax * 0.8, az] : [-ax, -u * 2 * az * 0.8];
+    if (swim && side !== 3 && i > 0) continue;
+    const horiz = side % 2 === 0, inx = side === 1 ? -1 : side === 3 ? 1 : 0, inz = side === 0 ? 1 : side === 2 ? -1 : 0;
+    b.add(dark, boxG(horiz ? 0.24 : 0.05, 0.09, horiz ? 0.05 : 0.24, pos[0] + inx * 0.03, H - 0.07, pos[1] + inz * 0.03), '#3a3d42');
+    for (const k of [-0.09, 0.09]) b.add(K.chrome(), sphG(0.016, pos[0] + inx * 0.012 + (horiz ? k : 0), H - 0.24, pos[1] + inz * 0.012 + (horiz ? 0 : k), 8, 6));
+  }
+  b.add(dark, boxG(0.22, 0.012, 0.07, 0, H + 0.004, d / 2 - 0.07), '#26282c');
+  if (swim) for (let i = -1; i <= 1; i++) b.add(K.chrome(), new THREE.CylinderGeometry(0.05, 0.05, 0.02, 14).rotateZ(Math.PI / 2).translate(ax - 0.01, H - 0.3, i * Math.min(0.3, d * 0.2)));
+}
+function roundTub(b, S, w, d, h, P) {
+  const R = w / 2, inflatable = S.variant === 'inflatable', coverH = S.cover ? Math.min(0.07, h * 0.12) : 0, H = h - coverH, wm = waterMat(S.water, 0.55);
+  if (inflatable) {
+    const col = hexOf(P.color, '#3d4249'), t = Math.min(0.24, R * 0.3);
+    b.add(vmat('satin'), latheG([[R - 0.03, 0], [R, 0.07], [R, H - 0.09], [R - 0.035, H - 0.02], [R - 0.1, H], [R - t + 0.08, H], [R - t + 0.02, H - 0.03], [R - t, H - 0.12], [R - t, 0.05]], 40), col);
+    for (let i = 0; i < 20; i++) { const a = (i / 20) * TAU; b.add(vmat('satin'), placed(boxOnG(0.012, H - 0.2, 0.006, 0, 0.08, R + 0.001), 0, 0, 0, a), K.shade(col, 0.12)); }
+    b.add(vmat('satin'), flatG(ellipsePts(R - t, R - t, 40), 0.05), '#dfe6ea');
+    if (!S.cover) b.add(wm, flatG(ellipsePts(R - t, R - t, 40), H - 0.16, WATER_UV));
+  } else {
+    const wood = K.wood(hexOf(P.color, '#b07a4a')), n = clamp(Math.round((TAU * R) / 0.1), 12, 72), sw = (TAU * (R - 0.006)) / n * 0.975, metal = K.metal('#3a3d42');
+    for (let i = 0; i < n; i++) b.add(wood, placed(boxOnG(sw, H, 0.035, 0, 0, R - 0.0235), 0, 0, 0, (i / n) * TAU));
+    for (const y of [0.18, 0.78]) b.add(metal, torusG(R - 0.0045, 0.0045, 0, H * y, 0, 5, 48));
+    const seatY = Math.max(H * 0.3, H - 0.45), ri = R - 0.04;
+    b.add(wood, flatG(ellipsePts(ri, ri, 40), seatY, 1, 1, [ellipsePts(ri - 0.36, ri - 0.36, 40)])); b.add(wood, wallG(ellipsePts(ri - 0.36, ri - 0.36, 40), 0.06, seatY, true)); b.add(wood, flatG(ellipsePts(ri - 0.36, ri - 0.36, 40), 0.06));
+    if (!S.cover) b.add(wm, flatG(ellipsePts(ri, ri, 40), H - 0.14, WATER_UV));
+  }
+  if (S.cover) b.add(vmat('matte'), latheG([[0.001, H + coverH * 0.2], [R - 0.01, H], [R - 0.004, H + coverH * 0.7], [R * 0.8, h], [0.001, h]], 40), hexOf(P.color3, inflatable ? '#5a6068' : '#4f463f'));
+}
+function barrelSauna(b, w, d, h, P) {
+  const R = w / 2, wood = K.wood(hexOf(P.color, '#c08a52')), n = clamp(Math.round((TAU * R) / 0.11), 16, 64), sw = (TAU * (R - 0.02)) / n * 0.98, porch = Math.min(0.45, d * 0.2), zf = d / 2 - porch;
+  for (let i = 0; i < n; i++) b.add(wood, boxG(sw, 0.04, d, 0, R - 0.02, 0).rotateZ((i / n) * TAU).translate(0, R, 0));
+  for (const z of [-d * 0.3, d * 0.3]) { b.add(K.metal('#3a3d42'), new THREE.TorusGeometry(R - 0.004, 0.004, 5, 44).translate(0, R, z)); b.add(wood, boxOnG(w * 0.72, R * 0.3, 0.12, 0, 0, z)); }
+  const wall = (z) => new THREE.CylinderGeometry(R - 0.04, R - 0.04, 0.045, 36).rotateX(Math.PI / 2).translate(0, R, z);
+  b.add(wood, wall(zf)); b.add(wood, wall(-d / 2 + 0.04));
+  const dw = Math.min(0.62, R * 0.9), dh = Math.min(1.75, R * 1.5), dy = R * 0.2;
+  b.add(K.wood('#7a5230'), boxOnG(dw + 0.1, dh + 0.08, 0.03, 0, dy - 0.03, zf + 0.03));
+  const gl = K.glass('#a9c4cc', 0.45); b.add(gl, boxOnG(dw, dh, 0.012, 0, dy, zf + 0.05));
+  b.add(K.metal('#2b2d31'), boxOnG(0.02, 0.3, 0.03, dw / 2 - 0.06, dy + dh * 0.4, zf + 0.07));
+  b.add(wood, boxOnG(w * 0.55, 0.04, porch - 0.06, 0, R * 0.2 - 0.04, d / 2 - porch / 2));
+  b.add(gl, new THREE.CylinderGeometry(R * 0.28, R * 0.28, 0.012, 24).rotateX(Math.PI / 2).translate(0, R * 1.2, -d / 2 + 0.014));
+}
+function cabinSauna(b, w, d, h, P) {
+  const wood = K.wood(hexOf(P.color, '#c69a62')), dark = vmat('matte'), t = 0.06, iw = w - 0.08, id = d - 0.08, roofH = Math.min(0.09, h * 0.1), H = h - roofH, gl = K.glass('#a9c4cc', 0.4);
+  b.add(wood, boxOnG(iw, H, t, 0, 0, -id / 2 + t / 2)); for (const sx of [-1, 1]) b.add(wood, boxOnG(t, H, id - t, sx * (iw / 2 - t / 2), 0, t / 2));
+  for (let y = 0.16; y < H - 0.05; y += 0.16) { b.add(dark, boxG(iw + 0.004, 0.006, 0.006, 0, y, -id / 2 - 0.001), '#8a6a42'); for (const sx of [-1, 1]) b.add(dark, boxG(0.006, 0.006, id, sx * (iw / 2 + 0.001), y, 0), '#8a6a42'); }
+  b.add(dark, boxOnG(w, roofH, d, 0, H, 0), hexOf(P.color2, '#34373c')); b.add(wood, boxOnG(iw, 0.05, id, 0, 0, 0));
+  const fz = id / 2 - 0.02, post = 0.07, dwid = Math.min(0.7, iw * 0.42);
+  for (const x of [-iw / 2 + post / 2, iw / 2 - post / 2, -iw / 2 + post + dwid + post / 2]) b.add(wood, boxOnG(post, H, post, x, 0, fz - post / 2 + 0.02));
+  b.add(wood, boxOnG(iw, 0.1, post, 0, H - 0.1, fz - post / 2 + 0.02));
+  b.add(gl, boxOnG(iw - 2 * post, H - 0.15, 0.012, 0, 0.05, fz - 0.02));
+  b.add(K.wood('#7a5230'), boxOnG(0.035, 0.4, 0.04, -iw / 2 + post + dwid - 0.07, H * 0.42, fz + 0.01));
+  const bd = Math.min(0.55, id * 0.4);
+  b.add(wood, boxOnG(iw - 2 * t, 0.05, bd, 0, 0.45, -id / 2 + t + bd / 2)); b.add(wood, boxOnG(iw - 2 * t, 0.05, bd * 0.75, 0, 0.9, -id / 2 + t + bd * 0.375));
+  b.add(dark, boxOnG(0.36, 0.55, 0.3, iw / 2 - t - 0.25, 0.05, fz - 0.4), '#2b2d31');
+  b.add(vmat('flat'), blobG(0.16, 0.06, 0.13, iw / 2 - t - 0.25, 0.62, fz - 0.4, K.rng(3), { amp: 0.4 }), '#77726a');
+}
+registerModel('spa', {
+  build({ w, d, h, p, item }) {
+    const P = params(p), S = spaSetup(P, w, d), b = new Batch(); S.rnd = K.rng(seedOf(item, 'spa' + S.variant));
+    if (S.variant === 'round' || S.variant === 'inflatable') roundTub(b, S, w, d, h, P);
+    else if (S.variant === 'sauna-barrel') barrelSauna(b, w, d, h, P);
+    else if (S.variant === 'sauna-cabin') { cabinSauna(b, w, d, h, P); return b.build(); }
+    else {
+      const sub = new Batch(), dt = d - S.stepD;
+      acrylicTub(sub, S, w, dt, h, P); b.merge(sub.fit(w, dt, h), 0, 0, -S.stepD / 2);
+      if (S.steps) { const sw = Math.min(w * 0.6, 0.9), c = K.shade(hexOf(P.color, '#6a5d52'), -0.1), m = vmat('matte'); b.add(m, boxOnG(sw, h * 0.33, S.stepD, 0, 0, d / 2 - S.stepD / 2), c); b.add(m, boxOnG(sw, h * 0.33, S.stepD / 2, 0, h * 0.33, d / 2 - S.stepD * 0.75), c); }
+      return b.build();
+    }
+    return b.fit(w, d, h).build();
+  },
+  draw2d(ctx, { w, d, p, px }) {
+    const P = params(p), S = spaSetup(P, w / 100, d / 100), sd = S.stepD * 100, water = S.cover ? K.tint(hexOf(P.color3, '#4f463f'), 0.5) : K.tint(S.water, 0.35);
+    if (S.variant === 'round' || S.variant === 'inflatable') {
+      const t = S.variant === 'inflatable' ? Math.min(24, w * 0.15) : 4;
+      ctx.beginPath(); ctx.ellipse(0, 0, w / 2, d / 2, 0, 0, TAU); ctx.fillStyle = K.tint(hexOf(P.color, S.variant === 'inflatable' ? '#3d4249' : '#b07a4a'), 0.35); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px; ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(0, 0, w / 2 - t, d / 2 - t, 0, 0, TAU); ctx.fillStyle = water; ctx.fill(); ctx.stroke();
+      if (!S.cover && S.variant === 'round') { ctx.beginPath(); ctx.ellipse(0, 0, Math.max(1, w / 2 - 40), Math.max(1, d / 2 - 40), 0, 0, TAU); ctx.strokeStyle = K.INK_SOFT; ctx.stroke(); }
+      if (S.cover) K.line(ctx, 0, -d / 2 + t, 0, d / 2 - t, K.INK_SOFT, px);
+    } else if (S.variant === 'sauna-barrel' || S.variant === 'sauna-cabin') {
+      const barrel = S.variant === 'sauna-barrel', col = hexOf(P.color, '#c08a52'), porch = barrel ? Math.min(45, d * 0.2) : 4;
+      K.fillRR(ctx, 0, 0, w, d, barrel ? 6 : 1, K.tint(col, 0.4), INK, px);
+      if (barrel) { for (let x = -w / 2 + 11; x < w / 2; x += 11) K.line(ctx, x, -d / 2, x, d / 2, K.INK_SOFT, px * 0.7); K.line(ctx, -w / 2, d / 2 - porch, w / 2, d / 2 - porch, INK, px * 1.5); }
+      else { K.fillRR(ctx, 0, -d / 2 + 10 + Math.min(55, d * 0.4) / 2, w - 20, Math.min(55, d * 0.4), 1, K.tint(col, 0.6), INK, px); K.line(ctx, -w / 2 + 10, -d / 2 + 10 + Math.min(55, d * 0.4) * 0.6, w / 2 - 10, -d / 2 + 10 + Math.min(55, d * 0.4) * 0.6, K.INK_SOFT, px); K.fillRR(ctx, w / 2 - 34, d / 2 - 52, 34, 28, 2, '#8a8f96', INK, px); }
+      const dw = Math.min(62, w * 0.42), dx = barrel ? -dw / 2 : -w / 2 + 12, dy = d / 2 - porch;
+      K.line(ctx, dx, dy, dx + dw, dy, '#ffffff', px * 3); ctx.beginPath(); ctx.moveTo(dx, dy); ctx.arc(dx, dy, dw, 0, Math.PI / 4); ctx.strokeStyle = K.INK_SOFT; ctx.lineWidth = px; ctx.stroke();
+    } else {
+      const dt = d - sd, cy = -sd / 2, rim = S.variant === 'cold-plunge' ? 5 : 15, cab = hexOf(P.color, S.variant === 'cold-plunge' ? '#2f3236' : '#6a5d52');
+      K.fillRR(ctx, 0, cy, w, dt, 13, K.tint(hexOf(P.color2, '#eef0f2'), 0.2), INK, px); ctx.lineWidth = px * 2; ctx.strokeStyle = rgba(cab, 0.8); K.rr(ctx, 0, cy, w - 2 * px, dt - 2 * px, 13); ctx.stroke();
+      K.fillRR(ctx, 0, cy, w - 2 * rim, dt - 2 * rim, 9, water, INK, px);
+      if (S.cover) K.line(ctx, 0, cy - dt / 2, 0, cy + dt / 2, INK, px);
+      else if (S.variant !== 'cold-plunge') {
+        const m = S.variant === 'swim-spa' ? [Math.min(150, w * 0.35), 12, 30, 30] : [42, 42, 42, 42];
+        K.fillRR(ctx, (m[0] - m[1]) / 2, cy + (m[2] - m[3]) / 2, w - 2 * rim - m[0] - m[1], dt - 2 * rim - m[2] - m[3], 6, rgba(K.shade(S.water, -0.2), 0.35), K.INK_SOFT, px);
+        for (let i = 0; i < S.seats && S.variant === 'square'; i++) { const side = i % 4, k = (side < 2 ? 1 : -1), hx = side % 2 ? k * (w / 2 - rim - 4) : 0, hy = side % 2 ? cy : cy - k * (dt / 2 - rim - 4); K.fillRR(ctx, hx, hy, side % 2 ? 5 : 22, side % 2 ? 22 : 5, 2, '#5a5d62', null); }
+      }
+      if (sd) { const sw = Math.min(w * 0.6, 90); K.fillRR(ctx, 0, d / 2 - sd / 2, sw, sd, 1, K.tint(cab, 0.4), INK, px); K.line(ctx, -sw / 2, d / 2 - sd / 2, sw / 2, d / 2 - sd / 2, INK, px); }
+    }
+  },
+});
+
+// ═════════════════════════════════ 12. water features ═════════════════════════════════
+const WF_VARIANTS = ['fountain-tier', 'fountain-wall', 'fountain-sphere', 'pond', 'bird-bath', 'stream', 'bubbler'];
+/** Ring of rough stones between two outlines (pond / stream banks), clamped into the w × d footprint and below `top`. */
+function stoneRing(b, outer, inner, n, size, top, w, d, rnd) {
+  for (let i = 0; i < n; i++) {
+    const k = Math.floor((i / n) * outer.length), o = outer[k], q = inner[k % inner.length], t = 0.25 + rnd() * 0.5, r = size * (0.7 + rnd() * 0.6), x = lerp(o[0], q[0], t), z = lerp(o[1], q[1], t);
+    const g = blobG(r * 1.2, top * (0.55 + rnd() * 0.3), r, x, top * 0.35, z, rnd, { amp: 0.25, floor: 0 }), a = g.attributes.position.array;
+    for (let j = 0; j < a.length; j += 3) { a[j] = clamp(a[j], -w / 2, w / 2); a[j + 1] = Math.min(a[j + 1], top); a[j + 2] = clamp(a[j + 2], -d / 2, d / 2); }
+    b.add(vmat('flat'), paintFoliage(g, K.shade(i % 3 ? '#a8a297' : '#8f897e', (rnd() - 0.5) * 0.22), rnd, { lo: -0.25, hi: 0.08 }));
+  }
+}
+function wfSetup(P, w, d, item) {
+  const variant = oneOf(P.variant, WF_VARIANTS, 'fountain-tier'), rnd = K.rng(seedOf(item, 'wf' + variant)), m = Math.min(0.14, w * 0.14, d * 0.14);
+  const outer = organicPts(w / 2, d / 2, K.rng(seedOf(item, 'pond')), 36, 0.09);
+  return { variant, rnd, m, outer, inner: insetPts(outer, m * 1.5), stone: hexOf(P.color, '#c9c2b4'), water: hexOf(P.color2, '#5fb4d4') };
+}
+const streamZ = (x, w, d) => Math.sin((x / w) * TAU * 1.15 + 0.6) * d * 0.17;
+registerModel('water-feature', {
+  build({ w, d, h, p, item }) {
+    const P = params(p), S = wfSetup(P, w, d, item), b = new Batch(), R = w / 2, st = vmat('matte'), col = S.stone, wm = waterMat(S.water, 0.7), fall = K.water('#cfeaf6', 0.5), rnd = S.rnd;
+    const disc = (r, y) => flatG(ellipsePts(r, r, 28), y, 0.8);
+    switch (S.variant) {
+      case 'fountain-wall': {
+        const tw = Math.min(0.14, d * 0.3), th = Math.min(h * 0.38, 0.5), t = 0.06, sy = h * 0.62;
+        b.add(st, boxOnG(w, h - 0.05, tw, 0, 0, -d / 2 + tw / 2), col); b.add(st, boxOnG(w, 0.05, tw, 0, h - 0.05, -d / 2 + tw / 2), K.shade(col, -0.1));
+        b.add(st, boxOnG(w, th, t, 0, 0, d / 2 - t / 2), col); for (const sx of [-1, 1]) b.add(st, boxOnG(t, th, d - tw - t, sx * (w / 2 - t / 2), 0, (tw - t) / 2), col);
+        b.add(st, boxOnG(w - 2 * t, 0.04, d - tw - t, 0, 0, (tw - t) / 2), K.shade(col, -0.15));
+        b.add(wm, flatG(rectPts(w - 2 * t, d - tw - t), th - 0.05, WATER_UV).translate(0, 0, (tw - t) / 2));
+        b.add(vmat('metal'), new THREE.CylinderGeometry(0.09, 0.09, 0.02, 20).rotateX(Math.PI / 2).translate(0, sy, -d / 2 + tw + 0.01), '#8a6a3a');
+        b.add(vmat('metal'), new THREE.CylinderGeometry(0.018, 0.018, 0.1, 10).rotateX(Math.PI / 2).translate(0, sy, -d / 2 + tw + 0.06), '#8a6a3a');
+        b.add(fall, boxG(0.035, sy - th + 0.05, 0.012, 0, (sy + th - 0.05) / 2, -d / 2 + tw + 0.105));
+        return b.build();
+      }
+      case 'fountain-sphere': case 'bubbler': {
+        b.add(st, cylG(R, R, Math.min(0.06, h * 0.2), 0, 0, 0, 32), K.shade(col, -0.25));
+        for (let i = 0; i < 30; i++) { const a = rnd() * TAU, k = 0.5 + rnd() * 0.44, r = R * 0.07; b.add(vmat('flat'), paintFoliage(blobG(r, r * 0.6, r, Math.cos(a) * R * k, Math.min(0.06, h * 0.2) + r * 0.2, Math.sin(a) * R * k, rnd, { detail: 0, amp: 0.2 }), K.shade('#b5aea2', (rnd() - 0.5) * 0.3), rnd, { lo: -0.2 })); }
+        if (S.variant === 'fountain-sphere') { const rs = Math.min(R * 0.66, (h - 0.03) / 2); b.add(vmat('gloss'), sphG(rs, 0, h - rs - 0.002, 0, 28, 18), hexOf(P.color, '#4a4d52')); b.add(K.water('#d8eef6', 0.28), sphG(rs + 0.002, 0, h - rs - 0.002, 0, 28, 18)); }
+        else {
+          b.add(vmat('gloss'), latheG([[R * 0.36, 0.03], [R * 0.52, h * 0.06], [R * 0.74, h * 0.36], [R * 0.62, h * 0.7], [R * 0.34, h * 0.88], [R * 0.42, h * 0.97], [R * 0.37, h], [R * 0.28, h * 0.975]], 28), hexOf(P.color, '#3f7f9a'));
+          b.add(wm, disc(R * 0.3, h * 0.985)); for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU; b.add(fall, barG([Math.cos(a) * R * 0.42, h * 0.96, Math.sin(a) * R * 0.42], [Math.cos(a) * R * 0.75, h * 0.38, Math.sin(a) * R * 0.75], 0.005, 4)); }
+        }
+        return b.fit(w, d, h).build();
+      }
+      case 'bird-bath':
+        b.add(st, latheG([[R * 0.5, 0], [R * 0.55, h * 0.03], [R * 0.3, h * 0.08], [R * 0.16, h * 0.2], [R * 0.14, h * 0.7], [R * 0.3, h * 0.83]], 24), col);
+        b.add(st, latheG([[R * 0.25, h * 0.8], [R * 0.9, h * 0.9], [R, h], [R * 0.94, h], [R * 0.2, h * 0.9]], 32), col);
+        b.add(wm, disc(R * 0.9, h * 0.975));
+        return b.fit(w, d, h).build();
+      case 'pond': {
+        const wy = h * 0.3;
+        b.add(vmat('matte'), flatG(S.outer, 0.006), '#59503f'); b.add(vmat('matte'), flatG(S.inner, 0.012), '#1f2e2a');
+        stoneRing(b, S.outer, S.inner, clamp(Math.round((w + d) * 2 / 0.22), 10, 80), S.m * 0.8, h * 0.62, w, d, rnd);
+        b.add(waterMat(hexOf(P.color2, '#4f8f86'), 0.8), flatG(S.inner, wy, WATER_UV));
+        for (let i = 0; i < clamp(Math.round(w * d * 2.2), 3, 14); i++) {
+          const q = S.inner[Math.floor(rnd() * S.inner.length)], k = 0.15 + rnd() * 0.55, x = q[0] * k, z = q[1] * k, r = 0.08 + rnd() * 0.07, a0 = rnd() * TAU;
+          b.add(vmat('two'), flatG([[x, z], ...Array.from({ length: 11 }, (_, j) => [x + Math.cos(a0 + 0.35 + (j / 10) * (TAU - 0.7)) * r, z + Math.sin(a0 + 0.35 + (j / 10) * (TAU - 0.7)) * r])], wy + 0.004 + i * 0.0004), K.shade('#4f8a4a', (rnd() - 0.5) * 0.2));
+          if (i % 3 === 0) { b.add(vmat('frond'), trisG(starG([x, wy + 0.012, z], [0, 1, 0], r * 0.55, 8)), i % 2 ? '#f6f2ec' : '#f2a8c2'); b.add(vmat('matte'), sphG(r * 0.13, x, wy + 0.03, z, 6, 4), '#f2c63a'); }
+        }
+        const q = S.inner[Math.floor(S.inner.length * 0.62)];
+        bladeFan(b, vmat('frond'), [q[0] * 0.9, wy, q[1] * 0.9], 18, h - wy, rnd, { wid: 0.04, el0: 1.56, el1: 1.25, curve: 0.35, colors: ['#5c8a4a', '#6f9a52'], segs: 3 });
+        return b.settle(h, w, d).build();
+      }
+      case 'stream': {
+        const n = 24, ws = d * 0.3, L = [], Rr = [];
+        addGround(b, rectPts(w, d), 0.012, surfaceOpts('gravel', {})); b.add(vmat('matte'), wallG(rectPts(w, d), 0, 0.012), '#9a958a');
+        for (let i = 0; i <= n; i++) { const x = -w / 2 + (i / n) * w, z = streamZ(x, w, d), k = 1 + 0.2 * Math.sin(i * 1.3); L.push([x, z - ws / 2 * k]); Rr.push([x, z + ws / 2 * k]); }
+        const tri = []; for (let i = 0; i < n; i++) tri.push(L[i][0], 0.03, L[i][1], Rr[i][0], 0.03, Rr[i][1], Rr[i + 1][0], 0.03, Rr[i + 1][1], L[i][0], 0.03, L[i][1], Rr[i + 1][0], 0.03, Rr[i + 1][1], L[i + 1][0], 0.03, L[i + 1][1]);
+        const g = trisG(tri), uv = new Float32Array(tri.length / 3 * 2); for (let i = 0; i < tri.length / 3; i++) { uv[i * 2] = tri[i * 3] / WATER_UV; uv[i * 2 + 1] = tri[i * 3 + 2] / WATER_UV; } g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+        b.add(wm, g);
+        const bank = (pts, sg) => pts.map(([x, z]) => [x, z + sg * 0.09]);
+        stoneRing(b, bank(L, -1.5), bank(L, -0.1), Math.round(w / 0.3), 0.06, h, w, d, rnd); stoneRing(b, bank(Rr, 1.5), bank(Rr, 0.1), Math.round(w / 0.3), 0.06, h, w, d, rnd);
+        for (let i = 0; i < 4; i++) { const x = (rnd() - 0.5) * w * 0.8; b.add(vmat('flat'), paintFoliage(blobG(0.07, 0.05, 0.06, x, 0.03, streamZ(x, w, d) + (rnd() - 0.5) * ws * 0.4, rnd, { amp: 0.25, floor: 0 }), '#8f897e', rnd)); }
+        return b.settle(h, w, d).build();
+      }
+      default: {
+        b.add(st, latheG([[R * 0.9, 0], [R, h * 0.03], [R, h * 0.2], [R * 0.93, h * 0.2], [R * 0.9, h * 0.08], [0.001, h * 0.08]], 36), col); b.add(wm, disc(R * 0.92, h * 0.17));
+        b.add(st, latheG([[R * 0.17, h * 0.08], [R * 0.1, h * 0.2], [R * 0.08, h * 0.45], [R * 0.14, h * 0.5]], 16), col);
+        b.add(st, latheG([[R * 0.12, h * 0.48], [R * 0.5, h * 0.52], [R * 0.6, h * 0.58], [R * 0.56, h * 0.58], [R * 0.1, h * 0.535]], 28), col); b.add(wm, disc(R * 0.56, h * 0.568));
+        b.add(st, latheG([[R * 0.07, h * 0.53], [R * 0.05, h * 0.75], [R * 0.09, h * 0.78]], 12), col);
+        b.add(st, latheG([[R * 0.08, h * 0.77], [R * 0.28, h * 0.8], [R * 0.33, h * 0.85], [R * 0.3, h * 0.85], [R * 0.06, h * 0.815]], 24), col); b.add(wm, disc(R * 0.3, h * 0.842));
+        b.add(st, latheG([[R * 0.05, h * 0.81], [R * 0.035, h * 0.93], [R * 0.06, h * 0.96], [0.001, h]], 12), col);
+        for (let i = 0; i < 8; i++) { const a = (i / 8) * TAU; b.add(fall, barG([Math.cos(a) * R * 0.6, h * 0.578, Math.sin(a) * R * 0.6], [Math.cos(a) * R * 0.66, h * 0.17, Math.sin(a) * R * 0.66], 0.006, 4)); if (i % 2) b.add(fall, barG([Math.cos(a) * R * 0.33, h * 0.848, Math.sin(a) * R * 0.33], [Math.cos(a) * R * 0.37, h * 0.57, Math.sin(a) * R * 0.37], 0.005, 4)); }
+        return b.fit(w, d, h).build();
+      }
+    }
+  },
+  draw2d(ctx, { w, d, p, px, item }) {
+    const P = params(p), S = wfSetup(P, w / 100, d / 100, item), stone = K.tint(S.stone, 0.3), water = K.tint(S.water, 0.35), ring = (k, fill) => { ctx.beginPath(); ctx.ellipse(0, 0, w / 2 * k, d / 2 * k, 0, 0, TAU); ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px; ctx.stroke(); };
+    switch (S.variant) {
+      case 'fountain-wall': { const tw = Math.min(14, d * 0.3); K.fillRR(ctx, 0, 0, w, d, 1, stone, INK, px); K.fillRR(ctx, 0, tw / 2 - 3, w - 12, d - tw - 6, 1, water, INK, px); K.fillRR(ctx, 0, -d / 2 + tw / 2, w, tw, 0, K.tint(S.stone, 0.1), INK, px); dot(ctx, 0, -d / 2 + tw + 5, Math.max(1.5 * px, 3), '#8a6a3a'); break; }
+      case 'fountain-sphere': ring(1, '#d9d5cc'); ring(0.66, K.tint(hexOf(P.color, '#4a4d52'), 0.45)); dot(ctx, -w * 0.1, -d * 0.1, Math.max(px, w * 0.05), 'rgba(255,255,255,0.7)'); break;
+      case 'bubbler': ring(1, '#d9d5cc'); ring(0.74, K.tint(hexOf(P.color, '#3f7f9a'), 0.4)); ring(0.3, water); break;
+      case 'bird-bath': ring(1, stone); ring(0.9, water); ring(0.15, stone); break;
+      case 'pond': case 'stream': {
+        if (S.variant === 'pond') {
+          const cm = (pts) => pts.map(([x, z]) => [x * 100, z * 100]);
+          pathPts(ctx, cm(S.outer)); ctx.fillStyle = '#d6d1c5'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px; ctx.stroke();
+          pathPts(ctx, cm(S.inner)); ctx.fillStyle = K.tint(hexOf(P.color2, '#4f8f86'), 0.35); ctx.fill(); ctx.stroke();
+          const n = S.outer.length; for (let i = 0; i < n; i += 2) { const o = S.outer[i], q = S.inner[i]; ctx.beginPath(); ctx.ellipse((o[0] + q[0]) * 50, (o[1] + q[1]) * 50, S.m * 80, S.m * 60, i, 0, TAU); ctx.fillStyle = '#c4beb2'; ctx.fill(); ctx.lineWidth = px * 0.8; ctx.stroke(); }
+          for (let i = 0; i < 6; i++) { const q = S.inner[Math.floor(S.rnd() * S.inner.length)], k = 0.15 + S.rnd() * 0.5; dot(ctx, q[0] * k * 100, q[1] * k * 100, Math.max(1.5 * px, 9), 'rgba(80,140,80,0.85)'); if (i % 3 === 0) dot(ctx, q[0] * k * 100, q[1] * k * 100, Math.max(px, 3.5), '#f6d2e0'); }
+        } else {
+          ctx.beginPath(); ctx.rect(-w / 2, -d / 2, w, d); ctx.fillStyle = groundFill2D(ctx, surfaceOpts('gravel', {}), px, -w / 2, -d / 2); ctx.fill(); ctx.strokeStyle = K.INK_SOFT; ctx.lineWidth = px; ctx.stroke();
+          const n = 24, ws = d * 0.3; ctx.beginPath();
+          for (let i = 0; i <= n; i++) { const x = -w / 2 + (i / n) * w; ctx.lineTo(x, streamZ(x / 100, w / 100, d / 100) * 100 - ws / 2 * (1 + 0.2 * Math.sin(i * 1.3))); }
+          for (let i = n; i >= 0; i--) { const x = -w / 2 + (i / n) * w; ctx.lineTo(x, streamZ(x / 100, w / 100, d / 100) * 100 + ws / 2 * (1 + 0.2 * Math.sin(i * 1.3))); }
+          ctx.closePath(); ctx.fillStyle = water; ctx.fill(); ctx.strokeStyle = INK; ctx.stroke();
+          for (let i = 0; i < Math.round(w / 20); i++) for (const sg of [-1, 1]) { const x = -w / 2 + (i + 0.5) * 20; ctx.beginPath(); ctx.ellipse(x, clamp(streamZ(x / 100, w / 100, d / 100) * 100 + sg * (ws / 2 * 1.2 + 9), -d / 2 + 7, d / 2 - 7), 9, 7, i, 0, TAU); ctx.fillStyle = '#c4beb2'; ctx.fill(); ctx.lineWidth = px * 0.8; ctx.stroke(); }
+        }
+        break;
+      }
+      default: ring(1, stone); ring(0.92, water); ring(0.6, stone); ring(0.56, water); ring(0.33, stone); ring(0.3, water); dot(ctx, 0, 0, Math.max(px, w * 0.03), INK);
+    }
+  },
+});
+
+// ═════════════════════════════════ 13. garden décor ═════════════════════════════════
+const DECOR = ['boulder', 'rocks', 'statue', 'bird-feeder', 'arch', 'obelisk', 'stepping-stone', 'edging', 'sundial', 'gnome', 'sign', 'bridge', 'wind-chime'];
+const rockG = (rx, ry, rz, x, z, rnd, tone = '#a8a297') => paintFoliage(blobG(rx, ry, rz, x, ry * 0.7, z, rnd, { detail: 2, amp: 0.26, floor: 0, squash: 0.5 }), K.shade(tone, (rnd() - 0.5) * 0.18), rnd, { lo: -0.3, hi: 0.1, sparkle: 0.1 });
+function decorSetup(P, item) {
+  const variant = oneOf(P.variant, DECOR, 'boulder');
+  const edge = P.material === 'metal' ? 'steel' : P.material === 'wood' ? 'wood' : P.material === 'ceramic' ? 'brick' : 'stone';
+  return { variant, edge, rnd: K.rng(seedOf(item, 'decor' + variant)), color: hexOf(P.color, null), color2: hexOf(P.color2, null) };
+}
+registerModel('garden-decor', {
+  build({ w, d, h, p, item }) {
+    const P = params(p), S = decorSetup(P, item), b = new Batch(), rnd = S.rnd, R = Math.min(w, d) / 2, flat = vmat('flat'), matte = vmat('matte'), col = S.color;
+    const metal = K.metal(col || '#2b2d31'), wood = K.wood(col || '#a9774a'), stone = col || '#c9c2b4';
+    switch (S.variant) {
+      case 'rocks': {
+        const n = clamp(Math.round(w * d * 5) + 3, 4, 9);
+        for (let i = 0; i < n; i++) { const a = i * 2.39996, k = i === 0 ? 0.1 : 0.3 + 0.6 * Math.sqrt(i / n), s = i === 0 ? 0.5 : 0.18 + rnd() * 0.2; b.add(flat, rockG(w * s * 0.6, h * s * 1.1, d * s * 0.6, Math.cos(a) * w / 2 * k, Math.sin(a) * d / 2 * k, rnd, col || (i % 2 ? '#a8a297' : '#8f897e'))); }
+        return b.fit(w, d, h).build();
+      }
+      case 'statue': {
+        const ph = h * 0.16, rr = (h - ph) * 0.3, m = P.material === 'metal' ? vmat('metal') : vmat('satin'), c = col || (P.material === 'metal' ? '#8a6a44' : '#e9e6df');
+        b.add(matte, boxOnG(w, ph, d, 0, 0, 0), S.color2 || '#8f8a82');
+        const art = new Batch();
+        art.add(m, new THREE.TorusGeometry(rr, rr * 0.42, 14, 36).scale(0.85, 1.25, 0.8).rotateY(0.5).translate(0, rr * 1.9, 0), c);
+        art.add(m, sphG(rr * 0.36, rr * 0.25, rr * 3.6, 0, 16, 12), c);
+        art.add(m, latheG([[rr * 0.5, 0], [rr * 0.34, rr * 0.3], [rr * 0.3, rr * 0.6]], 16), c);
+        return b.merge(art.fit(w * 0.86, d * 0.86, h - ph), 0, ph, 0).build();
+      }
+      case 'bird-feeder': {
+        const th = h * 0.62, hw = w / 2, hd = d / 2;
+        b.add(wood, cylG(R * 0.1, R * 0.12, th, 0, 0, 0, 10)); b.add(wood, boxOnG(w * 0.5, 0.03, d * 0.5, 0, 0, 0));
+        b.add(wood, boxOnG(w * 0.92, 0.025, d * 0.92, 0, th, 0)); for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.add(wood, boxOnG(0.025, h * 0.2, 0.025, sx * hw * 0.78, th, sz * hd * 0.78));
+        const y0 = th + h * 0.2;
+        b.add(vmat('flat'), trisG([-hw, y0, hd, hw, y0, hd, 0, h, 0, hw, y0, hd, hw, y0, -hd, 0, h, 0, hw, y0, -hd, -hw, y0, -hd, 0, h, 0, -hw, y0, -hd, -hw, y0, hd, 0, h, 0, -hw, y0, -hd, hw, y0, -hd, hw, y0, hd, -hw, y0, -hd, hw, y0, hd, -hw, y0, hd]), S.color2 || '#7a4a34');
+        return b.build();
+      }
+      case 'arch': {
+        const r = 0.012, x0 = w / 2 - r, z0 = d / 2 - r, ra = x0, ys = Math.max(h * 0.3, h - ra - r), n = 12, m = K.metal(col || '#2b2d31');
+        for (const sz of [-1, 1]) {
+          const pts = [[-x0, 0, sz * z0], [-x0, ys, sz * z0]]; for (let i = 1; i <= n; i++) { const a = Math.PI - (i / n) * Math.PI; pts.push([Math.cos(a) * ra, ys + Math.sin(a) * (h - r - ys), sz * z0]); } pts.push([x0, 0, sz * z0]);
+          b.add(m, tubeG(pts, r, 6));
+        }
+        for (let y = 0.25; y < ys; y += 0.3) for (const sx of [-1, 1]) b.add(m, barG([sx * x0, y, -z0], [sx * x0, y, z0], r * 0.7, 5));
+        for (let i = 0; i <= n; i += 2) { const a = Math.PI - (i / n) * Math.PI; b.add(m, barG([Math.cos(a) * ra, ys + Math.sin(a) * (h - r - ys), -z0], [Math.cos(a) * ra, ys + Math.sin(a) * (h - r - ys), z0], r * 0.7, 5)); }
+        const vine = new Batch();
+        for (let i = 0; i < 9; i++) { const t = i / 8, y = t * (ys + 0.2), x = -x0 + (t > 0.85 ? (t - 0.85) * ra * 2 : 0); vine.add(vmat('leaf'), paintFoliage(blobG(0.12, 0.14, Math.min(0.12, z0), x + 0.02, y + 0.1, (rnd() - 0.5) * z0, rnd, { amp: 0.3 }), i % 2 ? '#4f8a3c' : '#5c9846', rnd)); if (i % 2) vine.add(vmat('leaf'), blobG(0.035, 0.03, 0.035, x + 0.1, y + 0.12, (rnd() - 0.5) * z0 * 1.5, rnd, { detail: 0, amp: 0.2 }), S.color2 || '#e8506a'); }
+        for (const list of vine.buckets.values()) for (const g of list) { const a = g.attributes.position.array; for (let i = 0; i < a.length; i += 3) { a[i] = clamp(a[i], -w / 2, w / 2); a[i + 1] = clamp(a[i + 1], 0, h); a[i + 2] = clamp(a[i + 2], -d / 2, d / 2); } }
+        return b.merge(vine).fit(w, d, h).build();
+      }
+      case 'obelisk': {
+        const r = 0.011, top = [0, h * 0.93, 0];
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.add(metal, barG([sx * (w / 2 - r), 0, sz * (d / 2 - r)], top, r, 6));
+        for (const t of [0.25, 0.5, 0.72]) { const k = 1 - t / 0.93, y = h * t, c = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sz]) => [sx * (w / 2 - r) * k, y, sz * (d / 2 - r) * k]); for (let i = 0; i < 4; i++) b.add(metal, barG(c[i], c[(i + 1) % 4], r * 0.75, 5)); }
+        b.add(metal, sphG(h * 0.035, 0, h - h * 0.035, 0, 10, 8));
+        return b.fit(w, d, h).build();
+      }
+      case 'stepping-stone': b.add(flat, paintFoliage(extrudeG(organicPts(w / 2, d / 2, rnd, 16, 0.07), h, 0), stone, rnd, { lo: -0.25, hi: 0.04, sparkle: 0.03 })); return b.build();
+      case 'edging': {
+        if (S.edge === 'steel') { b.add(matte, boxOnG(w, h, Math.min(d, 0.006), 0, 0, 0), col || '#6a4a38'); b.add(matte, boxOnG(w, h * 0.3, d, 0, 0, 0), K.shade(col || '#6a4a38', -0.2)); return b.build(); }
+        const len = S.edge === 'wood' ? Math.max(0.05, d) : 0.2, n = Math.max(1, Math.round(w / len)), s = w / n;
+        for (let i = 0; i < n; i++) {
+          const x = -w / 2 + (i + 0.5) * s;
+          if (S.edge === 'wood') b.add(wood, cylG(s / 2 - 0.002, s / 2 - 0.002, h * (0.9 + (i % 2) * 0.1), x, 0, 0, 10).scale(1, 1, d / s));
+          else if (S.edge === 'brick') b.add(matte, boxOnG(s - 0.008, h * (0.93 + rnd() * 0.07), d, x, 0, 0), K.shade(col || '#a8563c', (rnd() - 0.5) * 0.25));
+          else { const g = blobG(s * 0.54, h * 0.62, d * 0.56, x, h * 0.45, 0, rnd, { amp: 0.16, floor: 0 }), a = g.attributes.position.array; for (let j = 0; j < a.length; j += 3) { a[j] = clamp(a[j], -w / 2, w / 2); a[j + 1] = Math.min(a[j + 1], h); a[j + 2] = clamp(a[j + 2], -d / 2, d / 2); } b.add(flat, paintFoliage(g, K.shade(stone, (rnd() - 0.5) * 0.2), rnd, { lo: -0.2, hi: 0.1 })); }
+        }
+        return b.fit(w, d, h).build();
+      }
+      case 'sundial': {
+        b.add(matte, latheG([[R * 0.75, 0], [R * 0.8, h * 0.04], [R * 0.45, h * 0.1], [R * 0.3, h * 0.25], [R * 0.26, h * 0.75], [R * 0.5, h * 0.86], [R * 0.95, h * 0.9], [R, h * 0.94], [0.001, h * 0.94]], 20), stone);
+        b.add(vmat('metal'), cylG(R * 0.8, R * 0.8, h * 0.012, 0, h * 0.94, 0, 28), '#b8964e');
+        b.add(vmat('metal'), trisG([0, h * 0.952, -R * 0.55, 0, h * 0.952, R * 0.5, 0, h, R * 0.5, 0, h * 0.952, R * 0.5, 0, h * 0.952, -R * 0.55, 0, h, R * 0.5]), '#8a6a3a');
+        return b.fit(w, d, h).build();
+      }
+      case 'gnome': {
+        const g = vmat('satin');
+        b.add(g, latheG([[R * 0.5, 0], [R * 0.82, h * 0.03], [R * 0.9, h * 0.2], [R * 0.7, h * 0.42], [R * 0.4, h * 0.5]], 16), col || '#2f6db0');
+        b.add(g, latheG([[R * 0.86, h * 0.02], [R * 0.95, h * 0.07], [R * 0.6, h * 0.1]], 16).translate(0, 0, R * 0.05), '#3a3028');
+        b.add(g, sphG(R * 0.5, 0, h * 0.56, 0, 14, 10), '#f0c4a0'); b.add(g, sphG(R * 0.13, 0, h * 0.56, R * 0.5, 8, 6), '#e8a888');
+        b.add(vmat('flat'), new THREE.ConeGeometry(R * 0.52, h * 0.3, 8).rotateX(Math.PI).translate(0, h * 0.44, R * 0.34), '#f4f1ea');
+        b.add(g, new THREE.ConeGeometry(R * 0.6, h * 0.36, 14).translate(0, h * 0.82, 0), S.color2 || '#d8242c');
+        return b.fit(w, d, h).build();
+      }
+      case 'sign': {
+        const bh = Math.min(h * 0.4, 0.4);
+        b.add(wood, boxOnG(Math.min(0.05, w * 0.15), h - bh * 0.3, Math.min(0.05, d * 0.6), 0, 0, -d * 0.15));
+        b.add(K.wood(S.color2 || '#e3cfa8'), boxOnG(w, bh, d * 0.45, 0, h - bh, d * 0.275));
+        for (let i = 0; i < 3; i++) b.add(matte, boxG(w * (0.7 - i * 0.12), bh * 0.07, 0.002, 0, h - bh * (0.3 + i * 0.2), d / 2 + 0.0005), '#4a3a2c');
+        b.add(wood, boxOnG(w * 0.3, 0.02, d, 0, 0, 0));
+        return b.fit(w, d, h).build();
+      }
+      case 'bridge': {
+        const rise = Math.min(h * 0.32, w * 0.14), n = Math.max(6, Math.round(w / 0.11)), yAt = (x) => 0.03 + rise * (1 - (x / (w / 2)) ** 2), rh = h - rise - 0.03, zr = d / 2 - 0.03;
+        for (let i = 0; i < n; i++) { const x = -w / 2 + (i + 0.5) * (w / n), sl = Math.atan(-2 * rise * x / (w / 2) ** 2); b.add(wood, boxG(w / n - 0.008, 0.025, d - 0.1, 0, 0, 0).rotateZ(sl).translate(x, yAt(x) + 0.0125, 0)); }
+        for (const sz of [-1, 1]) {
+          const arc = (y0) => Array.from({ length: 13 }, (_, i) => { const x = -w / 2 + 0.02 + (i / 12) * (w - 0.04); return [x, yAt(x) + y0, sz * zr]; });
+          b.add(wood, tubeG(arc(-0.02), 0.03, 6)); b.add(wood, tubeG(arc(rh - 0.03), 0.028, 6)); b.add(wood, tubeG(arc(rh * 0.5), 0.016, 5));
+          for (let i = 0; i <= 4; i++) { const x = -w / 2 + 0.05 + (i / 4) * (w - 0.1); b.add(wood, boxOnG(0.05, rh, 0.05, x, yAt(x), sz * zr)); }
+        }
+        return b.fit(w, d, h).build();
+      }
+      case 'wind-chime': {
+        const m = K.metal(col || '#2b2d31'), cx = R * 0.45, cy = h * 0.8;
+        b.add(m, cylG(R, R, 0.012, 0, 0, 0, 24)); 
+        const pts = [[-R * 0.5, 0, 0], [-R * 0.5, h * 0.86, 0]]; for (let i = 1; i <= 8; i++) { const a = Math.PI - (i / 8) * Math.PI * 1.15; pts.push([-R * 0.5 + (cx + R * 0.5) / 2 * (1 + Math.cos(a)), h * 0.86 + Math.sin(a) * (h * 0.14 - 0.01), 0]); }
+        b.add(m, tubeG(pts, 0.009, 6));
+        const e = pts[pts.length - 1];
+        b.add(m, barG(e, [cx, cy, 0], 0.0015, 3)); b.add(wood, cylG(R * 0.3, R * 0.3, 0.012, cx, cy, 0, 16));
+        for (let i = 0; i < 5; i++) { const a = (i / 5) * TAU, len = h * (0.16 + 0.03 * i), x = cx + Math.cos(a) * R * 0.22, z = Math.sin(a) * R * 0.22; b.add(vmat('metal'), cylG(0.008, 0.008, len, x, cy - 0.04 - len, z, 6), S.color2 || '#c9ccd0'); b.add(m, barG([x, cy, z], [x, cy - 0.04, z], 0.001, 3)); }
+        b.add(m, barG([cx, cy, 0], [cx, cy - h * 0.34, 0], 0.001, 3)); b.add(wood, cylG(R * 0.1, R * 0.1, 0.01, cx, cy - h * 0.16, 0, 10)); b.add(wood, boxG(R * 0.22, R * 0.3, 0.004, cx, cy - h * 0.36, 0));
+        return b.fit(w, d, h).build();
+      }
+      default: b.add(flat, rockG(w / 2, h * 0.6, d / 2, 0, 0, rnd, col || '#a8a297')); return b.fit(w, d, h).build();
+    }
+  },
+  draw2d(ctx, { w, d, p, px, item }) {
+    const P = params(p), S = decorSetup(P, item), rnd = S.rnd, R = Math.min(w, d) / 2, col = S.color, rock = (x, y, rx, ry, rot) => { pathPts(ctx, organicPts(rx, ry, rnd, 12, 0.1).map(([a, c]) => [x + a * Math.cos(rot) - c * Math.sin(rot), y + a * Math.sin(rot) + c * Math.cos(rot)])); ctx.fillStyle = K.tint(col || '#a8a297', 0.35); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px; ctx.stroke(); };
+    const circle = (r, fill) => K.fillCircle(ctx, 0, 0, r, fill, INK, px);
+    switch (S.variant) {
+      case 'rocks': { const n = clamp(Math.round(w * d / 2000) + 3, 4, 9); for (let i = n - 1; i >= 0; i--) { const a = i * 2.39996, k = i === 0 ? 0.1 : 0.3 + 0.45 * Math.sqrt(i / n), s = i === 0 ? 0.5 : 0.22 + rnd() * 0.14; rock(Math.cos(a) * w / 2 * k, Math.sin(a) * d / 2 * k, w * s * 0.55, d * s * 0.55, rnd() * 3); } break; }
+      case 'statue': K.fillRR(ctx, 0, 0, w, d, 1, K.tint(S.color2 || '#8f8a82', 0.4), INK, px); ctx.beginPath(); ctx.ellipse(0, 0, R * 0.62, R * 0.3, 0.5, 0, TAU); ctx.fillStyle = K.tint(col || '#e9e6df', 0.2); ctx.fill(); ctx.stroke(); break;
+      case 'bird-feeder': K.fillRR(ctx, 0, 0, w, d, 1, K.tint(S.color2 || '#7a4a34', 0.4), INK, px); K.line(ctx, -w / 2, -d / 2, w / 2, d / 2, INK, px); K.line(ctx, w / 2, -d / 2, -w / 2, d / 2, INK, px); break;
+      case 'arch': for (const sz of [-1, 1]) K.line(ctx, -w / 2, sz * (d / 2 - px), w / 2, sz * (d / 2 - px), INK, px * 1.5); for (let i = 0; i <= 6; i++) K.line(ctx, -w / 2 + (i / 6) * w, -d / 2, -w / 2 + (i / 6) * w, d / 2, K.INK_SOFT, px); ctx.save(); ctx.translate(-w / 2 + d * 0.4, 0); canopy2D(ctx, d * 0.45, d * 0.5, '#4f8a3c', rnd, px, { clumps: 0, accent: S.color2 || '#e8506a', dots: 4, dotR: 0.12 }); ctx.restore(); break;
+      case 'obelisk': ctx.strokeStyle = INK; ctx.lineWidth = px; for (const k of [1, 0.72, 0.45, 0.22]) ctx.strokeRect(-w / 2 * k, -d / 2 * k, w * k, d * k); K.line(ctx, -w / 2, -d / 2, w / 2, d / 2, INK, px); K.line(ctx, w / 2, -d / 2, -w / 2, d / 2, INK, px); dot(ctx, 0, 0, Math.max(1.5 * px, R * 0.1), INK); break;
+      case 'stepping-stone': pathPts(ctx, organicPts(w / 2, d / 2, rnd, 16, 0.07)); ctx.fillStyle = K.tint(col || '#c9c2b4', 0.3); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px; ctx.stroke(); break;
+      case 'edging': { K.fillRR(ctx, 0, 0, w, d, S.edge === 'stone' ? d * 0.3 : 0, K.tint(col || { steel: '#6a4a38', wood: '#a9774a', brick: '#a8563c', stone: '#c9c2b4' }[S.edge], 0.35), INK, px); const len = S.edge === 'wood' ? Math.max(5, d) : 20, n = Math.max(1, Math.round(w / len)); if (S.edge !== 'steel' && w / n / px > 3) for (let i = 1; i < n; i++) K.line(ctx, -w / 2 + (i / n) * w, -d / 2, -w / 2 + (i / n) * w, d / 2, K.INK_SOFT, px); break; }
+      case 'sundial': circle(R, K.tint(col || '#c9c2b4', 0.3)); circle(R * 0.8, '#e6d6a8'); for (let i = 0; i < 12; i++) { const a = (i / 12) * TAU; K.line(ctx, Math.cos(a) * R * 0.62, Math.sin(a) * R * 0.62, Math.cos(a) * R * 0.76, Math.sin(a) * R * 0.76, INK, px); } K.line(ctx, 0, -R * 0.5, 0, R * 0.5, INK, px * 2); break;
+      case 'gnome': circle(R, K.tint(col || '#2f6db0', 0.35)); circle(R * 0.6, K.tint(S.color2 || '#d8242c', 0.2)); dot(ctx, 0, 0, Math.max(px, R * 0.08), INK); break;
+      case 'sign': K.fillRR(ctx, 0, d * 0.275, w, d * 0.45, 0, K.tint(S.color2 || '#e3cfa8', 0.3), INK, px); K.fillRR(ctx, 0, -d * 0.15, Math.min(5, w * 0.15), Math.min(5, d * 0.6), 0, K.tint(col || '#a9774a', 0.2), INK, px); break;
+      case 'bridge': { K.fillRR(ctx, 0, 0, w, d - 6, 0, K.tint(col || '#a9774a', 0.4), INK, px); const n = Math.max(6, Math.round(w / 11)); if (w / n / px > 3) for (let i = 1; i < n; i++) K.line(ctx, -w / 2 + (i / n) * w, -d / 2 + 5, -w / 2 + (i / n) * w, d / 2 - 5, K.INK_SOFT, px); for (const sz of [-1, 1]) { K.fillRR(ctx, 0, sz * (d / 2 - 3), w, 6, 1, K.tint(col || '#a9774a', 0.15), INK, px); for (let i = 0; i <= 4; i++) K.fillRR(ctx, -w / 2 + 5 + (i / 4) * (w - 10), sz * (d / 2 - 3), 5, 5, 0, '#8a6a40', null); } break; }
+      case 'wind-chime': circle(R, 'rgba(120,125,130,0.18)'); K.line(ctx, -R * 0.5, 0, R * 0.45, 0, INK, px * 1.5); dot(ctx, -R * 0.5, 0, Math.max(1.5 * px, 1.5), INK); K.fillCircle(ctx, R * 0.45, 0, R * 0.3, K.tint('#a9774a', 0.3), INK, px); for (let i = 0; i < 5; i++) { const a = (i / 5) * TAU; dot(ctx, R * 0.45 + Math.cos(a) * R * 0.22, Math.sin(a) * R * 0.22, Math.max(px, 1), '#6a6d72'); } break;
+      default: rock(0, 0, w / 2, d / 2, 0);
+    }
   },
 });

@@ -505,6 +505,1488 @@ export default [
   "description": "Flatwoven rug for indoor or outdoor use."
  },
  {
+  "id": "ace-porto-alu-lounge-set",
+  "name": "Porto aluminium lounge set, black (3-seat sofa, 2 armchairs, table)",
+  "nameHe": "פינת ישיבה מאלומיניום פורטו שחור",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4459677",
+  "price": 2799,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 204,
+   "d": 75,
+   "h": 75
+  },
+  "type": "sofa",
+  "params": {
+   "seats": 3,
+   "color": "#3a3a3c",
+   "color2": "#d8d3ca",
+   "material": "aluminium"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "outdoor-sofas",
+  "tags": [
+   "lounge-set",
+   "aluminium",
+   "premium"
+  ],
+  "description": "Set; dims are the sofa 204x75, back height 62/75. Armchairs 85x75."
+ },
+ {
+  "id": "ace-talia-alu-lounge-set",
+  "name": "Talia luxury aluminium lounge set",
+  "nameHe": "מערכת ישיבה יוקרתית מאלומיניום טליה",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4498898",
+  "price": 2699,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 203,
+   "d": 74,
+   "h": 71
+  },
+  "type": "sofa",
+  "params": {
+   "seats": 3,
+   "color": "#8d8f92",
+   "material": "aluminium"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "outdoor-sofas",
+  "tags": [
+   "lounge-set",
+   "aluminium",
+   "premium"
+  ],
+  "description": "Set; dims are the 203x74x71 sofa; armchair 63.5x74x71, low table 122x68x34.5."
+ },
+ {
+  "id": "ace-melbourne-rattan-corner-set",
+  "name": "Melbourne rattan corner lounge set, grey",
+  "nameHe": "מערכת ישיבה פינתית ראטן מלבורן אפור",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4483371",
+  "price": 1499,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 146,
+   "d": 60,
+   "h": 78
+  },
+  "type": "sofa",
+  "params": {
+   "seats": 2,
+   "color": "#7c7d80",
+   "color2": "#d8d3ca",
+   "material": "rattan"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "outdoor-sofas",
+  "tags": [
+   "corner-set",
+   "rattan"
+  ],
+  "description": "Set; dims are the larger 146 cm module; second 132 cm module, table 120x70x70, footstool."
+ },
+ {
+  "id": "ace-bogota-4pc-set",
+  "name": "Bogota 4-piece garden lounge set",
+  "nameHe": "מערכת ישיבה 4 חלקים בוגוטה",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4486677",
+  "price": 899,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 124,
+   "d": 63,
+   "h": 78
+  },
+  "type": "sofa",
+  "params": {
+   "seats": 3,
+   "color": "#5f5f61"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "outdoor-sofas",
+  "tags": [
+   "lounge-set",
+   "budget"
+  ],
+  "description": "Set; dims are the 3-seat sofa 124x63x78; 2 armchairs and table included."
+ },
+ {
+  "id": "ace-nestle-double-lounger",
+  "name": "Nestle double sun lounger with canopy",
+  "nameHe": "מיטת שיזוף זוגית NESTLE",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/6001503",
+  "price": 1196,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 150,
+   "d": 203,
+   "h": 155
+  },
+  "type": "lounger",
+  "params": {
+   "variant": "double",
+   "cushion": true,
+   "color": "#d9d4c8",
+   "color2": "#3a3a3c"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "loungers",
+  "tags": [
+   "daybed",
+   "double",
+   "canopy"
+  ],
+  "description": "Double sun bed 150x203, height 155 with canopy frame."
+ },
+ {
+  "id": "ace-double-adjustable-lounger",
+  "name": "Double adjustable sun lounger with pull-out table",
+  "nameHe": "מיטת שיזוף זוגית מתכווננת עם שולחן מרכזי",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4503874",
+  "price": 1089,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 149.5,
+   "d": 196,
+   "h": 30.5
+  },
+  "type": "lounger",
+  "params": {
+   "variant": "double",
+   "cushion": true,
+   "backAngle": 45,
+   "color": "#9a9a9a"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "loungers",
+  "tags": [
+   "double",
+   "5-positions",
+   "side-table"
+  ],
+  "description": "Double lounger 149.5x196 with 5 back positions and pull-out table."
+ },
+ {
+  "id": "ace-bamboo-lounger",
+  "name": "Bamboo sun lounger",
+  "nameHe": "מיטת שיזוף במבוק",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4496807",
+  "price": 1350,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 215,
+   "d": 80,
+   "h": 35
+  },
+  "type": "lounger",
+  "params": {
+   "variant": "lounger",
+   "cushion": true,
+   "color": "#c8a96a",
+   "material": "wood"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "loungers",
+  "tags": [
+   "bamboo",
+   "natural"
+  ],
+  "description": "Bamboo lounger 215x80x35."
+ },
+ {
+  "id": "ace-sahara-hammock-chair",
+  "name": "Sahara hammock with stand",
+  "nameHe": "ערסל נוח SAHARA",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/6001203",
+  "price": 369,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 95,
+   "d": 95,
+   "h": 196
+  },
+  "type": "swing-bench",
+  "params": {
+   "variant": "hammock-stand",
+   "seats": 1,
+   "color": "#d9d0bf",
+   "color2": "#4a4a4a"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "swings-hammocks",
+  "tags": [
+   "hammock",
+   "stand"
+  ],
+  "description": "Hanging seat on a stand: base dia 95, height 196."
+ },
+ {
+  "id": "ace-tokyo-rattan-hammock",
+  "name": "Tokyo single rattan hammock chair with stand",
+  "nameHe": "ערסל ראטן יחיד טוקיו",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4416070",
+  "price": 799,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 105,
+   "d": 105,
+   "h": 195
+  },
+  "type": "swing-bench",
+  "params": {
+   "variant": "hanging-chair",
+   "seats": 1,
+   "color": "#5a4a3a",
+   "material": "rattan"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "swings-hammocks",
+  "tags": [
+   "hanging-chair",
+   "rattan",
+   "stand"
+  ],
+  "description": "Rattan hanging chair, base dia 105, height 195."
+ },
+ {
+  "id": "ace-roma-hanging-chair-clay",
+  "name": "Roma floating chair, clay",
+  "nameHe": "כורסת ריחוף ROMA",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4497601",
+  "price": 1299,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 71,
+   "d": 110,
+   "h": 74
+  },
+  "type": "swing-bench",
+  "params": {
+   "variant": "hanging-chair",
+   "seats": 1,
+   "color": "#b89f86"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "swings-hammocks",
+  "tags": [
+   "hanging-chair"
+  ],
+  "description": "Floating/hanging armchair 71x110x74."
+ },
+ {
+  "id": "ace-melani-swing",
+  "name": "Melani designer garden swing",
+  "nameHe": "נדנדה לגינה מעוצבת מלאני",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4421471",
+  "price": 1690,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 202,
+   "d": 121,
+   "h": 183
+  },
+  "type": "swing-bench",
+  "params": {
+   "variant": "swing-bench",
+   "canopy": true,
+   "seats": 3,
+   "color": "#8a8a8a",
+   "material": "metal"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "swings-hammocks",
+  "tags": [
+   "swing",
+   "canopy"
+  ],
+  "description": "3-seat swing 202x121, height 183."
+ },
+ {
+  "id": "ace-luxe-3-seat-swing",
+  "name": "Luxe 3-seat swing with canopy",
+  "nameHe": "נדנדה 3 מקומות LUXE",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/6001209",
+  "price": 1499,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 190,
+   "d": 120,
+   "h": 175
+  },
+  "type": "swing-bench",
+  "params": {
+   "variant": "swing-bench",
+   "canopy": true,
+   "seats": 3,
+   "color": "#d9d0bf"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "swings-hammocks",
+  "tags": [
+   "swing",
+   "budget",
+   "canopy"
+  ],
+  "description": "3-seat swing 190x120x175 with slingfabric seat."
+ },
+ {
+  "id": "ace-yasmin-alu-bench",
+  "name": "Yasmin 2-seat aluminium garden bench",
+  "nameHe": "ספסל לגינה זוגי מאלומיניום יסמין",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4472724",
+  "price": 799,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 125,
+   "d": 57,
+   "h": 87
+  },
+  "type": "bench",
+  "params": {
+   "back": true,
+   "color": "#3a3a3c",
+   "material": "aluminium"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "outdoor-chairs",
+  "tags": [
+   "bench",
+   "aluminium",
+   "2-seat"
+  ],
+  "description": "2-seat aluminium bench with back."
+ },
+ {
+  "id": "ace-barcelona-extendable-6",
+  "name": "Barcelona aluminium extendable table + 6 chairs",
+  "nameHe": "פינת אוכל ברצלונה שולחן אלומיניום נפתח עם 6 כיסאות",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4481552",
+  "price": 2999,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 298,
+   "d": 100,
+   "h": 75
+  },
+  "type": "table",
+  "params": {
+   "shape": "rect",
+   "color": "#a8a8a8",
+   "material": "aluminium",
+   "top": "metal",
+   "extendable": true
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "outdoor-dining",
+  "tags": [
+   "dining",
+   "6-seat",
+   "extendable"
+  ],
+  "description": "Set mapped to the table; open 298x100x75, closed 216.5 cm."
+ },
+ {
+  "id": "ace-seoul-extendable-table-160",
+  "name": "Seoul aluminium extendable table 160/240 x 90",
+  "nameHe": "שולחן אלומיניום נפתח 160/240 סיאול",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4480724",
+  "price": 1299,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 160,
+   "d": 90,
+   "h": 75
+  },
+  "type": "table",
+  "params": {
+   "shape": "rect",
+   "color": "#c9b99a",
+   "material": "aluminium",
+   "top": "metal",
+   "extendable": true
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "outdoor-dining",
+  "tags": [
+   "dining",
+   "extendable",
+   "aluminium"
+  ],
+  "description": "Table extends 160 to 240 cm, 90 deep."
+ },
+ {
+  "id": "ace-portugal-table-6-lima",
+  "name": "Portugal glass table 150x90 + 6 Lima chairs",
+  "nameHe": "פינת אוכל פורטוגל + 6 כיסאות לימה",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4488965",
+  "price": 899,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 150,
+   "d": 90,
+   "h": 70
+  },
+  "type": "table",
+  "params": {
+   "shape": "rect",
+   "color": "#2f2f2f",
+   "material": "metal",
+   "top": "glass"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "outdoor-dining",
+  "tags": [
+   "dining",
+   "6-seat",
+   "glass-top"
+  ],
+  "description": "Set mapped to the table (150x90x70, tempered glass); 6 chairs included."
+ },
+ {
+  "id": "ace-madrid-round-dining-4",
+  "name": "Madrid round dining set dia 90 + 4 chairs",
+  "nameHe": "סט פינת אוכל מדריד + 4 כסאות",
+  "brand": "Playa",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4434778",
+  "price": 799,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 90,
+   "d": 90,
+   "h": 70
+  },
+  "type": "table",
+  "params": {
+   "shape": "round",
+   "color": "#d8d3ca",
+   "top": "metal"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "outdoor-dining",
+  "tags": [
+   "dining",
+   "round",
+   "4-seat"
+  ],
+  "description": "Set mapped to the table (dia 90, h 70); 4 chairs 54x74x94 included."
+ },
+ {
+  "id": "ace-tenerife-dining-6",
+  "name": "Tenerife dining table 150x90 + 6 chairs",
+  "nameHe": "סט שולחן אוכל ו-6 כסאות טנריף",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4502430",
+  "price": 799,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 150,
+   "d": 90,
+   "h": 70
+  },
+  "type": "table",
+  "params": {
+   "shape": "rect",
+   "color": "#6b5a4a"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "outdoor-dining",
+  "tags": [
+   "dining",
+   "6-seat",
+   "budget"
+  ],
+  "description": "Set mapped to the table (150x90x70); chairs 55x75x90."
+ },
+ {
+  "id": "ace-trampoline-10ft-net",
+  "name": "Trampoline 10 ft (3.05 m) with safety net",
+  "nameHe": "טרמפולינה עם רשת בטיחות 10 פיט 3.05 מטר",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4477821",
+  "price": 649,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 305,
+   "d": 305,
+   "h": 180
+  },
+  "type": "play",
+  "params": {
+   "variant": "trampoline",
+   "net": true
+  },
+  "zone": "outdoor",
+  "category": "play",
+  "subcategory": "trampolines",
+  "tags": [
+   "trampoline",
+   "3.05m",
+   "net"
+  ],
+  "description": "Dia 3.05 m, frame height 65 cm, net height 180 cm."
+ },
+ {
+  "id": "ace-trampoline-6ft-net",
+  "name": "Trampoline 6 ft (1.83 m) with inner net",
+  "nameHe": "טרמפולינה עם רשת פנימית 6 פיט 1.83 מטר",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4477819",
+  "price": 399,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 183,
+   "d": 183,
+   "h": 150
+  },
+  "type": "play",
+  "params": {
+   "variant": "trampoline",
+   "net": true
+  },
+  "zone": "outdoor",
+  "category": "play",
+  "subcategory": "trampolines",
+  "tags": [
+   "trampoline",
+   "kids",
+   "1.83m"
+  ],
+  "description": "Dia 1.83 m, frame height 46 cm, net height 150 cm; no ladder."
+ },
+ {
+  "id": "ace-slide-244",
+  "name": "3-part slide 2.44 m with ladder and stabilisers",
+  "nameHe": "מגלשה 3 חלקים 2.44 מ",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4483015",
+  "price": 549,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 251,
+   "d": 84,
+   "h": 147
+  },
+  "type": "play",
+  "params": {
+   "variant": "slide"
+  },
+  "zone": "outdoor",
+  "category": "play",
+  "subcategory": "swing-sets",
+  "tags": [
+   "slide",
+   "kids"
+  ],
+  "description": "Assembled 251x84x147."
+ },
+ {
+  "id": "ace-slide-183",
+  "name": "2-part slide 1.83 m with ladder and stabilisers",
+  "nameHe": "מגלשה 2 חלקים 1.83 מ",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4498125",
+  "price": 449,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 196,
+   "d": 84,
+   "h": 119
+  },
+  "type": "play",
+  "params": {
+   "variant": "slide"
+  },
+  "zone": "outdoor",
+  "category": "play",
+  "subcategory": "swing-sets",
+  "tags": [
+   "slide",
+   "kids"
+  ],
+  "description": "Assembled 196x84x119."
+ },
+ {
+  "id": "ace-starplay-magic-house",
+  "name": "Starplay magic kids playhouse",
+  "nameHe": "בית ילדים לחצר Starplay הבית הקסום",
+  "brand": "Starplay",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4500495",
+  "price": 349,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 102,
+   "d": 90,
+   "h": 109
+  },
+  "type": "play",
+  "params": {
+   "variant": "playhouse"
+  },
+  "zone": "outdoor",
+  "category": "play",
+  "subcategory": "playhouses",
+  "tags": [
+   "playhouse",
+   "plastic"
+  ],
+  "description": "Colourful plastic playhouse 102x90x109."
+ },
+ {
+  "id": "ace-intex-rect-pool-300",
+  "name": "Intex rectangular frame pool 300x200x75 (28272)",
+  "nameHe": "INTEX בריכה מלבנית 300x200x75",
+  "brand": "Intex",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4420015",
+  "price": 549,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 300,
+   "d": 200,
+   "h": 75
+  },
+  "type": "pool",
+  "params": {
+   "variant": "above-ground-frame",
+   "shape": "rect",
+   "depth": 75
+  },
+  "zone": "outdoor",
+  "category": "pool-spa",
+  "subcategory": "above-ground-pools",
+  "tags": [
+   "intex",
+   "frame-pool"
+  ],
+  "description": "Intex rectangular pool 300x200x75."
+ },
+ {
+  "id": "ace-intex-rect-pool-400",
+  "name": "Intex rectangular frame pool 400x200x100 (26788)",
+  "nameHe": "INTEX בריכה עילית מלבנית 400x200x100",
+  "brand": "Intex",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4420044",
+  "price": 2199,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 400,
+   "d": 200,
+   "h": 100
+  },
+  "type": "pool",
+  "params": {
+   "variant": "above-ground-frame",
+   "shape": "rect",
+   "depth": 100
+  },
+  "zone": "outdoor",
+  "category": "pool-spa",
+  "subcategory": "above-ground-pools",
+  "tags": [
+   "intex",
+   "frame-pool"
+  ],
+  "description": "Intex Ultra frame pool 400x200x100."
+ },
+ {
+  "id": "ace-intex-round-pool-305",
+  "name": "Intex round tube pool 305x76 (26700)",
+  "nameHe": "INTEX בריכה צינורות 305X76",
+  "brand": "Intex",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4500293",
+  "price": 399,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 305,
+   "d": 305,
+   "h": 76
+  },
+  "type": "pool",
+  "params": {
+   "variant": "above-ground-round",
+   "shape": "round",
+   "depth": 76
+  },
+  "zone": "outdoor",
+  "category": "pool-spa",
+  "subcategory": "above-ground-pools",
+  "tags": [
+   "intex",
+   "round",
+   "budget"
+  ],
+  "description": "Round pool 305 cm, 76 cm wall."
+ },
+ {
+  "id": "ace-bestway-chevron-404",
+  "name": "Bestway Steel Pro MAX 404x201x100 Chevron",
+  "nameHe": "בריכת 404X201X100 CHEVRON",
+  "brand": "Bestway",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/6001571",
+  "price": 1899,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 404,
+   "d": 201,
+   "h": 100
+  },
+  "type": "pool",
+  "params": {
+   "variant": "above-ground-frame",
+   "shape": "rect",
+   "depth": 100,
+   "steps": "ladder"
+  },
+  "zone": "outdoor",
+  "category": "pool-spa",
+  "subcategory": "above-ground-pools",
+  "tags": [
+   "bestway",
+   "frame-pool"
+  ],
+  "description": "Steel Pro MAX rectangular pool with filter pump and ladder."
+ },
+ {
+  "id": "ace-mspa-carlton-6",
+  "name": "MSpa Carlton M-CA062 inflatable hot tub, 6 seats",
+  "nameHe": "MSPA CARLTON ג׳קוזי 6 מקומות",
+  "brand": "MSpa",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4420322",
+  "price": 2399,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 204,
+   "d": 204,
+   "h": 70
+  },
+  "type": "spa",
+  "params": {
+   "variant": "inflatable",
+   "seats": 6,
+   "cover": true
+  },
+  "zone": "outdoor",
+  "category": "pool-spa",
+  "subcategory": "hot-tubs",
+  "tags": [
+   "mspa",
+   "inflatable",
+   "6-seat"
+  ],
+  "description": "Round inflatable spa dia 204, height 70."
+ },
+ {
+  "id": "ace-mspa-tekapo-6",
+  "name": "MSpa Tekapo Comfort CTE062 hot tub, 6 seats",
+  "nameHe": "MSPA Tekapo Comfort ג׳קוזי 6 מקומות",
+  "brand": "MSpa",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4422558",
+  "price": 1599,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 185,
+   "d": 185,
+   "h": 68
+  },
+  "type": "spa",
+  "params": {
+   "variant": "square",
+   "seats": 6,
+   "cover": true
+  },
+  "zone": "outdoor",
+  "category": "pool-spa",
+  "subcategory": "hot-tubs",
+  "tags": [
+   "mspa",
+   "inflatable",
+   "square"
+  ],
+  "description": "Square inflatable spa 185x185x68."
+ },
+ {
+  "id": "ace-bestway-mauritius-spa",
+  "name": "Bestway Mauritius hot tub, up to 7 adults",
+  "nameHe": "גקוזי MAURITIUS Bestway",
+  "brand": "Bestway",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4474694",
+  "price": 3399,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 270,
+   "d": 180,
+   "h": 71
+  },
+  "type": "spa",
+  "params": {
+   "variant": "inflatable",
+   "seats": 7,
+   "cover": true
+  },
+  "zone": "outdoor",
+  "category": "pool-spa",
+  "subcategory": "hot-tubs",
+  "tags": [
+   "bestway",
+   "inflatable",
+   "7-seat"
+  ],
+  "description": "Inflatable spa 270x180x71."
+ },
+ {
+  "id": "ace-unity-chef-outdoor-kitchen",
+  "name": "Keter Unity Chef outdoor kitchen",
+  "nameHe": "מטבח חוץ Unity Chef כתר",
+  "brand": "Keter",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4409996",
+  "price": 2499,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 237,
+   "d": 51.3,
+   "h": 89.4
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "outdoor-kitchen",
+   "color": "#8a7a66"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "outdoor-kitchens",
+  "tags": [
+   "keter",
+   "outdoor-kitchen"
+  ],
+  "description": "Resin outdoor kitchen module 237x51.3x89.4."
+ },
+ {
+  "id": "ace-black-torch-kitchen-3",
+  "name": "Black Torch modular outdoor kitchen with 3-burner grill",
+  "nameHe": "Black torch מטבח חוץ מודולרי 3 מבערים",
+  "brand": "Black Torch",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4446308",
+  "price": 4490,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 262,
+   "d": 57,
+   "h": 112
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "outdoor-kitchen",
+   "burners": 3,
+   "color": "#2a2a2a",
+   "color2": "#b5b8ba"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "outdoor-kitchens",
+  "tags": [
+   "modular",
+   "3-burner",
+   "stainless"
+  ],
+  "description": "Assembled 262x57x112."
+ },
+ {
+  "id": "ace-mira-ph14-pizza-oven",
+  "name": "Mira PH-14 14 in gas pizza oven with rotating stone",
+  "nameHe": "MIRA PH-14 טאבון פיצה",
+  "brand": "Mira",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4502217",
+  "price": 849,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 61.4,
+   "d": 43.7,
+   "h": 36
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "pizza-oven",
+   "burners": 1,
+   "color": "#2a2a2a"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "pizza-ovens",
+  "tags": [
+   "pizza-oven",
+   "gas",
+   "budget"
+  ],
+  "description": "Gas pizza oven 61.4x43.7x36."
+ },
+ {
+  "id": "ace-witt-etna-rotante-grey",
+  "name": "Witt Etna Rotante 16 in gas pizza oven, dark grey",
+  "nameHe": "Witt Etna Rotante טאבון גז 16",
+  "brand": "Witt",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4477982",
+  "price": 3790,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 63,
+   "d": 75,
+   "h": 45
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "pizza-oven",
+   "burners": 1,
+   "color": "#4a4a4c"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "pizza-ovens",
+  "tags": [
+   "witt",
+   "pizza-oven",
+   "rotating-stone"
+  ],
+  "description": "Rotating-stone oven 63x75x45 with legs open."
+ },
+ {
+  "id": "ace-smoky-classic-smoker",
+  "name": "Smoky Classic gas smoker",
+  "nameHe": "מעשנה על גז SMOKY Classic",
+  "brand": "Smoky",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4436292",
+  "price": 1990,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 51,
+   "d": 41,
+   "h": 96
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "smoker",
+   "burners": 1,
+   "color": "#1f1f1f"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "gas-grills",
+  "tags": [
+   "smoker",
+   "gas"
+  ],
+  "description": "Gas smoker 51x41x96."
+ },
+ {
+  "id": "ace-caesar-alu-pergola-3x4",
+  "name": "Caesar aluminium pergola 3x4 m",
+  "nameHe": "פרגולה אלומיניום 3X4 קיסר",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4460608",
+  "price": 1379,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 300,
+   "d": 400,
+   "h": 220
+  },
+  "type": "pergola",
+  "params": {
+   "variant": "slatted",
+   "posts": 4,
+   "color": "#e8e8e8",
+   "material": "aluminium",
+   "attached": true
+  },
+  "zone": "outdoor",
+  "category": "shade",
+  "subcategory": "pergolas",
+  "tags": [
+   "pergola",
+   "aluminium"
+  ],
+  "description": "Aluminium pergola 300x400, height 220."
+ },
+ {
+  "id": "ace-playa-gazebo-3x4.5-white",
+  "name": "Playa quick-open gazebo 3x4.5 m, white",
+  "nameHe": "גזיבו 3X4.5 פתיחה מהירה לבן",
+  "brand": "Playa",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4436910",
+  "price": 359,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 300,
+   "d": 450,
+   "h": 300
+  },
+  "type": "pergola",
+  "params": {
+   "variant": "gazebo",
+   "posts": 4,
+   "color": "#f2f2f0",
+   "roofColor": "#f2f2f0"
+  },
+  "zone": "outdoor",
+  "category": "shade",
+  "subcategory": "gazebos",
+  "tags": [
+   "gazebo",
+   "pop-up"
+  ],
+  "description": "Fast-open gazebo 3x4.5 m, 3 m peak height."
+ },
+ {
+  "id": "ace-roma-round-parasol-3m",
+  "name": "Roma round aluminium parasol 3 m, beige",
+  "nameHe": "שמשיה רומא עגולה 3 מטר בז",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4458421",
+  "price": 639,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 300,
+   "d": 300,
+   "h": 235
+  },
+  "type": "parasol",
+  "params": {
+   "variant": "centre-pole",
+   "shape": "round",
+   "canopy": "#d9cdb4"
+  },
+  "zone": "outdoor",
+  "category": "shade",
+  "subcategory": "parasols",
+  "tags": [
+   "parasol",
+   "aluminium",
+   "round"
+  ],
+  "description": "Round parasol dia 3 m, height 2.35 m."
+ },
+ {
+  "id": "ace-roma-square-parasol-3x3",
+  "name": "Roma square aluminium parasol 3x3 m, beige",
+  "nameHe": "שמשיה רומא מרובעת 3X3 בז",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4458422",
+  "price": 799,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 300,
+   "d": 300,
+   "h": 250
+  },
+  "type": "parasol",
+  "params": {
+   "variant": "centre-pole",
+   "shape": "square",
+   "canopy": "#d9cdb4"
+  },
+  "zone": "outdoor",
+  "category": "shade",
+  "subcategory": "parasols",
+  "tags": [
+   "parasol",
+   "square"
+  ],
+  "description": "Square parasol 3x3 m, height 2.5 m."
+ },
+ {
+  "id": "ace-playa-roma-parasol-4x3",
+  "name": "Playa Roma rectangular parasol 4x3 m",
+  "nameHe": "שמשייה מרובעת רומא 4x3 Playa",
+  "brand": "Playa",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4435406",
+  "price": 849,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 400,
+   "d": 300,
+   "h": 250
+  },
+  "type": "parasol",
+  "params": {
+   "variant": "centre-pole",
+   "shape": "rect",
+   "canopy": "#cfc7b8"
+  },
+  "zone": "outdoor",
+  "category": "shade",
+  "subcategory": "parasols",
+  "tags": [
+   "parasol",
+   "large"
+  ],
+  "description": "Rectangular parasol 4x3 m, height 2.5 m."
+ },
+ {
+  "id": "ace-keter-darwin-6x6",
+  "name": "Keter Darwin 6x6 garden shed, grey",
+  "nameHe": "מחסן גינה כתר דארווין 6x6",
+  "brand": "Keter",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/6001058",
+  "price": 2999,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 190,
+   "d": 183,
+   "h": 221
+  },
+  "type": "shed",
+  "params": {
+   "variant": "shed",
+   "doors": 2,
+   "roof": "gable",
+   "window": false,
+   "color": "#8d8d8d",
+   "material": "plastic"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-storage",
+  "subcategory": "sheds",
+  "tags": [
+   "keter",
+   "resin",
+   "large"
+  ],
+  "description": "External 190x183, height 221 cm."
+ },
+ {
+  "id": "ace-keter-kentwood-350",
+  "name": "Keter Kentwood storage box 350 L",
+  "nameHe": "ארגז אחסון קנטווד 350 ליטר",
+  "brand": "Keter",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4432570",
+  "price": 569,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 128,
+   "d": 53.6,
+   "h": 59
+  },
+  "type": "shed",
+  "params": {
+   "variant": "storage-box",
+   "roof": "flat",
+   "color": "#8d8d8d",
+   "material": "plastic"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-storage",
+  "subcategory": "storage-boxes",
+  "tags": [
+   "keter",
+   "deck-box"
+  ],
+  "description": "Storage box 128x53.6x59."
+ },
+ {
+  "id": "ace-gardentop-t710-metal-shed",
+  "name": "Garden Top T-710 metal shed 2.13x3.19 m",
+  "nameHe": "מחסן מתכת T-710 2.13X3.19",
+  "brand": "Garden Top",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4400851",
+  "price": 1399,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 213,
+   "d": 319,
+   "h": 205
+  },
+  "type": "shed",
+  "params": {
+   "variant": "shed",
+   "doors": 2,
+   "roof": "gable",
+   "color": "#c8c4b8",
+   "material": "metal"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-storage",
+  "subcategory": "sheds",
+  "tags": [
+   "metal",
+   "large"
+  ],
+  "description": "Metal shed 213x319, height 205 at ridge."
+ },
+ {
+  "id": "ace-gardentop-ds3-metal-shed",
+  "name": "Garden Top DS3 metal shed 2.40x1.80 m",
+  "nameHe": "מחסן מתכת DS3 2.40X1.80",
+  "brand": "Garden Top",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4487317",
+  "price": 1149,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 240,
+   "d": 180,
+   "h": 205
+  },
+  "type": "shed",
+  "params": {
+   "variant": "shed",
+   "doors": 2,
+   "roof": "pent",
+   "color": "#c8c4b8",
+   "material": "metal"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-storage",
+  "subcategory": "sheds",
+  "tags": [
+   "metal",
+   "medium"
+  ],
+  "description": "Metal shed 240x180, height 205."
+ },
+ {
+  "id": "ace-gas-pyramid-heater",
+  "name": "Gas pyramid patio heater",
+  "nameHe": "פטריית חימום פירמידה גז",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4490856",
+  "price": 1390,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 49.5,
+   "d": 49.5,
+   "h": 227
+  },
+  "type": "fire-pit",
+  "params": {
+   "variant": "heater-pyramid",
+   "lit": false,
+   "color": "#b5b8ba"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "fire-pits-heaters",
+  "tags": [
+   "patio-heater",
+   "gas",
+   "pyramid"
+  ],
+  "description": "Pyramid gas heater, base 49.5x49.5, total height 227 cm."
+ },
+ {
+  "id": "ace-fire-column",
+  "name": "Garden fire column",
+  "nameHe": "עמוד אש",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4490858",
+  "price": 990,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 38,
+   "d": 38,
+   "h": 99
+  },
+  "type": "fire-pit",
+  "params": {
+   "variant": "chiminea",
+   "lit": false,
+   "color": "#2a2a2a"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "fire-pits-heaters",
+  "tags": [
+   "fire-column",
+   "gas"
+  ],
+  "description": "Fire column dia 38 cm, height 99 cm, glass shield dia 30."
+ },
+ {
+  "id": "ace-phh3000bs-mushroom-heater",
+  "name": "PHH-3000BS 3000 W electric mushroom patio heater",
+  "nameHe": "פטריית חימום חשמלית PHH-3000BS",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4417312",
+  "price": 299,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 60,
+   "d": 60,
+   "h": 180
+  },
+  "type": "fire-pit",
+  "params": {
+   "variant": "heater-mushroom",
+   "lit": false,
+   "color": "#b5b8ba"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "fire-pits-heaters",
+  "tags": [
+   "patio-heater",
+   "electric",
+   "3000w"
+  ],
+  "description": "Electric mushroom heater, head dia 60 cm, pole height 180 cm."
+ },
+ {
+  "id": "ace-rect-pole-heater-2500",
+  "name": "Rectangular electric outdoor pole heater 2500 W, black",
+  "nameHe": "מחמם חוצות חשמלי עמוד מלבני 2500W",
+  "brand": "ACE",
+  "retailer": "ACE",
+  "url": "https://www.ace.co.il/4424513",
+  "price": 990,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 70,
+   "d": 18,
+   "h": 150
+  },
+  "type": "fire-pit",
+  "params": {
+   "variant": "heater-pyramid",
+   "lit": false,
+   "color": "#1f1f1f"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "fire-pits-heaters",
+  "tags": [
+   "patio-heater",
+   "electric",
+   "2500w"
+  ],
+  "description": "Electric heater 70x18x150 cm, pole extends to 198 cm."
+ },
+ {
   "id": "hc-amber-lounge-set",
   "name": "Amber garden lounge set (2-seat sofa, armchair, coffee table)",
   "nameHe": "מערכת ישיבה למרפסת ולגינה אמבר",
@@ -1778,5 +3260,743 @@ export default [
    "filament"
   ],
   "description": "Solar rechargeable 10 m garland with 15 filament bulbs."
+ },
+ {
+  "id": "hc-solar-wall-light-pir",
+  "name": "Solar wall light with motion sensor IP65 3000K",
+  "nameHe": "גוף תאורה צמוד קיר סולארי + חיישן תנועה",
+  "brand": "Nisko",
+  "retailer": "Home Center",
+  "url": "https://www.homecenter.co.il/products/1788338923615",
+  "price": 71.92,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 16.9,
+   "d": 6,
+   "h": 7.5
+  },
+  "type": "outdoor-light",
+  "params": {
+   "variant": "wall",
+   "on": false,
+   "color": "#2a2a2a"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-lighting",
+  "subcategory": "wall-lights",
+  "tags": [
+   "solar",
+   "wall",
+   "motion-sensor"
+  ],
+  "description": "Solar wall light 16.9x6x7.5 cm."
+ },
+ {
+  "id": "hc-bamboo-fence-1.5x5",
+  "name": "Natural bamboo fence roll 1.5x5 m",
+  "nameHe": "גדר במבוק טבעי 1.5*5",
+  "brand": "VERDE",
+  "retailer": "Home Center",
+  "url": "https://www.homecenter.co.il/products/1011306177",
+  "price": 229,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 500,
+   "d": 1,
+   "h": 150
+  },
+  "type": "fence",
+  "params": {
+   "variant": "bamboo",
+   "posts": false,
+   "gap": 0.2,
+   "color": "#c9a96a",
+   "material": "wood"
+  },
+  "zone": "outdoor",
+  "category": "fencing",
+  "subcategory": "screens",
+  "tags": [
+   "bamboo",
+   "roll",
+   "privacy"
+  ],
+  "description": "Bamboo fence roll 5 m long x 1.5 m high, 7-12 mm canes."
+ },
+ {
+  "id": "hc-pp-bamboo-look-fence-1.5x3",
+  "name": "PP bamboo-look fence 1.5x3 m",
+  "nameHe": "גדר פלסטיק PP דמוי במבוק 1.5*3",
+  "brand": "VERDE",
+  "retailer": "Home Center",
+  "url": "https://www.homecenter.co.il/products/1767529803442",
+  "price": 249.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 300,
+   "d": 1,
+   "h": 150
+  },
+  "type": "fence",
+  "params": {
+   "variant": "bamboo",
+   "posts": false,
+   "gap": 0.15,
+   "color": "#b89a63",
+   "material": "plastic"
+  },
+  "zone": "outdoor",
+  "category": "fencing",
+  "subcategory": "screens",
+  "tags": [
+   "bamboo-look",
+   "plastic",
+   "roll"
+  ],
+  "description": "3 m long x 1.5 m high roll, 7 mm canes."
+ },
+ {
+  "id": "hc-pvc-fence-1x3",
+  "name": "PVC fence panel grey 1x3 m",
+  "nameHe": "גדר פלסטיק PVC אפור 1*3",
+  "brand": "VERDE",
+  "retailer": "Home Center",
+  "url": "https://www.homecenter.co.il/products/1767599349862",
+  "price": 129.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 300,
+   "d": 1.6,
+   "h": 100
+  },
+  "type": "fence",
+  "params": {
+   "variant": "picket",
+   "posts": false,
+   "gap": 0.3,
+   "color": "#8d8f92",
+   "material": "plastic"
+  },
+  "zone": "outdoor",
+  "category": "fencing",
+  "subcategory": "fences",
+  "tags": [
+   "pvc",
+   "border"
+  ],
+  "description": "3 m long x 1 m high PVC fence, 16 mm thick."
+ },
+ {
+  "id": "soferavi-ooni-koda-16",
+  "name": "Ooni Koda 16 gas pizza oven",
+  "nameHe": "טאבון גז Ooni Koda 16",
+  "brand": "Ooni",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%98%d7%90%d7%91%d7%95%d7%9f-%d7%92%d7%96-%d7%90%d7%95%d7%a0%d7%99-ooni-koda-16/",
+  "price": 1999,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 63,
+   "d": 58,
+   "h": 37
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "pizza-oven",
+   "burners": 1,
+   "color": "#2a2a2a"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "pizza-ovens",
+  "tags": [
+   "ooni",
+   "pizza-oven",
+   "gas",
+   "on-sale"
+  ],
+  "description": "Portable gas pizza oven, 16 in cooking surface, 17.8 kg."
+ },
+ {
+  "id": "soferavi-ooni-koda-2",
+  "name": "Ooni Koda 2 gas pizza oven",
+  "nameHe": "טאבון גז Ooni Koda 2",
+  "brand": "Ooni",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%98%d7%90%d7%91%d7%95%d7%9f-%d7%92%d7%96-%d7%90%d7%95%d7%a0%d7%99-%e2%81%a6uu-p36100-koda-2%e2%81%a9/",
+  "price": 2199,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 47.2,
+   "d": 54.5,
+   "h": 33.3
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "pizza-oven",
+   "burners": 1,
+   "color": "#2a2a2a"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "pizza-ovens",
+  "tags": [
+   "ooni",
+   "pizza-oven",
+   "gas",
+   "compact"
+  ],
+  "description": "Compact gas pizza oven, 16 kg."
+ },
+ {
+  "id": "soferavi-ooni-koda-18",
+  "name": "Ooni Koda 18 gas pizza oven",
+  "nameHe": "טאבון גז Ooni Koda 18",
+  "brand": "Ooni",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%98%d7%90%d7%91%d7%95%d7%9f-%d7%92%d7%96-%d7%90%d7%95%d7%a0%d7%99-%e2%81%a6koda-18%e2%81%a9-%e2%81%a6uup36200%e2%81%a9/",
+  "price": 2790,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 68.2,
+   "d": 65.2,
+   "h": 39.3
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "pizza-oven",
+   "burners": 1,
+   "color": "#2a2a2a"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "pizza-ovens",
+  "tags": [
+   "ooni",
+   "pizza-oven",
+   "gas",
+   "on-sale"
+  ],
+  "description": "18 in gas pizza oven, 30 kg."
+ },
+ {
+  "id": "soferavi-ooni-karu-2-pro",
+  "name": "Ooni Karu 2 Pro multi-fuel pizza oven",
+  "nameHe": "טאבון גז Ooni Karu 2 Pro",
+  "brand": "Ooni",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%98%d7%90%d7%91%d7%95%d7%9f-%d7%92%d7%96-%d7%90%d7%95%d7%a0%d7%99-karu-2-pro/",
+  "price": 4290,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 50,
+   "d": 81,
+   "h": 83
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "pizza-oven",
+   "color": "#6b6f73",
+   "color2": "#2a2a2a"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "pizza-ovens",
+  "tags": [
+   "ooni",
+   "pizza-oven",
+   "wood-gas"
+  ],
+  "description": "Multi-fuel oven with chimney, 28.4 kg."
+ },
+ {
+  "id": "soferavi-weber-e210",
+  "name": "Weber Spirit E-210 2-burner gas grill",
+  "nameHe": "גריל גז Weber E-210",
+  "brand": "Weber",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%92%d7%a8%d7%99%d7%9c-%d7%92%d7%96-%d7%95%d7%95%d7%91%d7%a8-e-210/",
+  "price": 2390,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 122,
+   "d": 68.5,
+   "h": 113
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "gas",
+   "burners": 2,
+   "sideShelves": true,
+   "lid": "closed",
+   "color": "#1f1f1f"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "gas-grills",
+  "tags": [
+   "weber",
+   "2-burner"
+  ],
+  "description": "Lid closed with side shelves open: 122x68.5x113; lid open height 144."
+ },
+ {
+  "id": "soferavi-weber-spirit-e425",
+  "name": "Weber Spirit E-425 4-burner gas grill",
+  "nameHe": "גריל גז Weber Spirit E-425",
+  "brand": "Weber",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%92%d7%a8%d7%99%d7%9c-%d7%92%d7%96-%d7%95%d7%95%d7%91%d7%a8-%e2%81%a6e-425-spirit%e2%81%a9/",
+  "price": 3499,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 132,
+   "d": 67.5,
+   "h": 117
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "gas",
+   "burners": 4,
+   "sideShelves": true,
+   "lid": "closed",
+   "color": "#1f1f1f"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "gas-grills",
+  "tags": [
+   "weber",
+   "4-burner",
+   "on-sale"
+  ],
+  "description": "Lid closed: 132x67.5x117; open height 154."
+ },
+ {
+  "id": "soferavi-weber-q2800n",
+  "name": "Weber Q2800N gas grill with cart",
+  "nameHe": "גריל גז Weber Q2800N",
+  "brand": "Weber",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%92%d7%a8%d7%99%d7%9c-%d7%92%d7%96-%d7%95%d7%95%d7%91%d7%a8-%e2%81%a6q2800n%e2%81%a9/",
+  "price": 2990,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 76,
+   "d": 50,
+   "h": 109
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "gas",
+   "burners": 2,
+   "sideShelves": true,
+   "lid": "closed",
+   "color": "#2a2a2a"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "gas-grills",
+  "tags": [
+   "weber",
+   "compact",
+   "cart"
+  ],
+  "description": "Lid closed 76x50x109; open height 140."
+ },
+ {
+  "id": "soferavi-weber-genesis-e335",
+  "name": "Weber Genesis E-335 gas grill",
+  "nameHe": "גריל גז Weber Genesis E-335",
+  "brand": "Weber",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%92%d7%a8%d7%99%d7%9c-%d7%92%d7%96-%d7%95%d7%95%d7%91%d7%a8-e-335w-genesis/",
+  "price": 6740,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 157.5,
+   "d": 68.6,
+   "h": 123.2
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "gas",
+   "burners": 3,
+   "sideShelves": true,
+   "lid": "closed",
+   "color": "#1f1f1f"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "gas-grills",
+  "tags": [
+   "weber",
+   "premium",
+   "3-burner",
+   "on-sale"
+  ],
+  "description": "Lid closed with shelves open: 157.5x68.6x123.2; open height 160."
+ },
+ {
+  "id": "soferavi-napoleon-r365pk",
+  "name": "Napoleon Rogue R365 3-burner gas grill",
+  "nameHe": "גריל גז Napoleon R365PK",
+  "brand": "Napoleon",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%92%d7%a8%d7%99%d7%9c-%d7%92%d7%96-%d7%a0%d7%a4%d7%95%d7%9c%d7%99%d7%90%d7%95%d7%9f-%e2%81%a6r365pk-2-il%e2%81%a9/",
+  "price": 3150,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 121,
+   "d": 64,
+   "h": 121
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "gas",
+   "burners": 3,
+   "sideShelves": true,
+   "lid": "closed",
+   "color": "#2a2a2a"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "gas-grills",
+  "tags": [
+   "napoleon",
+   "3-burner"
+  ],
+  "description": "Grill 121x64x121 cm with side shelves open."
+ },
+ {
+  "id": "soferavi-napoleon-f425pgt",
+  "name": "Napoleon F425PGT 4-burner gas grill",
+  "nameHe": "גריל גז Napoleon F425PGT",
+  "brand": "Napoleon",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%92%d7%a8%d7%99%d7%9c-%d7%92%d7%96-%d7%90%d7%a0%d7%a7%d7%a8%d7%a1%d7%a8%d7%95%d7%9d-f425pgt-il/",
+  "price": 3349,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 132,
+   "d": 64,
+   "h": 116
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "gas",
+   "burners": 4,
+   "sideShelves": true,
+   "lid": "closed",
+   "color": "#2a2a2a"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "gas-grills",
+  "tags": [
+   "napoleon",
+   "4-burner"
+  ],
+  "description": "Depth 64, height 116 (154 open), width 132."
+ },
+ {
+  "id": "soferavi-coleman-g52233",
+  "name": "Coleman G52233 gas grill",
+  "nameHe": "גריל גז Coleman G52233",
+  "brand": "Coleman",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%92%d7%a8%d7%99%d7%9c-%d7%92%d7%96-%d7%a7%d7%95%d7%9c%d7%9e%d7%9f-%e2%81%a6g52233%e2%81%a9/",
+  "price": 2590,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 155,
+   "d": 63,
+   "h": 124
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "gas",
+   "burners": 4,
+   "sideShelves": true,
+   "lid": "closed",
+   "color": "#2a2a2a"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "gas-grills",
+  "tags": [
+   "coleman",
+   "trolley",
+   "on-sale"
+  ],
+  "description": "Gas grill 155x63x124 cm."
+ },
+ {
+  "id": "soferavi-weber-kettle-57",
+  "name": "Weber Classic Kettle 57 cm charcoal grill",
+  "nameHe": "גריל פחמים Weber Classic Kettle 57",
+  "brand": "Weber",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%92%d7%a8%d7%99%d7%9c-%d7%a4%d7%97%d7%9e%d7%99%d7%9d-%d7%95%d7%95%d7%91%d7%a8-classic-kettle-1341504/",
+  "price": 1039,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 57.2,
+   "d": 63.5,
+   "h": 100.3
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "charcoal-kettle",
+   "lid": "closed",
+   "color": "#1f1f1f"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "charcoal-grills",
+  "tags": [
+   "weber",
+   "kettle",
+   "on-sale"
+  ],
+  "description": "57 cm kettle on wheels."
+ },
+ {
+  "id": "soferavi-weber-kettle-47",
+  "name": "Weber Classic Kettle 47 cm charcoal grill",
+  "nameHe": "גריל פחמים Weber Classic Kettle 47",
+  "brand": "Weber",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%92%d7%a8%d7%99%d7%9c-%d7%a4%d7%97%d7%9e%d7%99%d7%9d-%d7%95%d7%95%d7%91%d7%a8-classic-kettle-1241304/",
+  "price": 749,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 47,
+   "d": 58.4,
+   "h": 91
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "charcoal-kettle",
+   "lid": "closed",
+   "color": "#8a1f1f"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "charcoal-grills",
+  "tags": [
+   "weber",
+   "kettle",
+   "compact",
+   "on-sale"
+  ],
+  "description": "47 cm kettle."
+ },
+ {
+  "id": "soferavi-weber-c5750",
+  "name": "Weber C-5750 charcoal grill",
+  "nameHe": "גריל פחמים Weber C-5750",
+  "brand": "Weber",
+  "retailer": "Sofer Avi",
+  "url": "https://www.soferavi.co.il/מוצרים/%d7%92%d7%a8%d7%99%d7%9c-%d7%a4%d7%97%d7%9e%d7%99%d7%9d-%d7%90%d7%a7%d7%95%d7%95%d7%a7%d7%a1-c-5750-%d7%90%d7%a4%d7%95%d7%a8/",
+  "price": 1669,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 65,
+   "d": 72,
+   "h": 107
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "charcoal-kettle",
+   "lid": "closed",
+   "color": "#1f1f1f"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "charcoal-grills",
+  "tags": [
+   "weber",
+   "charcoal",
+   "on-sale"
+  ],
+  "description": "Lid closed 65x72x107; open height 118."
+ },
+ {
+  "id": "traklin-broil-king-baron-420",
+  "name": "Broil King Baron 420 4-burner gas grill",
+  "nameHe": "גריל גז 4 מבערים Broil King Baron 420",
+  "brand": "Broil King",
+  "retailer": "Traklin",
+  "url": "https://www.traklin.co.il/לבית_ולגן/גרילים_ומעשנות/גריל_גז_4_מבערים_40000_btu_מבית_המותג_הקנדי_broil_king_דגם_baron_420",
+  "price": 4899,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 145,
+   "d": 61,
+   "h": 116
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "gas",
+   "burners": 4,
+   "sideShelves": true,
+   "lid": "closed",
+   "color": "#1f1f1f"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "gas-grills",
+  "tags": [
+   "broil-king",
+   "4-burner"
+  ],
+  "description": "40,000 BTU grill; 145 wide with shelves, 105 with wings folded; 63x44 cooking area."
+ },
+ {
+  "id": "traklin-evergreen-ave-e-shed",
+  "name": "EverGreen Ave E plastic garden shed",
+  "nameHe": "מחסן גינה פלסטיק EverGreen Ave E",
+  "brand": "EverGreen",
+  "retailer": "Traklin",
+  "url": "https://www.traklin.co.il/לבית_ולגן/מחסנים/מחסן_גינה_פלסטיק_evergreen_דגם_ave_e",
+  "price": 2678,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 190,
+   "d": 280,
+   "h": 226
+  },
+  "type": "shed",
+  "params": {
+   "variant": "shed",
+   "doors": 2,
+   "roof": "gable",
+   "color": "#a9a69e",
+   "material": "plastic"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-storage",
+  "subcategory": "sheds",
+  "tags": [
+   "evergreen",
+   "resin",
+   "large"
+  ],
+  "description": "External 190x280x226 cm; door opening 119x181."
+ },
+ {
+  "id": "traklin-ninja-woodfire-og703",
+  "name": "Ninja Woodfire OG703 outdoor electric grill and smoker",
+  "nameHe": "Ninja Woodfire OG703 גריל חיצוני ומעשנה",
+  "brand": "Ninja",
+  "retailer": "Traklin",
+  "url": "https://www.traklin.co.il/product.aspx?id=17095",
+  "price": 1190,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 46,
+   "d": 46,
+   "h": 34
+  },
+  "type": "bbq",
+  "params": {
+   "variant": "smoker",
+   "color": "#2a2a2a"
+  },
+  "zone": "outdoor",
+  "category": "bbq",
+  "subcategory": "charcoal-grills",
+  "tags": [
+   "ninja",
+   "electric",
+   "portable"
+  ],
+  "description": "Portable outdoor electric grill/smoker 46x46x34."
+ },
+ {
+  "id": "traklin-erez-alu-chairs-4",
+  "name": "Erez set of 4 aluminium garden chairs",
+  "nameHe": "4 כסאות אלומיניום Australia Garden ארז",
+  "brand": "Australia Garden",
+  "retailer": "Traklin",
+  "url": "https://www.traklin.co.il/product.aspx?id=20750",
+  "price": 916,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 56,
+   "d": 55,
+   "h": 87.5
+  },
+  "type": "chair",
+  "params": {
+   "variant": "dining",
+   "arms": false,
+   "color": "#c9c9c9",
+   "material": "aluminium",
+   "legs": "metal"
+  },
+  "zone": "outdoor",
+  "category": "outdoor-furniture",
+  "subcategory": "outdoor-chairs",
+  "tags": [
+   "aluminium",
+   "set-of-4",
+   "stackable"
+  ],
+  "description": "Price for set of 4; each chair 56x55x87.5 cm."
+ },
+ {
+  "id": "tru-pool-412x201",
+  "name": "Bestway steel-frame pool 412x201x122 with sand pump and ladder",
+  "nameHe": "בריכת עמודים 412X201X122 ס\"מ עם משאבת חול וסולם Bestway",
+  "brand": "Bestway",
+  "retailer": "Toys R Us Israel",
+  "url": "https://www.toysrus.co.il/products/בריכת-עמודים-בגודל-412x201x122-ומשאבת-חול-וסולם",
+  "price": 2299.9,
+  "priceUnit": "item",
+  "priceDate": "2026-11",
+  "dims": {
+   "w": 412,
+   "d": 201,
+   "h": 122
+  },
+  "type": "pool",
+  "params": {
+   "variant": "above-ground-frame",
+   "shape": "rect",
+   "depth": 122,
+   "steps": "ladder"
+  },
+  "zone": "outdoor",
+  "category": "pool-spa",
+  "subcategory": "above-ground-pools",
+  "tags": [
+   "bestway",
+   "frame-pool"
+  ],
+  "description": "Rectangular frame pool 412x201x122 cm."
  }
 ];

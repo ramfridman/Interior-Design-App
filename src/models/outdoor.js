@@ -219,17 +219,16 @@ function fit(inner, w, d, h, mode = {}) {
   const out = new THREE.Group(), b = new THREE.Box3(), t = new THREE.Box3();
   out.add(inner);
   inner.updateMatrixWorld(true);
-  // mean of the loose (transformed geometry boxes) and the exact (per-vertex) bounds, so that either measure agrees within mm
-  const v = new THREE.Vector3(), e = new THREE.Box3();
+  // bake rotated meshes into world-space geometry so that loose (Box3.setFromObject) and exact bounds coincide
+  const rotated = [];
+  inner.traverse((o) => { if (o.isMesh) { const e = o.matrixWorld.elements; if (Math.abs(e[1]) + Math.abs(e[2]) + Math.abs(e[4]) + Math.abs(e[6]) + Math.abs(e[8]) + Math.abs(e[9]) > 1e-6) rotated.push(o); } });
+  for (const o of rotated) { o.geometry = o.geometry.clone().applyMatrix4(o.matrixWorld); inner.add(o); o.position.set(0, 0, 0); o.rotation.set(0, 0, 0); o.scale.set(1, 1, 1); o.updateMatrixWorld(true); }
   inner.traverse((o) => {
     if (!o.isMesh || o.userData.noFit) return;
     if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
     b.union(t.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld));
-    const pos = o.geometry.attributes.position;
-    for (let i = 0; i < pos.count; i++) e.expandByPoint(v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld));
   });
-  if (b.isEmpty() || !Number.isFinite(e.min.x + e.max.x + e.min.y + e.max.y + e.min.z + e.max.z)) return out;
-  b.min.add(e.min).multiplyScalar(0.5); b.max.add(e.max).multiplyScalar(0.5);
+  if (b.isEmpty() || !Number.isFinite(b.min.x + b.max.x + b.min.y + b.max.y + b.min.z + b.max.z)) return out;
   const s = b.getSize(new THREE.Vector3()), c = b.getCenter(new THREE.Vector3());
   const sx = mode.freeXZ ? 1 : w / Math.max(1e-6, s.x), sz = mode.freeXZ ? 1 : d / Math.max(1e-6, s.z), sy = mode.top ? 1 : h / Math.max(1e-6, s.y);
   inner.scale.set(sx, sy, sz);
@@ -901,3 +900,576 @@ define('lounger', {
     const col = C(p.color, '#5f7f8f'); ell(ctx, 0, 0, w / 2, d / 2, K.tint(col, 0.4), INK, px); ell(ctx, 0, d * 0.12, w * 0.3, d * 0.24, K.tint(col, 0.55), SOFT, px);
   } },
 });
+
+// ═════════════════════════ BBQ ═════════════════════════
+const archProfile = (hw, hh, n = 8) => { const pts = [[-hw, 0]]; for (let i = 0; i <= n; i++) { const a = PI - (i / n) * PI; pts.push([Math.cos(a) * hw, hh - hw + Math.sin(a) * hw]); } pts.push([hw, 0]); return pts; };
+/** Grill head (firebox + knobs + hinged lid + handle) sitting on y0, total height ht. */
+function grillHead(g, x, y0, gw, D, ht, open, burners, body, acc, zc = 0) {
+  const fb = (open ? 0.3 : 0.4) * ht, lh = open ? 0.45 * ht : ht - fb, th = open ? Math.asin(clamp((ht - fb) / D, 0.25, 0.95)) : 0;
+  g.add(mesh(taperG(gw * 0.94, D * 0.88, gw, D, fb, x, y0, zc), body), box(gw, Math.min(0.09, fb * 0.8), 0.02, body, x, y0 + fb - Math.min(0.09, fb * 0.8) / 2, zc + D / 2 + 0.008));
+  const n = Math.round(num(burners, Math.round(gw / 0.2), 1, 8)), kn = [];
+  for (let i = 0; i < n; i++) kn.push(zCylG(Math.min(0.022, fb * 0.2), 0.03, x + lerp(-gw / 2, gw / 2, (i + 0.5) / n), y0 + fb - Math.min(0.045, fb * 0.4), zc + D / 2 + 0.03, 10));
+  g.add(merge(kn, acc));
+  const lid = new THREE.Group(); lid.position.set(x, y0 + fb, zc - D / 2); lid.rotation.x = -th;
+  const lg = prismXG(fillet([[0, 0], [0, lh * 0.8, lh * 0.3], [D * 0.3, lh, D * 0.2], [D * 0.62, lh, D * 0.25], [D, lh * 0.35, lh * 0.3], [D, 0]], 4), gw - 0.01, 0.008);
+  lid.add(mesh(lg, body), mesh(xCylG(0.012, gw * 0.7, 0, lh * 0.3, D + 0.035, 8), acc), box(0.02, 0.02, 0.04, acc, gw * 0.3, lh * 0.3, D + 0.018), box(0.02, 0.02, 0.04, acc, -gw * 0.3, lh * 0.3, D + 0.018));
+  lid.add(rot(mesh(zCylG(Math.min(0.03, lh * 0.25), 0.012, 0, 0, 0, 12), acc, 0, lh * 0.62, D * 0.9), 0.55));
+  g.add(lid);
+  if (open) {
+    const bars = [[gw - 0.04, 0.012, D - 0.04, x, y0 + fb - 0.03, zc]], nb = Math.max(4, Math.round(gw / 0.035));
+    const gr = []; for (let i = 0; i < nb; i++) gr.push([0.008, 0.008, D - 0.05, x + lerp(-gw / 2 + 0.03, gw / 2 - 0.03, i / (nb - 1)), y0 + fb - 0.012, zc]);
+    g.add(boxes(bars, dark('#141414')), boxes(gr, K.metal('#55585c', { roughness: 0.5 })));
+  }
+}
+function bbqGas(g, o) {
+  const { w, d, h, p } = o, body = M(p.material, C(p.color, '#26282b'), 'metal'), cart = M(p.material2, C(p.color2, '#3a3d42'), 'metal'), acc = p.color3 ? K.metal(C(p.color3, '#c9ccd0')) : inox();
+  const shelves = flag(p.sideShelves, w > 0.95), sw = shelves ? clamp(w * 0.2, 0.15, 0.34) : 0, bw = w - 2 * sw, D = d - 0.05, yc = 0.6 * h, zc = -0.02;
+  g.add(box(bw * 0.94, yc - 0.1, D * 0.9, cart, 0, 0.1 + (yc - 0.1) / 2, zc));
+  for (const s of [-1, 1]) g.add(box(bw * 0.45, yc - 0.16, 0.015, cart, s * bw * 0.235, 0.13 + (yc - 0.16) / 2, zc + D * 0.45 + 0.006), box(0.014, Math.min(0.2, yc * 0.3), 0.02, acc, s * 0.035, yc - 0.06 - Math.min(0.2, yc * 0.3) / 2, zc + D * 0.45 + 0.025));
+  grillHead(g, 0, yc, bw, D, h - yc, p.lid === 'open', p.burners, body, acc, zc);
+  if (shelves) for (const s of [-1, 1]) g.add(box(sw, 0.03, D * 0.82, cart, s * (bw / 2 + sw / 2), yc + 0.4 * (h - yc) * (p.lid === 'open' ? 0.75 : 1) - 0.015, zc), rods([[[s * bw / 2, yc - 0.05, zc], [s * (w / 2 - 0.03), yc + 0.3 * (h - yc) * 0.7, zc]]], 0.008, acc, 5));
+  wheelSet(g, [[-bw * 0.47 + 0.03, 0.08, zc - D * 0.3], [-bw * 0.47 + 0.03, 0.08, zc + D * 0.3]], 0.08, 0.04, dark('#55585c'));
+  g.add(boxes([[0.04, 0.1, 0.04, bw * 0.42, 0.05, zc - D * 0.38], [0.04, 0.1, 0.04, bw * 0.42, 0.05, zc + D * 0.38]], dark()));
+}
+function bbqKettle(g, o) {
+  const { w, d, h, p } = o, enamel = K.mat(C(p.color, '#1d1e20'), { roughness: 0.25, metalness: 0.2, side: THREE.DoubleSide }), leg = inox(), R = Math.min(w, d) / 2 - 0.035, open = p.lid === 'open';
+  const yc = open ? h - 1.2 * R : h - 0.07 - 0.56 * R, lidP = [[R, 0], [0.93 * R, 0.24 * R], [0.62 * R, 0.47 * R], [0.25 * R, 0.55 * R], [0, 0.56 * R]];
+  g.add(lathe([[0, yc - 0.62 * R], [0.5 * R, yc - 0.54 * R], [0.86 * R, yc - 0.3 * R], [R, yc]], enamel, 24), mesh(torusG(R, 0.012, 'xz', 0, yc, 0, 24, 5), leg));
+  const lid = new THREE.Group(); lid.add(lathe(lidP, enamel, 24), box(0.14, 0.02, 0.035, dark(), 0, 0.56 * R + 0.05, 0), boxes([[0.015, 0.05, 0.02, 0.05, 0.56 * R + 0.02, 0], [0.015, 0.05, 0.02, -0.05, 0.56 * R + 0.02, 0]], leg), cyl(0.045, 0.045, 0.008, leg, 0.3 * R, 0.5 * R, 0.2 * R, 10));
+  if (open) { lid.rotation.x = -PI / 2; lid.position.set(0, yc + 0.2 * R, -0.4 * R); g.add(cyl(R * 0.95, R * 0.95, 0.01, K.metal('#55585c', { roughness: 0.5 }), 0, yc - 0.05, 0, 24), cyl(R * 0.8, R * 0.8, 0.03, K.mat('#2a211d', { emissive: '#ff5a1a', emissiveIntensity: 0.3 }), 0, yc - 0.2 * R, 0, 16)); }
+  else lid.position.y = yc;
+  g.add(lid);
+  const legs = [], yl = yc - 0.5 * R;
+  for (const a of [PI / 2, PI * 7 / 6, PI * 11 / 6]) legs.push([[Math.cos(a) * R * 0.55, yl, Math.sin(a) * R * 0.55], [Math.cos(a) * R * 0.95, a === PI / 2 ? 0 : 0.07, Math.sin(a) * R * 0.95]]);
+  g.add(rods(legs, 0.012, leg, 6), mesh(torusG(R * 0.72, 0.006, 'xz', 0, yl * 0.45, 0, 3, 4), leg), cyl(0.3 * R, 0.2 * R, 0.07, leg, 0, yc - 0.62 * R - 0.08, 0, 14));
+  wheelSet(g, [[Math.cos(PI * 7 / 6) * R * 0.95 - 0.02, 0.07, Math.sin(PI * 7 / 6) * R * 0.95], [Math.cos(PI * 11 / 6) * R * 0.95 + 0.02, 0.07, Math.sin(PI * 11 / 6) * R * 0.95]], 0.07, 0.03, dark('#55585c'));
+  g.add(boxes([[0.03, 0.02, 0.12, R + 0.02, yc - 0.04, 0], [0.03, 0.02, 0.12, -R - 0.02, yc - 0.04, 0]], dark()));
+}
+function bbqKamado(g, o) {
+  const { w, d, h, p } = o, cer = K.mat(C(p.color, '#2f4a3c'), { roughness: 0.35 }), st = alu(C(p.color2, '#2b2d31')), shelves = flag(p.sideShelves, w > d * 1.4), sw = shelves ? clamp((w - d) / 2, 0.12, 0.4) : 0;
+  const R = Math.min(w - 2 * sw, d) / 2 - 0.045, y0 = Math.min(0.3 * h, 0.4), H = h - y0 - 0.07;
+  g.add(lathe([[0.3 * R, y0], [0.72 * R, y0 + 0.1 * H], [R, y0 + 0.42 * H], [0.98 * R, y0 + 0.58 * H], [0.84 * R, y0 + 0.82 * H], [0.45 * R, y0 + 0.97 * H], [0.2 * R, y0 + H]], cer, 24));
+  g.add(merge([torusG(R * 1.0, 0.012, 'xz', 0, y0 + 0.5 * H, 0, 24, 5), torusG(R * 1.0, 0.012, 'xz', 0, y0 + 0.55 * H, 0, 24, 5), cylG(0.2 * R, 0.24 * R, 0.07, 0, y0 + H + 0.035, 0, 12), boxG(0.1, 0.12, 0.05, 0, y0 + 0.53 * H, -R - 0.01)], inox()));
+  g.add(box(R * 0.9, 0.035, 0.035, K.wood('teak'), 0, y0 + 0.57 * H, R + 0.03), mesh(zCylG(0.035, 0.012, 0, y0 + 0.72 * H, R * 0.9, 12), inox()), box(0.16, 0.06, 0.02, dark(), 0, y0 + 0.14 * H, R * 0.8));
+  const legs = []; for (let i = 0; i < 4; i++) { const a = PI / 4 + i * PI / 2; legs.push([[Math.cos(a) * R * 0.8, y0 + 0.2 * H, Math.sin(a) * R * 0.8], [Math.cos(a) * R * 0.95, 0.03, Math.sin(a) * R * 0.95]]); }
+  g.add(rods(legs, 0.015, st, 6), merge([torusG(R * 0.82, 0.014, 'xz', 0, y0 + 0.2 * H, 0, 20, 5), ...legs.map(([, b]) => cylG(0.03, 0.03, 0.05, b[0], 0.025, b[2], 8))], st));
+  if (shelves) for (const s of [-1, 1]) g.add(box(sw + 0.03, 0.025, Math.min(0.42, d * 0.7), K.wood('teak'), s * (w / 2 - sw / 2 - 0.015), y0 + 0.5 * H, 0), rods([[[s * R * 0.9, y0 + 0.3 * H, 0], [s * (w / 2 - 0.05), y0 + 0.49 * H, 0]]], 0.008, st, 5));
+}
+function bbqBuiltIn(g, o) {
+  const { w, d, h, p } = o;
+  grillHead(g, 0, 0, w, d - 0.05, h, p.lid === 'open', p.burners, M(p.material, C(p.color, '#c9ccd0'), 'metal'), p.color3 ? K.metal(C(p.color3, '#2b2d31')) : dark('#2b2d31'), -0.02);
+}
+function bbqKitchen(g, o) {
+  const { w, d, h, p } = o, front = M(p.material, C(p.color, '#3a3d42'), 'aluminium'), top = M(p.material2, C(p.color2, '#c9c5bd'), 'stone'), acc = inox();
+  const lh = clamp(0.2 * h, 0.08, 0.26), hc = h - lh, D = d - 0.03, n = Math.max(2, Math.round(w / 0.55)), gw = clamp(0.3 * w, 0.3, 0.9), gx = -w / 2 + 0.12 + gw / 2;
+  g.add(box(w - 0.06, 0.08, D - 0.08, dark(), 0, 0.04, -0.03), box(w - 0.02, hc - 0.12, D - 0.02, front, 0, 0.08 + (hc - 0.12) / 2, -0.015), box(w, 0.04, d, top, 0, hc - 0.02, 0));
+  const doors = [], hd = [];
+  for (let i = 0; i < n; i++) { const x = lerp(-w / 2, w / 2, (i + 0.5) / n), dw = (w - 0.02) / n - 0.008; doors.push([dw, hc - 0.14, 0.018, x, 0.09 + (hc - 0.14) / 2, D / 2 - 0.016]); hd.push([Math.min(0.16, dw * 0.5), 0.012, 0.025, x, hc - 0.1, D / 2 + 0.004]); }
+  g.add(boxes(doors, front), boxes(hd, acc));
+  grillHead(g, gx, hc - 0.03, gw, D * 0.8, lh + 0.03, p.lid === 'open', p.burners, K.metal('#c9ccd0'), dark('#2b2d31'), -0.02);
+  const sx = w / 2 - Math.min(0.5, w * 0.22), bwid = Math.min(0.45, w * 0.2);
+  g.add(box(bwid + 0.04, 0.004, D * 0.62, acc, sx, hc + 0.002, 0.01), box(bwid, 0.006, D * 0.62 - 0.05, dark('#3a3c3f'), sx, hc + 0.004, 0.01));
+  g.add(mesh(tubeG([[sx, hc, -D * 0.36], [sx, hc + lh * 0.78, -D * 0.36], [sx, hc + lh * 0.95, -D * 0.28], [sx, hc + lh * 0.82, -D * 0.2]], 0.011, 14, 6), acc), box(0.05, 0.012, 0.012, acc, sx + 0.06, hc + 0.04, -D * 0.36));
+}
+function bbqPizza(g, o) {
+  const { w, d, h, p } = o, dome = M(p.material, C(p.color, '#d9d2c4'), 'stone'), trimM = K.mat(C(p.color2, '#b5654a'), { roughness: 0.9 }), st = alu(C(p.color3, '#2b2d31')), stand = h > 1.2;
+  const yb = stand ? clamp(0.45 * h, 0.6, 0.95) : Math.min(0.05, h * 0.1), r = Math.min(w, d) / 2 - 0.03, hd = Math.min(r * 0.95, (h - yb - 0.06) * 0.62), sz = (d - 0.1) / (2 * r);
+  if (stand) {
+    const list = []; for (const sx of [-1, 1]) for (const s2 of [-1, 1]) list.push([0.05, yb, 0.05, sx * (w / 2 - 0.05), yb / 2, s2 * (d / 2 - 0.05)]);
+    list.push([w - 0.06, 0.03, d - 0.06, 0, yb * 0.3, 0], [w - 0.06, 0.04, 0.04, 0, yb - 0.02, d / 2 - 0.05], [w - 0.06, 0.04, 0.04, 0, yb - 0.02, -d / 2 + 0.05]);
+    g.add(boxes(list, st), merge([-0.2, -0.07, 0.07, 0.2, -0.13, 0.01].map((x, i) => zCylG(0.055, d * 0.6, x * Math.min(1, w), yb * 0.3 + 0.07 + (i > 3 ? 0.095 : 0), 0, 8)), K.wood('#8a6a4a')));
+  } else g.add(boxes([-1, 1].flatMap((sx) => [-1, 1].map((s2) => [0.06, yb, 0.06, sx * (w / 2 - 0.08), yb / 2, s2 * (d / 2 - 0.08)])), st));
+  g.add(box(w, 0.06, d, K.stone(C(p.color2, '#b9b2a6')), 0, yb + 0.03, 0));
+  const dg = latheG([[r, 0], [r, 0.22 * hd], [0.9 * r, 0.55 * hd], [0.62 * r, 0.85 * hd], [0.25 * r, 0.98 * hd], [0, hd]], 24); dg.scale(1, 1, sz); dg.translate(0, yb + 0.06, -0.02);
+  g.add(mesh(dg, dome));
+  const zf = r * sz - 0.02, ah = Math.max(0.12, hd * 0.5);
+  g.add(at(prismZ(archProfile(0.36 * r, ah), 0.14, trimM), 0, yb + 0.06, zf - 0.05), at(prismZ(archProfile(0.27 * r, ah * 0.8), 0.145, dark('#0f0f10')), 0, yb + 0.06, zf - 0.05));
+  const cy0 = yb + 0.06 + hd * 0.82, ctop = h - 0.05;
+  g.add(cylOn(0.06, 0.06, Math.max(0.02, ctop - cy0), st, 0, cy0, zf * 0.42, 12), cylOn(0.1, 0.1, 0.015, st, 0, ctop + 0.015, zf * 0.42, 12), cylOn(0.02, 0.02, 0.02, st, 0, ctop, zf * 0.42, 6), cylOn(0.03, 0.09, 0.02, st, 0, ctop + 0.03, zf * 0.42, 12));
+}
+function bbqSmoker(g, o) {
+  const { w, d, h, p } = o, blk = K.metal(C(p.color, '#222426'), { roughness: 0.6, metalness: 0.5 }), acc = inox(), r = clamp(0.36 * d, 0.05, 0.42), yc = clamp(0.57 * h, r + 0.05, Math.max(r + 0.06, h - r - 0.2)), zc = -d / 2 + r;
+  const Lm = 0.62 * w, xm = -w / 2 + 0.03 + Lm / 2, rf = r * 0.72, Lf = w - Lm - 0.05, xf = w / 2 - Lf / 2;
+  g.add(merge([xCylG(r, Lm, xm, yc, zc, 20), xCylG(rf, Lf, xf, yc - (r - rf) - 0.04, zc, 16), cylG(0.045, 0.045, h - yc - 0.03, xm - Lm * 0.36, (h + yc - 0.03) / 2, zc, 10), cylG(0.07, 0.07, 0.012, xm - Lm * 0.36, h - 0.006, zc, 10)], blk));
+  g.add(box(Lm * 0.6, 0.03, 0.03, K.wood('teak'), xm, yc + r * 0.3, zc + r + 0.045), boxes([[0.02, 0.02, 0.06, xm - Lm * 0.25, yc + r * 0.3, zc + r * 0.96 + 0.02], [0.02, 0.02, 0.06, xm + Lm * 0.25, yc + r * 0.3, zc + r * 0.96 + 0.02]], acc), rot(mesh(zCylG(0.035, 0.012, 0, 0, 0, 12), acc, xm, yc + r * 0.72, zc + r * 0.72), -0.78));
+  const sh = Math.max(0.05, d - 2 * r - 0.01);
+  g.add(boxes([0, 1, 2].map((i) => [Lm * 0.9, 0.02, sh / 3 - 0.012, xm, yc - r * 0.35, zc + r * 0.93 + sh * (i + 0.5) / 3]), K.wood('teak')));
+  const legs = [];
+  for (const sx of [-1, 1]) for (const s2 of [-1, 1]) legs.push([[xm + sx * Lm * 0.4, yc - r * 0.7, zc + s2 * r * 0.6], [xm + sx * Lm * 0.44, sx > 0 ? 0.09 : 0, zc + s2 * r * 0.85]]);
+  legs.push([[xm - Lm * 0.42, yc * 0.3, zc - r * 0.75], [xm + Lm * 0.42, yc * 0.3, zc - r * 0.75]], [[xm - Lm * 0.42, yc * 0.3, zc + r * 0.75], [xm + Lm * 0.42, yc * 0.3, zc + r * 0.75]]);
+  g.add(rods(legs, 0.016, blk, 6));
+  wheelSet(g, [[xm + Lm * 0.44, 0.09, zc - r * 0.85 - 0.03], [xm + Lm * 0.44, 0.09, zc + r * 0.85 + 0.03]], 0.09, 0.035, dark('#55585c'));
+}
+function bbqTabun(g, o) {
+  const { w, d, h, p } = o, clay = K.mat(C(p.color, '#b9714f'), { roughness: 0.95 }), stone = K.stone(C(p.color2, '#b9ad98')), irn = dark(C(p.color3, '#2b2d31')), r = Math.min(w, d) / 2, yb = 0.38 * h, hd = h - yb - 0.09;
+  g.add(cylOn(r * 0.96, r * 0.96, yb - 0.05, stone, 0, 0, 0, 20), cylOn(r, r, 0.05, K.stone(K.shade(C(p.color2, '#b9ad98'), 0.15)), 0, yb - 0.05, 0, 20), merge([torusG(r * 0.965, 0.006, 'xz', 0, (yb - 0.05) / 3, 0, 20, 4), torusG(r * 0.965, 0.006, 'xz', 0, (yb - 0.05) * 2 / 3, 0, 20, 4)], dark('#6f675a')));
+  g.add(lathe([[0.86 * r, yb], [0.9 * r, yb + 0.2 * hd], [0.78 * r, yb + 0.6 * hd], [0.46 * r, yb + 0.92 * hd], [0.3 * r, yb + hd]], clay, 22));
+  g.add(cylOn(0.33 * r, 0.33 * r, 0.025, irn, 0, yb + hd, 0, 16), mesh(torusG(0.05, 0.008, 'xy', 0, yb + hd + 0.035, 0, 10, 4, PI), irn));
+  g.add(at(prismZ(archProfile(0.3 * r, hd * 0.42), 0.1, irn), 0, yb + 0.01, 0.84 * r), box(0.1, 0.015, 0.03, inox(), 0, yb + hd * 0.26, 0.9 * r + 0.01));
+}
+function bbqMangal(g, o) {
+  const { w, d, h, p } = o, stl = K.metal(C(p.color, '#2b2d31'), { roughness: 0.6, metalness: 0.5 }), shelf = flag(p.sideShelves, false), sw = shelf ? Math.min(0.25, w * 0.25) : 0, tw = w - sw, cx = sw / 2;
+  const th = clamp(0.2 * h, 0.03, 0.18), yt = h - 0.012, y0 = yt - th, list = [[tw, 0.006, d - 0.04, cx, y0 + 0.003, 0]];
+  for (const s of [-1, 1]) list.push([tw, th, 0.006, cx, y0 + th / 2, s * (d / 2 - 0.02)], [0.006, th, d - 0.04, cx + s * (tw / 2 - 0.003), y0 + th / 2, 0], [0.012, 0.012, 0.1, cx + s * (tw / 2 - 0.006), y0 + th * 0.6, 0]);
+  for (const sx of [-1, 1]) for (const s2 of [-1, 1]) list.push([0.025, y0, 0.025, cx + sx * (tw / 2 - 0.03), y0 / 2, s2 * (d / 2 - 0.04)]);
+  list.push([tw - 0.06, 0.012, 0.012, cx, y0 * 0.35, d / 2 - 0.04], [tw - 0.06, 0.012, 0.012, cx, y0 * 0.35, -d / 2 + 0.04]);
+  g.add(boxes(list, stl), box(tw - 0.03, th * 0.35, d - 0.06, K.mat('#2a211d', { emissive: '#ff5a1a', emissiveIntensity: 0.35, roughness: 0.9 }), cx, y0 + th * 0.2, 0));
+  const n = Math.max(2, Math.round(tw / 0.07)), sk = [], hnd = [], meat = [];
+  for (let i = 0; i < n; i++) { const x = cx + lerp(-tw / 2 + 0.04, tw / 2 - 0.04, i / (n - 1)); sk.push([[x, yt + 0.006, -d / 2 + 0.01], [x, yt + 0.006, d / 2 - 0.08]]); hnd.push([[x, yt + 0.006, d / 2 - 0.08], [x, yt + 0.006, d / 2]]); if (i % 2 === 0) for (let k = 0; k < 4; k++) meat.push([0.028, 0.02, 0.03, x, yt + 0.006, lerp(-d / 2 + 0.07, d / 2 - 0.13, k / 3)]); }
+  g.add(rods(sk, 0.003, inox(), 4), rods(hnd, 0.007, K.wood('walnut'), 5), boxes(meat, K.mat('#8a4a33', { roughness: 0.8 })));
+  if (shelf) g.add(box(sw, 0.02, d * 0.8, K.wood('teak'), -w / 2 + sw / 2, y0 + th * 0.7, 0));
+}
+function bbqSym(ctx, { w, d, p, px, v }) {
+  const col = C(p.color, v === 'outdoor-kitchen' ? '#3a3d42' : v === 'pizza-oven' ? '#d9d2c4' : v === 'tabun' ? '#b9714f' : v === 'kamado' ? '#2f4a3c' : v === 'built-in' ? '#c9ccd0' : '#26282b'), body = K.tint(col, 0.45), c2 = K.tint(C(p.color2, '#8d8f92'), 0.55);
+  const grate = (x, y, gw, gd) => { rect(ctx, x, y, gw, gd, K.tint(col, 0.3), INK, px, 2); hatch(ctx, x - gw / 2, y - gd / 2, x + gw / 2, y + gd / 2, Math.max(2, Math.min(Math.round(gw / 6), Math.floor(gw / (3 * px)))), false, SOFT, px); };
+  const knobs = (x, gw, y, n) => { for (let i = 0; i < n; i++) circ(ctx, x + lerp(-gw / 2, gw / 2, (i + 0.5) / n), y, Math.max(px, 1.6), INK, null); };
+  if (v === 'gas' || v === 'built-in') {
+    const sw = v === 'gas' && flag(p.sideShelves, w > 95) ? clamp(w * 0.2, 15, 34) : 0, bw = w - 2 * sw;
+    if (sw) { rect(ctx, -w / 2 + sw / 2, -2, sw, d * 0.75, c2, INK, px, 1); rect(ctx, w / 2 - sw / 2, -2, sw, d * 0.75, c2, INK, px, 1); }
+    rect(ctx, 0, -2, bw, d - 4, body, INK, px, 3); grate(0, -3, bw - 6, d - 14);
+    line(ctx, -bw * 0.35, d / 2 - 1.5, bw * 0.35, d / 2 - 1.5, INK, 1.5 * px); knobs(0, bw, d / 2 - 5, Math.round(num(p.burners, Math.round(bw / 20), 1, 8)));
+  } else if (v === 'charcoal-kettle' || v === 'kamado' || v === 'tabun') {
+    const sw = v === 'kamado' && flag(p.sideShelves, w > d * 1.4) ? clamp((w - d) / 2, 12, 40) : 0, R = Math.min(w - 2 * sw, d) / 2 - (v === 'tabun' ? 0 : 3.5);
+    if (sw) { rect(ctx, -w / 2 + sw / 2, 0, sw, Math.min(42, d * 0.7), K.tint('#a9743f', 0.4), INK, px, 1); rect(ctx, w / 2 - sw / 2, 0, sw, Math.min(42, d * 0.7), K.tint('#a9743f', 0.4), INK, px, 1); }
+    if (v === 'tabun') circ(ctx, 0, 0, R, c2, INK, px);
+    circ(ctx, 0, 0, R * (v === 'tabun' ? 0.88 : 1), body, INK, px); circ(ctx, 0, 0, R * 0.62, null, SOFT, px); circ(ctx, 0, 0, R * (v === 'tabun' ? 0.32 : 0.16), K.tint(col, 0.2), INK, px);
+    if (v !== 'tabun') line(ctx, -R * 0.3, R + 1, R * 0.3, R + 1, INK, 1.5 * px); else rect(ctx, 0, R * 0.88, R * 0.5, 4, '#55585c', INK, px);
+  } else if (v === 'outdoor-kitchen') {
+    const gw = clamp(0.3 * w, 30, 90), gx = -w / 2 + 12 + gw / 2, sx = w / 2 - Math.min(50, w * 0.22), bw = Math.min(45, w * 0.2), n = Math.max(2, Math.round(w / 55));
+    rect(ctx, 0, 0, w, d, K.tint(C(p.color2, '#c9c5bd'), 0.5), INK, px); grate(gx, -2, gw, d * 0.72); knobs(gx, gw, d * 0.4, 3);
+    rect(ctx, sx, 1, bw, d * 0.58, '#eef1f2', INK, px, 4); circ(ctx, sx, -d * 0.36, Math.max(1.8, px), INK, null); line(ctx, sx, -d * 0.36, sx, -d * 0.18, INK, 1.5 * px);
+    for (let i = 1; i < n; i++) line(ctx, lerp(-w / 2, w / 2, i / n), d / 2 - 3, lerp(-w / 2, w / 2, i / n), d / 2, INK, px);
+  } else if (v === 'pizza-oven') {
+    const r = Math.min(w, d) / 2 - 3;
+    rect(ctx, 0, 0, w, d, c2, INK, px, 2); ell(ctx, 0, -2, r, (d - 10) / 2, body, INK, px); ell(ctx, 0, -2, r * 0.6, (d - 10) * 0.3, null, SOFT, px);
+    rect(ctx, 0, d / 2 - 6, r * 0.72, 10, K.tint(C(p.color2, '#b5654a'), 0.25), INK, px, 1); rect(ctx, 0, d / 2 - 5, r * 0.5, 8, '#4a4744', null, px); circ(ctx, 0, d * 0.2, 6, '#55585c', INK, px);
+  } else if (v === 'smoker') {
+    const r = clamp(0.36 * d, 5, 42), Lm = 0.62 * w, xm = -w / 2 + 3 + Lm / 2, Lf = w - Lm - 5;
+    rect(ctx, xm, -d / 2 + r + (d - 2 * r) / 2 + r * 0.5, Lm * 0.9, d - 2 * r, K.tint('#a9743f', 0.4), INK, px, 1);
+    rect(ctx, w / 2 - Lf / 2, -d / 2 + r, Lf, r * 1.44, K.tint(col, 0.35), INK, px, 3); rect(ctx, xm, -d / 2 + r, Lm, 2 * r, body, INK, px, 4); line(ctx, xm - Lm / 2 + 3, -d / 2 + r, xm + Lm / 2 - 3, -d / 2 + r, SOFT, px); circ(ctx, xm - Lm * 0.36, -d / 2 + r, 4.5, '#55585c', INK, px);
+  } else {
+    rect(ctx, 0, 0, w, d - 4, body, INK, px, 1); rect(ctx, 0, 0, w - 4, d - 9, '#6a5a52', SOFT, px);
+    hatch(ctx, -w / 2 + 2, -d / 2, w / 2 - 2, d / 2, Math.max(2, Math.min(Math.round(w / 7), Math.floor(w / (3 * px)))), false, INK, px);
+  }
+}
+define('bbq', { gas: { b: bbqGas }, 'charcoal-kettle': { b: bbqKettle }, kamado: { b: bbqKamado }, 'built-in': { b: bbqBuiltIn }, 'outdoor-kitchen': { b: bbqKitchen }, 'pizza-oven': { b: bbqPizza }, smoker: { b: bbqSmoker }, tabun: { b: bbqTabun }, mangal: { b: bbqMangal } }, bbqSym);
+
+// ═════════════════════════ FENCE ═════════════════════════
+// [target post spacing, max post width, default infill colour, default post colour]
+const FENCE = {
+  'slat-horizontal': [1.8, 0.08, '#b98a5e', '#3a3d42'], 'slat-vertical': [1.8, 0.09, '#b98a5e', null], picket: [1.8, 0.09, '#f4f2ee', null], mesh: [2.5, 0.06, '#3a3d42', null],
+  'stone-wall': [0, 0, '#b3a78f', '#d0c7b4'], 'block-wall': [3, 0.3, '#ece8df', '#cfc9bd'], 'hedge-screen': [2, 0.04, '#4f7a3d', '#3a3d42'], bamboo: [0, 0, '#c9a45c', '#6b4a34'], glass: [1.2, 0.05, '#cfe3ea', '#c9ccd0'],
+  gate: [0, 0.1, '#b98a5e', '#3a3d42'], 'gate-sliding': [0, 0.06, '#3a3d42', null], gabion: [0, 0, '#a39c90', '#b9bdc2'], trellis: [1.8, 0.05, '#b98a5e', null], railing: [1.5, 0.04, '#26282b', null], 'pool-fence': [0.9, 0.028, '#22252a', '#c9ccd0'],
+};
+/** Post centre positions (same units as w) for a fence segment. */
+function fencePosts(w, pw, span) {
+  if (!(span > 0)) return [-w / 2 + pw / 2, w / 2 - pw / 2];
+  const n = Math.max(1, Math.round((w - pw) / span));
+  return Array.from({ length: n + 1 }, (_, i) => lerp(-w / 2 + pw / 2, w / 2 - pw / 2, i / n));
+}
+function buildFence(g, o) {
+  const { w, d, h, p, v } = o, F = FENCE[v], col = C(p.color, F[2]), col2 = C(p.color2, F[3] || col), posts = flag(p.posts, true), gap = num(p.gap, v === 'picket' ? 0.45 : 0.18, 0, 0.9);
+  const wooden = !isMetal(p.material) && !['plastic', 'glass', 'stone', 'concrete'].includes(p.material);
+  const im = v === 'picket' && !isWood(p.material) && !isMetal(p.material) ? K.lacquer(col) : M(p.material, col, 'wood'), pm = p.color2 || !wooden || F[3] ? (wooden && !F[3] ? M(p.material, col2, 'wood') : alu(col2)) : im;
+  const pw = Math.min(F[1], Math.max(d, 0.02)), xs = fencePosts(w, pw, F[0]), list = [], inf = [], rng = seedOf(o, v);
+  const addPosts = (top = h, dep = d, z = 0) => { if (posts) xs.forEach((x) => list.push([pw, top, dep, x, top / 2, z])); };
+  if (v === 'slat-horizontal') {
+    const t = posts ? Math.min(0.02, d * 0.4) : d, bh = isMetal(p.material) ? 0.12 : 0.09, gs = clamp(bh * gap / (1 - gap), 0, 0.3), n = Math.max(1, Math.floor((h - 0.03 + gs) / (bh + gs)));
+    for (let i = 0; i < n; i++) inf.push([w, bh, t, 0, h - bh / 2 - i * (bh + gs), d / 2 - t / 2]);
+    addPosts(h, d - t, -t / 2);
+  } else if (v === 'slat-vertical' || v === 'picket') {
+    const t = Math.min(0.02, d * 0.4), bw = v === 'picket' ? 0.07 : 0.09, gs = clamp(bw * gap / (1 - gap), 0, 0.3), n = Math.max(1, Math.floor((w + gs) / (bw + gs))), y0 = v === 'picket' ? 0.05 : 0.03, x0 = -((n - 1) * (bw + gs)) / 2;
+    if (v === 'picket') { const pk = prismG([[-bw / 2, y0], [-bw / 2, h - bw * 0.6], [0, h], [bw / 2, h - bw * 0.6], [bw / 2, y0]], t); g.add(merge(Array.from({ length: n }, (_, i) => pk.clone().translate(x0 + i * (bw + gs), 0, d / 2 - t / 2)), im)); }
+    else for (let i = 0; i < n; i++) inf.push([bw, h - y0, t, x0 + i * (bw + gs), y0 + (h - y0) / 2, d / 2 - t / 2]);
+    for (const y of h > 1.3 ? [0.18, h / 2, h - 0.18] : [Math.min(0.18, h * 0.25), h - Math.min(0.2, h * 0.25)]) list.push([w, 0.07, Math.max(0.01, Math.min(0.04, d - t)), 0, y, d / 2 - t - Math.max(0.01, Math.min(0.04, d - t)) / 2]);
+    addPosts(v === 'picket' ? h - 0.02 : h, d - t, -t / 2);
+  } else if (v === 'mesh') {
+    const sv = Math.max(0.1, w / 110), nv = Math.max(2, Math.round(w / sv)), nh = Math.max(2, Math.round((h - 0.05) / 0.2));
+    for (let i = 0; i <= nv; i++) inf.push([0.004, h - 0.05, 0.004, lerp(-w / 2 + 0.01, w / 2 - 0.01, i / nv), 0.04 + (h - 0.05) / 2, 0]);
+    for (let i = 0; i <= nh; i++) inf.push([w - 0.02, 0.005, 0.005, 0, lerp(0.05, h - 0.012, i / nh), 0.003]);
+    addPosts();
+  } else if (v === 'stone-wall') {
+    const ct = Math.min(0.06, h * 0.2), nc = Math.max(1, Math.round((h - ct) / 0.2)), ch = (h - ct) / nc, k = Math.max(1, w / 14), sets = [[], [], []];
+    for (let c = 0; c < nc; c++) for (let x = -w / 2; x < w / 2 - 0.01;) { const len = Math.min(w / 2 - x, (0.24 + rng() * 0.32) * k), l2 = w / 2 - x - len < 0.12 * k ? w / 2 - x : len; sets[Math.floor(rng() * 3)].push([l2 - 0.012, ch - 0.012, d, x + l2 / 2, c * ch + ch / 2, 0]); x += l2; }
+    g.add(box(w - 0.004, h - ct, Math.max(0.005, d - 0.02), K.mat(K.shade(col, -0.35), { roughness: 1 }), 0, (h - ct) / 2, 0), box(w, ct, d, K.mat(col2, { roughness: 0.9 }), 0, h - ct / 2, 0));
+    sets.forEach((s, i) => g.add(boxes(s, K.mat(K.shade(col, [-0.08, 0.04, 0.14][i]), { roughness: 0.95 }))));
+  } else if (v === 'block-wall') {
+    const ct = Math.min(0.05, h * 0.2), wall = K.mat(col, { roughness: 0.95 });
+    g.add(box(w, h - ct, Math.max(0.005, d - 0.02), wall, 0, (h - ct) / 2, 0), box(w, ct, d, K.mat(col2, { roughness: 0.8 }), 0, h - ct / 2, 0), box(w, Math.min(0.12, h * 0.2), Math.max(0.006, d - 0.012), K.mat(K.shade(col, -0.08), { roughness: 0.95 }), 0, Math.min(0.06, h * 0.1), 0));
+    if (posts && w > 2.4) g.add(boxes(xs.map((x) => [pw, h - ct, d, x, (h - ct) / 2, 0]), wall));
+  } else if (v === 'hedge-screen') {
+    const fw = w - (posts ? 2 * pw : 0), geo = new THREE.BoxGeometry(fw, h - 0.06, d * 0.8, Math.max(2, Math.min(40, Math.round(fw / 0.12))), Math.max(2, Math.min(20, Math.round(h / 0.12))), 1), q = geo.attributes.position;
+    const jit = new Map();
+    for (let i = 0; i < q.count; i++) { const key = `${q.getX(i).toFixed(3)},${q.getY(i).toFixed(3)},${Math.sign(q.getZ(i))}`; if (!jit.has(key)) jit.set(key, 1 - rng() * 0.45); if (Math.abs(q.getX(i)) < fw / 2 - 1e-4 && Math.abs(q.getY(i)) < (h - 0.06) / 2 - 1e-4) q.setZ(i, q.getZ(i) * jit.get(key)); }
+    geo.computeVertexNormals(); geo.translate(0, 0.03 + (h - 0.06) / 2, 0);
+    g.add(mesh(geo, K.foliage(col)));
+    list.push([w, 0.03, d, 0, h - 0.015, 0], [w, 0.03, d, 0, 0.015, 0]); addPosts();
+  } else if (v === 'bamboo') {
+    const r = Math.min(Math.max(0.016, w / 220), d / 2), n = Math.max(1, Math.floor(w / (2 * r))), geos = [];
+    for (let i = 0; i < n; i++) { const hh = i === 0 ? h : h * (0.955 + rng() * 0.04); geos.push(cylG(r * 0.92, r, hh, -w / 2 + r + i * (w - 2 * r) / Math.max(1, n - 1), hh / 2, (rng() - 0.5) * (d - 2 * r), 6)); }
+    g.add(merge(geos, K.mat(col, { roughness: 0.55 })), boxes([[w, 0.03, d, 0, h * 0.22, 0], [w, 0.03, d, 0, h * 0.8, 0]], K.mat(col2, { roughness: 0.9 })));
+  } else if (v === 'glass') {
+    const gm = clear(col, 0.3), panes = [];
+    if (posts) { for (let i = 0; i < xs.length - 1; i++) panes.push([xs[i + 1] - xs[i] - pw - 0.03, h - 0.14, Math.min(0.012, d), (xs[i] + xs[i + 1]) / 2, 0.08 + (h - 0.14) / 2, 0]); addPosts(h - 0.02); list.push([w, 0.04, d, 0, h - 0.02, 0]); }
+    else { const n = Math.max(1, Math.round(w / 1.2)); for (let i = 0; i < n; i++) panes.push([w / n - 0.012, h - 0.04, Math.min(0.014, d), lerp(-w / 2, w / 2, (i + 0.5) / n), 0.04 + (h - 0.04) / 2, 0]); list.push([w, Math.min(0.1, h * 0.2), d, 0, Math.min(0.05, h * 0.1), 0]); }
+    g.add(ns(boxes(panes, gm)));
+  } else if (v === 'gate' || v === 'gate-sliding') {
+    const slide = v === 'gate-sliding', leaves = !slide && w >= 2.2 ? 2 : 1, fz = Math.min(0.04, d), x0 = slide ? -w / 2 : -w / 2 + pw + 0.012, x1 = -x0, y0 = slide ? 0.09 : 0.06, y1 = h - (slide ? 0 : 0.04), lw = (x1 - x0) / leaves;
+    for (let k = 0; k < leaves; k++) {
+      const a = x0 + k * lw + (k ? 0.006 : 0), b = x0 + (k + 1) * lw - (k < leaves - 1 ? 0.006 : 0), fs = Math.min(0.045, (b - a) * 0.2);
+      list.push([b - a, fs, fz, (a + b) / 2, y1 - fs / 2, 0], [b - a, slide ? 0.07 : fs, fz, (a + b) / 2, y0 + (slide ? 0.035 : fs / 2), 0], [fs, y1 - y0, fz, a + fs / 2, (y0 + y1) / 2, 0], [fs, y1 - y0, fz, b - fs / 2, (y0 + y1) / 2, 0]);
+      if (wooden) { const bh = 0.09, gs = clamp(bh * gap / (1 - gap), 0, 0.3), n = Math.max(1, Math.floor((y1 - y0 - 2 * fs + gs) / (bh + gs))); for (let i = 0; i < n; i++) inf.push([b - a - 2 * fs, bh, Math.min(0.02, fz), (a + b) / 2, y1 - fs - bh / 2 - i * (bh + gs) - 0.005, 0]); }
+      else { const n = Math.max(1, Math.round((b - a - 2 * fs) / 0.11)); for (let i = 1; i < n; i++) inf.push([0.016, y1 - y0 - 2 * fs, 0.016, lerp(a + fs, b - fs, i / n), (y0 + y1) / 2, 0]); }
+      if (!slide) { const hx = leaves === 2 ? (k ? a + 0.07 : b - 0.07) : b - 0.07; g.add(box(0.03, 0.12, d + 0.0, inox(), hx, Math.min(1.0, h * 0.6), 0), boxes([[0.03, 0.08, d, k || leaves === 1 && false ? b : (k ? b : a), y0 + 0.15, 0], [0.03, 0.08, d, k ? b : a, y1 - 0.15, 0]], dark())); }
+    }
+    if (slide) { g.add(box(w, 0.02, d, K.metal('#8a8d91', { roughness: 0.5 }), 0, 0.01, 0), merge([zCylG(0.045, d * 0.6, x0 + 0.3, 0.055, 0, 12), zCylG(0.045, d * 0.6, x1 - 0.3, 0.055, 0, 12)], dark('#55585c'))); }
+    else xs.forEach((x) => list.push([pw, h, d, x, h / 2, 0]));
+  } else if (v === 'gabion') {
+    const geo = new THREE.BoxGeometry(w - 0.02, h - 0.02, Math.max(0.01, d - 0.02), Math.max(2, Math.min(28, Math.round(w / 0.14))), Math.max(2, Math.min(16, Math.round(h / 0.14))), 2), q = geo.attributes.position, jit = new Map();
+    for (let i = 0; i < q.count; i++) { const key = `${q.getX(i).toFixed(3)},${q.getY(i).toFixed(3)},${q.getZ(i).toFixed(3)}`; if (!jit.has(key)) jit.set(key, 1 - rng() * 0.07); const s = jit.get(key); q.setXYZ(i, q.getX(i) * (Math.abs(q.getX(i)) > w / 2 - 0.02 ? s : 1), q.getY(i) * (q.getY(i) > h / 2 - 0.02 ? s : 1), q.getZ(i) * (Math.abs(q.getZ(i)) > d / 2 - 0.02 ? s : 1)); }
+    geo.computeVertexNormals(); geo.translate(0, 0.01 + (h - 0.02) / 2, 0);
+    g.add(mesh(geo, K.mat(col, { roughness: 1, flat: true })));
+    const s = Math.max(0.1, w / 36, h / 24), nx = Math.max(1, Math.round(w / s)), ny = Math.max(1, Math.round(h / s));
+    for (let i = 0; i <= nx; i++) { const x = lerp(-w / 2 + 0.003, w / 2 - 0.003, i / nx); for (const sz of [-1, 1]) inf.push([0.006, h, 0.006, x, h / 2, sz * (d / 2 - 0.003)]); inf.push([0.006, 0.006, d, x, h - 0.003, 0]); }
+    for (let j = 0; j <= ny; j++) for (const sz of [-1, 1]) inf.push([w, 0.006, 0.006, 0, lerp(0.003, h - 0.003, j / ny), sz * (d / 2 - 0.003)]);
+    g.add(boxes(inf.splice(0), K.metal(col2, { roughness: 0.5, metalness: 0.6 })));
+  } else if (v === 'trellis') {
+    const xa = -w / 2 + pw, xb = w / 2 - pw, ya = 0.08, yb = h - 0.04, s = Math.max(0.14, (w + h) / 70) * Math.SQRT2, lt = Math.min(0.008, d / 2);
+    for (let c = ya - xb + s / 2; c < yb - xa; c += s) { const a = Math.max(xa, ya - c), b = Math.min(xb, yb - c); if (b - a > 0.03) inf.push([(b - a) * Math.SQRT2, 0.03, lt, (a + b) / 2, (a + b) / 2 + c, lt / 2, 0, 0, PI / 4]); }
+    for (let c = ya + xa + s / 2; c < yb + xb; c += s) { const a = Math.max(xa, c - yb), b = Math.min(xb, c - ya); if (b - a > 0.03) inf.push([(b - a) * Math.SQRT2, 0.03, lt, (a + b) / 2, c - (a + b) / 2, -lt / 2, 0, 0, -PI / 4]); }
+    list.push([w, 0.04, d, 0, h - 0.02, 0], [w, 0.04, d, 0, 0.07, 0]); xs.forEach((x) => list.push([pw, h, d, x, h / 2, 0]));
+  } else if (v === 'railing') {
+    const sp = Math.max(0.11, w / 110), n = Math.max(1, Math.round(w / sp)), bt = Math.min(0.014, d);
+    for (let i = 1; i < n; i++) inf.push([bt, h - 0.15, bt, lerp(-w / 2, w / 2, i / n), 0.1 + (h - 0.15) / 2, 0]);
+    list.push([w, 0.04, d, 0, h - 0.02, 0], [w, 0.03, Math.min(0.03, d), 0, 0.1, 0]); addPosts();
+  } else {
+    const r = Math.min(0.014, d / 2);
+    g.add(merge(xs.map((x) => cylG(r, r, h, x, h / 2, 0, 8)), alu(col2)), ns(box(w - 2 * r, h - 0.1, 0.003, clear(col, 0.4), 0, 0.05 + (h - 0.1) / 2, 0)), boxes([[w - 2 * r, 0.04, Math.min(0.006, d), 0, h - 0.04, 0], [w - 2 * r, 0.04, Math.min(0.006, d), 0, 0.06, 0]], K.fabric(col)));
+  }
+  if (list.length) g.add(boxes(list, pm));
+  if (inf.length) g.add(boxes(inf, im));
+}
+function fenceSym(ctx, { w, d, p, px, v }) {
+  const F = FENCE[v], col = C(p.color, F[2]), col2 = C(p.color2, F[3] || col), posts = flag(p.posts, true), t = Math.max(d, 2.4 * px), pw = Math.max(Math.min(F[1] * 100, Math.max(d, 2)), 3 * px);
+  const xs = fencePosts(w, Math.min(F[1] * 100, Math.max(d, 2)), F[0] * 100);
+  if (['stone-wall', 'block-wall', 'gabion', 'hedge-screen', 'bamboo'].includes(v)) {
+    rect(ctx, 0, 0, w, t, K.tint(col, v === 'hedge-screen' ? 0.25 : 0.4), INK, px, v === 'hedge-screen' ? t / 3 : 0);
+    if (v === 'stone-wall' || v === 'gabion') hatch(ctx, -w / 2, -t / 2, w / 2, t / 2, Math.max(1, Math.min(Math.round(w / 30), Math.floor(w / (5 * px)))), false, SOFT, px);
+    if (v === 'bamboo') hatch(ctx, -w / 2, -t / 2, w / 2, t / 2, Math.max(1, Math.min(Math.round(w / 4), Math.floor(w / (3 * px)))), false, SOFT, px);
+    if (v === 'block-wall' && posts && w > 240) xs.forEach((x) => rect(ctx, x, 0, 30, t, K.tint(col, 0.3), INK, px));
+    return;
+  }
+  if (v === 'gate' || v === 'gate-sliding') {
+    const leaves = v === 'gate' && w >= 220 ? 2 : 1, lw = (w - 2 * pw) / leaves;
+    line(ctx, -w / 2, 0, w / 2, 0, rgba(col, 0.9), Math.max(t * 0.5, 1.6 * px));
+    if (v === 'gate') {
+      dashed(ctx, px, () => { for (let k = 0; k < leaves; k++) { const hx = k ? w / 2 - pw : -w / 2 + pw; ctx.beginPath(); ctx.arc(hx, 0, Math.max(0, lw), k ? PI / 2 : 0, k ? PI : PI / 2); ctx.strokeStyle = SOFT; ctx.lineWidth = px; ctx.stroke(); line(ctx, hx, 0, hx, Math.max(0, lw), SOFT, px); } });
+      for (const s of [-1, 1]) rect(ctx, s * (w / 2 - pw / 2), 0, pw, Math.max(t, pw), K.shade(col2, -0.1), INK, px);
+    } else { const y = t / 2 + 5 * px; line(ctx, -w * 0.3, y, w * 0.3, y, SOFT, px); poly(ctx, [[-w * 0.3 + 4 * px, y - 2.5 * px], [-w * 0.3, y], [-w * 0.3 + 4 * px, y + 2.5 * px]], null, SOFT, px, false); }
+    return;
+  }
+  const band = v === 'glass' ? rgba('#8fc4d6', 0.7) : v === 'pool-fence' || v === 'mesh' ? rgba(col, 0.55) : rgba(col, 0.95);
+  if (v === 'mesh' || v === 'trellis' || v === 'pool-fence' || v === 'railing') dashed(ctx, px, () => line(ctx, -w / 2, 0, w / 2, 0, band, Math.max(t * 0.4, 1.4 * px)), 5, 2);
+  else rect(ctx, 0, 0, w, Math.max(t * 0.55, 1.6 * px), band, INK, px * 0.7);
+  if (posts || v === 'trellis') xs.forEach((x) => rect(ctx, x, 0, pw, Math.max(t, pw), K.shade(col2, -0.15), INK, px));
+}
+define('fence', Object.fromEntries(Object.keys(FENCE).map((k) => [k, { b: buildFence }])), fenceSym);
+
+// ═════════════════════════ SHED ═════════════════════════
+/** Walls + roof of a small building. Returns { wb, db, yw (cladded wall height at the front), zf (front wall plane) }. */
+function shedShell(g, w, d, h, roof, wallCol, roofM, material, ov = 0.06) {
+  const wb = w - 2 * ov, db = d - 2 * ov, core = K.mat(K.shade(wallCol, -0.3), { roughness: 0.9 }), wall = isWood(material) ? K.wood(wallCol) : material === 'metal' || material === 'aluminium' ? K.metal(wallCol, { roughness: 0.55, metalness: 0.35 }) : K.mat(wallCol, { roughness: 0.6 });
+  let yw, ywBack;
+  if (roof === 'gable') {
+    const rise = clamp(0.2 * w, 0.04, 0.45 * h), tv = Math.min(0.045, h * 0.1), ye = h - tv - rise; yw = ywBack = ye + rise * (ov / (w / 2));
+    g.add(prismZ([[-w / 2, ye], [-w / 2, ye + tv], [0, h], [w / 2, ye + tv], [w / 2, ye], [0, h - tv]], d, roofM));
+    g.add(prismZ([[-wb / 2, yw - 0.002], [0, h - tv - 0.004], [wb / 2, yw - 0.002]], db, wall));
+  } else if (roof === 'pent') {
+    const drop = clamp(0.12 * d, 0.03, 0.3 * h), tv = Math.min(0.045, h * 0.1), yb = h - tv - drop; yw = h - tv - drop * (ov / d) - 0.004; ywBack = yb + drop * (ov / d) - 0.004;
+    g.add(prismX([[-d / 2, yb], [-d / 2, yb + tv], [d / 2, h], [d / 2, h - tv]], w, roofM), prismX([[-db / 2, ywBack - 0.002], [db / 2, yw], [db / 2, ywBack - 0.002]], wb, wall));
+  } else { const tv = Math.min(0.06, h * 0.15); yw = ywBack = h - tv; g.add(box(w, tv, d, roofM, 0, h - tv / 2, 0)); }
+  g.add(box(wb - 0.016, ywBack, db - 0.016, core, 0, ywBack / 2, 0), box(wb + 0.02, Math.min(0.05, h * 0.1), db + 0.02, dark('#3a3835'), 0, Math.min(0.025, h * 0.05), 0));
+  const list = [];
+  if (material === 'metal' || material === 'aluminium') {
+    list.push([wb, ywBack, 0.006, 0, ywBack / 2, db / 2 - 0.003], [wb, ywBack, 0.006, 0, ywBack / 2, -db / 2 + 0.003], [0.006, ywBack, db, wb / 2 - 0.003, ywBack / 2, 0], [0.006, ywBack, db, -wb / 2 + 0.003, ywBack / 2, 0]);
+    const nx = Math.max(2, Math.round(wb / 0.13)), nz = Math.max(2, Math.round(db / 0.13));
+    for (let i = 0; i <= nx; i++) for (const s of [-1, 1]) list.push([0.03, ywBack, 0.012, lerp(-wb / 2 + 0.015, wb / 2 - 0.015, i / nx), ywBack / 2, s * (db / 2 + 0.002)]);
+    for (let i = 0; i <= nz; i++) for (const s of [-1, 1]) list.push([0.012, ywBack, 0.03, s * (wb / 2 + 0.002), ywBack / 2, lerp(-db / 2 + 0.015, db / 2 - 0.015, i / nz)]);
+  } else {
+    const ph = isWood(material) ? 0.15 : 0.21, n = Math.max(1, Math.round(ywBack / ph)), ch = ywBack / n;
+    for (let i = 0; i < n; i++) { const y = (i + 0.5) * ch; list.push([wb, ch - 0.007, 0.012, 0, y, db / 2 - 0.006], [wb, ch - 0.007, 0.012, 0, y, -db / 2 + 0.006], [0.012, ch - 0.007, db, wb / 2 - 0.006, y, 0], [0.012, ch - 0.007, db, -wb / 2 + 0.006, y, 0]); }
+  }
+  g.add(boxes(list, wall));
+  return { wb, db, yw: roof === 'pent' ? ywBack : yw, yFront: yw, zf: db / 2 };
+}
+function shedDoors(g, S, n, doorM, trimM, wide, xOff = 0) {
+  const dw = wide ? (S.wb - 0.14) / n : Math.min(0.8, (S.wb - 0.24) / n), dh = Math.max(0.05, Math.min(1.88, (wide ? S.yFront : S.yw) - 0.07)), tw = n * dw, list = [], hw = [];
+  for (let i = 0; i < n; i++) { const x = xOff - tw / 2 + dw * (i + 0.5); list.push([dw - 0.012, dh, 0.03, x, 0.05 + dh / 2, S.zf + 0.008]); hw.push([0.02, Math.min(0.16, dh * 0.2), 0.03, n === 1 ? x + dw * 0.36 : xOff + (i ? 0.05 : -0.05), 0.05 + dh * 0.52, S.zf + 0.03]); }
+  g.add(boxes(list, doorM), boxes(hw, inox()));
+  g.add(boxes([[tw + 0.08, 0.04, 0.03, xOff, 0.05 + dh + 0.02, S.zf + 0.006], [0.04, dh, 0.03, xOff - tw / 2 - 0.02, 0.05 + dh / 2, S.zf + 0.006], [0.04, dh, 0.03, xOff + tw / 2 + 0.02, 0.05 + dh / 2, S.zf + 0.006],
+    ...[0.33, 0.66].flatMap((t) => Array.from({ length: n }, (_, i) => [dw - 0.1, 0.012, 0.004, xOff - tw / 2 + dw * (i + 0.5), 0.05 + dh * t, S.zf + 0.024]))], trimM));
+  return tw;
+}
+function shedWindow(g, x, y, z, s, trimM, side) {
+  const fr = [[s, 0.03, 0.03, 0, s / 2, 0], [s, 0.03, 0.03, 0, -s / 2, 0], [0.03, s, 0.03, s / 2, 0, 0], [0.03, s, 0.03, -s / 2, 0, 0], [0.018, s, 0.02, 0, 0, 0], [s, 0.018, 0.02, 0, 0, 0]];
+  const grp = new THREE.Group(); grp.add(boxes(fr, trimM), ns(box(s, s, 0.008, K.mat('#9fc0cf', { roughness: 0.08, metalness: 0.3 }), 0, 0, -0.004)));
+  grp.position.set(x, y, z); if (side) grp.rotation.y = PI / 2;
+  g.add(grp);
+}
+function shedPalette(p, defWall, defRoof, defDoor) { const wall = C(p.color, defWall); return { wall, roofM: K.mat(C(p.color2, defRoof), { roughness: 0.75 }), doorM: K.mat(C(p.color3, defDoor || K.shade(wall, -0.22)), { roughness: 0.6 }), trimM: K.mat(C(p.color2, defRoof), { roughness: 0.6 }) }; }
+function buildShed(g, o) {
+  const { w, d, h, p, v } = o, bike = v === 'bike-store', mat = MATS.includes(p.material) ? p.material : bike ? 'metal' : 'plastic';
+  const P = shedPalette(p, isWood(mat) ? '#b98a5e' : isMetal(mat) ? '#6f7f7a' : '#d9d2c2', isWood(mat) ? '#4a4744' : '#5a5d61', isWood(mat) ? null : isMetal(mat) ? null : '#8a8378');
+  const roof = ['gable', 'pent', 'flat'].includes(p.roof) ? p.roof : bike ? 'pent' : 'gable', S = shedShell(g, w, d, h, roof, P.wall, P.roofM, mat, Math.min(0.06, w * 0.08, d * 0.08));
+  const n = bike ? 2 : Math.round(num(p.doors, w >= 1.5 ? 2 : 1, 1, 2)), win = flag(p.window, false) && !bike, room = (S.wb - n * Math.min(0.8, (S.wb - 0.24) / n)) / 2, front = win && room > 1.1, ws = Math.min(0.5, S.yw * 0.3);
+  const tw = shedDoors(g, S, n, P.doorM, P.trimM, bike, front ? -S.wb / 2 + 0.16 + n * Math.min(0.8, (S.wb - 0.24) / n) / 2 : 0);
+  if (win) { if (front) shedWindow(g, (-S.wb / 2 + 0.16 + tw + S.wb / 2) / 2 + 0.04, Math.min(1.45, S.yw - ws / 2 - 0.12), S.zf + 0.012, ws, P.trimM, false); else shedWindow(g, S.wb / 2 + 0.012, Math.min(1.45, S.yw - ws / 2 - 0.12), 0, Math.min(ws, S.db * 0.5), P.trimM, true); }
+  if (roof === 'gable') g.add(box(Math.min(0.3, S.wb * 0.2), 0.1, 0.02, P.trimM, 0, S.yw + (h - S.yw) * 0.35, S.zf + 0.004));
+}
+function buildStorageBox(g, o) {
+  const { w, d, h, p } = o, col = C(p.color, '#6b6460'), body = K.mat(col, { roughness: 0.6 }), lh = clamp(0.2 * h, 0.03, 0.14), bh = h - lh - 0.006, list = [], n = Math.max(2, Math.round(bh / 0.11));
+  g.add(box(w - 0.05, bh, d - 0.05, K.mat(K.shade(col, -0.3), { roughness: 0.9 }), 0, bh / 2, 0));
+  for (let i = 0; i < n; i++) { const y = 0.02 + (i + 0.5) * (bh - 0.02) / n, ph = (bh - 0.02) / n - 0.006; list.push([w - 0.03, ph, 0.012, 0, y, d / 2 - 0.021], [w - 0.03, ph, 0.012, 0, y, -d / 2 + 0.021], [0.012, ph, d - 0.03, w / 2 - 0.021, y, 0], [0.012, ph, d - 0.03, -w / 2 + 0.021, y, 0]); }
+  for (const sx of [-1, 1]) for (const s2 of [-1, 1]) list.push([0.05, bh, 0.05, sx * (w / 2 - 0.035), bh / 2, s2 * (d / 2 - 0.035)]);
+  g.add(boxes(list, body), rbox(w, lh, d, K.mat(C(p.color2, K.shade(col, -0.12)), { roughness: 0.55 }), 0, h - lh / 2, 0, Math.min(0.03, lh * 0.4), 2));
+  g.add(box(0.08, 0.06, 0.02, K.mat(C(p.color3, '#2b2d31')), 0, bh - 0.02, d / 2 - 0.008), boxes([[0.012, 0.03, 0.14, w / 2 - 0.012, bh * 0.7, 0], [0.012, 0.03, 0.14, -w / 2 + 0.012, bh * 0.7, 0]], dark()));
+}
+function buildBinStore(g, o) {
+  const { w, d, h, p } = o, wood = M(p.material, C(p.color, '#a9825a'), 'wood'), fr = M(p.material, C(p.color2, K.shade(C(p.color, '#a9825a'), -0.18)), 'wood'), n = Math.max(1, Math.round(w / 0.72)), cw = w / n, drop = Math.min(0.1, h * 0.1), list = [], sl = [];
+  const hb = h - 0.03, hf = hb - drop, ns_ = Math.max(2, Math.round(hf / 0.1)), sh = hf / ns_;
+  for (let i = 0; i <= n; i++) { const x = lerp(-w / 2 + 0.025, w / 2 - 0.025, i / n); list.push([0.05, hf, 0.05, x, hf / 2, d / 2 - 0.045], [0.05, hb, 0.05, x, hb / 2, -d / 2 + 0.025]); }
+  for (let j = 0; j < ns_; j++) { const y = (j + 0.5) * sh; sl.push([w - 0.02, sh - 0.02, 0.016, 0, y, -d / 2 + 0.058], [0.016, sh - 0.02, d - 0.1, w / 2 - 0.012, y, -0.01], [0.016, sh - 0.02, d - 0.1, -w / 2 + 0.012, y, -0.01]); for (let i = 0; i < n; i++) sl.push([cw - 0.07, sh - 0.02, 0.016, -w / 2 + cw * (i + 0.5), y, d / 2 - 0.028]); }
+  const ang = Math.atan2(drop, d), ll = Math.hypot(d, drop) - 0.01, nl = Math.max(2, Math.round(d / 0.11));
+  for (let i = 0; i < n; i++) { const x = -w / 2 + cw * (i + 0.5); for (let k = 0; k < nl; k++) { const t = (k + 0.5) / nl; sl.push([cw - 0.012, 0.018, ll / nl - 0.008, x, lerp(h - 0.012, h - drop - 0.012, t), lerp(-d / 2, d / 2, t), ang]); } list.push([0.03, 0.03, ll, x - cw / 2 + 0.03, h - drop / 2 - 0.035, 0, ang], [0.03, 0.03, ll, x + cw / 2 - 0.03, h - drop / 2 - 0.035, 0, ang]); }
+  g.add(boxes(list, fr), boxes(sl, wood), boxes(Array.from({ length: n }, (_, i) => [0.1, 0.02, 0.025, -w / 2 + cw * (i + 0.5), hf * 0.55, d / 2 - 0.005]), dark()));
+}
+function buildTallCabinet(g, o) {
+  const { w, d, h, p } = o, col = C(p.color, '#d9d2c2'), body = K.mat(col, { roughness: 0.6 }), dm = K.mat(C(p.color3, '#8a8378'), { roughness: 0.6 }), cap = K.mat(C(p.color2, '#5a5d61'), { roughness: 0.6 }), ft = Math.min(0.05, h * 0.08), ct = Math.min(0.045, h * 0.06);
+  g.add(box(w - 0.04, ft, d - 0.04, dark('#3a3835'), 0, ft / 2, 0), box(w - 0.02, h - ft - ct, d - 0.03, body, 0, ft + (h - ft - ct) / 2, -0.005), rbox(w, ct, d, cap, 0, h - ct / 2, 0, 0.015, 2));
+  const dh = h - ft - ct - 0.03, dw = (w - 0.05) / 2, list = [], gr = [];
+  for (const s of [-1, 1]) { list.push([dw - 0.006, dh, 0.02, s * dw / 2, ft + 0.015 + dh / 2, d / 2 - 0.012]); for (let k = 1; k < 4; k++) gr.push([0.006, dh - 0.1, 0.004, s * dw * k / 4, ft + 0.015 + dh / 2, d / 2 - 0.001]); }
+  g.add(boxes(list, dm), boxes(gr, K.mat(K.shade(C(p.color3, '#8a8378'), -0.2))), boxes([[0.016, Math.min(0.22, dh * 0.2), 0.02, 0.03, ft + dh * 0.55, d / 2 - 0.004], [0.016, Math.min(0.22, dh * 0.2), 0.02, -0.03, ft + dh * 0.55, d / 2 - 0.004]], inox()));
+}
+function buildGreenhouse(g, o) {
+  const { w, d, h, p } = o, fr = alu(C(p.color, '#d9dcdc')), gl = clear(C(p.color2, '#cfe6ea'), 0.22), rise = clamp(0.26 * w, 0.03, 0.45 * h), he = h - rise, b = 0.03, list = [], ang = Math.atan2(rise, w / 2), rl = Math.hypot(w / 2, rise);
+  const nz = Math.max(1, Math.round(d / 0.62)), nx = Math.max(2, Math.round(w / 0.62));
+  for (let j = 0; j <= nz; j++) { const z = lerp(-d / 2 + b / 2, d / 2 - b / 2, j / nz); for (const s of [-1, 1]) list.push([b, he, b, s * (w / 2 - b / 2), he / 2, z], [rl, b, b, s * (w / 4 - 0.004), he + rise / 2 - 0.012, z, 0, 0, -s * ang]); }
+  for (const s of [-1, 1]) { list.push([b, b, d, s * (w / 2 - b / 2), he - b / 2, 0], [b * 1.3, 0.1, d, s * (w / 2 - b * 0.65), 0.05, 0], [w, 0.1, b * 1.3, 0, 0.05, s * (d / 2 - b * 0.65)], [w, b, b, 0, he - b / 2, s * (d / 2 - b / 2)]);
+    for (let i = 1; i < nx; i++) { const x = lerp(-w / 2, w / 2, i / nx); list.push([b * 0.8, he + rise * (1 - Math.abs(x) / (w / 2)) - 0.02, b * 0.8, x, (he + rise * (1 - Math.abs(x) / (w / 2)) - 0.02) / 2, s * (d / 2 - b / 2)]); } }
+  list.push([b * 1.4, b * 1.4, d, 0, h - b * 0.7, 0], [Math.min(0.7, w * 0.4), b, b * 1.2, 0, Math.min(1.9, he * 0.95), d / 2 - b * 0.4], [0.02, 0.14, 0.03, Math.min(0.3, w * 0.17) - 0.05, Math.min(1.0, he * 0.5), d / 2 + 0.002]);
+  g.add(boxes(list, fr));
+  const panes = [boxG(0.004, he - 0.1, d - b, w / 2 - b / 2, 0.1 + (he - 0.1) / 2, 0), boxG(0.004, he - 0.1, d - b, -w / 2 + b / 2, 0.1 + (he - 0.1) / 2, 0), boxG(rl, 0.004, d - b, w / 4, he + rise / 2 - 0.016, 0, 0, 0, -ang), boxG(rl, 0.004, d - b, -w / 4, he + rise / 2 - 0.016, 0, 0, 0, ang)];
+  const gab = [[-w / 2 + b, 0.1], [-w / 2 + b, he - 0.01], [0, h - 0.04], [w / 2 - b, he - 0.01], [w / 2 - b, 0.1]];
+  panes.push(prismG(gab, 0.004).translate(0, 0, d / 2 - b / 2), prismG(gab, 0.004).translate(0, 0, -d / 2 + b / 2));
+  g.add(ns(merge(panes, gl)));
+  const bw = Math.min(0.5, w * 0.28), bz = d - 0.3, wd = K.wood('pine');
+  g.add(boxes([[bw, 0.025, bz, -w / 2 + b + bw / 2 + 0.03, Math.min(0.75, he * 0.45), 0], ...[-1, 1].flatMap((s) => [-1, 1].map((s2) => [0.035, Math.min(0.75, he * 0.45), 0.035, -w / 2 + b + 0.03 + bw / 2 + s * (bw / 2 - 0.03), Math.min(0.75, he * 0.45) / 2, s2 * (bz / 2 - 0.03)]))], wd));
+  const pots = [], lf = [], yt = Math.min(0.75, he * 0.45) + 0.0125;
+  for (let i = 0; i < Math.max(1, Math.round(bz / 0.4)); i++) { const z = lerp(-bz / 2 + 0.15, bz / 2 - 0.15, i / Math.max(1, Math.round(bz / 0.4) - 1 || 1)), x = -w / 2 + b + bw / 2 + 0.03; pots.push(cylG(0.075, 0.055, 0.12, x, yt + 0.06, z, 10)); lf.push(new THREE.ConeGeometry(0.1, 0.24 + (i % 2) * 0.1, 7).translate(x, yt + 0.12 + 0.12 + (i % 2) * 0.05, z)); }
+  g.add(merge(pots, K.mat('#b9714f', { roughness: 0.9 })), merge(lf, K.foliage('#5d8a4a')));
+}
+function buildDogHouse(g, o) {
+  const { w, d, h, p } = o, P = shedPalette(p, '#c9a476', '#8f3b2e'), S = shedShell(g, w, d, h, ['gable', 'pent', 'flat'].includes(p.roof) ? p.roof : 'gable', P.wall, P.roofM, MATS.includes(p.material) ? p.material : 'wood', Math.min(0.06, w * 0.08));
+  const hw = Math.min(0.2, S.wb * 0.28), hh = Math.min(S.yw * 0.85, Math.max(hw * 1.2, S.yw * 0.72));
+  g.add(at(prismZ(archProfile(hw + 0.03, hh + 0.03), 0.03, K.mat(C(p.color3, K.shade(P.wall, -0.25)), { roughness: 0.7 })), 0, 0.03, S.zf + 0.004), at(prismZ(archProfile(hw, hh), 0.034, dark('#141312')), 0, 0.03, S.zf + 0.004));
+}
+function shedSym(ctx, { w, d, h, p, px, v }) {
+  const wallDef = v === 'storage-box' ? '#6b6460' : v === 'bin-store' ? '#a9825a' : v === 'dog-house' ? '#c9a476' : v === 'greenhouse' ? '#d9dcdc' : isWood(p.material) ? '#b98a5e' : isMetal(p.material) || v === 'bike-store' ? '#6f7f7a' : '#d9d2c2';
+  const wall = K.tint(C(p.color, wallDef), 0.45), roofC = C(p.color2, v === 'dog-house' ? '#8f3b2e' : '#5a5d61'), ov = Math.min(6, w * 0.08, d * 0.08);
+  if (v === 'storage-box') { rect(ctx, 0, 0, w, d, wall, INK, px, 3); rect(ctx, 0, 0, w - 6, d - 6, null, SOFT, px, 2); line(ctx, -w / 2 + 3, -d / 2 + 5, w / 2 - 3, -d / 2 + 5, SOFT, px); rect(ctx, 0, d / 2 - 2, 8, 3, '#55585c', null); return; }
+  if (v === 'tall-cabinet') { rect(ctx, 0, 0, w, d, wall, INK, px, 2); line(ctx, 0, d / 2, 0, d / 2 - 4, INK, px); dashed(ctx, px, () => { for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * w / 2, d / 2, Math.max(0, w / 2), s > 0 ? PI / 2 : 0, s > 0 ? PI : PI / 2); ctx.strokeStyle = SOFT; ctx.lineWidth = px; ctx.stroke(); } }); return; }
+  if (v === 'bin-store') { const n = Math.max(1, Math.round(w / 72)); rect(ctx, 0, 0, w, d, wall, INK, px, 1); for (let i = 0; i < n; i++) { const x = -w / 2 + (w / n) * (i + 0.5); rect(ctx, x, 0, w / n - 6, d - 6, K.tint(C(p.color, wallDef), 0.6), SOFT, px, 1); hatch(ctx, x - w / n / 2 + 3, -d / 2 + 3, x + w / n / 2 - 3, d / 2 - 3, Math.min(6, Math.floor(d / (4 * px))), true, SOFT, px); } return; }
+  if (v === 'greenhouse') {
+    rect(ctx, 0, 0, w, d, rgba('#bfe0e6', 0.45), INK, px); hatch(ctx, -w / 2, -d / 2, w / 2, d / 2, Math.max(1, Math.round(d / 62) - 1), true, SOFT, px); hatch(ctx, -w / 2, -d / 2, w / 2, d / 2, 1, false, INK, px);
+    rect(ctx, -w / 2 + Math.min(50, w * 0.28) / 2 + 6, 0, Math.min(50, w * 0.28), d - 30, rgba('#c9a476', 0.5), SOFT, px); line(ctx, -Math.min(35, w * 0.2), d / 2, Math.min(35, w * 0.2), d / 2, INK, 2.5 * px); return;
+  }
+  const roof = ['gable', 'pent', 'flat'].includes(p.roof) ? p.roof : v === 'bike-store' ? 'pent' : 'gable';
+  rect(ctx, 0, 0, w, d, K.tint(roofC, 0.55), INK, px, 1); dashed(ctx, px, () => rect(ctx, 0, 0, w - 2 * ov, d - 2 * ov, null, SOFT, px));
+  if (roof === 'gable') { hatch(ctx, -w / 2, -d / 2, w / 2, d / 2, Math.min(Math.max(3, Math.round(w / 22) | 1), Math.floor(w / (4 * px))), false, SOFT, px); line(ctx, 0, -d / 2, 0, d / 2, INK, 1.6 * px); }
+  else if (roof === 'pent') { hatch(ctx, -w / 2, -d / 2, w / 2, d / 2, Math.min(Math.max(2, Math.round(d / 25)), Math.floor(d / (4 * px))), true, SOFT, px); line(ctx, 0, d * 0.25, 0, -d * 0.25, SOFT, px); poly(ctx, [[-3 * px, -d * 0.25 + 4 * px], [0, -d * 0.25], [3 * px, -d * 0.25 + 4 * px]], null, SOFT, px, false); }
+  if (v === 'dog-house') { rect(ctx, 0, d / 2 - 2, Math.min(40, w * 0.5), 4, '#4a4744', INK, px, 1); return; }
+  const n = v === 'bike-store' ? 2 : Math.round(num(p.doors, w >= 150 ? 2 : 1, 1, 2)), wb = w - 2 * ov, dw = v === 'bike-store' ? (wb - 14) / n : Math.min(80, (wb - 24) / n), tw = n * dw;
+  line(ctx, -tw / 2, d / 2 - ov, tw / 2, d / 2 - ov, K.shade(C(p.color3, '#8a8378'), -0.2), Math.max(2.5 * px, 3));
+  if (h > 150) dashed(ctx, px, () => { for (let i = 0; i < n; i++) { const hx = n === 1 ? -tw / 2 : (i ? tw / 2 : -tw / 2), r = Math.max(0, Math.min(dw, 45)), left = n === 1 || !i; ctx.beginPath(); ctx.arc(hx, d / 2 - ov, r, left ? 0 : PI / 2, left ? PI / 2 : PI); ctx.strokeStyle = SOFT; ctx.lineWidth = px; ctx.stroke(); } });
+}
+define('shed', { shed: { b: buildShed }, 'storage-box': { b: buildStorageBox }, 'bin-store': { b: buildBinStore }, 'tall-cabinet': { b: buildTallCabinet }, 'bike-store': { b: buildShed }, greenhouse: { b: buildGreenhouse }, 'dog-house': { b: buildDogHouse } }, shedSym);
+
+// ═════════════════════════ FIRE PIT ═════════════════════════
+function logsG(x, y, z, r) {
+  const mk = (a, tilt, dy) => { const c = new THREE.CylinderGeometry(r * 0.16, r * 0.16, r * 1.5, 7); c.rotateZ(PI / 2 - tilt); c.rotateY(a); c.translate(x, y + r * 0.2 + dy, z); return c; };
+  return merge([mk(0.3, 0.2, 0), mk(2.3, 0.25, r * 0.12), mk(4.4, 0.2, r * 0.2)], K.wood('#5a4332'));
+}
+function buildFirePit(g, o) {
+  const { w, d, h, p, v } = o, isLit = flag(p.lit, false), R = Math.min(w, d) / 2;
+  if (v === 'bowl') {
+    const m = K.metal(C(p.color, '#8a5a3c'), { roughness: 0.8, metalness: 0.3 }), st = alu(C(p.color2, '#2b2d31')), yb = 0.38 * h, bh = h - yb;
+    g.add(mesh(latheG([[0, yb], [0.55 * R, yb + 0.22 * bh], [0.88 * R, yb + 0.66 * bh], [R, h]], 24), K.mat(C(p.color, '#8a5a3c'), { roughness: 0.8, metalness: 0.3, side: THREE.DoubleSide })), mesh(torusG(R - 0.008, 0.008, 'xz', 0, h - 0.008, 0, 24, 5), m));
+    g.add(rods([0, 1, 2].map((i) => { const a = PI / 2 + (i * TAU) / 3; return [[Math.cos(a) * R * 0.5, yb + 0.2 * bh, Math.sin(a) * R * 0.5], [Math.cos(a) * R * 0.78, 0, Math.sin(a) * R * 0.78]]; }), 0.014, st, 6), mesh(torusG(R * 0.62, 0.01, 'xz', 0, yb * 0.55, 0, 20, 4), st));
+    g.add(cyl(0.7 * R, 0.7 * R, 0.01, dark('#2a2725'), 0, yb + 0.42 * bh, 0, 16), logsG(0, yb + 0.42 * bh, 0, R * 0.6));
+    if (isLit) fire(g, 0, yb + 0.5 * bh, 0, R * 0.38, Math.max(0.28, h * 0.9));
+  } else if (v === 'table') {
+    const body = M(p.material, C(p.color, '#8d8f92'), 'concrete'), tw = w * 0.62, td = Math.min(d * 0.42, 0.3);
+    g.add(box(w - 0.1, 0.06, d - 0.1, dark(), 0, 0.03, 0), box(w, h - 0.07, d, body, 0, 0.06 + (h - 0.07) / 2, 0), box(tw + 0.03, 0.006, td + 0.03, inox(), 0, h - 0.007, 0), box(tw, 0.008, td, dark('#2a2725'), 0, h - 0.004, 0));
+    const rk = seedOf(o, 'rk'), rocks = [], n = Math.max(6, Math.round(tw / 0.06));
+    for (let i = 0; i < n; i++) rocks.push(new THREE.IcosahedronGeometry(0.02 + rk() * 0.012, 0).translate(lerp(-tw / 2 + 0.03, tw / 2 - 0.03, i / (n - 1)), h - 0.012, (rk() - 0.5) * (td - 0.06)));
+    g.add(merge(rocks, K.mat(C(p.color2, '#4a433d'), { roughness: 1, flat: true })));
+    if (isLit) { fire(g, 0, h, 0, 0.09, 0.2); fire(g, -tw * 0.28, h, 0, 0.07, 0.15); g.children.pop(); fire(g, tw * 0.28, h, 0, 0.07, 0.16); g.children.pop(); }
+  } else if (v === 'chiminea') {
+    const m = M(p.material, C(p.color, '#b9714f'), 'ceramic'), st = alu(C(p.color2, '#2b2d31'));
+    g.add(lathe([[0.3 * R, 0.14 * h], [0.8 * R, 0.2 * h], [0.97 * R, 0.36 * h], [0.9 * R, 0.5 * h], [0.45 * R, 0.64 * h], [0.3 * R, 0.7 * h], [0.26 * R, 0.96 * h], [0.34 * R, h]], K.mat(C(p.color, '#b9714f'), { roughness: 0.9, side: THREE.DoubleSide }), 20));
+    g.add(at(prismZ(archProfile(0.4 * R, 0.2 * h), 0.1, dark('#120f0e')), 0, 0.25 * h, 0.82 * R), mesh(torusG(R * 0.72, 0.012, 'xz', 0, 0.17 * h, 0, 18, 4), st), rods([0, 1, 2].map((i) => { const a = PI / 2 + (i * TAU) / 3; return [[Math.cos(a) * R * 0.72, 0.17 * h, Math.sin(a) * R * 0.72], [Math.cos(a) * R * 0.97, 0, Math.sin(a) * R * 0.97]]; }), 0.012, st, 6));
+    if (m && isLit) fire(g, 0, 0.26 * h, 0.7 * R, 0.2 * R, 0.14 * h);
+  } else if (v === 'heater-mushroom') {
+    const m = M(p.material, C(p.color, '#c9ccd0'), 'metal'), rb = Math.min(R, 0.23), hk = h / 2.2;
+    g.add(cylOn(rb, rb, 0.04, dark(), 0, 0, 0, 20), cylOn(rb * 0.82, rb * 0.82, 0.78 * hk, m, 0, 0.04, 0, 20), cylOn(0.028, 0.028, h - 0.36 * hk - 0.78 * hk, m, 0, 0.04 + 0.78 * hk, 0, 10));
+    g.add(cylOn(0.085, 0.085, 0.2 * hk, isLit ? K.glow('#ff7a2b', 1.3) : dark('#55585c'), 0, h - 0.36 * hk, 0, 14), cylOn(0.1, 0.1, 0.03, m, 0, h - 0.39 * hk, 0, 14));
+    g.add(mesh(latheG([[R, h - 0.1 * hk], [0.6 * R, h - 0.035 * hk], [0.1 * R, h - 0.012], [0, h]], 24), K.mat(C(p.color, '#c9ccd0'), { roughness: 0.3, metalness: 0.85, side: THREE.DoubleSide })));
+    if (isLit) g.add(K.lampLight('#ff9a4a', 1.2, 5, 0, h - 0.4 * hk, 0));
+  } else if (v === 'heater-pyramid') {
+    const m = M(p.material, C(p.color, '#c9ccd0'), 'metal'), frame = [];
+    g.add(mesh(taperG(w, d, w * 0.72, d * 0.72, 0.36 * h), m), mesh(taperG(w * 0.66, d * 0.66, w * 0.2, d * 0.2, 0.1 * h, 0, 0.9 * h), m));
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) frame.push([[sx * w * 0.34, 0.36 * h, sz * d * 0.34], [sx * w * 0.2, 0.9 * h, sz * d * 0.2]]);
+    g.add(rods(frame, 0.012, m, 5), ns(cylOn(Math.min(w, d) * 0.13, Math.min(w, d) * 0.13, 0.53 * h, clear('#dfe9ec', 0.25), 0, 0.37 * h, 0, 14)));
+    if (isLit) { const f = ns(mesh(new THREE.ConeGeometry(Math.min(w, d) * 0.07, 0.42 * h, 8).translate(0, 0.6 * h, 0), K.glow('#ff8a2b', 1.6))); g.add(f, K.lampLight('#ff9a4a', 1.2, 5, 0, 0.6 * h, 0)); }
+  } else {
+    const col = C(p.color, '#8a5a3c');
+    g.add(mesh(latheG([[R - 0.012, 0], [R - 0.012, h], [R, h], [R, 0]], 28), K.metal(col, { roughness: 0.85, metalness: 0.25 })), cyl(R - 0.01, R - 0.01, 0.02, K.mat(C(p.color2, '#5a544d'), { roughness: 1 }), 0, Math.min(0.05, h * 0.3), 0, 20), logsG(0, Math.min(0.06, h * 0.3), 0, R * 0.6));
+    if (isLit) fire(g, 0, Math.min(0.1, h * 0.4), 0, R * 0.36, Math.max(0.3, h * 1.3));
+  }
+}
+function firePitSym(ctx, { w, d, p, px, v }) {
+  const col = C(p.color, v === 'table' ? '#8d8f92' : v.startsWith('heater') ? '#c9ccd0' : v === 'chiminea' ? '#b9714f' : '#8a5a3c'), R = Math.min(w, d) / 2, ember = flag(p.lit, false) ? '#f6a04a' : '#6a5a52';
+  if (v === 'table') { rect(ctx, 0, 0, w, d, K.tint(col, 0.5), INK, px, 2); rect(ctx, 0, 0, w * 0.62, Math.min(d * 0.42, 30), ember, INK, px, 2); return; }
+  if (v === 'heater-pyramid') { rect(ctx, 0, 0, w, d, K.tint(col, 0.5), INK, px, 1); rect(ctx, 0, 0, w * 0.66, d * 0.66, null, SOFT, px); circ(ctx, 0, 0, R * 0.26, ember, INK, px); return; }
+  ell(ctx, 0, 0, w / 2, d / 2, K.tint(col, v === 'heater-mushroom' ? 0.6 : 0.4), INK, px);
+  if (v === 'heater-mushroom') { for (let i = 0; i < 8; i++) line(ctx, Math.cos(i * PI / 4) * R * 0.3, Math.sin(i * PI / 4) * R * 0.3, Math.cos(i * PI / 4) * R * 0.95, Math.sin(i * PI / 4) * R * 0.95, SOFT, px); circ(ctx, 0, 0, R * 0.26, ember, INK, px); }
+  else if (v === 'chiminea') { circ(ctx, 0, 0, R * 0.34, K.tint(col, 0.2), INK, px); rect(ctx, 0, R * 0.8, R * 0.7, R * 0.22, '#4a4744', INK, px, 1); }
+  else { ell(ctx, 0, 0, w / 2 * 0.8, d / 2 * 0.8, ember, SOFT, px); line(ctx, -R * 0.4, -R * 0.15, R * 0.4, R * 0.2, INK, 1.5 * px); line(ctx, -R * 0.3, R * 0.3, R * 0.35, -R * 0.3, INK, 1.5 * px); }
+}
+define('fire-pit', Object.fromEntries(['bowl', 'table', 'chiminea', 'heater-mushroom', 'heater-pyramid', 'ring'].map((k) => [k, { b: buildFirePit }])), firePitSym);
+
+// ═════════════════════════ SWING BENCH / HAMMOCK ═════════════════════════
+function hammockG(x0, x1, yEnd, sag, hw, gathered) {
+  return surfG((u, t) => {
+    const s = Math.sin(PI * u), k = gathered ? 0.03 + 0.97 * s ** 0.7 : 0.8 + 0.2 * s, vv = 2 * t - 1;
+    return [lerp(x0, x1, u), yEnd - sag * s + 0.22 * hw * vv * vv * k, vv * hw * k];
+  }, 16, 6);
+}
+function swingBench(g, o) {
+  const { w, d, h, p } = o, fab = K.fabric(C(p.color, '#e3d9c2')), fr = M(p.material2, C(p.color2, '#3a3d42'), 'metal'), acc = K.fabric(C(p.color3, K.shade(C(p.color, '#e3d9c2'), -0.15)));
+  const can = flag(p.canopy, true), yt = can ? h - 0.13 : h - 0.024, x = w / 2 - 0.024, zf = d / 2 - 0.024, list = [];
+  for (const s of [-1, 1]) list.push([[s * x, yt, 0], [s * x, 0.024, zf]], [[s * x, yt, 0], [s * x, 0.024, -zf]], [[s * x, 0.024, -zf], [s * x, 0.024, zf]], [[s * x, yt * 0.42, -zf * 0.56], [s * x, yt * 0.42, zf * 0.56], 0.016]);
+  list.push([[-x, yt, 0], [x, yt, 0]], [[-x, 0.024, -zf], [x, 0.024, -zf], 0.018]);
+  const sw = w - 0.34, sy = Math.min(0.42, yt * 0.35), sd = Math.min(0.56, d * 0.5), n = Math.round(num(p.seats, Math.round(sw / 0.56), 1, 6)), cw = sw / n;
+  for (const s of [-1, 1]) list.push([[s * sw / 2, yt, 0], [s * (sw / 2 + 0.01), sy + 0.2, sd / 2 - 0.04], 0.006], [[s * sw / 2, yt, 0], [s * (sw / 2 + 0.01), sy + 0.2, -sd / 2 + 0.02], 0.006], [[s * (sw / 2 + 0.01), sy + 0.2, sd / 2 - 0.02], [s * (sw / 2 + 0.01), sy + 0.2, -sd / 2], 0.014], [[s * (sw / 2 + 0.01), sy, sd / 2 - 0.04], [s * (sw / 2 + 0.01), sy + 0.2, sd / 2 - 0.04], 0.012]);
+  if (can) for (const s of [-1, 1]) list.push([[s * x, yt, 0], [s * x, h - 0.02, d * 0.3], 0.012], [[s * x, yt, 0], [s * x, h - 0.02, -d * 0.3], 0.012]);
+  g.add(rods(list, 0.024, fr, 8), box(sw, 0.03, sd, fr, 0, sy - 0.015, 0), rot(box(sw, 0.42, 0.025, fr, 0, sy + 0.2, -sd / 2 - 0.02), -0.2));
+  for (let i = 0; i < n; i++) { const cx = -sw / 2 + cw * (i + 0.5); g.add(rbox(cw - 0.012, 0.1, sd - 0.03, fab, cx, sy + 0.05, 0.01, 0.035, 2), rot(rbox(cw - 0.012, 0.4, 0.1, i % 2 ? acc : fab, cx, sy + 0.28, -sd / 2 + 0.07, 0.04, 2), -0.2)); }
+  if (can) g.add(box(w, 0.016, d, cloth(C(p.color, '#e3d9c2')), 0, h - 0.008, 0), boxes([[w, 0.1, 0.005, 0, h - 0.06, d / 2 - 0.0025], [w, 0.1, 0.005, 0, h - 0.06, -d / 2 + 0.0025]], cloth(C(p.color, '#e3d9c2'))));
+}
+function hammockStand(g, o) {
+  const { w, d, h, p } = o, fab = cloth(C(p.color, '#e9e2d0')), st = M(p.material2, C(p.color2, 'teak'), 'wood'), tip = w / 2 - 0.04, xe = 0.34 * w, hw = Math.max(0.05, d / 2 - 0.08);
+  g.add(mesh(tubeG([[-tip, h - 0.04, 0], [-0.4 * w, 0.52 * h, 0], [-0.24 * w, 0.12 * h, 0], [0, 0.045, 0], [0.24 * w, 0.12 * h, 0], [0.4 * w, 0.52 * h, 0], [tip, h - 0.04, 0]], 0.036, 30, 7), st), boxes([[0.08, 0.05, d, -0.2 * w, 0.025, 0], [0.08, 0.05, d, 0.2 * w, 0.025, 0]], st));
+  g.add(mesh(hammockG(-xe, xe, 0.7 * h, 0.3 * h, hw, false), fab), rods([[[-xe, 0.7 * h + 0.2 * hw, -hw * 0.82], [-xe, 0.7 * h + 0.2 * hw, hw * 0.82]], [[xe, 0.7 * h + 0.2 * hw, -hw * 0.82], [xe, 0.7 * h + 0.2 * hw, hw * 0.82]]], 0.014, K.wood('oak'), 6));
+  const ropes = []; for (const s of [-1, 1]) for (let i = 0; i < 5; i++) ropes.push([[s * (tip - 0.02), h - 0.07, 0], [s * xe, 0.7 * h + 0.2 * hw, lerp(-hw * 0.8, hw * 0.8, i / 4)]]);
+  g.add(rods(ropes, 0.003, K.mat('#efe9dc'), 3));
+}
+function hammockPosts(g, o) {
+  const { w, d, h, p } = o, fab = cloth(C(p.color, '#c9d6c6')), st = M(p.material2, C(p.color2, '#8a6a4a'), 'wood'), px_ = w / 2 - 0.06, hook = 0.86 * h, xe = 0.38 * w, ye = hook - 0.1 * h, sag = Math.max(0.05, Math.min(0.42 * h, ye - 0.45));
+  g.add(merge([cylG(0.055, 0.06, h, -px_, h / 2, 0, 12), cylG(0.055, 0.06, h, px_, h / 2, 0, 12)], st), mesh(hammockG(-xe, xe, ye, sag, d / 2, true), fab));
+  g.add(rods([[[-px_ + 0.05, hook, 0], [-xe, ye, 0]], [[px_ - 0.05, hook, 0], [xe, ye, 0]]], 0.006, K.mat('#efe9dc'), 4), rbox(0.4, 0.1, Math.min(0.4, d * 0.6), K.fabric(C(p.color3, '#efe9dc')), -xe * 0.62, ye - sag * 0.75 + 0.06, 0, 0.04, 2));
+}
+function hangingChair(g, o) {
+  const { w, d, h, p } = o, fab = cloth(C(p.color, '#e9e2d0')), st = alu(C(p.color2, '#2b2d31')), R = Math.min(w, d) / 2, Rb = R - 0.025, ysp = h - 0.42, sw = Math.min(0.48, R * 0.85), ys = Math.min(0.45, h * 0.3);
+  g.add(mesh(torusG(Rb, 0.025, 'xz', 0, 0.025, 0, 28, 6), st), mesh(tubeG([[0, 0.03, -Rb], [0, h * 0.45, -Rb + 0.01], [0, h * 0.82, -Rb * 0.86], [0, h - 0.04, -Rb * 0.4], [0, h - 0.035, 0.02]], 0.024, 24, 7), st));
+  g.add(rods([[[-sw, ysp, 0], [sw, ysp, 0]]], 0.018, K.wood('oak'), 8), rods([[[0, h - 0.05, 0.02], [-sw, ysp, 0]], [[0, h - 0.05, 0.02], [sw, ysp, 0]], [[-sw, ysp, 0], [-sw * 0.92, ys + 0.2, 0.3]], [[sw, ysp, 0], [sw * 0.92, ys + 0.2, 0.3]]], 0.005, K.mat('#efe9dc'), 4));
+  g.add(mesh(surfG((u, t) => { const uu = 2 * u - 1, zz = lerp(-0.26, 0.32, t), yy = t < 0.55 ? lerp(ysp - 0.03, ys, smooth(t / 0.55)) : lerp(ys, ys + 0.14, (t - 0.55) / 0.45); return [uu * sw * 0.95, yy + 0.3 * uu * uu * (ysp - ys) * (0.25 + 0.75 * (1 - t) * (1 - t)) * (t > 0.02 ? 1 : 0), zz]; }, 8, 10), fab));
+  g.add(rbox(sw * 1.3, 0.09, 0.4, K.fabric(C(p.color3, '#9aa89a')), 0, ys + 0.07, 0.08, 0.04, 2));
+}
+function porchSwing(g, o) {
+  const { w, d, h, p } = o, wd = M(p.material, C(p.color, '#b98a5e'), 'wood'), x = w / 2 - 0.045, yt = h - 0.05, zf = d / 2 - 0.05, len = Math.hypot(yt, zf), a = Math.atan2(zf, yt), list = [];
+  for (const s of [-1, 1]) list.push([0.09, len, 0.09, s * x, yt / 2, zf / 2, -a], [0.09, len, 0.09, s * x, yt / 2, -zf / 2, a], [0.06, 0.07, zf * 1.25, s * x, yt * 0.38, 0], [0.09, 0.06, d, s * x, 0.03, 0]);
+  list.push([w, 0.1, 0.1, 0, yt, 0]);
+  const bw = w - 0.5, sy = Math.min(0.44, yt * 0.3), sd = Math.min(0.5, d * 0.42);
+  for (let i = 0; i < 5; i++) list.push([bw, 0.022, sd / 5 - 0.012, 0, sy, lerp(-sd / 2, sd / 2, (i + 0.5) / 5)]);
+  for (let i = 0; i < 4; i++) list.push([bw, 0.075, 0.022, 0, sy + 0.1 + i * 0.1, -sd / 2 - 0.02 - i * 0.022, -0.2]);
+  for (const s of [-1, 1]) list.push([0.05, 0.03, sd + 0.05, s * (bw / 2 + 0.02), sy + 0.22, 0], [0.05, 0.22, 0.05, s * (bw / 2 + 0.02), sy + 0.11, sd / 2 - 0.03], [0.05, 0.5, 0.05, s * (bw / 2 + 0.02), sy + 0.24, -sd / 2 - 0.045, -0.2]);
+  g.add(boxes(list, wd), rods([-1, 1].flatMap((s) => [[[s * (bw / 2 + 0.02), yt - 0.05, 0], [s * (bw / 2 + 0.02), sy + 0.24, sd / 2 - 0.03]], [[s * (bw / 2 + 0.02), yt - 0.05, 0], [s * (bw / 2 + 0.02), sy + 0.46, -sd / 2 - 0.09]]]), 0.005, inox(), 4));
+}
+function swingSym(ctx, { w, d, h, p, px, v }) {
+  const fab = C(p.color, v === 'hammock-trees' ? '#c9d6c6' : v === 'porch-swing' ? '#b98a5e' : '#e3d9c2'), fr = C(p.color2, v === 'hammock-stand' ? '#a9743f' : '#3a3d42');
+  const lens = (hx, hy) => { ctx.beginPath(); ctx.moveTo(-hx, 0); ctx.quadraticCurveTo(0, -hy * 2, hx, 0); ctx.quadraticCurveTo(0, hy * 2, -hx, 0); ctx.closePath(); ctx.fillStyle = K.tint(fab, 0.35); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = px; ctx.stroke(); hatch(ctx, -hx * 0.7, -hy * 0.6, hx * 0.7, hy * 0.6, Math.min(7, Math.floor(hx / (3 * px))), false, SOFT, px); };
+  if (v === 'hammock-stand') { for (const s of [-1, 1]) line(ctx, s * 0.2 * w, -d / 2, s * 0.2 * w, d / 2, fr, Math.max(2 * px, 8)); line(ctx, -w / 2 + 4, 0, w / 2 - 4, 0, fr, Math.max(2 * px, 7)); lens(0.36 * w, d / 2 - 8); return; }
+  if (v === 'hammock-trees') { line(ctx, -w / 2 + 6, 0, w / 2 - 6, 0, SOFT, px); lens(0.38 * w, d / 2); for (const s of [-1, 1]) circ(ctx, s * (w / 2 - 6), 0, 6, K.tint('#8a6a4a', 0.2), INK, px); return; }
+  if (v === 'hanging-chair') { const R = Math.min(w, d) / 2; circ(ctx, 0, 0, R - 1.5, null, fr, Math.max(px, 3)); ell(ctx, 0, R * 0.08, R * 0.7, R * 0.5, K.tint(fab, 0.4), INK, px); line(ctx, -R * 0.75, 0, R * 0.75, 0, '#8a6a4a', Math.max(1.5 * px, 3)); circ(ctx, 0, -R + 2.5, Math.max(2.5, 1.5 * px), fr, null); return; }
+  const can = v === 'swing-bench' && flag(p.canopy, true), sw = w - (v === 'porch-swing' ? 50 : 34), sd = Math.min(v === 'porch-swing' ? 50 : 56, d * 0.5);
+  for (const s of [-1, 1]) line(ctx, s * (w / 2 - 2.5), -d / 2, s * (w / 2 - 2.5), d / 2, fr, Math.max(1.6 * px, v === 'porch-swing' ? 9 : 4.5));
+  line(ctx, -w / 2, 0, w / 2, 0, fr, Math.max(1.6 * px, v === 'porch-swing' ? 10 : 4.5));
+  rect(ctx, 0, 0, sw, sd, K.tint(fab, 0.4), INK, px, 3);
+  if (v === 'porch-swing') hatch(ctx, -sw / 2, -sd / 2, sw / 2, sd / 2, 4, true, SOFT, px);
+  else { const n = Math.round(num(p.seats, Math.round(sw / 56), 1, 6)); for (let i = 1; i < n; i++) line(ctx, -sw / 2 + (sw / n) * i, -sd / 2, -sw / 2 + (sw / n) * i, sd / 2, SOFT, px); line(ctx, -sw / 2, -sd / 2 + 9, sw / 2, -sd / 2 + 9, SOFT, px); }
+  if (can) { ctx.fillStyle = rgba(fab, 0.22); ctx.fillRect(-w / 2, -d / 2, w, d); dashed(ctx, px, () => rect(ctx, 0, 0, w, d, null, INK, px)); }
+}
+define('swing-bench', { 'swing-bench': { b: swingBench }, 'hammock-stand': { b: hammockStand }, 'hammock-trees': { b: hammockPosts }, 'hanging-chair': { b: hangingChair }, 'porch-swing': { b: porchSwing } }, swingSym);
+
+// ═════════════════════════ OUTDOOR LIGHT ═════════════════════════
+function buildLight(g, o) {
+  const { w, d, h, p, v } = o, on = p.on !== false && p.on !== 'false' && p.on !== 0, lc = C(p.lightColor, '#ffe2b0'), body = M(p.material, C(p.color, v === 'post-lantern' || v === 'lantern' ? '#26282b' : '#3a3d42'), 'metal');
+  const gm = on ? K.glow(lc, 1.5) : K.mat(C(p.color2, '#eeeae0'), { roughness: 0.5 }), R = Math.min(w, d) / 2;
+  let L = [0, h * 0.85, 0, 1, 4];
+  if (v === 'bollard') {
+    g.add(cylOn(R, R, 0.78 * h, body, 0, 0, 0, 16), ns(cylOn(R * 0.82, R * 0.82, 0.15 * h, gm, 0, 0.78 * h, 0, 16)), cylOn(R, R, 0.07 * h, body, 0, 0.93 * h, 0, 16));
+  } else if (v === 'spike-spot') {
+    const head = new THREE.Group(), r = Math.min(w / 2, h * 0.3);
+    head.add(mesh(zCylG(r, d * 0.7, 0, 0, 0, 14), body), ns(mesh(zCylG(r * 0.82, 0.006, 0, 0, d * 0.35 + 0.002, 14), gm)));
+    head.position.set(0, 0.62 * h, 0); head.rotation.x = -0.6;
+    g.add(head, cylOn(0.008, 0.004, 0.5 * h, body, 0, 0, 0, 6), box(0.02, 0.12 * h, 0.02, body, 0, 0.5 * h, 0)); L = [0, 0.8 * h, d * 0.3, 0.8, 4];
+  } else if (v === 'post-lantern' || v === 'lantern') {
+    const y0 = v === 'lantern' ? 0 : 0.8 * h, lh = h - y0, hw = w / 2, hd = d / 2, fr = [];
+    if (v === 'post-lantern') g.add(cylOn(Math.min(0.09, R), Math.min(0.09, R), 0.03, body, 0, 0, 0, 14), cylOn(0.03, 0.04, y0 - 0.03, body, 0, 0.03, 0, 12));
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) fr.push([[sx * hw * 0.62, y0 + 0.08 * lh, sz * hd * 0.62], [sx * hw * 0.82, y0 + 0.66 * lh, sz * hd * 0.82]]);
+    g.add(rods(fr, Math.min(0.012, R * 0.08), body, 4), mesh(taperG(w * 0.5, d * 0.5, w * 0.66, d * 0.66, 0.08 * lh, 0, y0), body), mesh(taperG(w, d, w * 0.16, d * 0.16, 0.22 * lh, 0, y0 + 0.66 * lh), body));
+    g.add(mesh(torusG(Math.min(0.5 * R, 0.06 * lh + 0.01), Math.min(0.006, R * 0.06), 'xy', 0, h - 0.06 * lh - 0.01, 0, 12, 4), body));
+    g.add(ns(mesh(taperG(w * 0.6, d * 0.6, w * 0.8, d * 0.8, 0.58 * lh, 0, y0 + 0.08 * lh), clear('#e6eef0', 0.22))), ns(v === 'lantern' ? cylOn(R * 0.28, R * 0.28, 0.3 * lh, gm, 0, y0 + 0.08 * lh, 0, 10) : sphere(Math.min(R * 0.4, 0.06), gm, 0, y0 + 0.36 * lh, 0, 10, 8)));
+    L = [0, y0 + 0.4 * lh, 0, v === 'lantern' ? 0.5 : 1.3, v === 'lantern' ? 3 : 6];
+  } else if (v === 'string') {
+    const pr = Math.min(0.022, d / 2), px_ = w / 2 - Math.max(d / 2, pr), span = 2 * px_, sag = Math.min(0.1 * span, 0.3 * h), yy = (t) => h - 0.04 - sag * (1 - (2 * t - 1) ** 2), wire = [], bulbs = [], sock = [];
+    g.add(merge([cylG(pr, pr, h, -px_, h / 2, 0, 8), cylG(pr, pr, h, px_, h / 2, 0, 8), cylG(d / 2, d / 2, 0.02, -px_, 0.01, 0, 12), cylG(d / 2, d / 2, 0.02, px_, 0.01, 0, 12)], body));
+    for (let i = 0; i < 16; i++) wire.push([[lerp(-px_, px_, i / 16), yy(i / 16), 0], [lerp(-px_, px_, (i + 1) / 16), yy((i + 1) / 16), 0]]);
+    const n = Math.round(num(p.count, Math.round(span / 0.35), 2, 60)), br = clamp(span / n * 0.12, 0.012, 0.03);
+    for (let i = 0; i < n; i++) { const t = (i + 0.5) / n, x = lerp(-px_, px_, t); sock.push(cylG(br * 0.45, br * 0.45, br, x, yy(t) - br * 0.5, 0, 6)); bulbs.push(new THREE.SphereGeometry(br, 8, 6).translate(x, yy(t) - br * 1.7, 0)); }
+    g.add(rods(wire, 0.003, dark(), 3), merge(sock, dark()), ns(merge(bulbs, gm))); L = [0, h - sag - 0.15, 0, 1.4, 7];
+  } else if (v === 'wall' || v === 'step') {
+    const bz = v === 'wall' ? 0.15 : 0.5;
+    g.add(box(w * (v === 'wall' ? 0.7 : 1), h * (v === 'wall' ? 0.8 : 1), d * bz, body, 0, h / 2, -d / 2 + d * bz / 2));
+    if (v === 'wall') g.add(box(w, h, d * 0.85, body, 0, h / 2, d * 0.075), ns(boxes([[w * 0.7, 0.003, d * 0.6, 0, h + 0.0005, d * 0.08], [w * 0.7, 0.003, d * 0.6, 0, -0.0005, d * 0.08]], gm)));
+    else g.add(ns(box(w * 0.8, h * 0.4, 0.002, gm, 0, h * 0.4, 0.001)), boxes([0, 1, 2].map((i) => [w * 0.86, h * 0.07, d * 0.5, 0, h * (0.25 + i * 0.16), d * 0.25, 0.5]), body), boxes([[w, h * 0.12, d * 0.5, 0, h * 0.94, d * 0.25], [w, h * 0.12, d * 0.5, 0, h * 0.06, d * 0.25], [w * 0.08, h, d * 0.5, w * 0.46, h / 2, d * 0.25], [w * 0.08, h, d * 0.5, -w * 0.46, h / 2, d * 0.25]], body));
+    L = [0, h / 2, d, 0.7, 3.5];
+  } else if (v === 'solar-path') {
+    g.add(cylOn(0.009, 0.005, 0.56 * h, body, 0, 0, 0, 6), ns(cylOn(R * 0.72, R * 0.6, 0.3 * h, on ? gm : clear('#eef2f2', 0.5), 0, 0.56 * h, 0, 12)), cylOn(R, R, 0.1 * h, body, 0, 0.86 * h, 0, 14), box(R * 1.1, 0.04 * h, R * 1.1, K.mat('#1c2a44', { roughness: 0.2, metalness: 0.4 }), 0, 0.98 * h, 0)); L = [0, 0.7 * h, 0, 0.5, 2.5];
+  } else if (v === 'flood') {
+    const head = new THREE.Group();
+    head.add(box(w, 0.62 * h, d * 0.42, body, 0, 0, 0), ns(box(w * 0.88, 0.5 * h, 0.004, gm, 0, 0, d * 0.21 + 0.002)), boxes([0, 1, 2, 3, 4].map((i) => [w * 0.8, 0.012, d * 0.1, 0, lerp(-0.22, 0.22, i / 4) * h, -d * 0.25]), body));
+    head.position.set(0, 0.6 * h, 0); head.rotation.x = -0.35;
+    g.add(head, box(w * 0.6, 0.02, d * 0.7, body, 0, 0.01, 0), boxes([[0.012, 0.6 * h, 0.03, w / 2 + 0.006, 0.3 * h, 0], [0.012, 0.6 * h, 0.03, -w / 2 - 0.006, 0.3 * h, 0], [w + 0.024, 0.012, 0.03, 0, 0.026, 0]], body)); L = [0, 0.7 * h, d, 1.6, 8];
+  } else {
+    const sg = new THREE.SphereGeometry(0.5, 22, 14); sg.scale(w, 0.95 * h, d); sg.translate(0, 0.05 * h + 0.475 * h, 0);
+    g.add(ns(mesh(sg, on ? K.glow(lc, 1.1) : K.mat('#f1efe8', { roughness: 0.4 }))), cylOn(R * 0.45, R * 0.5, 0.08 * h, body, 0, 0, 0, 14)); L = [0, h * 0.5, 0, 1.2, 5];
+  }
+  if (on) g.add(K.lampLight(lc, L[3], L[4], L[0], L[1], L[2]));
+}
+function lightSym(ctx, { w, d, p, px, v }) {
+  const on = p.on !== false, col = C(p.color, '#3a3d42'), lc = C(p.lightColor, '#ffe2b0'), R = Math.max(Math.min(w, d) / 2, 2.5 * px);
+  if (v === 'string') {
+    const x = w / 2 - d / 2, n = Math.round(num(p.count, Math.round(2 * x / 35), 2, 60)), r = Math.max(1.2 * px, Math.min(4, x / n * 0.6));
+    line(ctx, -x, 0, x, 0, INK, px);
+    for (let i = 0; i < n; i++) circ(ctx, lerp(-x, x, (i + 0.5) / n), 0, r, on ? '#ffd27a' : '#eeeae0', INK, px * 0.6);
+    for (const s of [-1, 1]) circ(ctx, s * x, 0, Math.max(d / 2, 2 * px), K.tint(col, 0.2), INK, px);
+    return;
+  }
+  if (on) { const gr = ctx.createRadialGradient(0, 0, R * 0.5, 0, 0, R * 2.4); gr.addColorStop(0, rgba(lc, 0.55)); gr.addColorStop(1, rgba(lc, 0)); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(0, 0, R * 2.4, 0, TAU); ctx.fill(); }
+  if (v === 'wall' || v === 'step' || v === 'flood' || v === 'lantern' || v === 'post-lantern') rect(ctx, 0, 0, Math.max(w, 4 * px), Math.max(d, 3 * px), K.tint(col, 0.35), INK, px, 1);
+  else circ(ctx, 0, 0, R, K.tint(col, 0.35), INK, px);
+  circ(ctx, 0, 0, Math.max(R * 0.4, 1.2 * px), on ? '#ffd27a' : '#eeeae0', INK, px * 0.7);
+}
+define('outdoor-light', Object.fromEntries(['bollard', 'spike-spot', 'post-lantern', 'string', 'wall', 'step', 'solar-path', 'flood', 'lantern', 'globe'].map((k) => [k, { b: buildLight }])), lightSym);

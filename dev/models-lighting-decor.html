@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Models — lighting &amp; décor (contact sheet)</title>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three/three.module.min.js", "three/addons/": "../vendor/three/addons/" } }
+</script>
+<style>
+  body { margin: 0; padding: 14px 18px 40px; font: 12px/1.35 system-ui, sans-serif; background: #eceae6; color: #2a2b2e; }
+  h1 { font-size: 17px; margin: 0 0 4px; } h2 { font-size: 14px; margin: 20px 0 6px; text-transform: uppercase; letter-spacing: .06em; }
+  p.hint { margin: 0 0 8px; color: #666; }
+  .grid { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cell { background: #fff; border-radius: 6px; padding: 4px; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .cell canvas { display: block; border-radius: 4px; }
+  .cell .lb { max-width: 230px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 3px 2px 0; color: #444; }
+  .cell.err .lb { color: #b00020; white-space: normal; }
+  #status { position: fixed; right: 12px; top: 8px; background: #2a2b2e; color: #fff; padding: 4px 10px; border-radius: 12px; }
+</style>
+</head>
+<body>
+<h1>Lighting &amp; décor models</h1>
+<p class="hint">?type=plant,vase limits the sheet · ?mode=3d|2d · ?size=230 tile size · <code>await window.__runTests()</code> runs the bounding-box / robustness assertions.</p>
+<div id="status">loading…</div>
+<div id="root"></div>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { getModel, buildModel } from '../src/models/registry.js';
+import { MODEL_TYPES } from '../src/models/types.js';
+import '../src/models/lighting-decor.js';
+
+const V = (label, w, d, h, params = {}) => ({ label, w, d, h, params });
+const SPECIES = ['monstera', 'ficus', 'fiddle-leaf', 'palm', 'snake', 'pothos', 'succulent', 'cactus', 'olive', 'fern', 'orchid', 'herbs', 'bamboo', 'rubber', 'zz', 'dracaena', 'peace-lily'];
+const PLANT_SIZE = { monstera: [70, 70, 90], ficus: [60, 60, 150], 'fiddle-leaf': [55, 55, 150], palm: [90, 90, 160], snake: [30, 30, 80], pothos: [40, 40, 110], succulent: [14, 14, 11], cactus: [20, 20, 40], olive: [60, 60, 170], fern: [60, 60, 50], orchid: [30, 30, 55], herbs: [16, 16, 24], bamboo: [45, 45, 180], rubber: [55, 55, 130], zz: [50, 50, 75], dracaena: [60, 60, 170], 'peace-lily': [50, 50, 65] };
+const POTS = ['ceramic', 'terracotta', 'basket', 'concrete', 'metal', 'plastic'];
+
+const SHEET = {
+  'floor-lamp': [
+    V('shade', 40, 40, 160), V('arc 170×40', 170, 40, 200, { variant: 'arc', color: 'brass' }), V('arc along depth', 40, 120, 190, { variant: 'arc' }),
+    V('tripod', 55, 55, 150, { variant: 'tripod' }), V('reading', 28, 55, 150, { variant: 'reading' }), V('torchiere', 30, 30, 180, { variant: 'torchiere', color: '#8b7a5c' }),
+    V('paper', 35, 35, 120, { variant: 'paper' }), V('globe', 28, 28, 150, { variant: 'globe', color: 'brass' }), V('shade, off, navy', 45, 45, 165, { on: false, shade: '#34465c', color: 'brass' }),
+  ],
+  'table-lamp': [
+    V('shade', 28, 28, 45), V('dome', 25, 25, 35, { variant: 'dome', color: '#b4543a' }), V('globe', 20, 20, 28, { variant: 'globe' }), V('desk', 16, 40, 45, { variant: 'desk' }),
+    V('mushroom', 25, 25, 32, { variant: 'mushroom', color: '#d98a4a' }), V('lantern', 16, 16, 35, { variant: 'lantern' }), V('shade blue/off', 32, 32, 55, { color: '#4f6d8f', on: false }),
+  ],
+  pendant: [
+    V('dome', 45, 45, 120), V('globe', 30, 30, 100, { variant: 'globe' }), V('cone', 35, 35, 110, { variant: 'cone', color: '#8a9a7b' }), V('cylinder', 12, 12, 120, { variant: 'cylinder', color: 'brass' }),
+    V('rattan', 55, 55, 130, { variant: 'rattan' }), V('linear ×3', 120, 25, 110, { variant: 'linear', count: 3 }), V('linear ×5', 150, 18, 100, { variant: 'linear', count: 5, color: 'brass' }),
+    V('cluster ×5', 50, 50, 120, { variant: 'cluster' }), V('cluster ×9', 70, 70, 150, { variant: 'cluster', count: 9 }), V('chandelier', 70, 70, 100, { variant: 'chandelier' }),
+    V('sputnik', 80, 80, 110, { variant: 'sputnik' }), V('paper', 60, 60, 120, { variant: 'paper' }), V('drum', 50, 50, 90, { variant: 'drum', shade: '#d9cdb8' }),
+    V('ring', 80, 80, 100, { variant: 'ring' }), V('dome, drop 40', 40, 40, 70, { drop: 40, on: false }),
+  ],
+  'ceiling-light': [
+    V('flush', 40, 40, 10), V('flush rect', 60, 30, 8), V('semi-flush', 40, 40, 25, { variant: 'semi-flush' }), V('spot ×3', 60, 10, 15, { variant: 'spot', count: 3 }),
+    V('spot ×1', 12, 12, 14, { variant: 'spot', count: 1 }), V('track ×4', 150, 8, 18, { variant: 'track', count: 4 }), V('panel 60', 60, 60, 4, { variant: 'panel' }),
+    V('panel 120×30', 120, 30, 5, { variant: 'panel' }), V('downlight', 10, 10, 3, { variant: 'downlight' }), V('downlights ×4 row', 180, 10, 2, { variant: 'downlight', count: 4 }),
+    V('downlights grid', 100, 100, 2, { variant: 'downlight' }),
+  ],
+  'wall-light': [
+    V('sconce', 15, 20, 28), V('up-down', 10, 12, 25, { variant: 'up-down' }), V('up-down box', 20, 8, 12, { variant: 'up-down' }), V('swing-arm', 35, 45, 22, { variant: 'swing-arm', color: 'brass' }),
+    V('picture', 50, 18, 12, { variant: 'picture', color: 'brass' }), V('bulkhead oval', 16, 10, 28, { variant: 'bulkhead' }), V('bulkhead round', 22, 9, 22, { variant: 'bulkhead', color: '#f1f0ec' }),
+    V('lantern', 16, 20, 35, { variant: 'lantern' }), V('strip', 60, 4, 6, { variant: 'strip' }), V('strip vertical', 5, 4, 80, { variant: 'strip' }),
+  ],
+  'ceiling-fan': [
+    V('modern', 132, 132, 40), V('classic + light', 132, 132, 45, { variant: 'classic' }), V('industrial', 142, 142, 60, { variant: 'industrial' }), V('tropical', 132, 132, 45, { variant: 'tropical' }),
+    V('modern 4 + light', 107, 107, 32, { blades: 4, light: true, color: '#2b2d31', color2: '#2b2d31' }), V('classic 6, white', 122, 122, 40, { variant: 'classic', blades: 6, color: '#f1efea', color2: '#f1efea', light: false }),
+  ],
+  rug: [
+    V('plain', 200, 300, 1.5), V('border', 200, 300, 1.5, { pattern: 'border' }), V('stripes', 160, 230, 1, { pattern: 'stripes' }), V('geometric', 160, 230, 1.5, { pattern: 'geometric' }),
+    V('persian + fringe', 200, 300, 1.5, { pattern: 'persian', fringe: true }), V('berber + fringe', 160, 230, 2.5, { pattern: 'berber', fringe: true }), V('checker', 140, 200, 1, { pattern: 'checker' }),
+    V('abstract', 200, 290, 1.5, { pattern: 'abstract' }), V('jute round', 150, 150, 1.5, { shape: 'round', pattern: 'jute' }), V('shaggy', 160, 230, 4, { pattern: 'shaggy' }),
+    V('runner', 250, 80, 1, { shape: 'runner', fringe: true, color: '#b9c2b4', color2: '#48584c' }), V('oval border', 230, 160, 1.5, { shape: 'oval', pattern: 'border' }), V('hide', 180, 200, 0.8, { shape: 'hide' }),
+    V('round persian', 200, 200, 1.5, { shape: 'round', pattern: 'persian', color: '#2f4858', color2: '#8e3b32' }),
+  ],
+  'wall-art': [
+    V('canvas', 70, 3, 100), V('canvas wide', 120, 3, 80, { palette: ['#2f4858', '#c98b6b', '#e9d8b8'] }), V('framed', 50, 3, 70, { variant: 'framed' }), V('framed oak', 100, 3, 70, { variant: 'framed', frame: '#c8a476', material: 'wood' }),
+    V('gallery ×6', 180, 3, 120, { variant: 'gallery' }), V('gallery ×3', 150, 3, 60, { variant: 'gallery', count: 3, frame: '#f4f1ea' }), V('clock', 40, 5, 40, { variant: 'clock' }),
+    V('macramé', 60, 3, 90, { variant: 'macrame' }), V('metal', 100, 4, 60, { variant: 'metal' }), V('shelf-art', 100, 10, 45, { variant: 'shelf-art' }), V('photo', 40, 3, 50, { variant: 'photo' }),
+  ],
+  curtain: [
+    V('curtain open .5', 200, 12, 260), V('curtain closed', 200, 12, 260, { open: 0, color: '#8a9a8b' }), V('curtain open 1', 240, 12, 260, { open: 1, color: '#c9b8a0', rod: 'brass' }), V('sheer', 200, 10, 260, { variant: 'sheer' }),
+    V('roller .35', 120, 8, 160, { variant: 'roller' }), V('roller down', 120, 8, 160, { variant: 'roller', open: 0, color: '#6f7f8c' }), V('venetian', 120, 5, 150, { variant: 'venetian' }),
+    V('venetian wood .5', 120, 5, 150, { variant: 'venetian', open: 0.5, material: 'wood', color: 'oak' }), V('roman .35', 100, 6, 150, { variant: 'roman' }), V('roman down', 100, 6, 150, { variant: 'roman', open: 0, color: '#b9a98c' }),
+    V('vertical', 200, 10, 240, { variant: 'vertical' }), V('vertical open .7', 200, 10, 240, { variant: 'vertical', open: 0.7 }), V('shutter', 120, 5, 140, { variant: 'shutter' }), V('shutter closed', 160, 4, 220, { variant: 'shutter', open: 0 }),
+  ],
+  plant: [
+    ...SPECIES.map((s, i) => V(`${s} / ${POTS[i % 6]}`, ...PLANT_SIZE[s], { species: s, pot: POTS[i % 6] })),
+    V('herbs trough', 60, 18, 30, { species: 'herbs', pot: 'terracotta' }), V('monstera small', 35, 35, 45, { species: 'monstera', pot: 'basket' }),
+    V('palm tall', 110, 110, 220, { species: 'palm', pot: 'concrete' }), V('snake small', 18, 18, 40, { species: 'snake', potColor: '#2b2d31' }), V('pothos small', 25, 25, 25, { species: 'pothos', pot: 'ceramic' }),
+  ],
+  vase: [
+    V('vase', 18, 18, 30), V('vase + flowers', 25, 25, 45, { flowers: true, color: '#8fa3a8' }), V('vase + branches', 30, 30, 70, { flowers: 'branches', style: 'boho', color: '#c98b6b' }),
+    V('glass vase', 14, 14, 26, { material: 'glass', style: 'modern' }), V('bowl', 30, 30, 9, { variant: 'bowl' }), V('bowl + fruit', 32, 32, 12, { variant: 'bowl', flowers: true, material: 'wood' }),
+    V('candles', 18, 18, 22, { variant: 'candle' }), V('candle', 7, 7, 15, { variant: 'candle' }), V('sculpture ring', 22, 8, 32, { variant: 'sculpture', style: 'modern' }), V('sculpture stones', 16, 16, 30, { variant: 'sculpture', style: 'classic' }),
+    V('books', 24, 17, 12, { variant: 'books' }), V('tray', 40, 28, 6, { variant: 'tray' }), V('basket', 35, 35, 32, { variant: 'basket' }), V('lantern', 14, 14, 30, { variant: 'lantern' }),
+    V('diffuser', 9, 9, 24, { variant: 'diffuser' }), V('frame', 18, 8, 24, { variant: 'frame' }),
+  ],
+  cushion: [
+    V('cushion', 45, 45, 12), V('cushion stripes', 50, 50, 14, { pattern: 'stripes', color: '#e7dfd0', color2: '#4f6d8f' }), V('lumbar geometric', 60, 35, 12, { pattern: 'geometric', color: '#c98b6b', color2: '#f1e7d6' }),
+    V('throw', 50, 35, 9, { variant: 'throw', color: '#8a9a8b' }), V('throw stripes', 50, 35, 9, { variant: 'throw', pattern: 'stripes', color: '#e7dfd0', color2: '#b65e45' }), V('bolster', 50, 18, 18, { variant: 'bolster', color: '#5c6b5a' }),
+    V('floor cushion', 70, 70, 18, { variant: 'floor-cushion', color: '#b9a98c' }), V('duvet set 160', 160, 200, 16, { variant: 'duvet-set' }), V('duvet set 90', 90, 200, 14, { variant: 'duvet-set', color: '#8fa3b5', color2: '#f1efe9' }),
+  ],
+};
+
+const q = new URLSearchParams(location.search);
+const only = (q.get('type') || '').split(',').filter(Boolean), mode = q.get('mode') || 'all', TILE = Number(q.get('size')) || 230;
+const status = document.getElementById('status'), root = document.getElementById('root');
+const item = (type, v, i) => ({ id: `${type}-${i}`, type, w: v.w, d: v.d, h: v.h, params: v.params });
+
+// ───────── 3D ─────────
+const RS = 330;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(RS, RS); renderer.setPixelRatio(1);
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#e9e6e0');
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.55;
+scene.add(new THREE.HemisphereLight('#ffffff', '#c9c2b6', 0.9));
+const sun = new THREE.DirectionalLight('#fff4e2', 2.2);
+sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.01; sun.shadow.radius = 5;
+scene.add(sun, sun.target);
+const camera = new THREE.PerspectiveCamera(28, 1, 0.01, 100);
+const standMat = new THREE.MeshStandardMaterial({ color: '#f1eee8', roughness: 0.95 });
+const floorMat = new THREE.MeshStandardMaterial({ color: '#b89b78', roughness: 0.8 });
+
+function render3d(type, v, i, canvas) {
+  const T = MODEL_TYPES[type], pl = T.placement, w = v.w / 100, d = v.d / 100, h = v.h / 100;
+  const def = getModel(type);
+  let obj;
+  try { obj = def.build({ w, d, h, p: v.params, item: item(type, v, i) }); } catch (e) { console.error(type, v.label, e); return String(e.message || e); }
+  obj.traverse((o) => { if (o.isMesh) { if (o.userData.noShadow !== true) o.castShadow = true; o.receiveShadow = true; } });
+  const stage = new THREE.Group(), R = Math.hypot(w, d, h) / 2, pad = Math.max(0.25, R * 0.5);
+  let elev = 0;
+  if (pl === 'ceiling') {
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(w + pad * 2, 0.03, d + pad * 2), standMat); slab.position.y = h + 0.015; slab.receiveShadow = true; stage.add(slab);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(w + pad * 2, h + pad, 0.03), standMat); back.position.set(0, (h + pad) / 2 - pad + 0.03, -d / 2 - pad); back.receiveShadow = true; stage.add(back);
+  } else {
+    if (pl === 'wall') { elev = Math.min(0.3, h * 0.25); const wall = new THREE.Mesh(new THREE.BoxGeometry(w + pad * 2, h + elev + pad, 0.03), standMat); wall.position.set(0, (h + elev + pad) / 2, -d / 2 - 0.015); wall.receiveShadow = true; stage.add(wall); }
+    const fl = new THREE.Mesh(new THREE.BoxGeometry(w + pad * 2 + 1, 0.02, d + pad * 2 + 1), type === 'rug' || type === 'cushion' ? floorMat : standMat); fl.position.y = -0.01; fl.receiveShadow = true; stage.add(fl);
+  }
+  obj.position.y = elev; stage.add(obj); scene.add(stage);
+  const flat = h < Math.max(w, d) * 0.12, dir = pl === 'ceiling' ? new THREE.Vector3(0.55, -0.16, 1) : flat ? new THREE.Vector3(0.35, 0.95, 0.75) : new THREE.Vector3(0.6, 0.42, 1);
+  const c = new THREE.Vector3(0, elev + h / 2, 0), dist = (R * 1.12) / Math.sin(THREE.MathUtils.degToRad(14));
+  camera.position.copy(c).addScaledVector(dir.normalize(), dist); camera.near = dist * 0.05; camera.far = dist * 4; camera.lookAt(c); camera.updateProjectionMatrix();
+  sun.position.copy(c).add(new THREE.Vector3(-0.7, pl === 'ceiling' ? 0.35 : 1.25, 0.9).multiplyScalar(R * 3 + 1)); sun.target.position.copy(c);
+  const sc = sun.shadow.camera; sc.left = sc.bottom = -R * 1.6; sc.right = sc.top = R * 1.6; sc.near = 0.05; sc.far = R * 8 + 4; sc.updateProjectionMatrix();
+  renderer.render(scene, camera);
+  canvas.getContext('2d').drawImage(renderer.domElement, 0, 0, canvas.width, canvas.height);
+  scene.remove(stage);
+  let tris = 0, meshes = 0;
+  obj.traverse((o) => { if (o.isMesh) { meshes++; const g = o.geometry; tris += (g.index ? g.index.count : g.attributes.position.count) / 3; if (!o.geometry.userData.shared) o.geometry.dispose(); } });
+  return { tris: Math.round(tris), meshes };
+}
+
+// ───────── 2D ─────────
+function render2d(type, v, i, canvas) {
+  const ctx = canvas.getContext('2d'), T = MODEL_TYPES[type], W = canvas.width, H = canvas.height, big = H, def = getModel(type);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+  const draw = (cx, cy, s) => {
+    ctx.save(); ctx.translate(cx, cy); ctx.scale(s, s);
+    if (T.placement === 'wall') { ctx.fillStyle = '#c9c5bd'; ctx.fillRect(-v.w / 2 - 12 / s, -v.d / 2 - 5 / s, v.w + 24 / s, 5 / s); }
+    try { def.draw2d(ctx, { w: v.w, d: v.d, h: v.h, p: v.params, px: 1 / s, item: item(type, v, i) }); } catch (e) { console.error('2d', type, v.label, e); ctx.restore(); return String(e.message || e); }
+    ctx.restore(); return null;
+  };
+  const m = Math.max(v.w, v.d), e1 = draw(big / 2, H / 2, Math.min((big - 24) / m, 7)), e2 = draw(big + (W - big) / 2, H / 2, Math.min(0.38, (W - big - 8) / m));
+  return e1 || e2;
+}
+
+function cell(parent, cw, ch, label) {
+  const c = document.createElement('div'); c.className = 'cell';
+  const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch; cv.style.width = cw + 'px'; cv.style.height = ch + 'px';
+  const lb = document.createElement('div'); lb.className = 'lb'; lb.textContent = label; lb.style.maxWidth = cw + 'px';
+  c.append(cv, lb); parent.append(c);
+  return { c, cv, lb };
+}
+
+async function main() {
+  const types = Object.keys(SHEET).filter((t) => !only.length || only.includes(t));
+  for (const type of types) {
+    for (const m of ['3d', '2d']) {
+      if (mode !== 'all' && mode !== m) continue;
+      const h2 = document.createElement('h2'); h2.textContent = `${type} — ${m.toUpperCase()}`; root.append(h2);
+      const grid = document.createElement('div'); grid.className = 'grid'; root.append(grid);
+      SHEET[type].forEach((v, i) => {
+        const size = `${v.w}×${v.d}×${v.h}`;
+        if (m === '3d') {
+          const { c, cv, lb } = cell(grid, TILE, TILE, '');
+          const r = render3d(type, v, i, cv);
+          if (typeof r === 'string') { c.classList.add('err'); lb.textContent = `${v.label}: ${r}`; } else lb.textContent = `${v.label} · ${size} · ${r.tris}▲ ${r.meshes}m`;
+        } else {
+          const { c, cv, lb } = cell(grid, 250, 150, `${v.label} · ${size}`);
+          const e = render2d(type, v, i, cv);
+          if (e) { c.classList.add('err'); lb.textContent = `${v.label}: ${e}`; }
+        }
+      });
+      status.textContent = `${type} ${m}`;
+      await new Promise((r) => setTimeout(r));
+    }
+  }
+  status.textContent = 'done'; document.body.dataset.ready = '1';
+}
+
+/** Headless assertions: bbox == w×d×h within 1 cm (lights excluded), nothing throws on {} / junk params / odd sizes. */
+window.__runTests = () => {
+  const junk = { variant: 42, species: null, shape: {}, pattern: [], pot: 3, color: 'zzz', color2: {}, color3: 12, material: 5, material2: 'unobtainium', style: 9, count: 'abc', open: 'x', on: 'no', shade: 7, lightColor: [], palette: 'x', blades: -4, drop: 'q', flowers: 'q', frame: 1, rod: {}, fringe: 'yes', light: 'maybe', potColor: 0, artificial: 'q' };
+  const sizes = [[5, 5, 5], [300, 20, 10], [20, 300, 400], [37, 91, 143]], fails = [], stats = {}, scratch = document.createElement('canvas').getContext('2d');
+  const lampTypes = ['floor-lamp', 'table-lamp', 'pendant', 'ceiling-light', 'wall-light'];
+  let n = 0;
+  for (const type of Object.keys(SHEET)) {
+    const def = getModel(type), T = MODEL_TYPES[type], st = stats[type] = { cases: 0, maxTris: 0, maxMeshes: 0, maxErrCm: 0 };
+    if (!def) { fails.push(`${type}: not registered`); continue; }
+    const cases = SHEET[type].map((v) => ({ ...v }));
+    cases.push({ label: '{}', ...T.size, params: {} }, { label: 'junk', ...T.size, params: junk }, { label: 'null params', ...T.size, params: null }, { label: 'on:false', ...T.size, params: { on: false } });
+    for (const [w, d, h] of sizes) for (const v of [SHEET[type][0], SHEET[type][SHEET[type].length - 1], { label: 'junk', params: junk }]) cases.push({ label: `${v.label} @${w}x${d}x${h}`, w, d, h, params: v.params });
+    for (const variantKey of ['variant', 'species', 'shape', 'pattern']) {
+      const spec = T.params[variantKey]; if (!spec) continue;
+      for (const m of spec.matchAll(/'([a-z-]+)'/g)) cases.push({ label: `${variantKey}=${m[1]}`, ...T.size, params: { [variantKey]: m[1] } }, { label: `${variantKey}=${m[1]} @60x25x45`, w: 60, d: 25, h: 45, params: { [variantKey]: m[1] } });
+    }
+    for (const v of cases) {
+      n++; st.cases++;
+      const tag = `${type} [${v.label}] ${v.w}×${v.d}×${v.h}`;
+      try {
+        const obj = def.build({ w: v.w / 100, d: v.d / 100, h: v.h / 100, p: v.params, item: { id: tag } });
+        obj.updateMatrixWorld(true);
+        const b = new THREE.Box3().setFromObject(obj, true), s = b.getSize(new THREE.Vector3());
+        const err = Math.max(Math.abs(s.x - v.w / 100), Math.abs(s.z - v.d / 100), Math.abs(s.y - v.h / 100), Math.abs(b.min.y), Math.abs(b.min.x + v.w / 200), Math.abs(b.min.z + v.d / 200)) * 100;
+        st.maxErrCm = Math.max(st.maxErrCm, err);
+        if (!(err <= 1)) fails.push(`${tag}: bbox off by ${err.toFixed(2)} cm (size ${(s.x * 100).toFixed(1)}×${(s.z * 100).toFixed(1)}×${(s.y * 100).toFixed(1)})`);
+        let tris = 0, meshes = 0, lights = 0, bad = 0;
+        obj.traverse((o) => {
+          if (o.isLight) lights++;
+          if (o.isMesh) { meshes++; const g = o.geometry; tris += (g.index ? g.index.count : g.attributes.position.count) / 3; const p = g.attributes.position.array; for (let k = 0; k < p.length; k++) if (!Number.isFinite(p[k])) { bad++; break; } g.dispose(); }
+        });
+        st.maxTris = Math.max(st.maxTris, Math.round(tris)); st.maxMeshes = Math.max(st.maxMeshes, meshes);
+        if (bad) fails.push(`${tag}: NaN vertices`);
+        if (lights > 1) fails.push(`${tag}: ${lights} lights`);
+        const off = v.params && v.params.on === false;
+        if (lampTypes.includes(type) && lights !== (off ? 0 : 1)) fails.push(`${tag}: expected ${off ? 0 : 1} light, got ${lights}`);
+      } catch (e) { fails.push(`${tag}: build threw ${e.message}`); }
+      try { scratch.save(); def.draw2d(scratch, { w: v.w, d: v.d, h: v.h, p: v.params, px: 0.5, item: { id: tag } }); scratch.restore(); } catch (e) { fails.push(`${tag}: draw2d threw ${e.message}`); }
+    }
+    try { def.build({}); def.build(); def.draw2d(scratch, {}); def.draw2d(scratch); buildModel({ type, w: 0, d: -3, h: NaN }); } catch (e) { fails.push(`${type}: threw on empty args: ${e.message}`); }
+  }
+  return { cases: n, fails, stats };
+};
+
+main().catch((e) => { status.textContent = 'ERROR ' + e.message; console.error(e); document.body.dataset.ready = '1'; });
+</script>
+</body>
+</html>
