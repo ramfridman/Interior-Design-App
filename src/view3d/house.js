@@ -12,12 +12,24 @@
  *     opening (→ reveal, split at the frame plane into a room-side and an outdoor-side part);
  *   • floors, ceilings, door thresholds, skirting boards, wall caps and the roof outline come from the same grid.
  * Collinear faces are merged into long quads; UVs are metres (u along the wall, v = height) so finishes are to scale.
+ *
+ * Sun study
+ * ---------
+ * Direct sun may enter a room only through its real openings — also while the roof is hidden or the walls are cut
+ * away for the dollhouse view. With `setSunStudy(true)` the hidden parts keep casting: an invisible copy of the roof
+ * slab / parapet, and (cut-away) invisible full-height walls, lintels and window / door frames. They are drawn with
+ * `colorWrite: false, depthWrite: false`, so they exist only in the sun's shadow map.
+ *
+ * Live plan edits
+ * ---------------
+ * Nothing derived from the plan outlives `rebuildPlan()`: grid, opening sides, footprint, floors, ceilings, shell,
+ * roof and openings are rebuilt from `ctx.plan` as it is at that moment and swapped in within the same frame.
  */
 import * as THREE from 'three';
 import { resolveFinish } from '../core/finishes.js';
 import { pointInPolygon } from '../core/geometry.js';
 import { floorMaterial, wallMaterial, surfaceMaterial, disposeMaterials } from './textures.js';
-import { Soup, buildOpenings, openingFrame } from './openings.js';
+import { Soup, buildOpenings, openingFrame, mergeSoups, casterMaterial, casterMesh } from './openings.js';
 
 const OUT = 0, WALL = 1, OPENING = 2, ROOM = 3;
 const SKIRT_H = 0.07, SKIRT_T = 0.012;        // skirting board (m)
@@ -338,24 +350,32 @@ function buildRoofSoups(outline, H, slab, parapet) {
 /**
  * Build the house shell.
  * @param {{ store, plan, catalog, models }} ctx
- * @returns {{ group: THREE.Group, update(): void, setRoofVisible(v: boolean): void, setCutaway(heightCm: number|null): void,
- *             setDoorsOpen(v: boolean): void, floorMeshes: THREE.Object3D[], dispose(): void }}
+ * @returns {{ group: THREE.Group, update(): void, rebuildPlan(): number, setRoofVisible(v: boolean): void,
+ *             setCutaway(heightCm: number|null): void, setDoorsOpen(v: boolean): void, setSunStudy(v: boolean): void,
+ *             floorMeshes: THREE.Object3D[], dispose(): void }}
  */
 export function buildHouse(ctx) {
   const { store, plan } = ctx;
   const group = new THREE.Group(); group.name = 'house';
   const shell = new THREE.Group(); shell.name = 'house-shell';
   const roof = new THREE.Group(); roof.name = 'house-roof';
-  group.add(shell, roof);
+  const casters = new THREE.Group(); casters.name = 'house-sun-casters';   // shadow-only stand-ins for hidden roof / cut walls
+  group.add(shell, roof, casters);
 
-  const grid = makeGrid(plan);
-  const sides = openingSides(grid, plan);
-  const outline = traceFootprint(grid)[0] || null;
-  const dryRooms = new Set(plan.rooms.filter((r) => !r.wet).map((r) => r.id));
+  // everything derived from the plan — refreshed by readPlan(), never kept across a plan edit
+  let grid, sides, outline, dryRooms;
+  function readPlan() {
+    grid = makeGrid(plan);
+    sides = openingSides(grid, plan);
+    outline = traceFootprint(grid)[0] || null;
+    dryRooms = new Set(plan.rooms.filter((r) => !r.wet).map((r) => r.id));
+  }
+  readPlan();
   const plinthDepth = (plan.heights.floorAboveGround || 15) / 100 + 0.12;
 
   const state = {
     H: 0, cut: null, doorsOpen: false, roofVisible: !!(store.ui && store.ui.showRoof),
+    sunStudy: !store.ui || store.ui.sunStudy !== false,
     exteriorColor: null, frameColor: null,
   };
   const own = {                                                         // materials owned (and disposed) by this module
@@ -365,6 +385,8 @@ export function buildHouse(ctx) {
     ceiling: new THREE.MeshStandardMaterial({ color: '#fbf8f2', roughness: 0.96 }),
     coping: new THREE.MeshStandardMaterial({ color: '#dcd8d0', roughness: 0.85 }),
     shade: new THREE.MeshBasicMaterial({ color: '#ffffff', vertexColors: true, transparent: true, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }),
+    caster: casterMaterial(),                                           // cut-away walls: back faces, exactly like the visible shell
+    roofCaster: Object.assign(casterMaterial(), { shadowSide: THREE.DoubleSide }),   // hidden roof: both faces, so nothing touching the ceiling plane is lit
   };
   const meshes = new Map();
 
@@ -388,14 +410,25 @@ export function buildHouse(ctx) {
 
   // floors + ceilings: geometry depends on the plan only
   const floorMeshes = [];
-  const fc = buildFloorSoups(grid, plan);
-  for (const room of plan.rooms) {
-    const mesh = setMesh('floor:' + room.id, fc.floors.get(room.id), shell, false, true);
-    if (mesh) { mesh.userData.spaceId = room.id; floorMeshes.push(mesh); }
+  function rebuildFloors() {
+    const fc = buildFloorSoups(grid, plan);
+    const ids = new Set(plan.rooms.map((r) => r.id));
+    for (const [name, mesh] of [...meshes]) {                           // rooms that no longer exist
+      if (!name.startsWith('floor:') || ids.has(name.slice(6))) continue;
+      mesh.geometry.dispose(); mesh.removeFromParent(); meshes.delete(name);
+    }
+    floorMeshes.length = 0;                                             // same array object: callers may hold on to it
+    for (const room of plan.rooms) {
+      const mesh = setMesh('floor:' + room.id, fc.floors.get(room.id), shell, false, true);
+      if (mesh) { mesh.userData.spaceId = room.id; if (mesh.visible) floorMeshes.push(mesh); }
+    }
+    const ceilingMesh = setMesh('ceilings', fc.ceilings, roof, false, false);
+    if (ceilingMesh) ceilingMesh.material = own.ceiling;
   }
-  const ceilingMesh = setMesh('ceilings', fc.ceilings, roof, false, false);
-  if (ceilingMesh) ceilingMesh.material = own.ceiling;
+  rebuildFloors();
 
+  /** Shadow casting of the visible shell: off while invisible full-height walls cast in its place. */
+  const wallsCast = () => !(state.sunStudy && state.cut != null);
   function rebuildShell() {
     const { soups, aoFloor, aoCeiling } = buildShellSoups(grid, plan, sides, topH(), state.H, plinthDepth, dryRooms);
     for (const [name, strips, parent] of [['ao:floor', aoFloor, shell], ['ao:ceiling', aoCeiling, roof]]) {
@@ -403,18 +436,53 @@ export function buildHouse(ctx) {
       if (mesh) { mesh.material = own.shade; mesh.renderOrder = 1; }
     }
     for (const key of new Set([...soups.keys(), ...[...meshes.keys()].filter((n) => n.startsWith('wall:')).map((n) => n.slice(5))])) {
-      const mesh = setMesh('wall:' + key, soups.get(key), shell, true, true);
+      const mesh = setMesh('wall:' + key, soups.get(key), shell, wallsCast(), true);
       if (mesh && key === 'skirting') mesh.castShadow = false;
+      if (mesh && key === 'cap') mesh.receiveShadow = false;           // a section cut through solid wall: evenly lit, never patchy
     }
+    const rooms = new Set(plan.rooms.map((r) => 'wall:room:' + r.id));
+    for (const [name, mesh] of [...meshes]) {                           // finishes of rooms that no longer exist
+      if (!name.startsWith('wall:room:') || rooms.has(name) || mesh.visible) continue;
+      mesh.geometry.dispose(); mesh.removeFromParent(); meshes.delete(name);
+    }
+    wallCasterStale = true;
   }
   function rebuildRoof() {
     const r = buildRoofSoups(outline, state.H, (plan.heights.slab || 20) / 100, (plan.heights.parapet || 0) / 100);
     setMesh('roof:ext', r.ext, roof, true, true);
     setMesh('roof:top', r.top, roof, true, true);
     setMesh('roof:coping', r.coping, roof, true, true);
+    const ceilingMesh = meshes.get('ceilings');
     if (ceilingMesh) ceilingMesh.position.y = state.H - 0.002;
   }
-  const openingOpts = () => ({ ceilingH: state.H, cutH: state.cut == null ? null : topH(), doorsOpen: state.doorsOpen, frameColor: state.frameColor });
+  const openingOpts = () => ({ ceilingH: state.H, cutH: state.cut == null ? null : topH(), doorsOpen: state.doorsOpen, frameColor: state.frameColor, shadowFull: state.sunStudy });
+
+  // ── sun study: invisible shadow casters for whatever is hidden ──
+  const casterMeshes = new Map();
+  let wallCasterStale = true;
+  /** Create / refresh a shadow-only mesh; `geometry` null hides it. `shared` geometries belong to a visible mesh. */
+  function setCaster(name, geometry, shared) {
+    let mesh = casterMeshes.get(name);
+    if (!geometry) { if (mesh) mesh.visible = false; return; }
+    if (!mesh) { mesh = casterMesh('caster:' + name, geometry, shared ? own.roofCaster : own.caster); casterMeshes.set(name, mesh); casters.add(mesh); }
+    else if (mesh.geometry !== geometry) { if (!mesh.userData.shared) mesh.geometry.dispose(); mesh.geometry = geometry; }
+    mesh.userData.shared = shared; mesh.visible = true;
+  }
+  /** Keep the shadow-only copies in step with what is currently hidden. */
+  function syncCasters() {
+    const roofHidden = !(state.roofVisible && state.cut == null);
+    for (const name of ['roof:ext', 'roof:top', 'roof:coping']) {       // the roof's own geometry, re-used
+      const src = meshes.get(name);
+      setCaster(name, state.sunStudy && roofHidden && src && src.visible ? src.geometry : null, true);
+    }
+    const fullWalls = state.sunStudy && state.cut != null;
+    if (fullWalls && (wallCasterStale || !casterMeshes.get('walls'))) {
+      const { soups } = buildShellSoups(grid, plan, sides, state.H, state.H, plinthDepth, dryRooms);
+      setCaster('walls', mergeSoups([...soups].filter(([key]) => key !== 'skirting').map(([, soup]) => soup)), false);
+      wallCasterStale = false;
+    } else setCaster('walls', fullWalls ? casterMeshes.get('walls').geometry : null, false);
+    for (const [name, mesh] of meshes) if (name.startsWith('wall:') && name !== 'wall:skirting') mesh.castShadow = wallsCast();
+  }
 
   function applyMaterials() {
     const p = store.project || {};
@@ -434,6 +502,7 @@ export function buildHouse(ctx) {
     roof.visible = state.roofVisible && state.cut == null;
     const cap = meshes.get('wall:cap');                                 // hidden under the slab (its edge would show as a hairline)
     if (cap && cap.geometry.index.count) cap.visible = !roof.visible;
+    syncCasters();
   };
 
   state.H = ceilingH();
@@ -452,6 +521,21 @@ export function buildHouse(ctx) {
       if (H !== state.H) { state.H = H; rebuildShell(); rebuildRoof(); openings.rebuild(openingOpts()); }
       applyMaterials(); applyRoofVisibility();
     },
+    /**
+     * The plan was edited in place (walls / openings / rooms / outline replaced): rebuild every piece of geometry that
+     * derives from it. Roof, cut-away, open doors, sun study, finishes and colours are kept. Everything is built and
+     * swapped synchronously, so no frame ever shows a half-built house.
+     * @returns {number} milliseconds the rebuild took
+     */
+    rebuildPlan() {
+      const t0 = performance.now();
+      state.H = ceilingH();
+      readPlan();
+      rebuildFloors(); rebuildShell(); rebuildRoof();
+      openings.rebuild(openingOpts());
+      applyMaterials(); applyRoofVisibility();
+      return performance.now() - t0;
+    },
     /** Show / hide roof slab, parapet and room ceilings (always hidden while a cutaway is active). */
     setRoofVisible(v) { state.roofVisible = !!v; applyRoofVisibility(); },
     /** Limit wall / window / door heights (cm above the floor) for a dollhouse view; null restores full height. */
@@ -461,6 +545,16 @@ export function buildHouse(ctx) {
       state.cut = cut;
       rebuildShell(); openings.rebuild(openingOpts()); applyMaterials(); applyRoofVisibility();
     },
+    /**
+     * Sun study: true (default) = a hidden roof and cut-away walls still block the sun (invisible shadow casters), so
+     * rooms show the real sun patches; false = hidden parts cast nothing (evenly lit dollhouse).
+     */
+    setSunStudy(v) {
+      if (!!v === state.sunStudy) return;
+      state.sunStudy = !!v;
+      if (state.cut != null) openings.rebuild(openingOpts());
+      applyRoofVisibility();
+    },
     /** Open (≈ 85°, on the hinge, towards `swing`) or close all hinged doors; the terrace slider parks half open. */
     setDoorsOpen(v) {
       if (!!v === state.doorsOpen) return;
@@ -469,7 +563,8 @@ export function buildHouse(ctx) {
     },
     dispose() {
       for (const mesh of meshes.values()) mesh.geometry.dispose();
-      meshes.clear(); floorMeshes.length = 0;
+      for (const mesh of casterMeshes.values()) if (!mesh.userData.shared) mesh.geometry.dispose();
+      meshes.clear(); casterMeshes.clear(); floorMeshes.length = 0;
       openings.dispose();
       Object.values(own).forEach((m) => m.dispose());
       disposeMaterials();
