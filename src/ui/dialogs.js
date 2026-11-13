@@ -72,12 +72,12 @@ export function openDialog(o) {
   return { close, el: dialog, body };
 }
 
-/** Promise-based confirmation. Resolves true when confirmed. */
-export function confirmDialog({ title, message, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger = false }) {
+/** Promise-based confirmation. Resolves true when confirmed. `body` (nodes) replaces the plain `message` paragraph. */
+export function confirmDialog({ title, message, body, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger = false }) {
   return new Promise((resolve) => {
     let result = false;
     const dlg = openDialog({
-      title, size: 'sm', body: h('p', { class: 'dialog__text' }, message),
+      title, size: 'sm', body: body || h('p', { class: 'dialog__text' }, message),
       actions: [
         btn(cancelLabel, { variant: 'quiet', onClick: () => dlg.close() }),
         btn(confirmLabel, { variant: danger ? 'danger' : 'primary', onClick: () => { result = true; dlg.close(); } }),
@@ -92,19 +92,22 @@ let toastHost = null;
 /**
  * Show a short status message.
  * @param {string} message
- * @param {{ kind?: 'info'|'success'|'warn'|'error', duration?: number, action?: { label: string, fn: Function } }} [opts]
+ * @param {{ kind?: 'info'|'success'|'warn'|'error', level?: 'free'|'warn'|'permit'|'locked', duration?: number,
+ *           action?: { label: string, fn: Function } }} [opts]  `level` = structure level (see structure.js): the toast
+ *           carries that level's icon and colour instead of the kind's.
  */
 export function toast(message, opts = {}) {
   if (!toastHost || !toastHost.isConnected) toastHost = layer().appendChild(h('div', { class: 'toasts', role: 'status', 'aria-live': 'polite' }));
   const kind = opts.kind || 'info';
-  const glyph = { success: 'pass', warn: 'warn', error: 'fail', info: 'info' }[kind] || 'info';
-  const el = h('div', { class: `toast toast--${kind}` }, icon(glyph, { size: 16 }), h('span', { class: 'toast__msg' }, message),
+  const levelGlyph = { free: 'pass', warn: 'engineer', permit: 'permit', locked: 'lock' }[opts.level];
+  const glyph = levelGlyph || { success: 'pass', warn: 'warn', error: 'fail', info: 'info' }[kind] || 'info';
+  const el = h('div', { class: `toast toast--${kind}${levelGlyph ? ` toast--level toast--level-${opts.level}` : ''}` }, icon(glyph, { size: 16 }), h('span', { class: 'toast__msg' }, message),
     opts.action && h('button', { type: 'button', class: 'toast__action', onClick: () => { opts.action.fn(); dismiss(); } }, opts.action.label));
   let timer = 0;
   function dismiss() { clearTimeout(timer); el.classList.add('is-leaving'); setTimeout(() => el.remove(), 180); }
   toastHost.append(el);
   while (toastHost.children.length > 3) toastHost.firstChild.remove();
-  timer = setTimeout(dismiss, opts.duration || (opts.action ? 6000 : 3200));
+  timer = setTimeout(dismiss, opts.duration || (opts.action || levelGlyph ? 6000 : 3200));
   return dismiss;
 }
 

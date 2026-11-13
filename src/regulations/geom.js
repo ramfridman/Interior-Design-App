@@ -8,6 +8,23 @@ export const m = (cm, digits = 2) => (cm / 100).toFixed(digits);
 export const cmStr = (cm) => `${Math.round(cm)} cm`;
 export const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 
+const REV = new WeakMap();
+const REV_KEYS = ['walls', 'openings', 'rooms', 'wallOutline', 'outdoorAreas', 'site', 'bounds', 'heights', 'assumptions', 'meta'];
+/**
+ * Revision number of a plan, for caches. The `plan` object stays the same when the owner edits it — plan-edit.js
+ * REPLACES `plan.walls / openings / rooms / wallOutline` with new arrays — so everything cached "per plan" must be
+ * keyed on this number, which goes up whenever one of the plan's parts is a different object than last time.
+ * Costs ten identity comparisons; never changes while nothing was replaced.
+ */
+export function planRev(plan) {
+  let s = REV.get(plan);
+  if (!s) { s = { rev: 0, parts: [] }; REV.set(plan, s); }
+  let same = s.rev > 0;
+  for (let i = 0; i < REV_KEYS.length && same; i++) same = s.parts[i] === plan[REV_KEYS[i]];
+  if (!same) { s.rev++; s.parts = REV_KEYS.map((k) => plan[k]); }
+  return s.rev;
+}
+
 /** Distance from point p to segment ab. */
 export function segDist(px, py, ax, ay, bx, by) {
   const dx = bx - ax, dy = by - ay;
@@ -302,16 +319,48 @@ export function largestInnerRect(poly) {
 }
 
 /**
- * Narrow passages of a rectilinear room polygon: pairs of facing parallel edges closer than `maxWidth`
- * with free floor between them. Returns [{ width, length, x, y }] (x, y = centre).
+ * The real wall faces of a rectilinear room polygon: its axis-aligned edges with zero-width slits removed.
+ * A room that contains a free-standing wall is one polygon whose outline runs to that wall and back along the same
+ * line (a slit); those two coincident stretches are not walls and cancel out here.
+ * @returns {{ H: Array<{ c, a, b }>, V: Array<{ c, a, b }> }} c = the fixed coordinate, a..b = the extent
  */
-export function narrowPassages(poly, maxWidth = 150) {
-  const H = [], V = [];
+export function polyEdges(poly) {
+  const groups = { H: new Map(), V: new Map() };
   for (let i = 0; i < poly.length; i++) {
     const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % poly.length];
-    if (y1 === y2 && x1 !== x2) H.push({ c: y1, a: Math.min(x1, x2), b: Math.max(x1, x2) });
-    else if (x1 === x2 && y1 !== y2) V.push({ c: x1, a: Math.min(y1, y2), b: Math.max(y1, y2) });
+    if (y1 === y2 && x1 !== x2) add(groups.H, y1, x1, x2);
+    else if (x1 === x2 && y1 !== y2) add(groups.V, x1, y1, y2);
   }
+  function add(map, c, p, q) {
+    if (!map.has(c)) map.set(c, []);
+    map.get(c).push({ a: Math.min(p, q), b: Math.max(p, q), dir: q > p ? 1 : -1 });
+  }
+  const resolve = (map) => {
+    const out = [];
+    for (const [c, list] of map) {
+      if (list.length === 1) { out.push({ c, a: list[0].a, b: list[0].b }); continue; }
+      const cuts = [...new Set(list.flatMap((e) => [e.a, e.b]))].sort((p, q) => p - q);
+      let run = null;
+      for (let k = 0; k + 1 < cuts.length; k++) {
+        const mid = (cuts[k] + cuts[k + 1]) / 2;
+        let net = 0;
+        for (const e of list) if (e.a < mid && mid < e.b) net += e.dir;
+        if (net !== 0 && run && run.dir === Math.sign(net) && run.b === cuts[k]) run.b = cuts[k + 1];
+        else { if (run) out.push({ c, a: run.a, b: run.b }); run = net !== 0 ? { a: cuts[k], b: cuts[k + 1], dir: Math.sign(net) } : null; }
+      }
+      if (run) out.push({ c, a: run.a, b: run.b });
+    }
+    return out;
+  };
+  return { H: resolve(groups.H), V: resolve(groups.V) };
+}
+
+/**
+ * Narrow passages of a rectilinear room polygon: pairs of facing parallel wall faces closer than `maxWidth`
+ * with free floor between them. Returns [{ width, length, x, y }] (x, y = centre). Slits are ignored (polyEdges).
+ */
+export function narrowPassages(poly, maxWidth = 150) {
+  const { H, V } = polyEdges(poly);
   const out = [];
   const scan = (edges, horizontal) => {
     for (let i = 0; i < edges.length; i++) for (let j = i + 1; j < edges.length; j++) {
@@ -323,6 +372,9 @@ export function narrowPassages(poly, maxWidth = 150) {
       const mid = (a + b) / 2, c = (e.c + f.c) / 2;
       const [px, py] = horizontal ? [mid, c] : [c, mid];
       if (!pointInPolygon(px, py, poly)) continue;
+      // the floor between the two faces must be free all the way across (no other wall in between)
+      const lo = Math.min(e.c, f.c), hi = Math.max(e.c, f.c);
+      if (edges.some((g) => g !== e && g !== f && g.c > lo && g.c < hi && g.a < mid && g.b > mid)) continue;
       out.push({ width, length: b - a, x: px, y: py });
     }
   };

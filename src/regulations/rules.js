@@ -20,10 +20,10 @@ export const DISCLAIMER =
   'and engineer of record always govern — confirm anything marked as a warning with them before you build or buy.';
 
 export const CATEGORIES = [
-  'Rooms & dimensions', 'Light & ventilation', 'Doors & circulation', 'Safe room (Mamad)', 'Kitchen', 'Bathrooms',
+  'Changes to the approved plan', 'Rooms & dimensions', 'Light & ventilation', 'Doors & circulation', 'Safe room (Mamad)', 'Kitchen', 'Bathrooms',
   'Furniture clearances', 'Site & parking', 'Garden & outdoor structures', 'Assumptions',
 ];
-const [ROOMS, LIGHT, DOORS, MAMAD, KITCHEN, BATH, FURN, SITE, GARDEN, ASSUME] = CATEGORIES;
+const [CHANGES, ROOMS, LIGHT, DOORS, MAMAD, KITCHEN, BATH, FURN, SITE, GARDEN, ASSUME] = CATEGORIES;
 
 const wiki = (title) => encodeURI('https://he.wikisource.org/wiki/' + title);
 
@@ -33,6 +33,8 @@ const SRC = {
     url: wiki('תקנות_התכנון_והבניה_(בקשה_להיתר,_תנאיו_ואגרות)') },
   HAGA: { name: 'תקנות ההתגוננות האזרחית (מפרטים לבניית מקלטים), התש"ן-1990 — Civil Defence Regulations (Specifications for the Construction of Shelters) 1990',
     url: wiki('תקנות_ההתגוננות_האזרחית_(מפרטים_לבניית_מקלטים)') },
+  LAW: { name: 'חוק התכנון והבניה, התשכ"ה-1965 — Planning and Building Law 1965',
+    url: wiki('חוק_התכנון_והבניה') },
   EXEMPT: { name: 'תקנות התכנון והבנייה (עבודות ומבנים הפטורים מהיתר), התשע"ד-2014 — Planning & Building Regulations (Works and Structures Exempt from a Permit) 2014',
     url: wiki('תקנות_התכנון_והבנייה_(עבודות_ומבנים_הפטורים_מהיתר)') },
   PARK: { name: 'תקנות התכנון והבניה (התקנת מקומות חניה), התשמ"ג-1983 — Planning & Building Regulations (Installation of Parking Places) 1983',
@@ -66,10 +68,30 @@ const R = (id, category, kind, title, requirement, src, section, confidence) =>
   ({ id, category, kind, title, requirement, reference: { name: SRC[src].name, section, url: SRC[src].url }, confidence });
 
 export const RULES = [
+  // ───────────── Changes to the approved plan ─────────────
+  R('plan-change-summary', CHANGES, 'regulation', 'Building according to the permit',
+    'Building work needs a permit and must be carried out according to it; only an "internal change in a dwelling" (שינוי פנימי) is excluded. Every difference between the edited plan and the architect\'s drawing is listed so it can be cleared with the architect before it is built.',
+    'LAW', '§145(a) opening words and §145(a)(2)', 'high'),
+  R('plan-change-free', CHANGES, 'regulation', 'Non-structural interior change',
+    'An "internal change" needs no permit: a change that does not touch the outside of the building, does not affect its façade, appearance or structural frame (שלד), shared property or services of other dwellings, harms no one, and does not change the dwelling\'s area or the number of dwellings. The changed rooms must still meet the Second Schedule (room sizes, light, ventilation, door widths).',
+    'LAW', '§145(a)(2), definition of "שינוי פנימי". How a change made DURING construction is recorded (revised working drawings / as-made plan for the completion certificate) was not verified with the local committee', 'medium'),
+  R('plan-change-structural', CHANGES, 'best-practice', 'Change to a thick interior wall — structural engineer',
+    'Caution, not a regulation: the architect\'s partitions are 10 cm; an interior wall of 15 cm or more (20 cm on this plan) may be a load-bearing block or concrete wall or carry a beam — the drawing does not say. Get the structural engineer of record to confirm before removing, moving or cutting it. If the wall is part of the structural frame, the change is no longer an "internal change" and needs a permit amendment.',
+    'LAW', 'Engineering caution (wall thickness on the drawing); the legal consequence if the wall is structural follows from §145(a)(2) ("אינו פוגע … בשלד של הבנין")', 'medium'),
+  R('plan-change-permit', CHANGES, 'regulation', 'Change to an exterior opening — permit',
+    'Moving, resizing, adding or closing a window or door in an exterior wall touches the outside of the building and its façade, so it is not an "internal change": it must be in the building permit (an amendment, or a correction of the application while it is still pending). Only replacing a component such as a window by one of identical dimensions in the same position is exempt.',
+    'LAW', '§145(a)(2); Exempt-works regulations 2014, reg. 20(a) (like-for-like replacement). The procedure the local planning committee uses (amended permit / change during construction) and its spatial guidelines were not verified', 'medium'),
+  R('plan-change-room', CHANGES, 'regulation', 'Room made too small by a change',
+    'A room created or reshaped by the owner must still meet the minimum for its use: habitable room ≥ 8.0 m² and ≥ 2.60 m between walls (a half room, חדרון, ≥ 6.0 m² and ≥ 2.00 m); bathroom ≥ 2.5 m² / 1.45 m (shower-and-toilet room 1.8 m² / 0.90 m); WC ≥ 1.1 m² / 0.80 m; kitchen ≥ 6.0 m² / 1.70 m. A closet room or store has no minimum.',
+    'PBR', 'Part B, §2.04(a)(1), (4)–(7), (10), (b), (c); reg. 1 ("חדר שירות" includes a closet room)', 'high'),
+  R('plan-change-light', CHANGES, 'regulation', 'Room left without enough window by a change',
+    'Every habitable room and kitchen must have windows to the open air (≥ 8% of the floor; kitchen 5%). A bathroom or WC without a window of 10% / 0.3 m² needs a vent duct or mechanical extractor. A closet room needs no ventilation.',
+    'PBR', 'Part B, §2.20, §2.21(a)–(c), §2.40–2.47', 'high'),
+
   // ───────────── Rooms & dimensions ─────────────
   R('room-size-habitable', ROOMS, 'regulation', 'Habitable room size',
-    'Every habitable room (חדר מגורים): floor area ≥ 8.0 m² and ≥ 2.60 m between walls; in a dwelling with two or more rooms at least one room ≥ 12.0 m². Width is measured 1.20 m above the floor and need only be kept over the minimum area.',
-    'PBR', 'Part B, §2.04(a)(1)–(3), (b), (c)', 'high'),
+    'Every habitable room (חדר מגורים): floor area ≥ 8.0 m² and ≥ 2.60 m between walls; a "small room" (חדרון, half room) ≥ 6.0 m² and ≥ 2.00 m; in a dwelling with two or more rooms at least one room ≥ 12.0 m². Width is measured 1.20 m above the floor and need only be kept over the minimum area.',
+    'PBR', 'Part B, §2.04(a)(1)–(4), (b), (c)', 'high'),
   R('room-size-bathroom', ROOMS, 'regulation', 'Bathroom size',
     'Bathroom (חדר אמבטיה): ≥ 2.5 m² and ≥ 1.45 m wide. A wash room with shower and toilet only (חדר רחצה המכיל מקלחת ואסלה): ≥ 1.8 m² and ≥ 0.90 m wide.',
     'PBR', 'Part B, §2.04(a)(5), (10)', 'high'),
@@ -112,6 +134,9 @@ export const RULES = [
     'PBR', 'Part C, §3.2.1.3 table rows 5–6, §3.8.4.4', 'high'),
   R('corridor-width', DOORS, 'regulation', 'Corridor width', 'Corridor inside a dwelling ≥ 0.90 m; a corridor that serves as the main entrance ≥ 1.00 m (measured 1.20 m above the floor between finishes).',
     'PBR', 'Part C, §3.2.12.5 table rows 1–2, §3.2.12.10', 'high'),
+  R('room-access', DOORS, 'best-practice', 'Every room can be entered',
+    'Every room needs a door or a passage. (The regulations read set door widths but contain no rule on which room may open onto which — e.g. a bedroom reached through another bedroom, or a WC opening onto the kitchen — so the checker does not flag those.)',
+    'PLAN', 'Geometry; PBR Part B and Part C §3.2.1.3 searched for access rules between rooms — none found', 'medium'),
   R('smoke-detectors', DOORS, 'regulation', 'Smoke detectors', 'In a building with up to two dwellings a stand-alone smoke detector (SI 1220-5) is required in every bedroom, in the lobby leading to the bedrooms and on every storey without bedrooms.',
     'PBR', 'Part C, ch. D, §3.4.6.2 and the residential table in sign 11 (row 1)', 'high'),
   R('door-swing', DOORS, 'best-practice', 'Door swings kept clear', 'Nothing should stand inside the arc a door leaf sweeps when it opens.', 'NEUFERT', 'Doors — swing clearance', 'high'),
@@ -126,12 +151,18 @@ export const RULES = [
     'HAGA', 'Reg. 198', 'high'),
   R('mamad-use', MAMAD, 'regulation', 'Permitted use of the mamad', 'A mamad may not serve as a kitchen, bathroom or toilet room. Use as a bedroom, study or guest room is allowed.', 'HAGA', 'Reg. 199', 'high'),
   R('mamad-ext-walls', MAMAD, 'regulation', 'Mamad external walls', 'Not more than two external walls without approval of the competent authority.', 'HAGA', 'Reg. 200', 'high'),
-  R('mamad-door', MAMAD, 'regulation', 'Blast door', 'One gas-tight blast door, opening outwards from the mamad; clear opening 70 × 200 cm minimum, 80 × 200 cm maximum (80–90 cm when a concrete wall faces the door closer than 1.30 m).',
-    'HAGA', 'Reg. 202, 204', 'high'),
+  R('mamad-door', MAMAD, 'regulation', 'Blast door', 'One gas-tight blast door, entered from inside the dwelling and opening outwards from the mamad; clear opening 70 × 200 cm minimum, 80 × 200 cm maximum (80–90 cm when a concrete wall faces the door closer than 1.30 m). A second blast door only instead of the window, with approval.',
+    'HAGA', 'Reg. 202(a), 204(a)–(b2)', 'high'),
   R('mamad-door-position', MAMAD, 'regulation', 'Blast door position', 'The blast door sits in an internal wall at least 4.00 m from the parallel external wall facing it (measured outside the mamad) and ≥ 2.20 m from a perpendicular external wall, or is shielded per the specification.',
     'HAGA', 'Reg. 203', 'high'),
   R('mamad-window', MAMAD, 'regulation', 'Blast window', 'Exactly one blast window; sill ≥ 1.05 m above the floor; area ≤ 1.21 m²; width 0.60–1.10 m; height 0.80–1.10 m.', 'HAGA', 'Reg. 205, 206', 'high'),
-  R('mamad-walls', MAMAD, 'regulation', 'Mamad wall thickness', 'Reinforced concrete: external walls ≥ 25 cm, internal walls ≥ 20 cm; a wall holding a sliding blast window ≥ 30 cm.', 'HAGA', 'Reg. 208', 'high'),
+  R('mamad-inner-door', MAMAD, 'standard', 'Second (inner) door in the safe-room doorway',
+    'NOT a requirement. The regulations require one gas-tight blast door that opens outwards and say nothing about a second, ordinary door in a dwelling\'s safe room; they expressly allow "a regular door, opening inwards, for everyday use" in addition to the blast door only for protected spaces in health institutions, and a second BLAST door only instead of the window with approval. An inner door is an optional comfort feature, reported as permitted by Home Front Command guidance: it must open into the room, and the blast door, its frame and seal must stay untouched and able to close.',
+    'HAGA', 'Regs. 202(a), 204(a), 204(b2), 204(c); reg. 287(b) (health institutions) — texts read, no requirement found. Permission for dwellings: Home Front Command guidance as reported by Maariv, 5.8.2024 (https://www.maariv.co.il/news/article-1122569) — secondary source, not verified on oref.org.il', 'medium'),
+  R('mamad-door-clear', MAMAD, 'regulation', 'Free space in front of the blast door',
+    'Where a wall that is part of the structure or made of reinforced concrete faces the blast door, it must be at least 110 cm away, so that a person in a wheelchair can open the door (if it is closer than 130 cm the door must be 80–90 cm wide). The leaf itself needs its full width (70–80 cm) to swing open.',
+    'HAGA', 'Reg. 202(b), 204(a), 204(b1)', 'high'),
+  R('mamad-walls', MAMAD, 'regulation', 'Mamad wall thickness', 'Reinforced concrete: external walls ≥ 25 cm, internal walls ≥ 20 cm; a wall (external or internal) holding a SLIDING blast window ≥ 30 cm; a wall shared by two adjoining safe rooms ≥ 15 cm.', 'HAGA', 'Reg. 208(a)–(c)', 'high'),
   R('mamad-finishes', MAMAD, 'regulation', 'Mamad wall finishes', 'Walls and ceiling may not be clad with ceramic or other tiles; finish is plaster/paint up to 2 mm or an SI 5075 system. Floor tiles and a skirting up to 10 cm are allowed.',
     'HAGA', 'Reg. 192(a)–(b), 193, applied to the mamad by reg. 217', 'high'),
   R('mamad-gas', MAMAD, 'regulation', 'Gas cylinders near the mamad', 'LPG cooking-gas cylinders must be at least 3 m from the walls of the mamad.', 'HAGA', 'Reg. 217א', 'high'),

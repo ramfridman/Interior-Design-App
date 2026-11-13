@@ -4,7 +4,7 @@
  */
 import { areaM2, pointInPolygon, polygonBounds, pointInRect } from '../core/geometry.js';
 import { ruleById, refString } from './rules.js';
-import { m, num, rectPoly, largestInnerRect, narrowPassages, overshoot, segDist, polyInside } from './geom.js';
+import { m, num, rectPoly, rectObstacle, freeDepth, largestInnerRect, narrowPassages, overshoot, segDist, polyInside } from './geom.js';
 
 /** Build one finding; category / kind / reference come from the rule. */
 export function finding(ruleId, severity, key, title, detail, extra) {
@@ -12,13 +12,15 @@ export function finding(ruleId, severity, key, title, detail, extra) {
   return { id: `${ruleId}:${key}`, ruleId, severity, category: r.category, kind: r.kind, title, detail, reference: refString(r), ...extra };
 }
 
-const HABITABLE = new Set(['bedroom', 'living', 'mamad', 'study', 'dining']);
-const SERVICE = new Set(['bathroom', 'wc']);
+export const HABITABLE = new Set(['bedroom', 'living', 'mamad', 'study', 'dining', 'office', 'guest', 'family']);
+export const SERVICE = new Set(['bathroom', 'wc']);
+const CORRIDOR = new Set(['corridor', 'hall', 'passage', 'lobby']);
 const pct = (v) => (v * 100).toFixed(1) + '%';
 const centre = (poly) => { const b = polygonBounds(poly); return { x: b.x + b.w / 2, y: b.y + b.h / 2 }; };
 const spot = (space) => (space.label ? { x: space.label[0], y: space.label[1] } : centre(space.polygon));
 const openingCentre = (o) => ({ x: o.x + o.w / 2, y: o.y + o.h / 2 });
 const isDoor = (o) => o.kind === 'door' || o.kind === 'sliding-door';
+const isPassage = (o) => o.kind === 'opening';                         // door-less passage added by the owner
 const isGlazed = (o) => o.kind === 'window' || o.kind === 'sliding-door' || /glass/.test(o.style || '');
 export const roomById = (plan, id) => plan.rooms.find((r) => r.id === id) || plan.outdoorAreas.find((r) => r.id === id) || null;
 const roomAt = (plan, x, y) => plan.rooms.find((r) => pointInPolygon(x, y, r.polygon)) || null;
@@ -26,46 +28,92 @@ const roomAt = (plan, x, y) => plan.rooms.find((r) => pointInPolygon(x, y, r.pol
 /** Exterior glazed openings (windows and glazed doors) of a room. */
 export const roomGlazing = (plan, roomId) => plan.openings.filter((o) => o.exterior && isGlazed(o) && (o.rooms || []).includes(roomId));
 const openingArea = (o) => (o.width * o.height) / 1e4;
+
+/**
+ * Size and daylight of one room, computed from its polygon and the openings that list it. Works on edited plans:
+ * the polygon may contain a zero-width slit (free-standing wall) — area, the largest clear rectangle and the
+ * window list are not affected by it.
+ * @returns {{ area, rect, width, windows, glazing, ratio }} area m², width cm (shorter side of the largest clear rectangle)
+ */
+export function roomMetrics(plan, r) {
+  const area = areaM2(r.polygon);
+  const rect = largestInnerRect(r.polygon);
+  const windows = roomGlazing(plan, r.id);
+  const glazing = windows.reduce((s, o) => s + openingArea(o), 0);
+  return { area, rect, width: Math.min(rect.w, rect.h), windows, glazing, ratio: area ? glazing / area : 0 };
+}
+
+/** The living-type room that holds the kitchen: the one with the 'kitchen' zone, else the largest. */
+export function kitchenRoom(plan) {
+  const living = plan.rooms.filter((r) => r.type === 'living');
+  return living.find((r) => (r.zones || []).some((z) => z.id === 'kitchen'))
+    || living.reduce((best, r) => (!best || areaM2(r.polygon) > areaM2(best.polygon) ? r : best), null);
+}
+
+/**
+ * Verdict of the minimum-size rule for a room of this type: { ok, severity, need } (need = text of the minimum).
+ * Rooms that are not for living, washing or cooking (closet, store, laundry) have no statutory minimum.
+ */
+export function sizeVerdict(type, area, width) {
+  if (HABITABLE.has(type)) {
+    if (area >= 8 && width >= 260) return { ok: true, severity: 'pass', need: '8.0 m² and 2.60 m' };
+    // §2.04(a)(4): a "small room" (חדרון) may be 6.0 m² and 2.00 m wide
+    return { ok: false, severity: area >= 6 && width >= 200 ? 'warn' : 'fail', half: area >= 6 && width >= 200, need: '8.0 m² and 2.60 m' };
+  }
+  if (type === 'kitchen') { const ok = area >= 6 && width >= 170; return { ok, severity: ok ? 'pass' : 'fail', need: '6.0 m² and 1.70 m' }; }
+  if (type === 'bathroom') { const ok = area >= 2.5 && width >= 145; return { ok, severity: ok ? 'pass' : (area >= 1.8 && width >= 90 ? 'info' : 'fail'), need: '2.5 m² and 1.45 m (1.8 m² and 0.90 m for a shower-and-toilet room)' }; }
+  if (type === 'wc') { const ok = area >= 1.1 && width >= 80; return { ok, severity: ok ? 'pass' : 'fail', need: '1.1 m² and 0.80 m' }; }
+  return { ok: true, severity: 'pass', need: null };
+}
 const dimsOf = (o) => `${m(o.width)} × ${m(o.height)} m`;
 
 // ───────────────────────── rooms ─────────────────────────
 
-function checkRooms(plan, H, out) {
+function checkRooms(plan, H, out, metrics) {
   let big = null;
   const mismatches = [];
+  const kitchenIn = kitchenRoom(plan);
   for (const r of plan.rooms) {
-    const area = areaM2(r.polygon);
-    const rect = largestInnerRect(r.polygon);
-    const width = Math.min(rect.w, rect.h);
+    const { area, rect, width } = metrics.get(r);
     const at = spot(r);
     const size = `${area.toFixed(2)} m², clear width ${m(width)} m`;
+    const v = sizeVerdict(r.type, area, width);
     if (r.drawnArea && Math.abs(area - r.drawnArea) > 0.35) mismatches.push(`${r.name}: ${area.toFixed(2)} m² computed vs ${r.drawnArea} m² written`);
     if (HABITABLE.has(r.type)) {
       if (!big || area > big.area) big = { r, area };
-      const ok = area >= 8 && width >= 260;
-      out.push(finding('room-size-habitable', ok ? 'pass' : 'fail', r.id, `${r.name}: ${size}`,
-        ok ? `${r.name} is ${area.toFixed(2)} m² with ${m(width)} m between walls — meets the minimum for a habitable room (8.0 m² and 2.60 m).`
-          : `${r.name} is ${area.toFixed(2)} m² with ${m(width)} m between walls — a habitable room needs at least 8.0 m² and 2.60 m.`,
+      out.push(finding('room-size-habitable', v.severity, r.id, `${r.name}: ${size}`,
+        v.ok ? `${r.name} is ${area.toFixed(2)} m² with ${m(width)} m between walls — meets the minimum for a habitable room (8.0 m² and 2.60 m).`
+          : `${r.name} is ${area.toFixed(2)} m² with ${m(width)} m between walls — a habitable room needs at least 8.0 m² and 2.60 m.`
+            + (v.half ? ' It is large enough only for a "small room" (חדרון, half room: 6.0 m² and 2.00 m) — it cannot be counted as a full bedroom or living room.'
+              : ' Too small even for a half room (6.0 m² and 2.00 m): it can only serve as a closet room or store, which have no minimum — change the room type if that is the intention.'),
         { spaceId: r.id, at }));
-      if (r.type === 'living') {
-        out.push(finding('room-size-kitchen', 'pass', r.id, `Open kitchen inside ${r.name}`,
-          `The kitchen is part of the open ${area.toFixed(1)} m² living space (largest clear rectangle ${m(rect.w)} × ${m(rect.h)} m), far above the 6.0 m² / 1.70 m required for a kitchen.`,
+      if (r === kitchenIn) {
+        const ok = area >= 6 && width >= 170;
+        out.push(finding('room-size-kitchen', ok ? 'pass' : 'fail', r.id, `Open kitchen inside ${r.name}`,
+          ok ? `The kitchen is part of the open ${area.toFixed(1)} m² living space (largest clear rectangle ${m(rect.w)} × ${m(rect.h)} m), far above the 6.0 m² / 1.70 m required for a kitchen.`
+            : `The space that holds the kitchen is ${area.toFixed(1)} m² with ${m(width)} m between walls — a kitchen needs 6.0 m² and 1.70 m.`,
           { spaceId: r.id, at }));
       }
+    } else if (r.type === 'kitchen') {
+      out.push(finding('room-size-kitchen', v.severity, r.id, `${r.name}: ${size}`,
+        `${r.name} is ${area.toFixed(2)} m² and ${m(width)} m wide — ${v.ok ? 'meets' : 'below'} the kitchen minimum of 6.0 m² and 1.70 m (5.0 m² next to a dining area of at least 4.0 m²).`,
+        { spaceId: r.id, at }));
     } else if (r.type === 'bathroom') {
-      const ok = area >= 2.5 && width >= 145;
-      out.push(finding('room-size-bathroom', ok ? 'pass' : (area >= 1.8 && width >= 90 ? 'info' : 'fail'), r.id, `${r.name}: ${size}`,
-        ok ? `${r.name} is ${area.toFixed(2)} m² and ${m(width)} m wide — above the bathroom minimum of 2.5 m² and 1.45 m.`
+      out.push(finding('room-size-bathroom', v.severity, r.id, `${r.name}: ${size}`,
+        v.ok ? `${r.name} is ${area.toFixed(2)} m² and ${m(width)} m wide — above the bathroom minimum of 2.5 m² and 1.45 m.`
           : `${r.name} is ${area.toFixed(2)} m² and ${m(width)} m wide. A bathroom needs 2.5 m² and 1.45 m; a shower-and-toilet room 1.8 m² and 0.90 m.`,
         { spaceId: r.id, at }));
     } else if (r.type === 'wc') {
-      const ok = area >= 1.1 && width >= 80;
-      out.push(finding('room-size-wc', ok ? 'pass' : 'fail', r.id, `${r.name}: ${size}`,
-        `${r.name} is ${area.toFixed(2)} m² and ${m(width)} m wide — ${ok ? 'meets' : 'below'} the minimum of 1.1 m² and 0.80 m for a toilet room.`,
+      out.push(finding('room-size-wc', v.severity, r.id, `${r.name}: ${size}`,
+        `${r.name} is ${area.toFixed(2)} m² and ${m(width)} m wide — ${v.ok ? 'meets' : 'below'} the minimum of 1.1 m² and 0.80 m for a toilet room.`,
         { spaceId: r.id, at }));
+    } else if (CORRIDOR.has(r.type)) {
+      const ok = width >= 90;
+      out.push(finding('corridor-width', ok ? 'pass' : 'fail', r.id, `${r.name}: ${m(width)} m wide`,
+        `${r.name} is ${m(width)} m wide — ${ok ? 'above' : 'below'} the 0.90 m minimum for a corridor inside a dwelling (1.00 m where it is the main entrance).`, { spaceId: r.id, at }));
     } else {
       out.push(finding('room-size-service', 'pass', r.id, `${r.name}: ${size}`,
-        `${r.name} is ${area.toFixed(2)} m² and ${m(width)} m wide. The regulations set no minimum area for a laundry / service room.`,
+        `${r.name} is ${area.toFixed(2)} m² and ${m(width)} m wide. The regulations set no minimum area for a laundry / service room, closet room or store.`,
         { spaceId: r.id, at }));
     }
   }
@@ -77,26 +125,36 @@ function checkRooms(plan, H, out) {
   out.push(finding('ceiling-height', habit ? 'pass' : 'fail', 'all', `Ceiling height ${m(H)} m`,
     habit ? `The ${m(H)} m ceiling is above the 2.50 m minimum for habitable rooms and the 2.05 m minimum for bathrooms, service rooms and corridors.`
       : `A ${m(H)} m ceiling is below the 2.50 m minimum for habitable rooms${serv ? ' (it would only be acceptable in bathrooms, service rooms and internal corridors, minimum 2.05 m)' : ''}.`));
+  // openings must fit under the ceiling that is actually set for the project
+  for (const o of plan.openings) {
+    const head = num(o.sill, 0) + num(o.height, 0);
+    if (head <= H) continue;
+    out.push(finding('ceiling-height', 'fail', `opening:${o.id}`, `${o.kind === 'window' ? 'Window' : 'Door'} head at ${m(head)} m is above the ${m(H)} m ceiling`,
+      `This ${o.kind === 'window' ? 'window' : 'opening'} reaches ${m(head)} m above the floor but the ceiling height of the project is ${m(H)} m. Lower the opening or correct the ceiling height.`, { at: openingCentre(o), spaceId: (o.rooms || [])[0] }));
+  }
   out.push(finding('plan-consistency', mismatches.length ? 'info' : 'pass', 'areas', mismatches.length ? 'Room areas differ from the drawing' : 'Room areas match the drawing',
     mismatches.length ? mismatches.join('; ') + '.' : 'Every room area computed from the digitised plan is within 0.35 m² of the area written on the drawing.'));
 }
 
 // ───────────────────────── light & ventilation ─────────────────────────
 
-function checkLight(plan, out) {
+function checkLight(plan, out, metrics) {
+  const kitchenIn = kitchenRoom(plan);
   for (const r of plan.rooms) {
-    const area = areaM2(r.polygon);
-    const wins = roomGlazing(plan, r.id);
-    const total = wins.reduce((s, o) => s + openingArea(o), 0);
-    const ratio = area ? total / area : 0;
+    const { area, windows: wins, glazing: total, ratio } = metrics.get(r);
     const list = wins.length ? wins.map((o) => `${o.kind === 'window' ? 'window' : 'glazed door'} ${dimsOf(o)}`).join(', ') : 'no window';
     const assumed = wins.some((o) => (o.assumed || []).some((f) => f === 'height' || f === 'width'));
     const extra = { spaceId: r.id, at: wins[0] ? openingCentre(wins[0]) : spot(r) };
     if (HABITABLE.has(r.type)) {
       const ok = ratio >= 0.08;
-      out.push(finding('light-habitable', ok ? 'pass' : 'fail', r.id, `${r.name}: windows ${pct(ratio)} of the floor`,
-        `${r.name} window area is ${total.toFixed(2)} m² (${list}) = ${pct(ratio)} of the ${area.toFixed(2)} m² floor — ${ok ? 'meets' : 'below'} the 8% minimum${r.type === 'living' ? ' (the open kitchen needs 5%)' : ''}.`
-        + (ok ? '' : ` At least ${(area * 0.08).toFixed(2)} m² is required.`), extra));
+      out.push(finding('light-habitable', ok ? 'pass' : 'fail', r.id, wins.length ? `${r.name}: windows ${pct(ratio)} of the floor` : `${r.name}: no window to the open air`,
+        wins.length ? `${r.name} window area is ${total.toFixed(2)} m² (${list}) = ${pct(ratio)} of the ${area.toFixed(2)} m² floor — ${ok ? 'meets' : 'below'} the 8% minimum${r === kitchenIn ? ' (the open kitchen needs 5%)' : ''}.`
+          + (ok ? '' : ` At least ${(area * 0.08).toFixed(2)} m² is required.`)
+          : `${r.name} has no window or glazed door in an exterior wall. A habitable room must have windows to the open air with a total area of at least 8% of its floor (${(area * 0.08).toFixed(2)} m² here). Only a closet room or store may be windowless.`, extra));
+    } else if (r.type === 'kitchen') {
+      const ok = ratio >= 0.05;
+      out.push(finding('light-kitchen', ok ? 'pass' : 'fail', r.id, wins.length ? `${r.name}: windows ${pct(ratio)} of the floor` : `${r.name}: no window to the open air`,
+        `${r.name} window area is ${total.toFixed(2)} m² (${list}) = ${pct(ratio)} of the ${area.toFixed(2)} m² floor — ${ok ? 'meets' : 'below'} the 5% minimum for a kitchen.`, extra));
     } else if (SERVICE.has(r.type)) {
       const need = Math.max(area * 0.1, 0.3);
       const ok = total >= need - 1e-6;
@@ -106,9 +164,13 @@ function checkLight(plan, out) {
           : `${r.name} has ${total.toFixed(2)} m² of window (${list}) but natural ventilation needs ${need.toFixed(2)} m² (10% of the ${area.toFixed(2)} m² floor, not less than 0.3 m²). `
             + 'This is allowed if a mechanical extractor or vent duct (at least 3 air changes per hour) is installed — make sure one is on the electrical and HVAC plans.'
             + (assumed ? ' The window height is an assumption (not written on the drawing); confirm it.' : ''), extra));
-    } else {
-      out.push(finding('vent-laundry', total > 0 ? 'pass' : 'info', r.id, total > 0 ? `${r.name}: has a window` : `${r.name}: no window — add an extractor`,
-        total > 0 ? `${r.name} has ${total.toFixed(2)} m² of window.` : `${r.name} has no window (its outside door is solid). With a washer and dryer, plan a mechanical extractor or a louvred door to remove moisture and heat.`, extra));
+    } else if (!CORRIDOR.has(r.type)) {
+      const solidDoor = plan.openings.some((o) => o.exterior && isDoor(o) && !isGlazed(o) && (o.rooms || []).includes(r.id));
+      const laundry = r.type === 'service';
+      out.push(finding('vent-laundry', total > 0 ? 'pass' : 'info', r.id, total > 0 ? `${r.name}: has a window` : `${r.name}: no window${laundry ? ' — add an extractor' : ''}`,
+        total > 0 ? `${r.name} has ${total.toFixed(2)} m² of window.`
+          : `${r.name} has no window${solidDoor ? ' (its outside door is solid)' : ''}. `
+            + (laundry ? 'With a washer and dryer, plan a mechanical extractor or a louvred door to remove moisture and heat.' : 'That is acceptable for a closet room or store; if anything damp or warm is kept there, add a vent or a louvred door.'), extra));
     }
   }
 

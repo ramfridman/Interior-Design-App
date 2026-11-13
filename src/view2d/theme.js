@@ -4,6 +4,7 @@
  *
  *   --plan-paper  --plan-ink  --plan-wall  --plan-accent  --plan-guide  --plan-danger  --plan-garden
  *   --plan-street --plan-property  --plan-building  --plan-dim  --plan-glass  --plan-font
+ *   --plan-warn  --plan-permit            (structure editing: "ask an engineer" amber, "needs a permit" violet)
  *   --plan-inset-top|right|bottom|left   (px kept clear of floating UI: used by fit() and the scale bar / north arrow)
  *   --plan-hud: off                       (hide the built-in scale bar + north arrow, e.g. when the UI shows its own)
  */
@@ -12,15 +13,18 @@ import { parseColor, mix, css, luminance } from './color.js';
 const LIGHT = {
   paper: '#f4f2ed', ink: '#22262b', wall: '#2e3237', accent: '#1d4e89', guide: '#d6248a', danger: '#c9362b',
   garden: '#e3e8d8', street: '#dcdad5', property: '#2b5cc4', building: '#cf3f3a', dim: '#59616b', glass: '#b9d6e6',
+  warn: '#cf7f00', permit: '#7a4fd6',
 };
 const DARK = {
   paper: '#131517', ink: '#ebe8e2', wall: '#e4e0d7', accent: '#8dbbee', guide: '#ff6dc0', danger: '#ff6f61',
   garden: '#1a211b', street: '#202327', property: '#7ea6ff', building: '#ff7a6e', dim: '#a2a8b0', glass: '#4f7f9c',
+  warn: '#f0b354', permit: '#b79cff',
 };
 const VARS = {
   paper: ['--plan-paper'], ink: ['--plan-ink'], wall: ['--plan-wall'], accent: ['--plan-accent', '--accent'],
   guide: ['--plan-guide'], danger: ['--plan-danger', '--fail'], garden: ['--plan-garden'], street: ['--plan-street'],
   property: ['--plan-property'], building: ['--plan-building'], dim: ['--plan-dim'], glass: ['--plan-glass'],
+  warn: ['--plan-warn'], permit: ['--plan-permit'],
 };
 
 function detectDark(container, cs) {
@@ -56,6 +60,16 @@ export function buildPalette(base, dark) {
   p.halo = css(base.paper, 0.86);
   p.shadow = dark ? 'rgba(0,0,0,' : 'rgba(30,26,20,';
   p.shadowAlpha = dark ? 0.3 : 0.085;
+  // structure editing: one colour per policy level (free / warn / permit / locked) …
+  p.locked = m(base.ink, base.paper, 0.5);
+  p.level = { free: base.accent, warn: base.warn, permit: base.permit, locked: p.locked };
+  // … and the wall poché tinted with it (locked walls recede to a neutral grey)
+  p.wallTint = {
+    free: dark ? m(base.accent, base.paper, 0.12) : m(base.accent, '#ffffff', 0.2),
+    warn: dark ? m(base.warn, base.paper, 0.1) : m(base.warn, '#ffffff', 0.08),
+    locked: m(base.wall, base.paper, dark ? 0.62 : 0.6),
+  };
+  p.wallNew = dark ? m(base.accent, '#ffffff', 0.1) : m(base.accent, '#ffffff', 0.32);
   /** Room floor tint from a finish colour. */
   p.floor = (hex) => (dark ? m(hex || '#cccccc', base.paper, 0.74) : m(hex || '#dddddd', '#ffffff', 0.52));
   p.floorLine = (hex) => (dark ? m(m(hex || '#cccccc', base.paper, 0.74), '#ffffff', 0.16) : m(m(hex || '#dddddd', '#ffffff', 0.52), base.ink, 0.2));
