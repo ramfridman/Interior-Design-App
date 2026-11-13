@@ -97,6 +97,10 @@ const DEFAULT_UI = {
   structureSel: null,      // { type: 'segment' | 'opening', id } — the wall segment / opening selected in the plan
   wallThickness: 10,       // cm, for the draw-wall tool (7–20)
   showPlanChanges: true,   // highlight differences from the architect's plan
+  // ── carpentry (made-to-measure runs) — see docs/CONTRACT.md § 8; ui.tool 'carpentry' = Carpentry mode ──
+  carpentrySel: null,      // { runId, unitId? } — the run / unit selected in Carpentry mode
+  carpentryTier: null,     // null (each run's suggested tier) | 'basic' | 'mid' | 'premium' — estimate tier override
+  carpentryTab: 'run',     // Carpentry inspector tab: 'run' | 'unit' | 'checks' | 'estimate' | 'quantities'
 };
 
 const DEFAULT_PROJECT = {
@@ -118,6 +122,8 @@ class Store {
     this.finishes = {};
     /** Made-to-measure carpentry: { runs: { [id]: Run }, settings } — written only by src/carpentry/ (§ 8). */
     this.carpentry = emptyCarpentry();
+    /** Large reference images of carpentry special requirements { [imageId]: dataUrl } — saved, but kept out of undo history. */
+    this.carpentryImages = {};
     this._listeners = new Map();
     this._undo = [];
     this._redo = [];
@@ -351,7 +357,7 @@ class Store {
   // ---------- persistence ----------
   /** `planEdits` = { walls, openings, rooms } of an edited plan, null while the plan is the architect's. */
   serialize() {
-    return { app: 'e7-interior-design', version: 1, savedAt: new Date().toISOString(), project: this.project, items: this.items, finishes: this.finishes, ui: this.ui, planEdits: planState(), carpentry: this.carpentry };
+    return { app: 'e7-interior-design', version: 1, savedAt: new Date().toISOString(), project: this.project, items: this.items, finishes: this.finishes, ui: this.ui, planEdits: planState(), carpentry: this.carpentry, carpentryImages: this.carpentryImages };
   }
   /** Replace the whole design. `data` is the output of serialize(). */
   load(data, opts = {}) {
@@ -367,6 +373,7 @@ class Store {
     });
     this.finishes = clone(data.finishes || {});
     this.carpentry = readCarpentry(data.carpentry);           // a file without carpentry has no runs
+    this.carpentryImages = data.carpentryImages && typeof data.carpentryImages === 'object' ? { ...data.carpentryImages } : {};
     this.project = { ...DEFAULT_PROJECT, ...(data.project || {}) };
     if (data.ui && opts.restoreUI) this.ui = { ...DEFAULT_UI, ...data.ui };
     this.selection = [];

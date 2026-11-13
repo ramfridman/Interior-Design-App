@@ -6,6 +6,7 @@
 import { textOp, r2 } from './prims.js';
 import { wrap, textWidth, PT, ellipsize } from './metrics.js';
 import { tr, S } from './strings.js';
+import { autoDir } from './bidi.js';
 
 export const PAPER = { A4: [210, 297], A3: [297, 420] };
 
@@ -71,6 +72,14 @@ export class Builder {
     this.y = TP.top;
   }
   t(v) { return tr(v, this.lang); }
+  /**
+   * Lines a value needs in the TALLER of the two editions: pagination reserves that height, so the English and the
+   * Hebrew documents break pages at the same places and have the same page count.
+   */
+  n2(v, w, st) {
+    const a = wrap(tr(v, this.lang), w, st.size, st.font).length;
+    return v && typeof v === 'object' && 'en' in v ? Math.max(a, wrap(tr(v, this.lang === 'he' ? 'en' : 'he'), w, st.size, st.font).length) : a;
+  }
   /** New portrait text page; the flow cursor moves to its top. */
   textPage(extra = {}) {
     this.page = { size: [TP.W, TP.H], orientation: 'portrait', kind: 'text', ops: [], ...extra };
@@ -107,14 +116,26 @@ export class Builder {
     if (level === 2) { R.hline(this.y, 0, R.W, 0.25, 'ink'); this.y += 4.5; } else this.y += 1.2;
   }
   /** Wrapped paragraph in the flow (breaks across pages line by line). */
-  para(s, st = ST.body, { gap = 2.5, indent = 0, width, color } = {}) {
-    const w = (width || this.R.W) - indent, lines = wrap(this.t(s), w, st.size, st.font), l = lh(st);
+  para(s, st = ST.body, { gap = 2.5, indent = 0, width, color, auto = false } = {}) {
+    const text = this.t(s), w = (width || this.R.W) - indent, lines = wrap(text, w, st.size, st.font), l = lh(st), n2 = this.n2(s, w, st);
+    const pdir = auto ? autoDir(text, this.dir) : this.dir, foreign = pdir !== this.dir;   // owner text keeps its own direction
     for (const line of lines) {
       this.ensure(l);
-      this.R.text(indent, this.y + st.size * PT * 0.8, line, st, 'start', { maxWidth: w, ...(color ? { color } : {}) });
+      this.R.text(foreign ? indent + w : indent, this.y + st.size * PT * 0.8, line, st, foreign ? 'end' : 'start', { maxWidth: w, dir: pdir, ...(color ? { color } : {}) });
       this.y += l;
     }
-    this.y += gap;
+    this.y += gap + (n2 - lines.length) * l;
+  }
+  /** Image (data URL) scaled into max w × h mm at the flow position, with an optional caption. */
+  image(src, pw, ph, { maxW = 80, maxH = 60, caption, u = 0 } = {}) {
+    const k = Math.min(maxW / (pw || 1), maxH / (ph || 1)), w = (pw || 1) * k, h = (ph || 1) * k;
+    this.ensure(h + 6);
+    const R = this.R;
+    this.page.ops.push({ t: 'image', x: r2(R.X(u, w)), y: r2(this.y), w: r2(w), h: r2(h), src, role: 'image' });
+    R.rect(u, this.y, w, h, { lw: 0.1, color: 'rule' });
+    this.y += h + 1;
+    if (caption) { R.text(u, this.y + 2.6, caption, ST.small, 'start', { maxWidth: w, dir: autoDir(caption, this.dir) }); this.y += 4; }
+    return { w, h };
   }
   /** Bulleted list. */
   bullets(items, st = ST.body, { indent = 4.5, gap = 1.2 } = {}) {
@@ -123,7 +144,7 @@ export class Builder {
       this.ensure(l * Math.min(lines.length, 2));
       this.R.rect(0.6, this.y + st.size * PT * 0.8 - 1.55, 1.1, 1.1, { fill: 'accent' });
       for (const line of lines) { this.ensure(l); this.R.text(indent, this.y + st.size * PT * 0.8, line, st, 'start', { maxWidth: this.R.W - indent }); this.y += l; }
-      this.y += gap;
+      this.y += gap + (this.n2(it, this.R.W - indent, st) - lines.length) * l;
     }
   }
 
@@ -139,7 +160,7 @@ export class Builder {
     const padX = 1.4, padY = spec.pad != null ? spec.pad : 1.45, st = ST.td, l = lh(st);
     let drawn = 0;
     const headLines = cols.map((c, i) => wrap(B.t(c.title), widths[i] - 2 * padX, ST.th.size, ST.th.font));
-    const headH = spec.head === false ? 0 : Math.max(...headLines.map((x) => x.length)) * lh(ST.th) + 2 * padY + 0.6;
+    const headH = spec.head === false ? 0 : Math.max(...cols.map((c, i) => B.n2(c.title, widths[i] - 2 * padX, ST.th))) * lh(ST.th) + 2 * padY + 0.6;
     const drawHead = (cont) => {
       const R = B.R;
       if (cont && spec.title) { R.text(0, B.y + 3, `${B.t(spec.title)} (${B.t(S.continued)})`, ST.small, 'start'); B.y += 5; }
@@ -155,15 +176,16 @@ export class Builder {
     const layoutRow = (row) => {
       if (row.kind === 'group') {
         const lines = wrap(B.t(row.cells.label), W - 2 * padX, ST.tdb.size, ST.tdb.font);
-        return { lines, h: lines.length * l + 2 * padY + 1.2 };
+        return { lines, h: B.n2(row.cells.label, W - 2 * padX, ST.tdb) * l + 2 * padY + 1.2 };
       }
       const cells = cols.map((c, i) => {
         const v = row.cells[c.key];
         if (v && typeof v === 'object' && v.edges) return { mark: v, lines: v.label ? [B.t(v.label)] : [] };
         const cst = row.kind === 'total' ? ST.tdb : c.st || st;
-        return { lines: v == null || v === '' ? [] : wrap(B.t(v), widths[i] - 2 * padX, cst.size, cst.font), st: cst };
+        const empty = v == null || v === '';
+        return { lines: empty ? [] : wrap(B.t(v), widths[i] - 2 * padX, cst.size, cst.font), n: empty ? 0 : B.n2(v, widths[i] - 2 * padX, cst), st: cst };
       });
-      const h = Math.max(spec.rowMin || 0, row.h || 0, l + 2 * padY, ...cells.map((c) => c.lines.length * l + 2 * padY));
+      const h = Math.max(spec.rowMin || 0, row.h || 0, l + 2 * padY, ...cells.map((c) => Math.max(c.lines.length, c.n || 0) * l + 2 * padY));
       return { cells, h };
     };
     if (!B.page || B.page.kind !== 'text') B.textPage();
@@ -194,7 +216,8 @@ export class Builder {
           const col = cols[i], al = col.align || 'start';
           const u = al === 'end' ? us[i] + widths[i] - padX : al === 'center' ? us[i] + widths[i] / 2 : us[i] + padX;
           if (c.mark) { edgeMark(R, us[i] + padX, y0 + padY + 0.4, c.mark.edges); if (c.lines[0]) R.text(us[i] + padX + 9.5, y0 + padY + st.size * PT * 0.85, c.lines[0], ST.small, 'start'); return; }
-          c.lines.forEach((line, j) => R.text(u, y0 + padY + c.st.size * PT * 0.85 + j * l, line, c.st, al, { maxWidth: widths[i] - 2 * padX }));
+          const cdir = col.auto ? autoDir(c.lines.join(' '), B.dir) : B.dir, fal = cdir !== B.dir ? 'end' : al, fu = fal === al ? u : us[i] + widths[i] - padX;
+          c.lines.forEach((line, j) => R.text(fu, y0 + padY + c.st.size * PT * 0.85 + j * l, line, c.st, fal, { maxWidth: widths[i] - 2 * padX, dir: cdir }));
         });
       }
       B.y += L.h;

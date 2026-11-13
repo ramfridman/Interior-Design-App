@@ -17,7 +17,10 @@ const slug = (name) => (String(name || 'design').toLowerCase().replace(/[^a-z0-9
 /** @param {object} app  UI context: { store, plan, catalog, view2d, view3d, … } */
 export function createActions(app) {
   const { store, plan, catalog } = app;
-  const movable = (ids = store.selection) => ids.map((id) => store.getItem(id)).filter((it) => it && !it.locked);
+  /** Carpentry units are made to measure: the furniture tools leave them to Carpentry mode (docs/CONTRACT.md § 8). */
+  const isCarp = (it) => !!(it && it.carp);
+  const carpRefusal = (ids) => { const it = ids.map((id) => store.getItem(id)).find(isCarp); if (it && app.carpentry) app.carpentry.lockedToast(it); return !!it; };
+  const movable = (ids = store.selection) => ids.map((id) => store.getItem(id)).filter((it) => it && !it.locked && !isCarp(it));
   const show2d = () => store.ui.mode === '2d' || store.ui.mode === 'split';
   const show3d = () => store.ui.mode !== '2d';
 
@@ -36,21 +39,25 @@ export function createActions(app) {
       const ids = store.selection.slice();
       if (!ids.length) return;
       const free = movable(ids).map((it) => it.id);
-      if (!free.length) { toast('Unlock the item to remove it', { kind: 'warn' }); return; }
+      if (!free.length) { if (!carpRefusal(ids)) toast('Unlock the item to remove it', { kind: 'warn' }); return; }
       store.removeItems(free);
       toast(free.length === 1 ? 'Item removed' : `${free.length} items removed`, { action: { label: 'Undo', fn: () => store.undo() } });
     },
     duplicateSelection() {
       if (!store.selection.length) return;
-      store.duplicateItems(store.selection.slice());
+      const ids = store.selection.filter((id) => !isCarp(store.getItem(id)));
+      if (!ids.length) { carpRefusal(store.selection); return; }
+      store.duplicateItems(ids);
     },
     rotateSelection(delta) {
       const ids = movable().map((it) => it.id);
       if (ids.length) store.updateItems(ids, (it) => ({ rot: normDeg((it.rot || 0) + delta) }));
+      else carpRefusal(store.selection);
     },
     nudge(dx, dy) {
       const ids = movable().map((it) => it.id);
       if (ids.length) store.updateItems(ids, (it) => ({ x: it.x + dx, y: it.y + dy }));
+      else carpRefusal(store.selection);
     },
     selectAll() {
       const spaceId = store.ui.activeSpace;
@@ -61,6 +68,7 @@ export function createActions(app) {
     escape(event) {
       if (store.ui.mode === 'walk') { store.setUI({ mode: '3d' }); return; }
       if (app.structure.isActive()) { app.structure.escape(event); return; }
+      if (app.carpentry && app.carpentry.isActive()) { app.carpentry.escape(event); return; }
       if (store.ui.tool !== 'select') { store.setUI({ tool: 'select' }); return; }
       store.clearSelection();
     },

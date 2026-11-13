@@ -48,7 +48,11 @@ export const capHalf = (size) => (CAP_HEIGHT / UPM) * size * PT / 2;
 export function wrap(s, maxW, size, weight = 'regular') {
   const out = [];
   for (const para of sanitize(s).split('\n')) {
-    const words = para.split(/ +/).filter((w, i, a) => w !== '' || a.length === 1);
+    const raw = para.split(/ +/).filter((w, i, a) => w !== '' || a.length === 1), words = [];
+    for (let i = 0; i < raw.length; i++) {               // keep "2 × hinge" and "60 × 90" together
+      if (raw[i] === '×' && words.length && i + 1 < raw.length) { words[words.length - 1] += ` ${raw[i]} ${raw[++i]}`; continue; }
+      words.push(raw[i]);
+    }
     let line = '';
     for (let w of words) {
       const cand = line ? line + ' ' + w : w;

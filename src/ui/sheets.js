@@ -63,6 +63,7 @@ export function openWelcome(app) {
       h('ul', { class: 'tips' },
         tip('sofa', 'Drag products onto the plan', 'Or press the + on a product card, then click where it goes. Floors and wall finishes apply to the room you click.'),
         tip('swap', 'Swap the architect’s placeholders', 'The furniture already on the plan has no product yet. Select a piece and pick a real one in the Inspector.'),
+        tip('carpentry', 'Design the made-to-measure carpentry', 'Press C for Carpentry: start from the architect’s kitchen, wardrobes and vanities, edit units right in the elevation, and prepare a quotation package for carpenters.'),
         tip('wall', 'Change walls, doors and windows', 'Press B for Structure. Partitions and interior doors are yours to change; the app says what needs your engineer or a permit, and what is locked.'),
         tip('walk', 'Walk through and keep an eye on the budget', 'Press 3 to walk the house and watch the sun move through the rooms. The shopping list adds up prices as you place things.')),
       open.length ? h('details', { class: 'welcome__assume' },
@@ -125,6 +126,9 @@ export function openItemMenu(app, point) {
   const one = items.length === 1 ? items[0] : null;
   const ids = items.map((it) => it.id);
   const allLocked = items.every((it) => it.locked), allHidden = items.every((it) => it.hidden);
+  if (one && one.carp && app.carpentry) {
+    return openMenu(point, [{ heading: app.carpentry.unitLabel(one) }, { label: 'Edit in Carpentry', icon: 'carpentry', kbd: 'C', onSelect: () => app.carpentry.openUnit(one.id) }]);
+  }
   return openMenu(point, [
     { heading: one ? one.name : `${items.length} items` },
     one && (one.generic || !one.productId) ? { label: 'Choose a product…', icon: 'swap', onSelect: () => app.openPanel('inspector') } : null,

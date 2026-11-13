@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Carpentry RFQ — quotation package preview</title>
+<style>
+  html, body { margin: 0; font: 13px/1.4 system-ui, sans-serif; background: #d9dbd6; color: #1c1c1a; }
+  #bar { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px; background: #f4f4f1; border-bottom: 1px solid #0002; }
+  button, select { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid #0003; background: #fff; cursor: pointer; }
+  button.on { background: #2d5c66; color: #fff; border-color: transparent; }
+  #status { margin-left: auto; font-variant-numeric: tabular-nums; color: #555; }
+  #pages { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 16px; }
+  #pages svg { box-shadow: 0 1px 4px #0003; background: #fff; max-width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button data-lang="en" class="on">English</button><button data-lang="he">עברית</button>
+  <select id="paper"><option>A4</option><option>A3</option></select>
+  <label><input type="checkbox" id="estimate"> Owner’s copy (estimate)</label>
+  <button id="pdf">Download PDF</button>
+  <span id="status">…</span>
+</div>
+<div id="pages"></div>
+<script type="module">
+import { store } from '../src/core/store.js';
+import { PLAN } from '../src/core/plan.js';
+import { initialLayout } from '../src/core/initial-layout.js';
+import * as Carp from '../src/carpentry/index.js';
+import pricebook from '../src/carpentry/pricebook.js';
+import { buildQuotationPreview, buildQuotationPDF } from '../src/carpentry/doc/index.js';
+
+store.persist = false;
+store.load({ items: initialLayout() });
+Carp.adoptArchitectLayout();
+const state = { lang: new URLSearchParams(location.search).get('lang') === 'he' ? 'he' : 'en' };
+const $ = (s) => document.querySelector(s);
+const options = () => ({
+  lang: state.lang, runIds: 'all', paper: $('#paper').value, include: { estimate: $('#estimate').checked }, pricebook,
+  project: { title: 'House 98 — Kibbutz Afikim', address: 'Kibbutz Afikim, Jordan Valley', date: new Date().toISOString().slice(0, 10), reference: 'H98-CARP-RFQ-01' },
+  src: { store, plan: PLAN },
+});
+function render() {
+  const t = performance.now();
+  const { doc, svgPages } = buildQuotationPreview(options());
+  $('#pages').innerHTML = svgPages.join('');   // markup generated from escaped document data
+  document.documentElement.lang = state.lang;
+  for (const b of document.querySelectorAll('[data-lang]')) b.classList.toggle('on', b.dataset.lang === state.lang);
+  $('#status').textContent = `${doc.pages.length} pages · ${Math.round(performance.now() - t)} ms`;
+  window.__doc = doc;
+}
+document.querySelectorAll('[data-lang]').forEach((b) => b.addEventListener('click', () => { state.lang = b.dataset.lang; render(); }));
+$('#paper').addEventListener('change', render);
+$('#estimate').addEventListener('change', render);
+$('#pdf').addEventListener('click', async () => {
+  $('#status').textContent = 'Building PDF…';
+  const t = performance.now();
+  const { bytes, filename, pages } = await buildQuotationPDF(options());
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  window.__pdf = { size: bytes.length, filename, pages };
+  $('#status').textContent = `${filename} · ${pages} pages · ${(bytes.length / 1024).toFixed(0)} KB · ${Math.round(performance.now() - t)} ms`;
+});
+render();
+</script>
+</body>
+</html>

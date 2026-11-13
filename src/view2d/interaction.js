@@ -36,6 +36,19 @@ export function attachInteraction(V) {
   const redraw = () => V.invalidate();
   const structureTool = () => isStructureTool(tool());
   const isStructureGesture = (g) => !!g && typeof g.type === 'string' && g.type.startsWith('s-');
+  // Carpentry hooks (docs/CONTRACT.md § 8): units of made-to-measure runs (`item.carp`) are selectable but never moved,
+  // rotated or resized by the furniture tools; in Carpentry mode (tool 'carpentry') a click is reported to the UI instead.
+  const carpentryTool = () => tool() === 'carpentry';
+  function hitCarp(pp) {
+    if (!store.ui.showItems) return null;
+    for (let i = store.items.length - 1; i >= 0; i--) {
+      const it = store.items[i];
+      if (!it.carp || it.hidden) continue;
+      const [lx, ly] = planToItemLocal(it, pp.x, pp.y);
+      if (Math.abs(lx) <= it.w / 2 && Math.abs(ly) <= it.d / 2) return it;
+    }
+    return null;
+  }
   const structure = createStructureTools(V, { toPlan, snapOn, tool, startPan: (p, extra) => startPan(p, extra) });
 
   // ───────────── hit testing ─────────────
@@ -59,7 +72,7 @@ export function attachInteraction(V) {
   function hitHandle(p) {
     if (tool() !== 'select' || store.selection.length !== 1 || !store.ui.showItems) return null;
     const it = store.getItem(store.selection[0]);
-    if (!it || it.hidden) return null;
+    if (!it || it.hidden || it.carp) return null;
     let best = null;
     for (const h of itemHandles(it, cam)) {
       const dist = Math.hypot(h.x - p.x, h.y - p.y);
@@ -76,6 +89,7 @@ export function attachInteraction(V) {
     else if (st.spaceDown || tool() === 'pan') c = 'grab';
     else if (st.placing) c = 'copy';
     else if (structureTool()) c = structure.cursor();
+    else if (carpentryTool()) c = st.hoverId ? 'pointer' : 'default';
     else if (tool() === 'measure') c = 'crosshair';
     else if (g && g.type === 'rotate') c = 'grabbing';
     else if (g && g.type === 'resize') c = g.cursor;
@@ -141,7 +155,8 @@ export function attachInteraction(V) {
 
   function beginMove(g) {
     const clicked = store.getItem(g.itemId);
-    let items = store.getSelected().filter((it) => !it.locked && !it.hidden);
+    let items = store.getSelected().filter((it) => !it.locked && !it.hidden && !it.carp);
+    if (clicked && clicked.carp) { g.type = 'noop'; V.emit('carpentry-locked', { itemId: clicked.id, op: g.alt ? 'duplicate' : 'move' }); return false; }
     if (!clicked || clicked.locked || !items.length) { g.type = 'noop'; return false; }
     V.selfWrite = true;
     store.begin(); g.batch = true;
@@ -360,6 +375,7 @@ export function attachInteraction(V) {
     if (e.button !== 0) return;
     if (st.placing) { updateGhost(p, e); st.gesture = { type: 'place', start: p }; return; }
     if (structureTool()) { structure.down(p, e); setCursor(p); return; }
+    if (carpentryTool()) { st.gesture = { type: 'c-press', start: p, last: p, samples: [] }; return; }
     if (tool() === 'measure') {
       const pt = snapper.snapPoint(pp, { scale: cam.scale, enabled: snapOn(e) });
       if (st.measureDraft && st.measureDraft.armed) {
@@ -416,6 +432,7 @@ export function attachInteraction(V) {
     if (!g) {
       if (st.placing) { updateGhost(p, e); return; }
       if (structureTool()) { if (e.pointerType !== 'touch') structure.hover(p, e); setCursor(p); return; }
+      if (carpentryTool()) { const it = e.pointerType !== 'touch' ? hitCarp(pp) : null, id = it ? it.id : null; if (id !== st.hoverId) { st.hoverId = id; redraw(); } setCursor(p); return; }
       if (tool() === 'measure' && st.measureDraft) {
         st.measureDraft.b = constrain(st.measureDraft.a, snapper.snapPoint(pp, { scale: cam.scale, enabled: snapOn(e) }), e);
         redraw();
@@ -456,6 +473,7 @@ export function attachInteraction(V) {
         redraw();
         break;
       case 'place': updateGhost(p, e); break;
+      case 'c-press': if (far) { startPan(p, { start: g.start, last: g.last }); cam.panBy(p.x - g.start.x, p.y - g.start.y); st.gesture.last = p; st.gesture.moved = true; redraw(); setCursor(p); } break;
       default:
         if (isStructureGesture(g)) { structure.move(g, p, e, far); setCursor(p); }
         break;
@@ -495,6 +513,7 @@ export function attachInteraction(V) {
       case 'context': {
         if (st.placing) { endPlacing(null); break; }
         if (st.measureDraft) { st.measureDraft = null; redraw(); break; }
+        if (carpentryTool()) break;
         if (structureTool()) {
           // right-click drops a wall being drawn; otherwise it is a context menu on the wall / opening under it
           const pp = toPlan(p);
@@ -516,6 +535,11 @@ export function attachInteraction(V) {
           const vx = (b.x - a.x) / dt, vy = (b.y - a.y) / dt, v = Math.hypot(vx, vy), cap = Math.min(1, 2.5 / (v || 1));
           cam.glide(vx * cap, vy * cap);
         }
+        break;
+      }
+      case 'c-press': {
+        const pp = toPlan(p), it = hitCarp(pp);
+        V.emit('carpentry-pick', { x: pp.x, y: pp.y, clientX: e.clientX, clientY: e.clientY, itemId: it ? it.id : null });
         break;
       }
       case 'press': click(p, e, store.getItem(g.itemId)); break;

@@ -9,7 +9,7 @@ import { iconBtn, segmented } from './components.js';
 import { openMenu } from './dialogs.js';
 import { canPrint } from './exporter.js';
 import { fmtPrice } from './format.js';
-import { shoppingTotal } from './shopping.js';
+import { shoppingTotal, onCarpentryBudget } from './shopping.js';
 import { WALL_THICKNESSES } from './structure.js';
 import { STRUCTURE_TOOL_LIST, planChip } from './structure-panels.js';
 
@@ -29,6 +29,7 @@ const TOOLS = [
 const EDIT_MODES = [
   { value: 'furnish', label: 'Furnish', tip: 'Furnish: place and arrange products', kbd: 'B' },
   { value: 'structure', label: 'Structure', tip: 'Structure: change walls, doors and windows', kbd: 'B' },
+  { value: 'carpentry', label: 'Carpentry', tip: 'Carpentry: design the made-to-measure kitchen, wardrobes and vanities', kbd: 'C' },
 ];
 const TOGGLES = [
   { key: 'snap', label: 'Snap to walls and grid', icon: 'snap' },
@@ -40,7 +41,8 @@ const TOGGLES = [
 
 /** @param {HTMLElement} root  @param {object} app */
 export function initTopbar(root, app) {
-  const { store, actions, structure } = app;
+  const { store, actions, structure, carpentry } = app;
+  const editModeNow = () => (structure.isActive() ? 'structure' : carpentry.isActive() ? 'carpentry' : 'furnish');
 
   /* Mark + project name */
   const mark = h('div', { class: 'mark', 'aria-hidden': 'true' }, h('span', { class: 'mark__text display' }, app.plan.meta.model || 'E7'));
@@ -53,11 +55,12 @@ export function initTopbar(root, app) {
   const redo = iconBtn('redo', 'Redo', { kbd: `${MOD} ⇧ Z`, onClick: actions.redo });
 
   /* Furnish | Structure, and the tools of each mode */
-  const editMode = segmented({ options: EDIT_MODES, value: structure.isActive() ? 'structure' : 'furnish', label: 'Editing mode', cls: 'seg--mode',
-    onChange: (v) => (v === 'structure' ? structure.enter() : structure.exit()) });
+  const editMode = segmented({ options: EDIT_MODES, value: editModeNow(), label: 'Editing mode', cls: 'seg--mode',
+    onChange: (v) => (v === 'structure' ? structure.enter() : v === 'carpentry' ? carpentry.enter() : (structure.exit(), carpentry.exit())) });
   const editBadge = h('span', { class: 'badge', hidden: true });
   const editBtn = iconBtn('wall', 'Structure: change walls, doors and windows', { kbd: 'B', pressed: structure.isActive(), class: 'only-compact modebtn', onClick: () => structure.toggle() });
   editBtn.append(editBadge);
+  const carpBtn = iconBtn('carpentry', 'Carpentry: made-to-measure kitchen, wardrobes and vanities', { kbd: 'C', pressed: carpentry.isActive(), class: 'only-compact modebtn', onClick: () => carpentry.toggle() });
   const tools = segmented({ options: TOOLS, value: store.ui.tool, iconOnly: true, label: 'Tool', cls: 'seg--tools', onChange: (tool) => store.setUI({ tool }) });
 
   const sTools = segmented({ options: STRUCTURE_TOOL_LIST.map((t) => ({ value: t.value, label: t.long, icon: t.icon, kbd: t.kbd })), value: store.ui.tool, iconOnly: true, iconSize: 18,
@@ -136,7 +139,7 @@ export function initTopbar(root, app) {
       compact && { label: 'Keyboard shortcuts', icon: 'keyboard', onSelect: () => app.openShortcuts() },
       compact && { label: 'Welcome and house facts', icon: 'home', onSelect: () => app.openWelcome() },
       compact && { heading: 'Tool' },
-      ...(compact && !structure.isActive() ? TOOLS.map((t) => ({ label: t.label, icon: t.icon, checked: store.ui.tool === t.value ? true : undefined, onSelect: () => store.setUI({ tool: t.value }) })) : []),
+      ...(compact && !structure.isActive() && !carpentry.isActive() ? TOOLS.map((t) => ({ label: t.label, icon: t.icon, checked: store.ui.tool === t.value ? true : undefined, onSelect: () => store.setUI({ tool: t.value }) })) : []),
       ...(compact && structure.isActive() ? STRUCTURE_TOOL_LIST.map((t) => ({ label: t.long, icon: t.icon, checked: store.ui.tool === t.value ? true : undefined, onSelect: () => structure.setTool(t.value) })) : []),
     ];
   }
@@ -145,7 +148,7 @@ export function initTopbar(root, app) {
   root.append(
     h('div', { class: 'topbar__group topbar__brand' }, mark, name),
     h('div', { class: 'topbar__group', role: 'group', 'aria-label': 'History' }, undo, redo),
-    h('div', { class: 'topbar__group topbar__edit' }, h('div', { class: 'hide-compact' }, editMode), editBtn),
+    h('div', { class: 'topbar__group topbar__edit' }, h('div', { class: 'hide-compact' }, editMode), editBtn, carpBtn),
     h('div', { class: 'topbar__group topbar__furnish hide-phone' }, tools),
     structureHost,
     center,
@@ -171,9 +174,10 @@ export function initTopbar(root, app) {
   const syncHistory = () => { const s = store.historyState(); undo.disabled = !s.canUndo; redo.disabled = !s.canRedo; };
   const syncUI = () => {
     const on = structure.isActive();
-    editMode.set(on ? 'structure' : 'furnish');
+    editMode.set(editModeNow());
     editBtn.setPressed(on);
-    tools.set(on ? null : store.ui.tool);
+    carpBtn.setPressed(carpentry.isActive());
+    tools.set(on || carpentry.isActive() ? null : store.ui.tool);
     sTools.set(on ? store.ui.tool : null);
     thickness.set(store.ui.wallThickness);
     showChanges.setPressed(!!store.ui.showPlanChanges);
@@ -197,6 +201,7 @@ export function initTopbar(root, app) {
   store.on('project', () => { if (document.activeElement !== name) name.value = store.project.name; refreshBudget(); });
   store.on('items', (e) => { if (!e.transient) refreshBudget(); });
   store.on('finishes', refreshBudget);
+  onCarpentryBudget(refreshBudget);
   store.on('plan', (e) => { if (!e || !e.transient) refreshBudget(); });
   syncHistory(); syncUI(); syncPlan(); refreshBudget();
 }

@@ -12,7 +12,7 @@
  *   { t:'drawing', id, kind, runId, scale, box: [x, y, w, h], ops: PageOp[] }   a shop drawing flattened to page mm
  * Any op may carry `role` and `unitId` (kept from the engine op) for styling / hit-testing.
  */
-import { visualOrder } from './bidi.js';
+import { visualOrder, autoDir } from './bidi.js';
 import { sanitize, textWidth, capHalf, PT } from './metrics.js';
 import { tr } from './strings.js';
 
@@ -97,25 +97,26 @@ export function flattenDrawing(d, { lang = 'en', box, scale, align = 'center' } 
   const ops = [];
   const meta = (o) => { const m = {}; if (o.role) m.role = o.role; if (o.unitId) m.unitId = o.unitId; return m; };
   for (const o of d.ops) {
-    const m = meta(o), dash = o.dash && DASH[o.dash] ? o.dash : undefined;
-    if (o.t === 'line') ops.push({ t: 'line', x1: X(o.x1), y1: Y(o.y1), x2: X(o.x2), y2: Y(o.y2), lw: o.lw, color: 'ink', ...(dash ? { dash } : {}), ...m });
+    const m = meta(o), dash = o.dash && DASH[o.dash] ? o.dash : undefined, ink = o.role === 'callout' ? 'accent' : 'ink';
+    if (o.t === 'line') ops.push({ t: 'line', x1: X(o.x1), y1: Y(o.y1), x2: X(o.x2), y2: Y(o.y2), lw: o.lw, color: ink, ...(dash ? { dash } : {}), ...m });
     else if (o.t === 'rect') {
       const x = X(o.x), y = Y(o.y + o.h), w = r2(o.w * k), h = r2(o.h * k), F = FILLS[o.fill] || null, H = FILLS[o.hatch] || null;
       if (F) ops.push({ t: 'rect', x, y, w, h, fill: F.fill, ...m });
       else if (H) ops.push({ t: 'rect', x, y, w, h, fill: H.fill, ...m });
       const hat = (H && H.hatch) || (F && F.hatch);
       if (hat) ops.push(...hatchLines(x, y, w, h, hat.gap, hat.lw, 'hatch', m));
-      ops.push({ t: 'rect', x, y, w, h, lw: o.lw, color: 'ink', ...(dash ? { dash } : {}), ...m });
+      ops.push({ t: 'rect', x, y, w, h, lw: o.lw, color: ink, ...(dash ? { dash } : {}), ...m });
     } else if (o.t === 'poly') {
       const F = FILLS[o.fill];
-      ops.push({ t: 'poly', pts: o.pts.map(([x, y]) => [X(x), Y(y)]), close: !!o.close, lw: o.lw, color: 'ink', ...(F ? { fill: F.fill } : {}), ...(dash ? { dash } : {}), ...m });
-    } else if (o.t === 'arc') ops.push({ t: 'arc', cx: X(o.cx), cy: Y(o.cy), r: r2(o.r * k), a0: o.a0, a1: o.a1, lw: o.lw, color: 'ink', ...(dash ? { dash } : {}), ...m });
+      ops.push({ t: 'poly', pts: o.pts.map(([x, y]) => [X(x), Y(y)]), close: !!o.close, lw: o.lw, color: ink, ...(F ? { fill: F.fill } : {}), ...(dash ? { dash } : {}), ...m });
+    } else if (o.t === 'arc') ops.push({ t: 'arc', cx: X(o.cx), cy: Y(o.cy), r: r2(o.r * k), a0: o.a0, a1: o.a1, lw: o.lw, color: ink, ...(dash ? { dash } : {}), ...m });
     else if (o.t === 'text') {
       const size = (o.size * tscale) / PT, rot = o.rot || 0, a = (rot * Math.PI) / 180, ch2 = capHalf(size);
       const x = X(o.x) + Math.sin(a) * ch2, y = Y(o.y) + Math.cos(a) * ch2;     // vertical centre → baseline
       const align = o.anchor === 'start' ? 'left' : o.anchor === 'end' ? 'right' : 'center';
-      const col = o.role === 'label' || o.role === 'note' ? 'ink2' : 'ink';
-      ops.push(textOp(x, y, tr(o.text, lang), { size: r2(size), font: FONT_OF(o), color: col, align, dir, rot: rot || undefined, ...m }));
+      const col = o.role === 'callout' ? 'accent' : o.role === 'label' || o.role === 'note' ? 'ink2' : 'ink';
+      const s = tr(o.text, lang);
+      ops.push(textOp(x, y, s, { size: r2(size), font: o.role === 'callout' ? 'bold' : FONT_OF(o), color: col, align, dir: o.role === 'note' || o.role === 'callout' ? autoDir(s, dir) : dir, rot: rot || undefined, ...m }));
     }
   }
   return { ops, k, origin: (x, y) => [X(x), Y(y)], size: [cw, ch], offset: [ox, oy] };

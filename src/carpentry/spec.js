@@ -92,6 +92,27 @@ export const VOCAB = {
     shelves: L('Adjustable shelves', 'מדפים מתכווננים'), drawers: L('Internal drawers', 'מגירות פנימיות'),
     larder: L('Pull-out larder', 'מזווה נשלף (קרגו)'),
   },
+  doorOperation: {
+    hinged: L('Hinged doors', 'דלתות ציר'), removable: L('Removable lift-off doors', 'דלתות נשלפות (מורמות מהצירים)'),
+    sliding: L('Sliding doors', 'דלתות הזזה'), pocket: L('Pocket doors (retract into side pockets)', 'דלתות כיס נסתרות (נכנסות לצדדים)'),
+    bifold: L('Bi-fold doors', 'דלת אקורדיון (מתקפלת)'), tambour: L('Tambour / roller shutter', 'תריס גלילה'),
+    'lift-up': L('Lift-up door', 'דלת הרמה (קלפה)'), 'drop-down': L('Drop-down flap', 'דלת נפתחת כלפי מטה'),
+    'push-open': L('Push-to-open doors (no handle)', 'דלתות פתיחה בלחיצה (ללא ידית)'), curtain: L('Fabric curtain', 'וילון בד'),
+    none: L('No doors (open)', 'ללא דלתות (פתוח)'),
+  },
+  cornerPantry: {
+    diagonal: L('Diagonal front', 'חזית אלכסונית'), 'l-doors': L('Two doors meeting at the inside corner (no post)', 'שתי דלתות הנפגשות בפינה הפנימית (ללא עמוד)'),
+    'walk-in': L('Walk-in corner pantry, U-shaped shelving', 'מזווה פינתי נכנס, מדפים בצורת U'),
+  },
+  featureCategory: {
+    construction: L('Construction', 'מבנה'), doors: L('Doors / fronts', 'דלתות / חזיתות'), internal: L('Interior', 'חלוקה פנימית'),
+    finish: L('Finish', 'גימור'), hardware: L('Hardware', 'פרזול'), appliance: L('Appliance', 'מכשיר'), lighting: L('Lighting', 'תאורה'),
+    electrical: L('Electrical', 'חשמל'), other: L('Other', 'אחר'),
+  },
+  cellKind: {
+    door: L('Door', 'דלת'), drawer: L('Drawer', 'מגירה'), drawers: L('Drawers', 'מגירות'), open: L('Open shelf', 'מדף פתוח'), glass: L('Glass door', 'דלת זכוכית'),
+    panel: L('Fixed panel', 'פאנל קבוע'), appliance: L('Appliance', 'מכשיר'), pullout: L('Pull-out', 'נשלף'), void: L('Empty niche', 'נישה ריקה'),
+  },
   cornerInternal: {
     shelf: L('Fixed shelf', 'מדף קבוע'), lemans: L('LeMans-type swing-out', 'מנגנון לה-מאן'),
     'magic-corner': L('Magic-corner pull-out', 'מנגנון מג׳יק קורנר'), carousel: L('Carousel', 'קרוסלה'), none: L('Empty (dead corner)', 'פינה מתה (ללא גישה)'),
@@ -120,6 +141,9 @@ export const RULES = {
   islandOverhangUnsupported: { 12: 20, 20: 30, 30: 35, 40: 40 }, // worktop mm → max unsupported seating overhang cm
   endOverhangUnsupported: 15,
   jointClearOfCutout: 10,
+  cornerPantryAccess: 30,     // clear door width on a corner-pantry face
+  diagonalDoorMin: 45, walkInLegMin: 120,
+  customMinCell: 8, customMinDoor: 20, customMinColumn: 10,
 };
 
 /** The default RunSpec. Kind-specific deltas are in KIND_SPEC. */

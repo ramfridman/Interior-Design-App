@@ -27,6 +27,11 @@ export const SHORTCUTS = [
     [['B'], 'Switch between Furnish and Structure'], [['V'], 'Select walls and openings'], [['W'], 'Draw a wall'],
     [['D'], 'Place a door'], [['N'], 'Place a window'], [['P'], 'Place an open passage'],
   ] },
+  { group: 'Carpentry: runs and units', rows: [
+    [['C'], 'Switch Carpentry mode on / off'], [['N'], 'New run'], [['←', '→'], 'Previous / next unit'], [['Alt', '←', '→'], 'Move the unit left / right'],
+    [['+', '−'], 'Unit 5 cm wider / narrower'], [['Delete'], 'Remove the unit'], [['F'], 'Fit the run (fillers at the walls)'], [['Shift', 'F'], 'Show the run'],
+    [['Esc'], 'Unit → run → leave Carpentry'], [[MOD, 'Z'], 'Undo, one step per gesture'],
+  ] },
   { group: 'Structure: the selected wall or opening', rows: [
     [['←', '↑', '→', '↓'], 'Move it 5 cm'], [['Delete'], 'Remove it'], [['Esc'], 'Put the tool down, then leave Structure'],
     [[MOD, 'Z'], 'Undo a plan change'],
@@ -66,6 +71,12 @@ export function initKeyboard(app) {
     if (walking) return;
 
     if (key === 'b') { app.structure.toggle(); return; }
+    if (key === 'c' && !e.altKey) { app.carpentry.toggle(); return; }
+    if (app.carpentry.isActive()) {
+      // Carpentry mode: arrows / + − / Delete / F act on the selected unit and run; furnishing keys do nothing here.
+      if (app.carpentry.handleKey(e, key)) return;
+      if (['h', 'm', 'r', '®', 'v', 'Delete', 'Backspace', 'ArrowUp', 'ArrowDown', '+', '=', '-', '_'].includes(key)) return;
+    }
     if (app.structure.isActive()) {
       // Structure mode: the letters pick wall / opening tools, Delete and the arrows act on the selected wall or opening.
       const tool = { v: 'structure', w: 'wall', d: 'door', n: 'window', p: 'passage' }[key];

@@ -30,7 +30,7 @@ export function drawingToSVG(drawing, opts = {}) {
   const print = !!opts.print, interactive = opts.interactive !== false;
   const pal = print ? PALETTE : SCREEN_PALETTE;
   const css = `${opts.fonts === false ? '' : fontFaceCSS()}${TEXT_CSS}`
-    + (interactive ? '.op[data-unit-id]{cursor:pointer}.op-unit[data-unit-id]:hover{fill:var(--carp-accent-tint,rgba(61,124,135,.15))}' : '');
+    + (interactive ? '.op[data-unit-id]{cursor:pointer}.op-unit[data-unit-id]{pointer-events:all}.op-unit[data-unit-id]:hover{fill:var(--carp-accent-tint,rgba(61,124,135,.15))}' : '');
   const size = `${opts.width != null ? ` width="${esc(opts.width)}"` : ` width="${(w).toFixed(1)}mm"`}${opts.height != null ? ` height="${esc(opts.height)}"` : opts.width != null ? '' : ` height="${(h).toFixed(1)}mm"`}`;
   const cls = ['carp-drawing', `carp-drawing-${drawing.kind}`, opts.className].filter(Boolean).join(' ');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w.toFixed(2)} ${h.toFixed(2)}"${size} class="${esc(cls)}" data-drawing-id="${esc(drawing.id || '')}" data-run-id="${esc(drawing.runId || '')}" data-scale="${scale}" lang="${lang}"`

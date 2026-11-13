@@ -6,7 +6,7 @@ import { itemCorners } from '../../core/geometry.js';
 import { textOp, r2 } from './prims.js';
 import { tr } from './strings.js';
 
-const ZONES = { kitchen: { en: 'Kitchen', he: 'מטבח' }, dining: { en: 'Dining', he: 'פינת אוכל' }, living: { en: 'Living', he: 'סלון' }, foyer: { en: 'Entry', he: 'כניסה' } };
+const ZONES = { dining: { en: 'Dining', he: 'פינת אוכל' }, living: { en: 'Living', he: 'סלון' }, foyer: { en: 'Entry', he: 'כניסה' } };
 
 /** Footprints (plan polygons) of the visible unit items of a run. */
 export function runFootprints(run, items) {

@@ -39,6 +39,13 @@ export function computeWorktops(run, units, butts = []) {
     if (!carries) { cur = null; continue; }
     if (cur && Math.abs(cur.e - at) < 0.5) { cur.e = at + u.carp.width; cur.units.push(u); } else { cur = { s: at, e: at + u.carp.width, units: [u] }; segs.push(cur); }
   }
+  // a BASE corner unit of the other arm reserving this end (carousel / diagonal): the worktop runs over the reserved part
+  const rs = run.reserved && run.reserved.by;
+  if (rs && segs.length) {
+    if (rs.left && rs.left.level === 'base' && Math.abs(segs[0].s - rs.left.cm) < 0.5) segs[0].s = 0;
+    const last = segs[segs.length - 1];
+    if (rs.right && rs.right.level === 'base' && Math.abs(last.e - (run.length - rs.right.cm)) < 0.5) last.e = run.length;
+  }
   const depth = wt.depth, max = wt.maxSlab || 300, out = [];
   let n = 0;
   const endType = (side, atRunEnd) => {
@@ -79,7 +86,7 @@ export function computeWorktops(run, units, butts = []) {
       const lt = i === 0 ? leftT : 'joint', rt = i === cutsAll.length - 2 ? rightT : 'joint';
       const pieceCuts = cuts.filter((c) => c.a >= a - 0.01 && c.b <= b + 0.01).map((c) => ({ kind: c.kind, unitId: c.unitId, x: r1(c.a - a), w: c.w, d: c.d, fromFront: c.fromFront }));
       let polished = len;                                   // front edge
-      for (const bt of butts) if ((bt.side === 'left' && i === 0) || (bt.side === 'right' && i === cutsAll.length - 2)) polished -= bt.depth;
+      for (const bt of butts) if ((bt.side === 'left' && i === 0 && a < 0.5) || (bt.side === 'right' && i === cutsAll.length - 2 && b > run.length - 0.5)) polished -= bt.depth;
       if (island) polished += len;                          // back (working side) edge too
       if (lt === 'polished') polished += depth;
       if (rt === 'polished') polished += depth;

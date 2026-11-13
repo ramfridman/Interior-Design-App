@@ -49,6 +49,8 @@ export function opsToSVG(ops, opts = {}) {
         anchor = anchor === 'start' ? 'end' : anchor === 'end' ? 'start' : anchor;
       }
       out += `<text x="${n(o.x)}" y="${n(o.y)}" font-size="${n(fs)}" font-weight="${FONT_WEIGHTS[o.font] || 400}" fill="${resolve(o.color || 'ink', pal)}" text-anchor="${anchor}" style="${style}"${rot}${hooks(o, opts)}>${esc(body)}</text>`;
+    } else if (o.t === 'image') {
+      out += `<image x="${n(o.x)}" y="${n(o.y)}" width="${n(o.w)}" height="${n(o.h)}" href="${esc(o.src)}" xlink:href="${esc(o.src)}" preserveAspectRatio="none"/>`;
     } else if (o.t === 'drawing') {
       out += `<g class="drawing drawing-${esc(o.kind || '')}" data-drawing-id="${esc(o.id || '')}"${o.runId ? ` data-run-id="${esc(o.runId)}"` : ''}>${opsToSVG(o.ops, opts)}</g>`;
     }

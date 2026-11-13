@@ -43,6 +43,7 @@ export function initInspector(root, app) {
     }
     const items = store.getSelected();
     if (!items.length) setKids(root, renderNothing());
+    else if (items.length === 1 && items[0].carp) setKids(root, renderCarp(items[0]));
     else if (items.length === 1) { shownId = items[0].id; setKids(root, renderOne(items[0])); }
     else setKids(root, renderMany(items));
   }
@@ -84,6 +85,22 @@ export function initInspector(root, app) {
     } catch (err) { return 'Built-in default'; }
   }
   function spaceId(item) { try { const s = store.spaceOf(item); return s ? s.id : null; } catch (err) { return null; } }
+
+  /* ───────── A carpentry unit: made to measure, edited in Carpentry mode ───────── */
+  function renderCarp(item) {
+    const C = app.carpentry;
+    const run = C.Carp.runOfItem(item);
+    const mod = C.Carp.MODULES[item.carp.module];
+    return [
+      h('div', { class: 'ccard' },
+        h('span', { class: 'ccard__icon' }, icon('carpentry', { size: 22 })),
+        h('div', { class: 'ccard__body' },
+          h('p', { class: 'ccard__title display' }, C.unitLabel(item)),
+          h('p', { class: 'ccard__meta' }, `${mod ? mod.name.en : item.name} · ${Math.round(item.carp.width * 10) / 10} cm wide${run ? ` · ${run.name}` : ''}`),
+          h('p', { class: 'ccard__text' }, 'Made to measure: its size, position, fronts and materials are set in Carpentry, so the furniture tools leave it alone.'),
+          btn('Edit in Carpentry', { small: true, variant: 'primary', icon: 'carpentry', kbd: 'C', onClick: () => C.openUnit(item.id) }))),
+    ];
+  }
 
   /* ───────── One item ───────── */
   function renderOne(item) {

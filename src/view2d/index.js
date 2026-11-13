@@ -74,7 +74,7 @@ export function createView2D(container, ctx) {
     const moving = cam.tick(now, dt || 16);
     env.ui = store.ui;
     const zooming = cam.scale !== lastScale;
-    V.renderer.render(cam, { dpr: V.dpr, live: state.live, direct: zooming && Number.isFinite(lastScale), overlay: (G) => drawOverlay(G, V) });
+    V.renderer.render(cam, { dpr: V.dpr, live: state.live, direct: zooming && Number.isFinite(lastScale), overlay: (G) => { drawOverlay(G, V); paintExtraOverlays(G); } });
     if (zooming) { lastScale = cam.scale; V.emit('zoom', { scale: cam.scale }); }
     if (state.flash && now - state.flash.t0 > 1500) state.flash = null;
     if (moving || state.flash) V.invalidate(); else lastTime = 0;
@@ -170,6 +170,13 @@ export function createView2D(container, ctx) {
   }
   V.fit = fit;
 
+  // Host overlays (hook for the UI's Carpentry mode): painted on top of the plan every frame, in device space.
+  const extraOverlays = new Set();
+  function paintExtraOverlays(G) {
+    for (const fn of extraOverlays) { try { G.deviceSpace(); fn(G, env.pal); } catch (err) { console.error('[view2d] overlay failed', err); } }
+    G.deviceSpace();
+  }
+
   // ───────────── store wiring ─────────────
   const interaction = attachInteraction(V);
   let planShot = planSnapshot(plan);        // fingerprint of the drawn plan, to find what the next edit touched
@@ -237,7 +244,9 @@ export function createView2D(container, ctx) {
     getStructureHover: () => interaction.getStructureHover(),
     /**
      * Events: 'cursor' {x,y,space}, 'zoom' {scale}, 'placing' {state,…}, 'contextmenu' {item,structure?,clientX,clientY},
-     * 'item-dblclick' {item}, 'structure' {type:'done'|'refused'|'locked'|'warning', op, level, text, clientX, clientY}.
+     * 'item-dblclick' {item}, 'structure' {type:'done'|'refused'|'locked'|'warning', op, level, text, clientX, clientY},
+     * 'carpentry-pick' {x, y, clientX, clientY, itemId|null} (Carpentry mode: a click on the plan; itemId = the carpentry unit
+     * under it), 'carpentry-locked' {itemId, op} (a furniture gesture refused on a carpentry unit).
      */
     on(name, fn) {
       if (!listeners.has(name)) listeners.set(name, new Set());
@@ -251,6 +260,13 @@ export function createView2D(container, ctx) {
       interaction.destroy(); V.theme.destroy(); V.renderer.destroy(); ro?.disconnect();
       canvas.remove(); listeners.clear();
     },
+    /**
+     * Hook (Carpentry mode): paint `fn(G, palette)` over the plan on every frame (G = the device-space drawing helper of
+     * gfx.js). Returns a function that removes it. Call redraw() when what it paints changes.
+     */
+    addOverlay(fn) { if (typeof fn !== 'function') return () => {}; extraOverlays.add(fn); V.invalidate(); return () => { extraOverlays.delete(fn); V.invalidate(); }; },
+    /** Request a repaint of the overlay (cheap: the cached plan layers are reused). */
+    redraw() { V.invalidate(); },
     /** Test / diagnostics handle (not part of the contract). */
     _debug: { state, cam, env, stats: V.renderer.stats, snapper: V.snapper, renderNow() { if (raf) { cancelAnimationFrame(raf); raf = 0; } frame(performance.now()); return V.renderer.stats; } },
   };

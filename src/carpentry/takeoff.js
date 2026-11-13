@@ -13,6 +13,7 @@ import { MODULES, islandBays } from './modules.js';
 import { RULES, vocab } from './spec.js';
 import { unitsOf, positions, geometryOf, unitCodes, isFloorLevel } from './layout.js';
 import { computeWorktops } from './worktop.js';
+import { cornerShape, polyArea, BY_CARPENTER } from './bespoke.js';
 
 const L = (en, he) => ({ en, he });
 const mm = (cm) => Math.round(cm * 100) / 10;           // cm → mm (0.1 mm)
@@ -26,6 +27,10 @@ const PART = {
   boxSide: L('Top box side', 'דופן בוידעם'), boxTop: L('Top box top', 'גג בוידעם'), boxBottom: L('Top box bottom', 'תחתית בוידעם'), boxBack: L('Top box back', 'גב בוידעם'),
   shelfBoard: L('Floating shelf', 'מדף צף'), cladding: L('Cladding panel', 'פאנל חיפוי'), deskTop: L('Desk top', 'משטח שולחן'),
   bench: L('Bench seat', 'מושב ספסל'), sliding: L('Sliding door', 'דלת הזזה'),
+  fixedPanel: L('Fixed front panel', 'פאנל חזית קבוע'), cornerTop: L('Top (shaped to the corner)', 'גג (בצורת הפינה)'), cornerBottom: L('Bottom (shaped to the corner)', 'תחתית (בצורת הפינה)'),
+  cornerShelf: L('Corner shelf (shaped)', 'מדף פינתי (בצורה)'), sideA: L('Side (end of this arm)', 'דופן (קצה הזרוע הזו)'), sideB: L('Side (end of the other arm)', 'דופן (קצה הזרוע השנייה)'),
+  backA: L('Back panel (this wall)', 'גב (קיר זה)'), backB: L('Back panel (other wall)', 'גב (הקיר השני)'), angledRail: L('Angled front frame rail', 'מסגרת חזית אלכסונית (פס)'),
+  cornerEnd: L('End panel of the other arm', 'פאנל צד בקצה הזרוע השנייה'),
 };
 export const HARDWARE = {
   hinge: L('Hinge', 'ציר'), drawer: L('Drawer system (runners + box)', 'מערכת מגירה (מסילות + קופסה)'), liftup: L('Lift-up mechanism', 'מנגנון דלת הרמה'),
@@ -35,6 +40,9 @@ export const HARDWARE = {
   pullout: L('Pull-out fitting', 'מנגנון נשלף'), larder: L('Pull-out larder', 'מזווה נשלף (קרגו)'), 'trouser-rack': L('Trouser rack', 'מתקן מכנסיים'),
   'sliding-set': L('Sliding door gear (per door)', 'מנגנון דלת הזזה (לדלת)'), 'sliding-track': L('Sliding track (top + bottom)', 'מסילה (עליונה + תחתונה)'),
   'appliance-kit': L('Integrated appliance door kit', 'ערכת חיבור חזית למכשיר'), 'worktop-bracket': L('Overhang bracket', 'תומך בליטה'),
+  'lift-off-hinge': L('Lift-off hinge / cleat for removable door', 'ציר נשלף / תושבת לדלת נשלפת'), 'pocket-system': L('Pocket-door system (per door)', 'מנגנון דלת כיס (לדלת)'),
+  'bifold-set': L('Bi-fold door fitting set', 'ערכת פרזול לדלת אקורדיון'), 'tambour-kit': L('Tambour shutter kit (slats + tracks)', 'ערכת תריס גלילה (שלבים + מסילות)'),
+  'curtain-track': L('Curtain track', 'מסילת וילון'),
 };
 
 /** Longest standard runner ≤ depth − 10 mm. */
@@ -112,6 +120,33 @@ export function unitTakeoff(run, unit, code) {
     }
   } else if (m.carcass === 'filler') {
     panel(fronts, PART.filler, 'front', fm, ft, mm(g.zone.y1 - g.zone.y0), W, 1, { long: 2, short: 2 }, feb);
+  } else if (m.carcass === 'custom') {
+    carcass(parts, g.level === 'base' || g.level === 'island' ? 'base' : 'tall', W, H, D, spec);
+    if (plinthed && g.carcassY[0] > g.elev + 0.01) hw(hardware, 'leg', legs(W));
+    hw(hardware, g.level === 'wall' ? 'hanger' : 'wall-fixing', 2);
+  } else if (m.carcass === 'corner') {
+    const k = g.corner, f = g.frontD, tcm = g.t, mat = spec.carcass.material, eb = spec.edge.carcass;
+    const shapeName = k.variant === 'l-doors' ? 'L' : 'diagonal';
+    const shaped = (list, part, sh, qty, frontEdgeCm) => {
+      const outline = sh.poly.map(([u, v]) => [mm(u), mm(v)]), xs = outline.map((p) => p[0]), ys = outline.map((p) => p[1]);
+      list.push({ part, group: 'carcass', material: mat, thickness: t, length: Math.max(...xs) - Math.min(...xs), width: Math.max(...ys) - Math.min(...ys), qty,
+        edges: { long: 0, short: 0 }, edgeType: eb, areaM2: r3((polyArea(outline) * qty) / 1e6), edgeM: r3((mm(frontEdgeCm) * qty) / 1000), shape: shapeName, outline });
+    };
+    const body = cornerShape(k.variant, k.legA, k.legB, k.dA - f, k.dB - f), sh = cornerShape(k.variant, k.legA - tcm, k.legB - tcm, k.dA - f - 2, k.dB - f - 2);
+    const frontLen = (x) => x.faces.reduce((a, q) => a + q.len, 0);
+    panel(parts, PART.sideA, 'carcass', mat, t, H, mm(k.dA - f), 1, { long: 1, short: 0 }, eb);
+    panel(parts, PART.sideB, 'carcass', mat, t, H, mm(k.dB - f), 1, { long: 1, short: 0 }, eb);
+    shaped(parts, PART.cornerTop, body, 1, frontLen(body));
+    shaped(parts, PART.cornerBottom, body, 1, frontLen(body));
+    panel(parts, PART.backA, 'back', spec.carcass.back.material, spec.carcass.back.thickness, mm(k.legA) - 4, H - 4, 1);
+    panel(parts, PART.backB, 'back', spec.carcass.back.material, spec.carcass.back.thickness, mm(k.legB - tcm) - 4, H - 4, 1);
+    if (k.variant !== 'l-doors') panel(parts, PART.angledRail, 'carcass', mat, t, mm(body.faces[0].len), 100, 2, { long: 1, short: 0 }, eb);
+    else notes.push(L('No corner post: the two doors meet at the inside corner; the carcass is stiffened by the shaped top, bottom and fixed shelves.', 'ללא עמוד פינה: שתי הדלתות נפגשות בפינה הפנימית; הגוף מקובע ע״י גג, תחתית ומדפים קבועים בצורת הפינה.'));
+    const nSh = g.inner.filter((c) => c.shaped).length;
+    if (nSh) { shaped(parts, PART.cornerShelf, sh, nSh, frontLen(sh)); hw(hardware, 'shelf-support', 4 * nSh); }
+    panel(fronts, PART.cornerEnd, 'front', fm, ft, mm(g.zone.y1 - g.zone.y0), mm(k.dB), 1, { long: 2, short: 2 }, feb);
+    if (g.level === 'wall') hw(hardware, 'hanger', 2); else { if (plinthed) hw(hardware, 'leg', 6); hw(hardware, 'wall-fixing', 3); }
+    notes.push(L(`Corner ${shapeName === 'L' ? 'L-shaped' : 'diagonal'} carcass: legs ${k.legA} × ${k.legB} cm; shaped parts carry their outline (mm, corner-local).`, `גוף פינתי ${shapeName === 'L' ? 'בצורת L' : 'אלכסוני'}: זרועות ${k.legA} × ${k.legB} ס״מ; לחלקים בצורה מצורף קו מתאר (מ״מ).`));
   } else if (m.carcass === 'desk') {
     panel(parts, PART.deskTop, 'front', fm, 2 * ft, W, mm(g.d), 1, { long: 1, short: 2 }, feb);
     hw(hardware, 'wall-fixing', 3);
@@ -120,13 +155,24 @@ export function unitTakeoff(run, unit, code) {
   // fronts
   const handleT = spec.handles.type, profileStyle = ['j-profile', 'gola'].includes(spec.fronts.style);
   let profileMm = 0;
-  for (const f of g.fronts) {
-    if (['open', 'blind', 'filler', 'panel'].includes(f.kind) || (f.kind === 'appliance' && !f.panel)) continue;
+  for (const f of g.trueFronts || g.fronts) {
+    if (f.kind === 'panel' && f.cellId) { panel(fronts, PART.fixedPanel, 'front', fm, ft, mm(f.h), mm(f.w), 1, { long: 2, short: 2 }, feb); continue; }
+    if (['open', 'blind', 'filler', 'panel', 'void'].includes(f.kind) || (f.kind === 'appliance' && !f.panel)) continue;
     const fw = mm(f.w), fh = mm(f.h);
     const part = f.kind === 'appliance' ? PART.panelFront : PART[f.kind] || PART.door;
     const mat = f.kind === 'glass' ? 'glass' : f.kind === 'mirror' ? 'mirror' : fm, th = f.kind === 'glass' || f.kind === 'mirror' ? 4 : ft;
     panel(fronts, part, f.kind === 'glass' || f.kind === 'mirror' ? 'glass' : 'front', mat, th, fh, fw, 1, f.kind === 'glass' || f.kind === 'mirror' ? { long: 0, short: 0 } : { long: 2, short: 2 }, feb);
-    if (f.kind === 'door' || f.kind === 'glass' || f.kind === 'mirror') hw(hardware, 'hinge', RULES.hingesFor(Math.max(fh, fw > fh ? fw : 0)), { variant: f.kind === 'glass' ? 'glass' : m.corner ? 'blind-corner' : 'standard', grade: spec.hardware.grade });
+    if (f.kind === 'door' || f.kind === 'glass' || f.kind === 'mirror') {
+      const op = f.operation || 'hinged', sbc = BY_CARPENTER.has(op) ? { specifiedByCarpenter: true } : {};
+      if (op === 'hinged' || op === 'push-open') hw(hardware, 'hinge', RULES.hingesFor(Math.max(fh, fw > fh ? fw : 0)), { variant: f.kind === 'glass' ? 'glass' : m.id === 'base-corner-blind' ? 'blind-corner' : 'standard', grade: spec.hardware.grade });
+      else if (op === 'removable') hw(hardware, 'lift-off-hinge', RULES.hingesFor(fh), { grade: spec.hardware.grade, ...sbc });
+      else if (op === 'sliding') { hw(hardware, 'sliding-set', 1, { grade: spec.hardware.grade }); hw(hardware, 'sliding-track', r3((2 * fw) / 1000), { unit: 'm' }); }
+      else if (op === 'pocket') hw(hardware, 'pocket-system', 1, sbc);
+      else if (op === 'bifold') hw(hardware, 'bifold-set', 1, sbc);
+      else if (op === 'tambour') hw(hardware, 'tambour-kit', 1, sbc);
+      else if (op === 'curtain') hw(hardware, 'curtain-track', r3(fw / 1000), { unit: 'm', ...sbc });
+      if (op === 'push-open') hw(hardware, 'push-latch', 1);
+    }
     if (f.kind === 'flap') { if (f.hinge === 'B') { hw(hardware, 'flap-stay', 1, { grade: spec.hardware.grade }); hw(hardware, 'hinge', 2, { variant: 'standard', grade: spec.hardware.grade }); } else hw(hardware, 'liftup', 1, { grade: spec.hardware.grade }); }
     if (f.kind === 'drawer') hw(hardware, 'drawer', 1, { length: runnerFor(D), grade: spec.hardware.grade });
     if (f.kind === 'appliance' && f.panel) hw(hardware, 'appliance-kit', 1);
@@ -138,11 +184,11 @@ export function unitTakeoff(run, unit, code) {
   }
   if (profileMm) hw(hardware, 'profile', r3(profileMm / 1000), { unit: 'm', variant: spec.fronts.style });
   // internals
-  const inner = g.inner, divider = inner.find((c) => c.kind === 'divider');
+  const inner = g.inner.filter((c) => !c.shaped), dividers = inner.filter((c) => c.kind === 'divider');
   const sectionLen = (c) => {
     let a = Math.max(c.x0 ?? 0, g.t), b = Math.min(c.x1 ?? g.w, g.w - g.t);
-    if (divider && Math.abs(a - divider.x0) < 0.01) a += g.t / 2;
-    if (divider && Math.abs(b - divider.x0) < 0.01) b -= g.t / 2;
+    if (dividers.some((dv) => Math.abs(a - dv.x0) < 0.01)) a += g.t / 2;
+    if (dividers.some((dv) => Math.abs(b - dv.x0) < 0.01)) b -= g.t / 2;
     return mm(b - a) - 2;
   };
   for (const c of inner) {

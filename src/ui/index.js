@@ -17,6 +17,8 @@ import { createThumbs } from './thumbs.js';
 import { createActions } from './actions.js';
 import { createStructure } from './structure.js';
 import { initStructureGuide } from './structure-panels.js';
+import { createCarpentry } from './carpentry/index.js';
+import { setCarpentryBudget } from './shopping.js';
 import { initTopbar } from './topbar.js';
 import { initViewport } from './viewport.js';
 import { initStatusbar } from './statusbar.js';
@@ -69,6 +71,7 @@ export function initUI(ctx) {
   };
   app.thumbs = createThumbs(app);
   app.structure = createStructure(app);
+  app.carpentry = createCarpentry(app);
   app.actions = createActions(app);
 
   /* ───────── Panels: docked on wide screens, drawers / sheets on narrow ones ───────── */
@@ -140,6 +143,7 @@ export function initUI(ctx) {
   viewport = initViewport(app);
   catalogPanel = initCatalogPanel(left, app);
   initStructureGuide(left, app);
+  app.carpentry.mount();
   const panels = {
     inspector: initInspector(tabPanels.get('inspector'), app),
     budget: initBudget(tabPanels.get('budget'), app),
@@ -175,17 +179,18 @@ export function initUI(ctx) {
   /** The left sidebar holds the catalogue, or the structure guide while in Structure mode. */
   let leftIs = '';
   function syncLeftLabels() {
-    const next = app.structure.isActive() ? 'guide' : 'catalog';
+    const next = app.structure.isActive() ? 'guide' : app.carpentry.isActive() ? 'carpentry' : 'catalog';
     if (next === leftIs) return;
     leftIs = next;
-    const guide = next === 'guide';
-    left.setAttribute('aria-label', guide ? 'Structure guide' : 'Catalogue');
-    edgeLeft.setAttribute('aria-label', guide ? 'Show the structure guide' : 'Show the catalogue');
-    edgeLeft.dataset.tip = guide ? 'Structure guide' : 'Catalogue';
-    edgeLeft.replaceChildren(icon(guide ? 'wall' : 'sofa', { size: 18 }));
+    const L = { guide: ['Structure guide', 'wall', 'Guide'], carpentry: ['Carpentry runs', 'carpentry', 'Runs'], catalog: ['Catalogue', 'sofa', 'Catalogue'] }[next];
+    left.setAttribute('aria-label', L[0]);
+    edgeLeft.setAttribute('aria-label', `Show the ${L[0].toLowerCase()}`);
+    edgeLeft.dataset.tip = L[0];
+    edgeLeft.replaceChildren(icon(L[1], { size: 18 }));
     const nav = navButtons.get('catalog');
-    if (nav) nav.replaceChildren(icon(guide ? 'wall' : 'sofa', { size: 20 }), h('span', null, guide ? 'Guide' : 'Catalogue'));
-    if (!guide && isOpen('left')) catalogPanel.relayout();
+    if (nav) nav.replaceChildren(icon(L[1], { size: 20 }), h('span', null, L[2]));
+    right.setAttribute('aria-label', next === 'carpentry' ? 'Run and unit inspector' : 'Inspector, shopping list, rooms and checks');
+    if (next === 'catalog' && isOpen('left')) catalogPanel.relayout();
     viewport.resize();
   }
   function syncEdges() {
@@ -265,5 +270,7 @@ export function initUI(ctx) {
     closePanels,
     /** Call after the catalogue was (re)loaded. */
     refreshCatalog: () => catalogPanel.refresh(),
+    /** The Carpentry estimate's total for the shopping list / budget ({ low, typical, high } in ILS, or null). */
+    setCarpentryBudget,
   };
 }

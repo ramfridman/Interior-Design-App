@@ -342,3 +342,6 @@ export function splitEven(total, n) {
   for (let i = 0; i < n; i++) out.push((base + (i < rest ? 1 : 0)) / 10);
   return out;
 }
+
+// Helpers shared with bespoke.js (bespoke units, door operations, corner pantries).
+export { doors, drawers, shelvesEvenly, tallDoors, baseModel, wallModel, tallModel, robeModel, boxModel, handleParam, counterParam, def, doorCount, app };

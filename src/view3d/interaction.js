@@ -280,7 +280,7 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
   function updateCursor() {
     if (drag) dom.style.cursor = 'grabbing';
     else if (placing) dom.style.cursor = 'copy';
-    else if (hoverId) { const it = store.getItem(hoverId); dom.style.cursor = it && !it.locked && store.selection.includes(hoverId) ? 'move' : 'pointer'; }
+    else if (hoverId) { const it = store.getItem(hoverId); dom.style.cursor = it && !it.locked && !it.carp && store.selection.includes(hoverId) ? 'move' : 'pointer'; }
     else dom.style.cursor = '';
   }
   function hoverNow() {
@@ -293,7 +293,7 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
 
   // ───────────── drag ─────────────
   function beginDrag(e) {
-    const ids = store.selection.filter((id) => { const it = store.getItem(id); return it && !it.locked; });
+    const ids = store.selection.filter((id) => { const it = store.getItem(id); return it && !it.locked && !it.carp; });
     const primary = store.getItem(down.hit.id);
     if (!primary || !ids.includes(primary.id)) return false;
     setRay(down.x, down.y);
@@ -402,7 +402,8 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
     down = { x: e.clientX, y: e.clientY, hit, mod, candidate: false, id: e.pointerId };
     if (hit && hit.kind === 'item' && !mod && store.selection.includes(hit.id)) {
       const it = store.getItem(hit.id);
-      if (it && !it.locked) { down.candidate = true; down.heldControls = true; rig.controls.enabled = false; }
+      // carpentry units (item.carp) are made to measure: selectable, never dragged here (docs/CONTRACT.md § 8)
+      if (it && !it.locked && !it.carp) { down.candidate = true; down.heldControls = true; rig.controls.enabled = false; }
     }
   }
   function onMove(e) {

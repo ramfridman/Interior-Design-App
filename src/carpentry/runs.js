@@ -11,6 +11,8 @@ import { wallSpanAt, spanOfRun, openingConflicts, toPlan, frame } from './walls.
 import { layoutInDraft, unitsOf, positions, levelOf, geometryOf, isFloorLevel } from './layout.js';
 import { computeWorktops } from './worktop.js';
 import { spaceAt } from '../core/geometry.js';
+import { validateCustomLayout, frontsToLayout } from './bespoke.js';
+import { toLocal } from './walls.js';
 
 const L = (en, he) => ({ en, he });
 const FAIL = (en, he) => ({ ok: false, reason: L(en, he) });
@@ -46,8 +48,42 @@ export function relayout(draft, runIds) {
     const e = r.ends && r.ends[side];
     if (e && e.type === 'run' && (all.has(e.runId) || all.has(r.id))) { all.add(r.id); if (draft.carpentry.runs[e.runId]) all.add(e.runId); }
   }
+  computeReserves(draft, [...all]);
   for (const id of all) layoutInDraft(draft, id, (run, units) => computeWorktops(run, units, buttsInto(draft.carpentry, run)));
   return [...all];
+}
+
+/**
+ * Corner footprints that reach into another arm: for every run end linked to another run ({ type: 'run' }) whose corner unit
+ * (first / last floor unit at that end, module with `cornerLeg`) has a leg longer than the distance from its wall to this run's
+ * end, reserve the difference at this end. Writes run.reserved = { left, right, by: { left|right: { cm, level, runId, unitId } } }.
+ */
+function computeReserves(draft, ids) {
+  for (const id of ids) {
+    const r = draft.carpentry.runs[id];
+    if (!r) continue;
+    const res = {};
+    for (const side of ['left', 'right']) {
+      const e = r.ends && r.ends[side], o = e && e.type === 'run' && draft.carpentry.runs[e.runId];
+      if (!o) continue;
+      const fl = (o.unitIds || []).map((x) => draft.peek(x)).filter((u) => u && u.carp && isFloorLevel(levelOf(u)));
+      const cu = e.at === 'right' ? fl[fl.length - 1] : fl[0], m = cu && MODULES[cu.carp.module];
+      if (!m || !m.cornerLeg) continue;
+      const [ex, ey] = toPlan(r.anchor, side === 'left' ? 0 : r.length, 0), vEnd = toLocal(o.anchor, ex, ey)[1];
+      const cm = r1(m.cornerLeg(cu.carp) - vEnd);
+      if (cm > 0.05) res[side] = { cm, level: levelOf(cu), runId: o.id, unitId: cu.id };
+    }
+    if (res.left || res.right) r.reserved = { left: res.left ? res.left.cm : 0, right: res.right ? res.right.cm : 0, by: res };
+    else delete r.reserved;
+  }
+}
+
+/** Bespoke layout of a unit valid for its geometry? → null or a FAIL result. */
+function layoutError(run, draft, unitId) {
+  const u = draft.peek(unitId);
+  if (!u || u.carp.module !== 'custom' || !u.carp.internals || !u.carp.internals.layout) return null;
+  const g = geometryOf(run, u), errs = validateCustomLayout(u.carp.internals.layout, g.w, g.zone.y1 - g.zone.y0);
+  return errs.length ? { ok: false, reason: errs[0], reasons: errs } : null;
 }
 
 /** A unit item (not yet laid out). */
@@ -60,7 +96,7 @@ function makeUnit(run, moduleId, o = {}) {
     internals: deepMerge((mod.internals && mod.internals.default) || {}, o.internals || {}),
     fronts: clone(o.fronts || {}), spec: clone(o.spec || {}), handed: o.handed || 'L', note: o.note || '',
   };
-  for (const k of ['appliance', 'hob', 'cutout', 'offset', 'elev', 'h', 'depth', 'cornerSide', 'blind', 'worktop', 'sink', 'basins', 'mirror']) if (o[k] !== undefined) carp[k] = clone(o[k]);
+  for (const k of ['appliance', 'hob', 'cutout', 'offset', 'elev', 'h', 'depth', 'cornerSide', 'blind', 'worktop', 'sink', 'basins', 'mirror', 'legB', 'noPlinth']) if (o[k] !== undefined) carp[k] = clone(o[k]);
   return { id: newId('cu'), type: 'cabinet', name: mod.name.en, params: {}, x: 0, y: 0, rot: run.anchor.dir, w: width, d: 60, h: 90, elev: 0,
     placement: 'floor', zone: 'indoor', price: null, priceUnit: 'item', url: null, retailer: null, brand: null, productId: null,
     locked: false, hidden: !!mod.virtual, fixture: true, generic: false, note: '', carp };
@@ -250,6 +286,8 @@ export function addUnit(runId, moduleId, o = {}, mopts) {
     const runIds = relayout(d, [runId]);
     const bad = hardConflicts(run, d, [it.id]);
     if (bad.length) return { ok: false, reason: conflictReason(bad[0]) };
+    const le = layoutError(run, d, it.id);
+    if (le) return le;
     return { ids: [it.id], unitId: it.id, runIds };
   }, mopts);
 }
@@ -276,13 +314,38 @@ export function updateUnit(unitId, patch = {}, mopts) {
     if (patch.internals) c.internals = deepMerge(c.internals || {}, patch.internals);
     if (patch.fronts) c.fronts = { ...(c.fronts || {}), ...patch.fronts };
     if (patch.spec) c.spec = deepMerge(c.spec || {}, patch.spec);
-    for (const k of ['level', 'handed', 'appliance', 'hob', 'cutout', 'offset', 'elev', 'h', 'depth', 'note', 'worktop', 'cornerSide', 'blind', 'sink', 'basins', 'mirror']) {
+    for (const k of ['level', 'handed', 'appliance', 'hob', 'cutout', 'offset', 'elev', 'h', 'depth', 'note', 'worktop', 'cornerSide', 'blind', 'sink', 'basins', 'mirror', 'legB', 'noPlinth']) {
       if (patch[k] === null) delete c[k]; else if (patch[k] !== undefined) c[k] = clone(patch[k]);
     }
     orderRows(run, d);
     const runIds = relayout(d, [run.id]);
     const bad = hardConflicts(run, d, [unitId]);
     if (bad.length) return { ok: false, reason: conflictReason(bad[0]) };
+    const le = layoutError(run, d, unitId);
+    if (le) return le;
+    return { ids: [unitId], runIds };
+  }, mopts);
+}
+
+/**
+ * Convert any unit into a bespoke unit (`custom` with carp.internals.layout) that keeps its look: same level, size, height,
+ * elevation, depth, worktop and fronts. Door operation and features are kept. The owner can then change anything.
+ */
+export function toCustom(unitId, mopts) {
+  const run0 = runOfUnit(unitId);
+  if (!run0) return FAIL('No such unit.', 'יחידה לא קיימת.');
+  return mutate('update-unit', (d) => {
+    const run = d.carpentry.runs[run0.id], it = d.item(unitId), c = it.carp, g = geometryOf(run, it), m = MODULES[c.module];
+    if (c.module === 'custom' && c.internals && c.internals.layout) return { ids: [unitId], runIds: [] };
+    const layout = frontsToLayout(g);
+    const op = c.fronts && c.fronts.operation;
+    c.module = 'custom'; c.level = g.level; c.h = g.h; c.elev = g.elev; c.depth = g.dc;
+    if (m.worktop && (g.level === 'base' || g.level === 'island') && run.spec.worktop.material !== 'none' && c.worktop !== false) c.worktop = true;
+    if (g.level !== 'wall' && g.carcassY[0] === g.elev) c.noPlinth = true;
+    c.internals = { layout }; c.fronts = op ? { operation: op } : {}; c.convertedFrom = m.id;
+    it.hidden = false;
+    const runIds = relayout(d, [run.id]), le = layoutError(run, d, unitId);
+    if (le) return le;
     return { ids: [unitId], runIds };
   }, mopts);
 }
@@ -372,8 +435,8 @@ export function fitRun(runId, opts = {}, mopts) {
       run.anchor = { x: r1(ax), y: r1(ay), dir: run.anchor.dir }; run.length = r1(to - from);
       if (from < 0.5) run.ends.left = { type: span.ends.left }; if (to > span.length - 0.5) run.ends.right = { type: span.ends.right };
     }
-    const target = opts.length != null ? +opts.length : run.length;
-    if (opts.length != null) run.length = r1(target);
+    const reservedCm = (run.reserved ? run.reserved.left + run.reserved.right : 0);
+    if (opts.length != null) run.length = r1(+opts.length);
     orderRows(run, d);
     let units = unitsOf(run, d);
     const floorUnits = units.filter((u) => rowOf(u) === 'floor');
@@ -399,6 +462,7 @@ export function fitRun(runId, opts = {}, mopts) {
       }
     }
     const ru = rowUnits().map((u) => d.item(u.id));
+    const target = run.length - (row === 'floor' ? reservedCm : 0);
     const sum = () => ru.reduce((s, u) => s + u.carp.width, 0);
     const minOf = (u) => MODULES[u.carp.module].w.min, maxOf = (u) => MODULES[u.carp.module].w.max;
     const fillers = ru.filter((u) => u.carp.module === 'filler');

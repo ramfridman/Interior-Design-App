@@ -579,3 +579,92 @@ hardware choice, corner, wardrobe interiors, mamad fixing, tolerances). Codes ma
 * The estimate is not a quotation; show the price book's `asOf` and sources. Fridge / washer / dryer stay ordinary catalogue items.
 * Store hook used by the engine only: `store._applyCarpentry(change, opts)`. `Carp.bindStore(otherStore)` for workers / tests;
   read-only functions also take a `src = { carpentry, items }` (e.g. a parsed design file): `checkRun / takeoff / drawings / schedules (runId, src)`, `estimate(runId, { …, src })`, `listRuns(src)`, `getRun(runId, src)`.
+
+## 9. Quotation document API (`src/carpentry/doc/`) — request for quotation to carpenters (pure layout + renderers)
+
+The owner exports a tender package (PDF) to hand to carpenters, in **English or Hebrew** (chosen at export, never
+mixed). Layout is done ONCE (`composeQuotation` → `Doc` of page primitives); the SVG preview and the PDF renderer are
+dumb and draw identical pages. Runs in the browser (offline, sandboxed iframe) and under plain node.
+Libraries: `vendor/pdf/pdf-lib.esm.min.js` (pdf-lib 1.17.1, MIT) and `vendor/pdf/fontkit.esm.js` (@pdf-lib/fontkit 1.1.1,
+MIT, UMD build wrapped as ESM); font: Heebo 300/400/500/700 TTF (`vendor/fonts/Heebo_*.ttf`, OFL, `LICENSE-Heebo.txt`)
+for both languages. Test: `node tests/carpentry-doc.test.mjs` (writes `dist/carpentry/*.pdf`). Preview page: `dev/carpentry-doc.html`.
+```js
+import { buildQuotationPDF, buildQuotationPreview, drawingToSVG } from './carpentry/doc/index.js';
+const opts = {
+  lang: 'en' | 'he',
+  runIds: 'all' | [runId…],                 // default 'all' (Carp.listRuns order)
+  paper: 'A4' | 'A3',                       // drawing sheets (landscape); text pages are always A4 portrait. Default A4
+  include: { estimate: false, cutLists: true, carpenterForm: true, questions: true },   // estimate:true = "owner's copy"
+  project: { title, address, ownerName?, phone?, email?, date: 'YYYY-MM-DD', reference },  // empty fields are omitted
+  src: { store, plan: PLAN },               // the app store + PLAN (read-only; defaults: bound store, core PLAN)
+  pricebook?, tier?,                        // only used by the owner's-copy estimate page (Carp.estimate)
+  features?: Feature[],                     // optional extra special requirements (added to schedules().features)
+};
+const { doc, svgPages } = buildQuotationPreview(opts);          // sync; svgPages[i] = '<svg …>' for page i (mm size)
+const { bytes, filename, pages } = await buildQuotationPDF(opts); // Uint8Array, 'House98-Carpentry-RFQ-2026-11-13-HE.pdf'
+el.innerHTML = drawingToSVG(Carp.drawings(runId)[1], { lang, interactive: true });  // one shop drawing for the editor
+```
+* **Download** in the UI: `new Blob([bytes], { type: 'application/pdf' })` → object URL → `<a download={filename}>`.
+  The first PDF build fetches the four TTFs relative to the module (`vendor/fonts/`, ≈ 225 KB, cached); pass
+  `fonts: { light, regular, medium, bold }` (Uint8Array) or `fontBase` (URL) to override. A full 13-run document
+  (≈ 88 pages, ≈ 600 KB) composes in ≈ 0.4 s and renders to PDF in ≈ 1 s. Run it on a click, not on every store event.
+* **Preview**: insert `svgPages` (each SVG has `width/height` in mm and a `viewBox` in mm; set `width:100%; height:auto`
+  to scale). Fonts come from `@font-face` rules inside each SVG pointing at the same TTF files (the dev server should
+  serve `.ttf` as `font/ttf`; browsers accept octet-stream too). Re-compose on `'carpentry'`, `'items'`, `'plan'`.
+* **Before export**: `Carp.checkRun('all')` errors should block "send to carpenter" (the document itself lists only
+  warnings / info as "design notes"); `doc.meta.errors` repeats the error count.
+
+`drawingToSVG(drawing, { lang, width?, height?, padding = 4, className?, interactive = true, print = false, scale?, fonts = true })`
+→ SVG string. y flipped, paper-mm line weights / text sizes at the drawing's scale (or `scale`), semantic fills / hatches
+mapped to print-style fills, `text.en` / `text.he` picked, Hebrew as logical text with `direction: rtl` (anchors kept
+physical). `interactive`: every op has `class="op op-<role>"`, unit outlines / codes carry `data-unit-id` (click → select
+the unit). Theme: `currentColor` + CSS variables `--carp-ink, --carp-ink2, --carp-muted, --carp-rule, --carp-hair,
+--carp-accent, --carp-accent-tint, --carp-fill-wall | -plinth | -worktop | -appliance | -glass | -splash | -void | -section |
+-blind, --carp-hatch` (fallbacks work in light and dark); `print: true` = black on white with a white background.
+
+### Doc model (`composeQuotation(opts) → Doc`)
+`Doc = { lang, dir: 'ltr'|'rtl', pages: Page[], meta }`; `Page = { size: [wMm, hMm], orientation: 'portrait'|'landscape',
+kind: 'text'|'sheet', role?: 'cover', runId?, sheetCode?, ops: PageOp[] }`. Page mm, origin top-left, **y down**; colours are
+palette tokens (`ink ink2 grey rule hair tint paper accent accentTint accentMid fWall fPlinth fWorktop fAppliance fGlass
+fSplash fVoid fSection fBlind hatch`, `PALETTE` in `prims.js`) or `#rrggbb`. PageOps (closed set):
+`line {x1,y1,x2,y2,lw,color,dash?}` · `rect {x,y,w,h,fill?,lw?,color?,dash?}` · `poly {pts,close,fill?,lw?,color?,dash?}` ·
+`arc {cx,cy,r,a0,a1 (deg CCW as seen),lw,color,dash?}` · `text {x,y (baseline anchor),text (logical),vis (left-to-right
+drawing order),size (pt),font: light|regular|medium|bold,color,align: left|center|right (physical),w (mm, real metrics),dir,rot?,maxWidth?}` ·
+`image {x,y,w,h,src (PNG / JPEG data URL)}` · `drawing {id,kind,runId,scale,box,ops}` (a shop drawing already flattened
+to page mm). `dash` ∈ `dash | dot | center` (`DASH`, mm). Ops may carry `role` / `unitId`.
+`meta = { title, project, reference, paper, lang, filename, runs: [{ id, code, page }], sections: [{ num, title, page, level }],
+tables: [{ id, rows, drawn }], include, errors, warnings, composeMs }`.
+
+### The document (both editions paginate identically: every row reserves the height of the taller language)
+Cover (title, project block with the filled-in fields only, key plan of the house from `plan.walls` with every run's unit
+footprints highlighted and coded, north arrow; owner's-copy banner when the estimate is included) · Contents (page numbers)
+and the invitation to tender · 1 Scope of works (runs table) · **Special requirements** (consolidated, only when there are
+features) · General specification (most common value per item, per-run exceptions listed by code) · Included / excluded ·
+Per run: landscape drawing sheets (frame, view captions with number + title + scale, north arrow on plans, title block:
+mini key plan, project, run / room / kind / length, drawings + scales, reference, date, paper, sheet code `K1-01`,
+page n / N, dimension note), views packed at the finest standard scale ≥ the engine's (1:10/20/25/50/100) that fits the
+paper, plan + elevations stacked on a common x = 0 when they share a sheet, internal / bespoke views on their own sheet;
+then the run's special requirements (numbered as the drawing callouts, owner's text + reference images), unit schedule
+(columns = `HEADERS.units`, so new engine columns such as door operation appear automatically), materials & finishes,
+hardware, worktop schedule, design notes (checkRun warnings / info) · Appliance schedule · Cutting lists (indicative; grouped
+by material, edge-banding marks) · Questions for the carpenter (with a reply column) · Quotation form (price breakdown per
+run: carcasses, fronts, worktop, hardware & fittings, lighting, installation, run total — n/a cells shaded; a line per
+special requirement; subtotal, site measurement & shop drawings, delivery, total excl. VAT, VAT 18 %, total incl. VAT;
+alternatives; lead time, installation days, measurement date, payment terms, warranty, validity, deviations; bidder details;
+name / signature / date / stamp) · Owner's estimate (only with `include.estimate`: ranges per run, totals excl. / incl. VAT,
+basis, `asOf`, missing rates, sources, the estimate disclaimer). Text pages carry a header (project · title, reference · date)
+and a footer (dimension note, page n / N). Furniture strings: `src/carpentry/doc/strings.js` (`S`, `INCLUDED`, `EXCLUDED`, `ALTERNATIVES`).
+
+### Hebrew / bidi
+`visualOrder(line, 'ltr'|'rtl')` implements UAX #9 for one line (W1–W7, N0 bracket pairs, N1–N2, I1–I2, L1, L2, L4 mirroring;
+verified against Chromium) and is applied AFTER line wrapping; `autoDir(text, fallback)` picks a paragraph's direction from its
+first strong character (owner's free text keeps its own direction in either edition — never translated). pdf-lib draws `vis`
+glyph by glyph (fontkit's own RTL reversal is disabled on the embedded font); the SVG preview draws the same `vis` with
+`unicode-bidi: bidi-override`, so both are identical. RTL documents mirror every region (tables: first column on the right,
+furniture and title blocks mirrored); drawings themselves are never mirrored. Text widths come from the real Heebo
+advances (`metrics-data.js`, generated from the TTFs and re-checked by the test); no kerning / ligatures in either renderer.
+
+### Special requirements (`schedules().features`, feature-detected)
+Each feature `{ runId | run, ref?, num? (callout number), unitId? | unitCode?, title, text, category?, priority?, images?: [{ dataUrl, w, h, name }] }`;
+strings are rendered as typed, `{ en, he }` values pick the edition's language. Drawing ops with `role: 'callout'` are drawn
+in the accent colour (bold numbers); a drawing's `legend: [{ symbol?, text }]` is printed under its caption.

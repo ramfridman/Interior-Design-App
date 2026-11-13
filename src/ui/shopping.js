@@ -8,6 +8,22 @@ import { itemQuantity, fmtPrice } from './format.js';
 
 const OTHER = { id: 'elsewhere', name: 'Outside the lot' };
 
+/* Custom carpentry is designed in Carpentry mode and priced by its estimate, not by catalogue products. */
+let carpentryBudget = null;
+const budgetListeners = new Set();
+/**
+ * Set the Carpentry estimate shown in the shopping list and added to the budget (typical value), or null.
+ * @param {{ low: number, typical: number, high: number }|null} range  ILS (pass the incl.-VAT figures)
+ */
+export function setCarpentryBudget(range) {
+  const ok = range && ['low', 'typical', 'high'].every((k) => Number.isFinite(+range[k]));
+  carpentryBudget = ok ? { low: Math.round(+range.low), typical: Math.round(+range.typical), high: Math.round(+range.high) } : null;
+  budgetListeners.forEach((fn) => { try { fn(carpentryBudget); } catch (err) { console.error(err); } });
+}
+export const getCarpentryBudget = () => carpentryBudget;
+/** Subscribe to setCarpentryBudget(); returns an unsubscribe function. */
+export function onCarpentryBudget(fn) { budgetListeners.add(fn); return () => budgetListeners.delete(fn); }
+
 /** Display order of spaces: rooms, outdoor areas, garden, parking, everything else. */
 function spaceOrder(plan) {
   const ids = [...allSpaces(plan).map((s) => s.id), 'garden', ...(plan.site?.parking || []).map((p) => p.id), OTHER.id];
@@ -29,7 +45,9 @@ export function buildShopping({ store, plan, catalog }, groupBy = 'room') {
     return groups.get(id);
   };
 
+  const carpentry = { units: 0, runs: new Set(), budget: carpentryBudget };
   for (const item of store.items) {
+    if (item.carp) { if (!item.hidden) carpentry.units++; carpentry.runs.add(item.carp.runId); continue; }   // made to measure: see Carpentry
     const space = safeSpace(store, item) || OTHER;
     pieces++;
     if (item.price == null || !item.productId) {
@@ -78,7 +96,15 @@ export function buildShopping({ store, plan, catalog }, groupBy = 'room') {
   if (groupBy === 'retailer') list.sort((a, b) => b.subtotal - a.subtotal);
   else list.sort((a, b) => order(a.id) - order(b.id));
   const pending = [...pendingMap.values()].sort((a, b) => order(a.spaceId) - order(b.spaceId) || a.name.localeCompare(b.name));
-  return { groups: list, pending, total, pieces, chosen };
+  if (carpentry.budget) total += carpentry.budget.typical;
+  return { groups: list, pending, total, pieces, chosen, carpentry: carpentry.units ? { units: carpentry.units, runs: carpentry.runs.size, budget: carpentry.budget } : null };
+}
+
+/** "Custom carpentry — see Carpentry estimate" line text. */
+export function carpentryLine(c) {
+  if (!c) return null;
+  const what = `${c.runs} ${c.runs === 1 ? 'run' : 'runs'}, ${c.units} units`;
+  return { title: 'Custom carpentry — see Carpentry estimate', what, amount: c.budget ? `${fmtPrice(c.budget.low)}–${fmtPrice(c.budget.high)}` : 'Estimate in Carpentry', typical: c.budget ? c.budget.typical : null };
 }
 
 function safeSpace(store, item) {
@@ -107,6 +133,8 @@ export function shoppingCSV(ctx, groupBy = 'room') {
     lines.push([g.title, r.name, r.retailer, r.qtyUnit ? r.qty.toFixed(2) : Math.round(r.qty), r.qtyUnit || 'pcs', r.unitPrice, Math.round(r.cost), r.spaceName, r.url || ''].map(csvCell).join(','));
   }
   for (const r of s.pending) lines.push(['Still to choose', r.name, '', r.qty, 'pcs', '', '', r.spaceName, ''].map(csvCell).join(','));
+  const cl = carpentryLine(s.carpentry);
+  if (cl) lines.push(['Custom carpentry', cl.title, '', cl.what, '', '', cl.typical != null ? cl.typical : '', '', ''].map(csvCell).join(','));
   lines.push(['Total', '', '', '', '', '', Math.round(s.total), '', ''].join(','));
   return '﻿' + lines.join('\r\n');
 }
@@ -125,6 +153,8 @@ export function shoppingText(ctx, groupBy = 'room') {
     for (const r of s.pending) out.push(`  ${r.qty} × ${r.name} — ${r.spaceName}`);
     out.push('');
   }
+  const cl = carpentryLine(s.carpentry);
+  if (cl) out.push(`${cl.title}: ${cl.what} — ${cl.amount}`, '');
   out.push(`Total ${fmtPrice(s.total)}`);
   return out.join('\n');
 }

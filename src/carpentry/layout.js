@@ -7,6 +7,7 @@ import { MODULES } from './modules.js';
 import { unitSpec, derivedHeights, RULES, VOCAB } from './spec.js';
 import { toPlan } from './walls.js';
 import { ceilingOf } from './state.js';
+import { applyOperation, cornerTrueFronts } from './bespoke.js';
 
 const r2 = (v) => Math.round(v * 100) / 100;
 const FLOOR = new Set(['base', 'tall', 'full', 'island']);
@@ -67,10 +68,24 @@ export function geometryOf(run, unit, ceiling = ceilingOf()) {
     d = spec.worktop.depth;
   }
   if (mod.id === 'filler' && level !== 'wall') zone = { y0: H.plinth, y1: level === 'base' || level === 'island' ? H.worktop - H.wt : h };
+  if (mod.id === 'custom' && carp.h != null) {               // bespoke unit: free h / elev / depth, optional worktop
+    const floorLvl = level !== 'wall';
+    elev = carp.elev ?? (level === 'wall' ? H.wallBottom : 0); h = carp.h;
+    const plinth = floorLvl && elev === 0 && !carp.noPlinth ? H.plinth : 0, wt = carp.worktop === true && (level === 'base' || level === 'island') ? H.wt : 0;
+    carcassY = [elev + plinth, elev + h - wt]; zone = { y0: carcassY[0], y1: carcassY[1] - (wt ? G : 0) }; top = null;
+    dc = carp.depth ?? spec.depths[level === 'island' ? 'island' : level] ?? spec.depths.base;
+    d = wt ? Math.max(spec.worktop.depth, dc + frontD) : dc + frontD;
+  }
+  if (mod.id === 'tall-corner-pantry') d = carp.legB ?? 90;      // bounding square: the leg on the other arm
   const c = { run, unit, carp, mod, spec, H, level, w, d: r2(d), dc, h: r2(h), elev: r2(elev), t, frontD, zone, top, carcassY };
-  c.fronts = mod.fronts(c);
+  if (mod.prepare) mod.prepare(c);
+  const op = carp.fronts && carp.fronts.operation;
+  c.fronts = applyOperation(mod.fronts(c), op);
+  if (c.corner) c.trueFronts = applyOperation(cornerTrueFronts(c), op);
   c.inner = mod.inner ? mod.inner(c) : [];
   c.model = mod.model(c);
+  if (op === 'none') c.model = { ...c.model, params: { ...c.model.params, open: true } };
+  else if ((op === 'sliding' || op === 'pocket') && c.model.type === 'wardrobe') c.model = { ...c.model, params: { ...c.model.params, sliding: true } };
   return c;
 }
 
@@ -86,7 +101,7 @@ export function unitsOf(run, reader) {
  */
 export function positions(run, units) {
   const pos = new Map();
-  let s = 0;
+  let s = (run.reserved && run.reserved.left) || 0;           // corner footprint of another run reserved at this end
   const blocks = [];
   for (const u of units) {
     const lvl = levelOf(u);

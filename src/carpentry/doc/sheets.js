@@ -9,14 +9,14 @@ import { S, tr } from './strings.js';
 import { keyPlanOps, northArrow } from './keyplan.js';
 
 const SCALES = [10, 20, 25, 50, 100];
-const CAP = 9;          // caption band under a view (mm)
+const CAP = 8;          // caption band under a view (mm)
 const GAP_X = 14, GAP_Y = 9;
 const ORDER = { plan: 0, elevation: 1, internal: 2, section: 3, worktop: 4 };
 
 /** Geometry of a landscape sheet. */
 export function sheetGeometry(size) {
-  const [W, H] = size, a3 = W > 300, m = a3 ? 10 : 8, tb = a3 ? 30 : 25, head = 7;
-  return { W, H, m, tb, head, area: { x: m + 6, y: m + head + 6, w: W - 2 * m - 12, h: H - 2 * m - head - tb - 10 } };
+  const [W, H] = size, a3 = W > 300, m = a3 ? 10 : 8, tb = a3 ? 26 : 23, head = 6.5;
+  return { W, H, m, tb, head, area: { x: m + 5, y: m + head + 3.5, w: W - 2 * m - 10, h: H - 2 * m - head - tb - 6.5 } };
 }
 
 /** Finest standard scale (never finer than the engine's own) at which a drawing + caption fits an area. */
@@ -45,8 +45,9 @@ export function packDrawings(drawings, area) {
   });
   const sheets = [];
   let cur = [];
+  const alone = (x) => x.d.kind === 'internal' || x.d.bespoke || x.d.kind === 'bespoke';   // internal / bespoke views get their own sheet
   for (const it of list) {
-    if (cur.length && arrange([...cur, it], area.w, area.h)) cur.push(it);
+    if (cur.length && !alone(it) && !cur.some(alone) && arrange([...cur, it], area.w, area.h)) cur.push(it);
     else { if (cur.length) sheets.push(cur); cur = [it]; }
   }
   if (cur.length) sheets.push(cur);
@@ -92,6 +93,7 @@ export function drawSheet(ctx) {
       const fl = flattenDrawing(it.d, { lang, scale: it.S, box: [left, top, it.w, it.h] });
       page.ops.push({ t: 'drawing', id: it.d.id, kind: it.d.kind, runId: it.d.runId, scale: it.S, box: [r2(left), r2(top), r2(it.w), r2(it.h)], ops: fl.ops });
       caption(page, dir, lang, left, top + it.h + 2.2, Math.max(it.w, 62), it);
+      if (Array.isArray(it.d.legend) && it.d.legend.length) legend(page, dir, lang, left, top + it.h + 10.2, Math.max(it.w, 62), it.d.legend);
       if (it.d.kind === 'plan') { const [vx, vy] = northInPlan(run, plan); page.ops.push(...northArrow(left + it.w - 4, top + 5, 7, vx, vy, lang)); }
       x += it.w + GAP_X;
     }
@@ -112,16 +114,23 @@ function caption(page, dir, lang, x, y, w, it) {
   R.text(w, y + 3.3, `${tr(S.scale, lang)} 1:${it.S}`, { size: 6.6, font: 'regular', color: 'grey' }, 'end');
 }
 
+/** Symbol legend carried by a drawing (door operations, callouts): one wrapped line of "symbol  text" items. */
+function legend(page, dir, lang, x, y, w, items) {
+  const R = region(page, x, x + w, dir);
+  const s = items.map((e) => (typeof e === 'string' ? e : [e.symbol || e.code || e.key || '', tr(e.text || e.label || e.title || '', lang)].filter(Boolean).join(' '))).filter(Boolean).join('   ·   ');
+  R.text(0, y, ellipsize(s, w, 6, 'regular'), { size: 6, font: 'regular', color: 'ink2' }, 'start');
+}
+
 /** Title block along the bottom of the sheet. */
 function titleBlock(page, G, ctx) {
   const { B, run, roomName } = ctx, { W, H, m, tb } = G, dir = B.dir, lang = B.lang, p = B.project;
   const y0 = H - m - tb, R = region(page, m, W - m, dir), w = R.W;
   page.ops.push({ t: 'line', x1: m, y1: y0, x2: W - m, y2: y0, lw: 0.35, color: 'ink' });
   // top band: dimension note + status
-  const band = 5.2;
+  const band = 4.6;
   R.rect(0, y0, w, band, { fill: 'tint' });
-  R.text(3, y0 + 3.6, B.t(S.dimsNote), { size: 6.4, font: 'medium', color: 'ink2' }, 'start');
-  R.text(w - 3, y0 + 3.6, B.t(S.forTender), { size: 6.2, font: 'medium', color: 'accent' }, 'end');
+  R.text(3, y0 + 3.2, B.t(S.dimsNote), { size: 6.4, font: 'medium', color: 'ink2' }, 'start');
+  R.text(w - 3, y0 + 3.2, B.t(S.forTender), { size: 6.2, font: 'medium', color: 'accent' }, 'end');
   page.ops.push({ t: 'line', x1: m, y1: y0 + band, x2: W - m, y2: y0 + band, lw: 0.12, color: 'rule' });
   const cy = y0 + band, ch = tb - band;
   const kpW = ch * 1.15, cells = [

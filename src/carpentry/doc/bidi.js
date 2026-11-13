@@ -136,3 +136,13 @@ export function visualOrder(text, dir = 'ltr') {
   }
   return idx.map((i) => (lv[i] % 2 === 1 && MIRROR[chars[i]] ? MIRROR[chars[i]] : chars[i])).join('');
 }
+
+/** Paragraph direction from the first strong character (UAX #9 P2–P3); `fallback` when there is none. */
+export function autoDir(text, fallback = 'ltr') {
+  for (const c of String(text == null ? '' : text)) {
+    const t = bidiClass(c.codePointAt(0));
+    if (t === 'R') return 'rtl';
+    if (t === 'L') return 'ltr';
+  }
+  return fallback;
+}
