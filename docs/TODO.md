@@ -10,6 +10,9 @@ Last updated: 13 Nov 2026. Published preview: https://claude.ai/artifact/8ZvK3RL
 - [x] Safe room doorway with both doors (2D and 3D).
 - [x] Structure editing: walls, doors, windows, passages, with the four permission levels, changes list, undo, save / open.
 
+## In progress
+- [ ] **Realistic interior daylight** (requested 13 Nov) — light from windows and doors must spread through the rooms, not only draw sun patches: sky light falling off into each room, bounce off sunlit floors and the ground outside, colour from the finishes, furniture lit to match; live with the date / time slider and in the walk-through. Being built as a runtime radiosity solver feeding lightmaps (one engineer, Opus).
+
 ## Next
 - [ ] Lead's UX review pass (known: finishes cannot be dropped onto the 3D view; tablet side panels have no scrim; wall length has no inspector field; the Bedroom 1 / Bedroom 2 partition cannot be dragged until a bedroom door is moved away from its end; the removed-wall ghost is faint in dark theme; touch gestures for structure tools untested).
 - [ ] Performance check on a real graphics card (only a software renderer has been measured).
