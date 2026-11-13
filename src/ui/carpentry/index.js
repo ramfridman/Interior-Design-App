@@ -338,8 +338,11 @@ export function createCarpentry(app) {
   });
 
   /** "Kitchen run K1 · unit B3 — edit it in Carpentry" (furniture tools refuse carpentry units). */
+  let lastLocked = 0;
   function lockedToast(it) {
     const run = Carp.runOfItem(it);
+    if (performance.now() - lastLocked < 4000) return run;      // one explanation per burst of attempts
+    lastLocked = performance.now();
     toast(`${unitLabel(it)} is made to measure: edit it in Carpentry.`, { action: { label: 'Edit in Carpentry', fn: () => api.openUnit(it.id) } });
     return run;
   }
@@ -492,11 +495,17 @@ export function createCarpentry(app) {
   return api;
 }
 
+let normCtx = null;
+/** Any CSS colour → the same colour at alpha `a` (the canvas normalises it to #rrggbb or rgba()). */
 function withAlpha(color, a) {
   if (typeof color !== 'string') return color;
-  const m = color.match(/^#([0-9a-f]{6})$/i);
+  if (!normCtx) normCtx = document.createElement('canvas').getContext('2d');
+  normCtx.fillStyle = '#000'; normCtx.fillStyle = color;
+  const c = normCtx.fillStyle;
+  const m = c.match(/^#([0-9a-f]{6})$/i);
   if (m) { const v = parseInt(m[1], 16); return `rgba(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255},${a})`; }
-  return color;
+  const r = c.match(/^rgba?\(([^,]+),([^,]+),([^,)]+)/);
+  return r ? `rgba(${r[1]},${r[2]},${r[3]},${a})` : color;
 }
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();

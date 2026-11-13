@@ -14,6 +14,7 @@
  */
 import { takeoff as doTakeoff } from './takeoff.js';
 import { marketEstimate, hasMarketKeys, MARKET_COMPONENTS } from './market.js';
+import { listFeatures } from './features.js';
 
 const L = (en, he) => ({ en, he });
 const r0 = (v) => Math.round(v);
@@ -22,6 +23,7 @@ export const COMPONENTS = {
   carcass: L('Carcasses, backs, plinth & edging', 'גופים, גבות, צוקל וקנטים'), fronts: L('Fronts & end panels', 'חזיתות ופאנלים'),
   worktop: L('Worktop', 'משטח עבודה'), hardware: L('Hardware', 'פרזול'), internal: L('Internal fittings', 'אביזרים פנימיים'),
   installation: L('Installation', 'התקנה'), lighting: L('Lighting (optional)', 'תאורה (אופציונלי)'), splashback: L('Splashback (optional)', 'חיפוי קיר (אופציונלי)'),
+  special: L('Special requirements', 'דרישות מיוחדות'),
 };
 const HW_INTERNAL = new Set(['pullout', 'larder', 'trouser-rack']);
 
@@ -118,6 +120,19 @@ export function estimate(runId = 'all', opts = {}) {
     const t = opts.takeoff || doTakeoff(runId, opts.src);
     runs = t.runs.map((rt) => runEstimate(rt, pb, tier, missing));
     missingRates = [...missing].sort().map((key) => ({ key, label: L(`No rate: ${key}`, `אין מחיר: ${key}`) }));
+  }
+  // special requirements: one unpriced line each, never silently zero
+  for (const r of runs) {
+    const feats = listFeatures(r.runId, opts.src);
+    if (!feats.length) continue;
+    const lines = feats.map((f) => {
+      const key = `feature:${f.id}`, label = L(`Special requirement ${f.label} ${f.ref}: ${f.title} — priced by the carpenter`, `דרישה מיוחדת ${f.label} ${f.ref}: ${f.title} — מתומחר ע״י הנגר`);
+      missingRates.push({ key, label });
+      return { rateKey: key, rateKeys: [key], label, unit: 'unit', qty: 1, low: 0, typical: 0, high: 0, noRate: true, sources: [], featureId: f.id };
+    });
+    r.components.push({ key: 'special', label: L('Special requirements', 'דרישות מיוחדות'), basis: L('Bespoke requests — the carpenter prices them in the quotation', 'בקשות מיוחדות — הנגר מתמחר אותן בהצעת המחיר'), optional: false, low: 0, typical: 0, high: 0, rateKeys: lines.map((l) => l.rateKey), lines });
+    r.rateKeys = [...new Set([...(r.rateKeys || []), ...lines.map((l) => l.rateKey)])];
+    r.noRateLines = (r.noRateLines || 0) + lines.length;
   }
   const inc = (o) => ({ low: r0(o.low * (1 + vat)), typical: r0(o.typical * (1 + vat)), high: r0(o.high * (1 + vat)) });
   for (const r of runs) r.totalIncVat = inc(r.total);

@@ -76,7 +76,7 @@ export function initRunsPanel(root, app, C) {
       : h('span', { class: 'crun__name truncate', onDblclick: () => { renaming = run.id; render(); } }, run.name);
     return h('li', { class: `crun${selected ? ' is-selected' : ''}` },
       h('button', { type: 'button', class: 'crun__main', 'aria-pressed': String(selected), 'aria-label': `${run.code}, ${run.name}, ${metres(run.length)}, ${n} units`,
-        onClick: () => { if (renaming === run.id) return; C.select(run.id); }, onDblclick: () => C.focusRun(run.id) },
+        onClick: () => { if (renaming === run.id) return; C.select(run.id); C.focusRun(run.id); } },
       h('span', { class: 'crun__icon' }, icon(k.icon, { size: 18 })),
       h('span', { class: 'crun__code num' }, run.code)),
       h('span', { class: 'crun__body' }, nameEl,
@@ -93,7 +93,7 @@ export function initRunsPanel(root, app, C) {
     const runs = Carp.listRuns();
     const groups = new Map();
     for (const r of runs) { const key = r.roomId || 'other'; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(r); }
-    return h('div', { class: 'cruns' }, [...groups.entries()].map(([roomId, list]) => h('section', { class: 'cruns__group' },
+    return h('div', { class: `cruns${sel && sel.runId ? ' cruns--compact' : ''}` }, [...groups.entries()].map(([roomId, list]) => h('section', { class: 'cruns__group' },
       h('h3', { class: 'cruns__room' }, roomName(plan, roomId), h('span', { class: 'num faint' }, String(list.length))),
       h('ul', { class: 'cruns__list' }, list.map((r) => runRow(r, sel && sel.runId === r.id))))));
   }
@@ -103,7 +103,7 @@ export function initRunsPanel(root, app, C) {
     const mods = Carp.modulesFor(run.kind).filter((m) => m.id !== 'wall-void' || run.kind !== 'island');
     const byLevel = new Map();
     for (const m of mods) {
-      const lvl = m.level;
+      const lvl = m.id === 'custom' ? 'bespoke' : m.level;
       if (!byLevel.has(lvl)) byLevel.set(lvl, []);
       byLevel.get(lvl).push(m);
     }
@@ -114,10 +114,25 @@ export function initRunsPanel(root, app, C) {
         h('h4', { class: 'cpal__level' }, g.label),
         h('div', { class: 'cpal__grid' }, byLevel.get(g.id).map((m) => tile(run, m))))));
   }
+  /** The bespoke tile: an empty free-layout unit for a row of this run, or one of the engine's starter templates. */
+  function bespokeMenu(run, anchor) {
+    const empty = (level, label) => ({ label, icon: 'carpentry', onSelect: () => add({ level, internals: { layout: { columns: [{ flex: 1, cells: [{ flex: 1, kind: 'door' }] }] } } }) });
+    const add = (opts) => { const id = C.addUnit(run.id, 'custom', opts); if (id) { store.setUI({ carpentryTab: 'unit' }); app.toast(`Bespoke unit added to ${run.code}: compose it in the Unit tab`, { action: { label: 'Undo', fn: () => store.undo() } }); } };
+    const T = Carp.CUSTOM_TEMPLATES && typeof Carp.customLayoutTemplate === 'function' ? Object.entries(Carp.CUSTOM_TEMPLATES) : [];
+    const rows = (run.levels || ['base']).filter((l) => l !== 'island');
+    openMenu(anchor, [
+      { heading: 'Empty bespoke unit' },
+      ...rows.map((l) => empty(l, `${({ base: 'Base', wall: 'Wall', tall: 'Tall', full: 'Full-height' })[l] || l} row`)),
+      T.length ? { separator: true } : null,
+      T.length ? { heading: 'Start from an idea' } : null,
+      ...T.map(([id, t]) => ({ label: (t.name && (t.name.en || t.name)) || id, icon: 'note', onSelect: () => { const o = Carp.customLayoutTemplate(id); if (o) { const { module: _m, label: _l, ...opts } = o; add(opts); } } })),
+    ], { placement: 'right-start' });
+  }
   function tile(run, m) {
     const range = m.w.min === m.w.max ? `${num(m.w.std)} cm` : `${num(m.w.min)}–${num(m.w.max)}, std ${num(m.w.std)}`;
     const t = h('button', { type: 'button', class: 'cmod', draggable: 'true', 'data-tip': `${m.name.en} · ${range} cm`, 'aria-label': `Add ${m.name.en}, standard width ${num(m.w.std)} cm`,
-      onClick: () => {
+      onClick: (e) => {
+        if (m.id === 'custom') { bespokeMenu(run, e.currentTarget); return; }
         const opts = m.level === 'any' ? { level: run.kind === 'island' ? 'island' : (run.levels.includes('base') ? 'base' : run.levels[0]) } : {};
         const id = C.addUnit(run.id, m.id, opts);
         if (id) app.toast(`${m.name.en} added to ${run.code}`, { action: { label: 'Undo', fn: () => store.undo() } });
@@ -125,7 +140,7 @@ export function initRunsPanel(root, app, C) {
       onDragstart: (e) => { e.dataTransfer.setData(DND_MODULE, m.id); e.dataTransfer.setData('text/plain', m.name.en); e.dataTransfer.effectAllowed = 'copy'; C.emit('palette-drag', { module: m.id }); },
       onDragend: () => C.emit('palette-drag', null) });
     t.innerHTML = moduleGlyph(m.id);
-    t.append(h('span', { class: 'cmod__name' }, shortName(m)), h('span', { class: 'cmod__w num' }, m.w.min === m.w.max ? `${num(m.w.std)}` : `${num(m.w.std)}`));
+    t.append(h('span', { class: 'cmod__name' }, shortName(m)), h('span', { class: 'cmod__w num' }, `${num(m.w.std)}`));
     return t;
   }
 
@@ -138,7 +153,7 @@ export function initRunsPanel(root, app, C) {
     setKids(body,
       renderList(store.ui.carpentrySel),
       cur ? renderPalette(cur.run) : h('p', { class: 'cpanel__hint' }, 'Select a run to add units to it.'),
-      h('ul', { class: 'guide__notes' },
+      cur ? null : h('ul', { class: 'guide__notes' },
         h('li', null, kbd('←'), kbd('→'), ' select units, ', kbd('Alt'), ' + arrows move them, ', kbd('+'), kbd('−'), ' change the width by 5 cm.'),
         h('li', null, kbd('F'), ' fits the run, ', kbd('Delete'), ' removes the unit, ', kbd('Esc'), ' steps back.')),
       btn('Back to furnishing', { block: true, icon: 'sofa', tip: 'Leave Carpentry mode', kbd: 'C', onClick: () => C.exit() }));

@@ -8,6 +8,7 @@ import { view } from './state.js';
 import { MODULES } from './modules.js';
 import { unitsOf, positions, geometryOf, levelOf } from './layout.js';
 import { runTakeoff } from './takeoff.js';
+import { VOCAB } from './spec.js';
 
 const L = (en, he) => ({ en, he });
 const r0 = (v) => Math.round(v);
@@ -21,6 +22,7 @@ export const MARKET_COMPONENTS = {
   installation: L('Installation', 'התקנה'),
   lighting: L('Lighting (optional)', 'תאורה (אופציונלי)'),
   other: L('Items without a published rate', 'פריטים ללא מחיר מפורסם'),
+  special: L('Special requirements', 'דרישות מיוחדות'),
 };
 
 /** True if the price book carries market keys (kitchen.* / wardrobe.* …). */
@@ -122,7 +124,8 @@ function runMarket(run, v, tier, R, ctx) {
     }
     const talls = geo.filter((x) => x.level === 'tall' && !x.mod.virtual && x.mod.id !== 'tall-fridge-niche' && !['filler', 'panel'].includes(x.mod.id));
     if (talls.length) {
-      const q = talls.reduce((s, x) => s + x.w, 0) / 60;
+      const eff = (x) => (x.g.corner ? x.w + x.g.corner.legB - x.g.corner.dA : x.w);   // a corner pantry counts both legs
+      const q = talls.reduce((s, x) => s + eff(x), 0) / 60;
       push('cabinets', R.line('kitchen.tall-unit.per-unit', q, { note: L(`${talls.length} tall unit(s), ${talls.reduce((s, x) => s + x.w, 0)} cm — priced per 60 cm unit (width / 60)`, `${talls.length} ארונות גבוהים, ${talls.reduce((s, x) => s + x.w, 0)} ס״מ — מתומחר לפי יחידה של 60 ס״מ (רוחב / 60)`) }));
     }
     basis.cabinets = L('Lower + upper cabinets per running metre (standard hardware, excl. worktop, drawers and special fittings); tall units per 60 cm unit', 'ארונות תחתונים + עליונים למטר רץ (פרזול סטנדרטי, ללא משטח, מגירות ופרזול מיוחד); ארונות גבוהים ליחידת 60 ס״מ');
@@ -193,6 +196,15 @@ function runMarket(run, v, tier, R, ctx) {
     if (rest.length) push('other', R.line(`${run.kind}.per-unit`, rest.length, { label: L(`${rest.map((x) => x.mod.name.en).join(', ')} — no published rate, ask the carpenter`, `${rest.map((x) => x.mod.name.he).join(', ')} — אין מחיר מפורסם, לשאול את הנגר`) }));
   }
 
+  // ── special door operations ──
+  const opCount = {};
+  for (const x of geo) for (const f of (x.g.trueFronts || x.g.fronts)) if (f.operation && !['hinged', 'lift-up', 'drop-down', 'push-open', 'none'].includes(f.operation)) opCount[f.operation] = (opCount[f.operation] || 0) + 1;
+  for (const [op, n] of Object.entries(opCount)) {
+    const lab = VOCAB.doorOperation[op];
+    if (op === 'sliding' && R.rates['hardware.sliding-gear.per-door']) push('addons', R.line('hardware.sliding-gear.per-door', n));
+    else push('addons', R.line(`fittings.${op}`, n, { label: L(`${lab.en} — fittings for ${n} door(s), priced by the carpenter`, `${lab.he} — פרזול ל-${n} דלתות, מתומחר ע״י הנגר`) }));
+  }
+
   // ── worktop ──
   for (const p of rt.worktops) {
     const natural = ['granite', 'marble-local'].includes(p.material);
@@ -217,7 +229,7 @@ function runMarket(run, v, tier, R, ctx) {
   const led = rt.lighting.underWallM + rt.lighting.inCabinetM;
   if (led > 0) { push('lighting', R.line('lighting.led.strip.per-m', led)); basis.lighting = L('LED strip only, per metre (driver, profile and electrician extra)', 'פס לד בלבד למטר (שנאי, פרופיל וחשמלאי בנפרד)'); }
 
-  const components = Object.keys(MARKET_COMPONENTS).filter((c) => comp[c].length).map((c) => {
+  const components = Object.keys(MARKET_COMPONENTS).filter((c) => comp[c] && comp[c].length).map((c) => {
     const lines = comp[c].map((l) => ({ ...l, low: r0(l.low), typical: r0(l.typical), high: r0(l.high) }));
     return { key: c, label: MARKET_COMPONENTS[c], basis: basis[c] || (c === 'other' ? L('No published market rate — ask the carpenter', 'אין מחיר שוק מפורסם — לשאול את הנגר') : null), optional: c === 'lighting',
       low: lines.reduce((s, l) => s + l.low, 0), typical: lines.reduce((s, l) => s + l.typical, 0), high: lines.reduce((s, l) => s + l.high, 0),

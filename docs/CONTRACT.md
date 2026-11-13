@@ -535,6 +535,95 @@ Market component keys: `cabinets, addons, worktop, installation, lighting, other
 total = Σ runs = Σ components = Σ lines. **Always present it as an estimate**: show `label` / `disclaimer`, `asOf`, each component's
 `basis`, each line's sources / confidence / `includes`, the book's `notes`, and "no published rate — ask the carpenter" for `noRate` lines.
 
+### Bespoke units, door operations, corner pantry, special requirements
+Additive to everything above (no field was renamed or removed). New `'carpentry'` event reason: `'feature'`.
+
+**Door / front operation (any unit).** `carp.fronts.operation` ∈ `VOCAB.doorOperation`: `hinged` (default) · `removable` (lift-off
+doors, דלתות נשלפות) · `sliding` · `pocket` (retract into side pockets, דלתות כיס נסתרות) · `bifold` (דלת אקורדיון) · `tambour` (roller
+shutter, תריס גלילה) · `lift-up` · `drop-down` · `push-open` · `curtain` · `none` (open). A bespoke cell may set its own `operation`.
+* Fronts: every door-type `Front` now carries `operation`; `none` turns doors into `open`, `lift-up` / `drop-down` into `flap`
+  (hinge `T` / `B`), `push-open` / `curtain` drop the handle, `tambour` / `curtain` merge a row of doors into one front.
+* Elevation symbols (ops `role: 'op-symbol'`, `op`): hinged = dashed triangle to the hinge side; removable = up-arrows at both top
+  corners + **R**; sliding = double arrow; pocket = arrows into both sides + dashed pocket lines; bifold = dashed fold line + chevron;
+  tambour = slat lines; lift-up / drop-down = triangle to the hinge edge; push-open = triangle + **P**; curtain = wavy line. Plan views
+  mark non-hinged corner faces with the key letter. Every plan / elevation / internal drawing has **`legend: [{ op, key, label { en, he } }]`**
+  for the operations it shows, also drawn as text ops `role: 'legend'` (with `op`) under the drawing; keys in `OP_KEY`
+  (`◁ R ↔ ⇤⇥ Λ ≡ △ ▽ P ∿ ○`).
+* Take-off `Hw` instead of hinges: `lift-off-hinge` (removable, qty = hinges for the door height), `sliding-set` + `sliding-track` (m),
+  `pocket-system`, `bifold-set`, `tambour-kit` (per door / shutter), `curtain-track` (m), `push-latch` (+ hinges for push-open);
+  `specifiedByCarpenter: true` on removable / pocket / bifold / tambour / curtain fittings (the exact product is the maker's choice) —
+  also on the schedules' hardware rows. Mapping: `OPERATION_HARDWARE`, `BY_CARPENTER`.
+* Schedules: unit rows get `operation { en, he }` (and `fronts` mentions it when not hinged). 3D: `none` → model `open: true`;
+  sliding / pocket on wardrobes → `sliding: true`; otherwise the same model with doors.
+* Estimate (market): sliding doors × `hardware.sliding-gear.per-door`; other special operations → `fittings.<op>` lines with `noRate`.
+
+**Corner modules that occupy both arms.**
+* `tall-corner-pantry` (level tall; kinds kitchen / pantry / utility): `width` = **legA** (along its own run, 70–160),
+  `carp.legB` (along the other arm, measured from this run's wall, default 90), `carp.cornerSide: 'L'|'R'` (the end it sits at),
+  `internals.cornerPantry` ∈ `VOCAB.cornerPantry`: `l-doors` (two doors meeting at the inside corner, no post; faces A and B),
+  `diagonal` (angled front, 1–2 doors), `walk-in` (larger legs ≥ 120, one door on the angled face, U shelving); `internals.shelves` (5);
+  any `fronts.operation`. Put it FIRST / LAST in the run that goes through the corner (the run the other arm butts into, or at a wall corner).
+* `base-corner-diagonal` (80–100, legs = width, worktop over it) and `wall-corner-diagonal` (55–75; draws / takes off its diagonal
+  shape but does not reserve the other arm's wall row). `base-corner-carousel` now also reserves its leg on the other arm.
+* **Reservation**: corner modules with a leg on the other arm write, on the other run, the derived
+  `run.reserved = { left, right (cm), by: { left|right: { cm, level, runId, unitId } } }` (absent when nothing is reserved). The floor row of
+  that run starts after `reserved.left` and must end at `length − reserved.right` (`checkRun` overflow / underfill, `fitRun` target and
+  `positions()` use it); its worktop stops against a TALL corner unit (end `'tall'`) and runs over a BASE corner unit (to the butt joint).
+* Geometry (`geometryOf`): `corner = { variant, side, legA, legB, dA, dB, poly: [[u, v]…], faces: [{ id: 'A'|'B'|'diag', a, b, len }] }` in
+  corner-local cm (u along this run from the corner, v from this run's wall), `trueFronts` (true-size doors per face, `face`), and the
+  elevation `fronts` as seen from this run (the other arm's end panel + the projected face). The store item is the bounding box
+  legA × legB (3D shows a box). Drawings: plan = true footprint (`poly` op with `corner: true`, role `unit`), faces (role `front`, `face`),
+  swings or operation key, shaped shelves dotted; the other arm's plan / elevation show a `role: 'reserved'` zone labelled with the unit
+  ref (e.g. `K1·T1`) and the B-face doors; internal elevation shows shelf heights.
+* Take-off: `Side (end of this arm)`, `Side (end of the other arm)`, shaped `Top` / `Bottom` / `Corner shelf` panels with
+  `shape: 'L'|'diagonal'` and `outline: [[x, y]…]` (mm, corner-local; `length` × `width` = bounding box, `areaM2` = true area), two backs,
+  `Angled front frame rail` ×2 (diagonal / walk-in), the other arm's end panel (front material), true-size doors, legs 6, wall fixings 3.
+* Checks: `corner-placement`, `corner-owner`, `corner-pantry-doors` (hinged L-doors clash at the inside corner), `corner-pantry-access`
+  (face < 30 cm, diagonal < 45 cm, walk-in legs < 120 cm), `corner-overlap` (error). Corner units are fixed in `fitRun`.
+* Estimate (market): the pantry is priced as tall units × (legA + legB − depth) / 60.
+
+**Bespoke unit composer.** `custom` is now a free-form unit on ANY level (`carp.level`) in any run kind:
+`carp.width`, `carp.h` (total height incl. plinth / worktop), `carp.elev`, `carp.depth` (carcass depth), `carp.worktop: true` (base),
+`carp.noPlinth`, and `carp.internals.layout = { columns: [{ w | flex, cells: [{ h | flex, kind, operation?, count?, hinge?, shelves?,
+label?: { en, he } | string, note? }] }] }` — columns left → right, cells **bottom → top**; `w` / `h` fixed cm or `flex` (number weight or
+`true`) to share the rest of the front area (width × front-zone height). Cell `kind` ∈ `VOCAB.cellKind`: `door`, `drawer`, `drawers`
+(`count`), `open` (`shelves`), `glass`, `panel` (fixed front), `appliance` (`label`), `pullout`, `void` (empty niche).
+* Fronts carry `cellId` (`'<column>.<cell>'`, 1-based); inner = dividers between columns, fixed shelves between cells (not between
+  drawer cells), cell shelves, pull-outs. `layoutGrid(layout, w, y0, y1)` → `[{ x0, x1, cells: [{ id, ya, yb, cell }] }]`.
+* `validateCustomLayout(layout, w, h)` → `[{ en, he }]` (sums, min column 10, min cell 8 / door 20, drawers ≥ 10 each, known kinds and
+  operations); `addUnit` / `updateUnit` refuse an invalid layout with the first reason (`reasons` = all); `checkRun` → `custom-layout`
+  errors and a `bespoke` info finding on every custom unit.
+* Drawings: elevation draws every cell's fronts with their operation symbols; the internal elevation draws one `role: 'cell'` rect per
+  cell (`cellId`, `unitId`) with its label, a `cols-<code>` width chain (sums to the width) and `cells-<code>-<n>` height chains per column
+  (sum to the front height). Take-off: carcass (base type for base / island, otherwise top + bottom), dividers, fixed and cell shelves,
+  a front per cell front (`Fixed front panel` for panels), hardware per cell kind and operation. 3D: kitchen-base / -wall / -tall /
+  wardrobe with the door / drawer counts. Codes follow the level (B, W, T, C, I).
+* `customLayoutTemplate(name)` → ready `addUnit` options (`{ module: 'custom', level, width, h, depth?, elev?, worktop?, internals: { layout },
+  label }`) for `appliance-garage` (tambour), `open-shelves-drawers`, `tall-larder-drawers`, `window-seat`, `bar-niche` (`CUSTOM_TEMPLATES`):
+  `addUnit(runId, 'custom', customLayoutTemplate('bar-niche'))`.
+* `toCustom(unitId)` converts any unit to `custom` keeping its look (same fronts, size, elevation, depth, worktop, operation);
+  `carp.convertedFrom` = the old module. `frontsToLayout(geometry)` is the converter.
+
+**Special requirements (`Feature`).** The owner's free text — never translate it.
+`Feature = { id, n, title, text, category: 'construction'|'doors'|'internal'|'finish'|'hardware'|'appliance'|'lighting'|'electrical'|'other',
+priority?: 'must'|'nice', images?: [{ id, name, w, h, dataUrl? , stored? }] }` on `run.features` or `unit.carp.features`; `n` is a stable
+number per run (`run.featureSeq`), shown as ①②… (`circled(n)`). Images with a data URL over 50 000 characters are kept out of the undo
+history in `store.carpentryImages[imageId]` (saved by `serialize()` / restored by `load()`); the feature keeps `{ id, name, w, h, stored: true }`
+and `featureImage(imageId)` returns the data URL.
+```js
+addFeature({ runId } | { unitId }, { title, text, category, priority, images })  // → { ok, featureId, n }
+updateFeature(featureId, patch)  ·  removeFeature(featureId)  ·  featureImage(imageId)
+listFeatures(runId | 'all', src?) // → [{ …feature, runId, run, unitId, code, ref ('K1·T1' | 'K1'), label ('①') }]
+```
+* Drawings: plan and elevation get a numbered balloon per feature — ops `role: 'callout'`, `featureId`: a leader line, two half-circle
+  arcs and a text op (`text: '1'`, `label: '①'`) — on the unit (top in elevation, front in plan) or, for run features, at the run's left.
+* `schedules().features` rows `{ runId, unitId, featureId, n, label, ref, code, title, text, category { en, he }, priority { en, he }, images }`
+  (`headers.features`); every `must` feature adds a question "Please confirm how you would build ① K1·T1 "title": text"
+  (`featureId` on the row); every bespoke unit adds a construction question.
+* Estimate (both methods): a component `special` with one line per feature `{ rateKey: 'feature:<id>', noRate: true, low/typical/high 0,
+  featureId, label 'Special requirement ① … — priced by the carpenter' }`, also listed in `missingRates`.
+* `checkRun`: an info finding `feature` per requirement ("no automatic rule checks — the carpenter confirms it").
+
 ### Drawings — `drawings(runId)` → `Drawing[]` (plan, elevation, section, worktop if any, internal if tall / full units)
 `Drawing = { id, kind: 'plan'|'elevation'|'section'|'worktop'|'internal', runId, title { en, he }, scale (1:scale, from 10/20/25/50/100 to
 fit A3 landscape), bounds { x, y, w, h } (real cm incl. dimensions), yUp: true, ops: Op[], dims: DimChain[] }`.

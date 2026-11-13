@@ -22,6 +22,7 @@ import { iconBtn } from '../components.js';
 import { openMenu } from '../dialogs.js';
 import { getPref, setPref } from '../prefs.js';
 import { DND_MODULE } from './runs-panel.js';
+import { focusFeature } from './bespoke.js';
 import { rowOf } from './index.js';
 import { num } from './vocab.js';
 
@@ -99,7 +100,7 @@ export function initWorkbench(app, C) {
   /* ───────── size, collapse, sheet ───────── */
   let collapsed = !!getPref('carpWbCollapsed');
   const setHeight = (px) => { const max = Math.max(160, stage.clientHeight - 120); const v = clamp(Math.round(px), 150, max); stage.style.setProperty('--cwb-h', `${v}px`); return v; };
-  setHeight(getPref('carpWbH') || 340);
+  setHeight(getPref('carpWbH') || Math.max(300, Math.round(stage.clientHeight * 0.42)));
   function setCollapsed(v) {
     collapsed = v;
     setPref('carpWbCollapsed', v);
@@ -253,11 +254,11 @@ export function initWorkbench(app, C) {
     const fU = sum(floor), wU = sum(wall), free = Math.round((run.length - fU) * 10) / 10;
     const cls = Math.abs(free) < 0.05 ? 'is-ok' : free < 0 ? 'is-over' : 'is-free';
     const cell = (k, v, c = '') => h('span', { class: `cwb__cell ${c}` }, h('span', { class: 'cwb__k' }, k), h('span', { class: 'cwb__v num' }, v));
+    const status = Math.abs(free) < 0.05 ? 'Fits' : free > 0 ? `${num(free)} cm free` : `${num(-free)} cm too long`;
     setKids(strip,
-      cell('Length', `${num(run.length)} cm`),
-      floor.length ? cell(run.kind === 'island' ? 'Island' : 'Floor row', `${num(fU)} cm`) : null,
-      wall.length ? cell('Wall row', `${num(wU)} cm`) : null,
-      floor.length ? cell(Math.abs(free) < 0.05 ? 'Fits' : free > 0 ? 'Free' : 'Too long', Math.abs(free) < 0.05 ? '✓' : `${num(Math.abs(free))} cm`, cls) : null);
+      floor.length ? cell(run.kind === 'island' ? 'Island / run' : 'Floor row / run', `${num(fU)} / ${num(run.length)} cm`) : cell('Run', `${num(run.length)} cm`),
+      wall.length ? cell('Wall row', `${num(wU)} cm`, 'cwb__cell--wall') : null,
+      floor.length ? cell('Status', status, cls) : null);
     fitMain.classList.toggle('is-hot', Math.abs(free) >= 0.05 && floor.length > 0);
   }
 
@@ -381,6 +382,8 @@ export function initWorkbench(app, C) {
     }
     if (e.button !== 0 && e.pointerType === 'mouse') { if (e.button === 1) S.gesture = { type: 'pan', last: p, start: p, moved: false }; return; }
     view.focus({ preventScroll: true });
+    const callout = calloutAt(p);
+    if (callout) { focusFeature(C, store, callout); app.setPanelOpen('right', true); return; }
     const side = gripAt(p);
     if (side) {
       const sel = store.ui.carpentrySel, r = S.rects.find((q) => q.id === sel.unitId);
@@ -458,8 +461,18 @@ export function initWorkbench(app, C) {
     if (e.key === 'Escape' && S.gesture) { e.stopPropagation(); e.preventDefault(); const g = S.gesture; S.gesture = null; if (g.type === 'resize' && g.began) store.cancel(); hideTip(); view.classList.remove('is-reordering'); drawOverlay(); }
   });
 
+  /** Special-requirement callout (numbered balloon, ops with role 'callout') under p → its featureId. */
+  function calloutAt(p) {
+    if (!S.drawing) return null;
+    for (const o of S.drawing.ops) {
+      if (o.role !== 'callout' || o.t !== 'arc' || !o.featureId) continue;
+      if (Math.hypot(toX(o.cx) - p.x, toY(o.cy) - p.y) <= Math.max(8, o.r * S.scale + 3)) return o.featureId;
+    }
+    return null;
+  }
   function hover(p, target) {
     if (!S.drawing) return;
+    if (calloutAt(p)) { view.style.cursor = 'pointer'; if (S.hover) { S.hover = null; drawOverlay(); } return; }
     const side = gripAt(p);
     const r = side ? null : unitAt(p, target);
     const id = r ? r.id : null;
@@ -555,7 +568,8 @@ export function initWorkbench(app, C) {
     e.preventDefault();
     const m = Carp.MODULES[id];
     const opts = { index: drop.index };
-    if (m && m.level === 'any') opts.level = S.runKind === 'island' ? 'island' : 'base';
+    if (m && m.level === 'any') opts.level = S.runKind === 'island' ? 'island' : drop.row === 'wall' ? 'wall' : 'base';
+    if (id === 'custom') opts.internals = { layout: { columns: [{ flex: 1, cells: [{ flex: 1, kind: 'door' }] }] } };
     const got = Carp.getRun(S.runId);
     const unitId = C.addUnit(S.runId, id, opts);
     if (unitId) app.toast(`${m.name.en} added to ${got.run.code}`, { action: { label: 'Undo', fn: () => store.undo() } });

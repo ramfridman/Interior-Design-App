@@ -28,7 +28,7 @@ export function drawingToSVG(drawing, opts = {}) {
   const DASH = { dash: [3, 1.5], dot: [0.3, 1.2], center: [6, 1.5, 0.8, 1.5] };
   const dash = (d) => (d && DASH[d] ? ` stroke-dasharray="${DASH[d].map((v) => n(v * k)).join(' ')}"` : '');
   const cls = (o, extra = '') => `op op-${o.role || 'line'}${o.fill ? ` fill-${o.fill}` : ''}${o.hatch ? ` hatch-${o.hatch}` : ''}${extra}`;
-  const uid = (o) => (o.unitId ? ` data-unit-id="${esc(o.unitId)}"` : '');
+  const uid = (o) => (o.unitId ? ` data-unit-id="${esc(o.unitId)}"` : '') + (o.featureId ? ` data-feature-id="${esc(o.featureId)}"` : '');
   const fill = (o) => (o.hatch ? ` fill="url(#${id}-hatch)"` : '');
   const out = [];
   for (const o of drawing.ops || []) {

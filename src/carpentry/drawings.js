@@ -186,7 +186,8 @@ function addCallouts(D, feats, pos) {
     const key = f.unitId || 'run', i = (seen[key] = (seen[key] || 0) + 1) - 1;
     const cx = p[0] + i * 2.4 * r, cy = p[1] + 4 * k + r;
     D.line(p[0], p[1], cx, cy - r, LW.hair, { role: 'callout', featureId: f.id });
-    D.arc(cx, cy, r, 0, 360, LW.thin, { role: 'callout', featureId: f.id });
+    D.arc(cx, cy, r, 0, 180, LW.thin, { role: 'callout', featureId: f.id });
+    D.arc(cx, cy, r, 180, 360, LW.thin, { role: 'callout', featureId: f.id });
     D.text(cx, cy, String(f.n), TEXT.label, { role: 'callout', featureId: f.id, label: f.label, weight: 'bold' });
   }
 }

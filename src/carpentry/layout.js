@@ -167,6 +167,7 @@ export function unitCodes(run, units) {
     const lvl = levelOf(u);
     let p = m.code;
     if (m.id === 'filler') p = 'F'; else if (m.id === 'panel') p = 'P';
+    else if (m.id === 'custom') p = { base: 'B', wall: 'W', tall: 'T', full: 'C', island: 'I' }[lvl] || 'B';
     else if (p === 'B' && lvl === 'wall') p = 'W';
     counters[p] = (counters[p] || 0) + 1;
     out.set(u.id, p + counters[p]);

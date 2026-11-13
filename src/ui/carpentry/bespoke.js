@@ -14,6 +14,7 @@ import { btn, iconBtn, numField, segmented } from '../components.js';
 import { openMenu, confirmDialog, toast } from '../dialogs.js';
 import { num } from './vocab.js';
 
+const labelText = (v) => (v == null ? '' : typeof v === 'object' ? v.en || '' : String(v));
 const fn = (name) => (typeof Carp[name] === 'function' ? Carp[name] : null);
 export const hasFeatures = () => !!(fn('addFeature') && fn('listFeatures'));
 const vocabList = (group, fallback) => (Carp.VOCAB[group] ? Object.entries(Carp.VOCAB[group]).map(([k, v]) => [k, v.en]) : fallback);
@@ -59,9 +60,9 @@ export function bespokeSection({ app, C, unit, mod, upd }) {
     class: 'cbesp__col', role: 'row', style: col.w ? { flex: `0 0 ${Math.max(8, (col.w / c.width) * 100)}%` } : { flex: `${col.flex || 1} 1 0` } },
   (col.cells || []).map((cell, ri) => h('button', { type: 'button', role: 'gridcell', class: `cbesp__cell cbesp__cell--${cell.kind || 'door'}${sel.c === ci && sel.r === ri ? ' is-sel' : ''}`,
     style: cell.h ? { flex: `0 0 ${Math.max(6, cell.h * 1.1)}px` } : { flex: `${cell.flex || 1} 1 0` },
-    'aria-label': `Column ${ci + 1}, cell ${ri + 1}: ${kindLabel(cell.kind)}${cell.h ? `, ${num(cell.h)} cm` : ''}`,
+    'aria-label': `Column ${ci + 1}, cell ${ri + 1}: ${labelText(cell.label) || kindLabel(cell.kind)}${cell.h ? `, ${num(cell.h)} cm` : ''}`,
     onClick: () => { selCell.set(unit.id, { c: ci, r: ri }); C.emit('features'); } },
-  h('span', { class: 'cbesp__ck' }, cell.label || kindLabel(cell.kind)), cell.h ? h('span', { class: 'cbesp__ch num' }, `${num(cell.h)}`) : null)))));
+  h('span', { class: 'cbesp__ck' }, labelText(cell.label) || kindLabel(cell.kind)), cell.h ? h('span', { class: 'cbesp__ch num' }, `${num(cell.h)}`) : null)))));
 
   const col = cols[sel.c], cell = col && col.cells[sel.r];
   const sizeCtl = (label, cur, unitHint, onFixed, onFill, key) => h('div', { class: 'cbesp__size' },
@@ -82,7 +83,7 @@ export function bespokeSection({ app, C, unit, mod, upd }) {
     h('div', { class: 'grid2' },
       h('label', { class: 'field' }, h('span', { class: 'field__label' }, 'Kind'), h('select', { class: 'select', 'aria-label': 'Cell kind', 'data-fk': 'besp-kind', onChange: (e) => setCell({ kind: e.target.value }) },
         kinds.map(([v, l]) => h('option', { value: v, selected: v === cell.kind }, l)))),
-      ['door', 'doors', 'drawers', 'appliance', undefined].includes(cell.kind) || /door|flap/.test(cell.kind || '')
+      !cell.kind || /door|glass|flap/.test(cell.kind)
         ? h('label', { class: 'field' }, h('span', { class: 'field__label' }, 'Opening'), h('select', { class: 'select', 'aria-label': 'Door operation', 'data-fk': 'besp-op', onChange: (e) => setCell({ operation: e.target.value }) },
           ops.map(([v, l]) => h('option', { value: v, selected: v === (cell.operation || 'hinged') }, l))))
         : h('span')),
@@ -90,14 +91,14 @@ export function bespokeSection({ app, C, unit, mod, upd }) {
     /drawer/.test(cell.kind || '') || /door/.test(cell.kind || '') ? numField({ label: /drawer/.test(cell.kind) ? 'Drawers' : 'Doors', value: cell.count || 1, min: 1, max: 6, title: 'Count', onCommit: (v) => setCell({ count: v }) }) : null,
     /shel|open|hang/.test(cell.kind || '') ? numField({ label: 'Shelves', value: cell.shelves || 0, min: 0, max: 10, title: 'Shelves', onCommit: (v) => setCell({ shelves: v }) }) : null,
     h('label', { class: 'field' }, h('span', { class: 'field__label' }, 'Label on the drawing'),
-      h('input', { class: 'field__input', type: 'text', value: cell.label || '', placeholder: 'e.g. Coffee machine', 'data-fk': 'besp-label', onChange: (e) => setCell({ label: e.target.value.trim() || undefined }) })),
+      h('input', { class: 'field__input', type: 'text', value: labelText(cell.label), placeholder: 'e.g. Coffee machine', 'data-fk': 'besp-label', onChange: (e) => setCell({ label: e.target.value.trim() || undefined }) })),
     h('label', { class: 'field' }, h('span', { class: 'field__label' }, 'Note for the carpenter'),
       h('input', { class: 'field__input', type: 'text', value: cell.note || '', placeholder: 'How it should work', 'data-fk': 'besp-note', onChange: (e) => setCell({ note: e.target.value.trim() || undefined }) }))) : null;
 
   const tpls = TEMPLATES();
   const tplBtn = tpls.length && fn('customLayoutTemplate') ? btn('Templates', { small: true, icon: 'list', onClick: (e) => openMenu(e.currentTarget, [
     { heading: 'Start from a template' },
-    ...tpls.map(([id, label]) => ({ label, onSelect: () => { const t = Carp.customLayoutTemplate(id); if (t) { selCell.set(unit.id, { c: 0, r: 0 }); upd({ internals: { layout: t } }); } } })),
+    ...tpls.map(([id, label]) => ({ label, onSelect: () => { const t = Carp.customLayoutTemplate(id); const lay = t && (t.internals ? t.internals.layout : t.columns ? t : null); if (lay) { selCell.set(unit.id, { c: 0, r: 0 }); upd({ internals: { layout: lay } }); } } })),
   ], { placement: 'bottom-end' }) }) : null;
 
   return h('section', { class: 'sec cbesp' },
@@ -107,9 +108,9 @@ export function bespokeSection({ app, C, unit, mod, upd }) {
 }
 
 /* ───────── special requirements ───────── */
-const CATEGORIES = () => vocabList('featureCategory', [['function', 'How it works'], ['material', 'Material / finish'], ['hardware', 'Hardware'], ['dimension', 'Size'], ['other', 'Other']]);
+const CATEGORIES = () => vocabList('featureCategory', [['construction', 'Construction'], ['doors', 'Doors / fronts'], ['internal', 'Interior'], ['finish', 'Finish'], ['hardware', 'Hardware'], ['other', 'Other']]);
 
-/** Downscale a picked image to ≤ 1200 px (longest side) as a JPEG data URL. */
+/** Downscale a picked image to ≤ 1200 px (longest side): { name, w, h, dataUrl (JPEG) }. */
 function downscale(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -122,7 +123,7 @@ function downscale(file) {
         const cv = document.createElement('canvas');
         cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
         cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-        resolve(cv.toDataURL('image/jpeg', 0.82));
+        resolve({ name: file.name || 'reference.jpg', w: cv.width, h: cv.height, dataUrl: cv.toDataURL('image/jpeg', 0.82) });
       };
       img.src = String(reader.result);
     };
@@ -130,6 +131,8 @@ function downscale(file) {
   });
 }
 
+/** The displayable source of a feature image ({ dataUrl } inline, or kept by the engine out of the undo history). */
+const imgSrc = (im) => (typeof im === 'string' ? im : im && (im.dataUrl || (fn('featureImage') && im.id ? Carp.featureImage(im.id) : null))) || '';
 const editing = new Set();   // feature ids open for editing
 
 /**
@@ -156,7 +159,7 @@ export function featuresSection({ app, C, runId, unitId, fkPrefix }) {
     const prioSeg = segmented({ options: [{ value: 'must', label: 'Must have' }, { value: 'nice', label: 'Nice to have' }], value: prio, label: 'Priority', cls: 'seg--mini', onChange: (v) => { prio = v; } });
     let images = f && Array.isArray(f.images) ? f.images.slice() : [];
     const thumbs = h('div', { class: 'cfeat__imgs' });
-    const drawThumbs = () => thumbs.replaceChildren(...images.map((src, i) => h('span', { class: 'cfeat__img' }, h('img', { src, alt: `Reference picture ${i + 1}` }),
+    const drawThumbs = () => thumbs.replaceChildren(...images.map((im, i) => h('span', { class: 'cfeat__img' }, h('img', { src: imgSrc(im), alt: im.name || `Reference picture ${i + 1}` }),
       iconBtn('close', 'Remove picture', { size: 12, onClick: () => { images.splice(i, 1); drawThumbs(); } }))));
     drawThumbs();
     const file = h('input', { type: 'file', accept: 'image/*', class: 'sr-only', onChange: async () => {
@@ -180,11 +183,11 @@ export function featuresSection({ app, C, runId, unitId, fkPrefix }) {
   };
 
   const item = (f, i) => editing.has(f.id) ? h('li', { class: 'cfeat is-editing' }, form(f)) : h('li', { class: `cfeat cfeat--${f.priority || 'must'}` },
-    h('span', { class: 'cfeat__n num' }, String(f.n || f.number || i + 1)),
+    h('span', { class: 'cfeat__n num', 'aria-label': `Requirement ${f.n || i + 1}` }, String(f.n || i + 1)),
     h('div', { class: 'cfeat__body' },
       h('p', { class: 'cfeat__title' }, f.title || 'Requirement', h('span', { class: 'cfeat__meta' }, `${catLabel(f.category)} · ${f.priority === 'nice' ? 'nice to have' : 'must have'}`)),
       f.text ? h('p', { class: 'cfeat__text' }, f.text) : null,
-      Array.isArray(f.images) && f.images.length ? h('div', { class: 'cfeat__imgs' }, f.images.map((src, k) => h('span', { class: 'cfeat__img' }, h('img', { src, alt: `Reference ${k + 1}` })))) : null),
+      Array.isArray(f.images) && f.images.length ? h('div', { class: 'cfeat__imgs' }, f.images.map((im, k) => h('span', { class: 'cfeat__img' }, h('img', { src: imgSrc(im), alt: im.name || `Reference ${k + 1}` })))) : null),
     h('span', { class: 'cfeat__acts' },
       iconBtn('note', 'Edit', { size: 15, onClick: () => { editing.add(f.id); C.emit('features'); } }),
       iconBtn('trash', 'Remove', { size: 15, variant: 'danger', onClick: async () => {

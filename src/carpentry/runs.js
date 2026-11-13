@@ -385,7 +385,7 @@ export function moveUnit(unitId, index, mopts) {
 
 // ───────────────────────── fit ─────────────────────────
 
-const isAdjustable = (u) => { const m = MODULES[u.carp.module]; return m && !m.appliance && m.id !== 'filler' && m.id !== 'panel' && m.w.max > m.w.min; };
+const isAdjustable = (u) => { const m = MODULES[u.carp.module]; return m && !m.appliance && !m.corner && m.id !== 'filler' && m.id !== 'panel' && m.w.max > m.w.min; };
 const handleless = (spec) => ['none', 'push'].includes(spec.handles.type) || ['j-profile', 'gola'].includes(spec.fronts.style);
 
 /** Spread `amount` (cm, + grows) over units within their min / max; whole cm where possible. Returns the remainder. */

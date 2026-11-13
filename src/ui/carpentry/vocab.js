@@ -22,6 +22,7 @@ export const kindInfo = (kind) => KINDS.find((k) => k.id === kind) || KINDS[KIND
 
 /** Level groups of the module palette. */
 export const LEVEL_GROUPS = [
+  { id: 'bespoke', label: 'Bespoke — anything you can describe' },
   { id: 'base', label: 'Base' }, { id: 'wall', label: 'Wall' }, { id: 'tall', label: 'Tall' },
   { id: 'full', label: 'Full height' }, { id: 'island', label: 'Island' }, { id: 'any', label: 'Other' },
 ];

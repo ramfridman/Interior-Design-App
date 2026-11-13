@@ -111,7 +111,7 @@ export function initCarpentryInspector(right, app, C) {
     return h('div', { class: 'crow' }, h('span', { class: 'crow__label' }, label), h('div', { class: 'crow__ctl' }, control), hint ? h('p', { class: 'crow__hint' }, hint) : null);
   }
   function numRow(key, label, value, onCommit, o = {}) {
-    return row(label, fk(numField({ value, step: o.step || 1, min: o.min ?? 0, max: o.max ?? 1000, digits: o.digits || 0, suffix: o.suffix || 'cm', title: label, onCommit }), key), o.hint);
+    return row(label, fk(numField({ value, step: o.step || 1, min: o.min ?? 0, max: o.max ?? 1000, digits: o.digits || 0, suffix: o.suffix ?? 'cm', title: label, onCommit }), key), o.hint);
   }
   function textRow(key, label, value, onCommit, placeholderText = '') {
     const i = h('input', { class: 'field__input', type: 'text', value: value || '', placeholder: placeholderText, 'aria-label': label, 'data-fk': key,
@@ -354,10 +354,19 @@ export function initCarpentryInspector(right, app, C) {
     if (c.module === 'base-hob' || (run.kind === 'island' && c.module === 'island')) special.push(select('u-hob', 'Hob', [['', run.kind === 'island' ? 'None' : 'Induction (default)'], ['induction', 'Induction'], ['gas', 'Gas']], c.hob || '', (v) => upd({ hob: v || null })));
     if (run.kind === 'island' && c.module === 'island') special.push(toggleRow('u-sink', 'Sink in the island', !!c.sink, (v) => upd({ sink: v || null })));
     if (c.module === 'vanity' && c.width >= 120) special.push(select('u-basins', 'Basins', [[1, 'One basin'], [2, 'Two basins']], c.basins || 1, (v) => upd({ basins: +v })));
+    const twoArm = !!(g && g.corner);                       // corner modules occupying the corner square on both arms
     if (mod.corner) special.push(h('div', { class: 'grid2' },
       select('u-cs', 'Corner on the', [['L', 'Left'], ['R', 'Right']], c.cornerSide || 'L', (v) => upd({ cornerSide: v })),
-      fk(numField({ label: 'Blind part', value: c.blind ?? (level === 'wall' ? 35 : 60), min: 0, max: c.width, suffix: 'cm', onCommit: (v) => upd({ blind: v }) }), 'u-blind')));
-    const specialSec = special.length ? h('section', { class: 'sec' }, h('header', { class: 'sec__head' }, h('h3', { class: 'sec__title' }, mod.appliance ? 'Appliance' : 'Details')), special) : null;
+      twoArm
+        ? fk(numField({ label: 'Leg on the other wall', value: c.legB ?? g.corner.legB, min: 30, max: 200, suffix: 'cm', title: 'Length of the corner unit along the other wall', onCommit: (v) => upd({ legB: v }) }), 'u-legb')
+        : fk(numField({ label: 'Blind part', value: c.blind ?? (level === 'wall' ? 35 : 60), min: 0, max: c.width, suffix: 'cm', onCommit: (v) => upd({ blind: v }) }), 'u-blind')));
+    if (twoArm) special.push(h('p', { class: 'crow__hint' }, `Legs ${num(g.corner.legA)} × ${num(g.corner.legB)} cm: this unit fills the corner square of both walls.`));
+    if (c.module === 'custom' && (level === 'base' || level === 'tall' || level === 'full')) special.push(toggleRow('u-noplinth', 'No plinth (stands on legs / the floor)', !!c.noPlinth, (v) => upd({ noPlinth: v || null })));
+    if (c.module === 'custom') special.push(h('div', { class: 'grid3' },
+      fk(numField({ label: 'Height', value: g ? g.h : c.h, min: 5, max: 300, suffix: 'cm', onCommit: (v) => upd({ h: v }) }), 'u-h'),
+      fk(numField({ label: 'Depth', value: c.depth ?? (g ? g.dc : 56), min: 5, max: 120, suffix: 'cm', onCommit: (v) => upd({ depth: v }) }), 'u-d'),
+      level === 'wall' || level === 'base' ? fk(numField({ label: 'From floor', value: g ? g.elev : c.elev || 0, min: 0, max: 280, suffix: 'cm', onCommit: (v) => upd({ elev: v }) }), 'u-elev') : null));
+    const specialSec = special.length ? h('section', { class: 'sec' }, h('header', { class: 'sec__head' }, h('h3', { class: 'sec__title' }, mod.appliance ? 'Appliance' : c.module === 'custom' ? 'Size and place' : 'Details')), special) : null;
 
     // overrides
     const overrides = overridesSection(run, unit, upd);
