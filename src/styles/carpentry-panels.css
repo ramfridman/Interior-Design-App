@@ -253,6 +253,17 @@
   .cq-thumbs { flex-direction: column; overflow-x: hidden; overflow-y: auto; width: 76px; border-bottom: 0; border-right: 1px solid var(--line); }
 }
 
+/* Desktop: the quotation package takes nearly the whole window — the form column is fixed, the sheet preview flexes and
+   scrolls inside itself (the dialog body never scrolls as a whole; the page root never scrolls at all). */
+@media (min-width: 1100px) {
+  .dialog--cquote { width: 92vw; max-width: 92vw; height: 90vh; max-height: 90vh; }
+  .dialog--cquote .dialog__body { display: flex; flex-direction: column; overflow: hidden; padding-bottom: var(--s-4); }
+  .dialog--cquote .cq { flex: 1 1 auto; min-height: 0; }
+  .dialog--cquote .cq-grid { flex: 1 1 auto; grid-template-columns: 340px minmax(0, 1fr); height: 100%; min-height: 0; }
+  .dialog--cquote .cq-left { overflow-y: auto; padding-right: var(--s-2); overscroll-behavior: contain; }
+  .dialog--cquote .cq-preview { height: auto; min-height: 0; }
+}
+
 @media (pointer: coarse) { .cp-trk__amt, .cq-in { font-size: 16px; } }
 
 .cp-cc__he { text-align: left; }
@@ -260,3 +271,6 @@
 .cp-table--cmp td, .cp-table--cmp th { white-space: normal; }
 .cp-table--cmp .is-num { white-space: nowrap; }
 .cp-cmp__diff { font-size: var(--fs-11); white-space: nowrap; }
+
+/* Furnish inspector: a made-to-measure carpentry unit (src/ui/inspector.js renderCarp) */
+.ccard__lead { color: var(--ink); font-size: var(--fs-13); font-weight: 600; margin: 4px 0 2px; }

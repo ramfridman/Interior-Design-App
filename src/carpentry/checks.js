@@ -254,6 +254,13 @@ function findingsFor(run, v) {
     if (worst && worst.d < aisleNeed) add(worst.d < aisleNeed - 15 ? 'error' : 'warning', 'aisle', `Only ${r1(worst.d)} cm clear in front of ${C(worst.x)} (to ${worst.what}) — ≥ ${aisleNeed} cm needed${run.kind === 'kitchen' ? `, ${RULES.aisleRecommended}–${RULES.aisleTwoCooks} cm recommended` : ''} to open doors and pass.`,
       `רק ${r1(worst.d)} ס״מ פנויים מול ${C(worst.x)} (עד ${worst.whatHe}) — נדרש ≥ ${aisleNeed} ס״מ${run.kind === 'kitchen' ? `, מומלץ ${RULES.aisleRecommended}–${RULES.aisleTwoCooks} ס״מ` : ''} לפתיחת דלתות ולמעבר.`, [worst.x]);
   }
+  if (run.kind === 'island' || run.freeStanding) {
+    // free-standing: the walkway all round (sides that reach a wall / run / furniture within 4 m)
+    const sides = clearancesOf(run, v).filter((c) => c.d != null);
+    const worst = sides.reduce((a, c) => (!a || c.d < a.d ? c : a), null);
+    if (worst && worst.d < aisleNeed) add(worst.d < aisleNeed - 15 ? 'error' : 'warning', 'aisle', `Only ${r1(worst.d)} cm clear on the ${SIDE_NAME[worst.side].en} side of ${run.code} (to ${worst.what}) — ≥ ${aisleNeed} cm needed, ${RULES.aisleRecommended}–${RULES.aisleTwoCooks} cm recommended, to open doors and pass.`,
+      `רק ${r1(worst.d)} ס״מ פנויים בצד ה${SIDE_NAME[worst.side].he} של ${run.code} (עד ${worst.whatHe}) — נדרש ≥ ${aisleNeed} ס״מ, מומלץ ${RULES.aisleRecommended}–${RULES.aisleTwoCooks} ס״מ, לפתיחת דלתות ולמעבר.`, list.filter((x) => !x.virtual));
+  }
   for (const o of PLAN.openings.filter((q) => q.kind === 'door')) {
     const sw = swingRect(o);
     if (!sw) continue;
@@ -267,6 +274,65 @@ function findingsFor(run, v) {
     if (hits.length) add('warning', 'clash', `${it.name || it.type} overlaps ${hits.map(C).join(', ')}.`, `${it.name || it.type} חופף ל-${hits.map(C).join(', ')}.`, hits);
   }
   return out;
+}
+
+const SIDE_NAME = { n: L('north', 'צפוני'), e: L('east', 'מזרחי'), s: L('south', 'דרומי'), w: L('west', 'מערבי') };
+/** Items a walkway is measured to (furniture, other runs; not rugs, chairs, lamps…), as the aisle check uses. */
+function obstaclesFor(run, v) {
+  const own = new Set(run.unitIds || []);
+  const markers = new Set((run.unitIds || []).map((id) => { const u = v.item(id); return u && u.carp && u.carp.appliance && u.carp.appliance.itemId; }).filter(Boolean));
+  return v.items.filter((it) => !it.hidden && !own.has(it.id) && !markers.has(it.id) && it.zone !== 'outdoor' && !NOT_CLASHING.has(it.type)
+    && !(it.carp && it.carp.runId === run.id) && (it.elev || 0) < 120 && it.h > 30);
+}
+/** Plan footprint (axis-aligned box) of a run's visible units, or null. */
+export function runFootprint(run, v = view()) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const id of run.unitIds || []) {
+    const u = v.item(id);
+    if (!u || u.hidden) continue;
+    const b = itemAABB(u);
+    x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h);
+  }
+  return x0 < x1 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+}
+function clearancesOf(run, v) {
+  const b = runFootprint(run, v);
+  if (!b) return [];
+  const obs = obstaclesFor(run, v), out = [];
+  const sides = [
+    ['n', 0, -1, (t) => [b.x + t * b.w, b.y - 0.5], b.w], ['s', 0, 1, (t) => [b.x + t * b.w, b.y + b.h + 0.5], b.w],
+    ['w', -1, 0, (t) => [b.x - 0.5, b.y + t * b.h], b.h], ['e', 1, 0, (t) => [b.x + b.w + 0.5, b.y + t * b.h], b.h],
+  ];
+  for (const [side, dx, dy, at, len] of sides) {
+    let best = null;
+    const inset = Math.min(0.45, 5 / Math.max(len, 1));
+    for (const t of [inset, 0.25, 0.5, 0.75, 1 - inset]) {
+      const [px, py] = at(t), hit = rayClear(px, py, dx, dy, obs, 400);
+      if (hit && (!best || hit.d < best.d)) best = { ...hit, from: [px - dx * 0.5, py - dy * 0.5], to: [px + dx * hit.d, py + dy * hit.d] };
+    }
+    out.push(best ? { side, d: r1(best.d + 0.5), what: best.what, whatHe: best.whatHe, from: best.from, to: best.to }
+      : { side, d: null, what: 'nothing within 4 m', whatHe: 'אין מכשול בטווח 4 מ׳', from: at(0.5), to: null });
+  }
+  return out;
+}
+/**
+ * Walkway clearances around a run's footprint (free-standing runs / islands): one entry per side
+ * { side: 'n'|'e'|'s'|'w', d (cm, null = nothing within 4 m), what, whatHe, from [x, y], to [x, y] | null, level }
+ * with level 'ok' (≥ RULES.aisleRecommended), 'tight' (≥ RULES.aisleMin) or 'short' (< RULES.aisleMin).
+ */
+export function runClearances(runId, src) {
+  const v = view(src), run = v.run(runId);
+  if (!run) return [];
+  return clearancesOf(run, v).map((c) => ({ ...c, level: c.d == null || c.d >= RULES.aisleRecommended ? 'ok' : c.d >= RULES.aisleMin ? 'tight' : 'short' }));
+}
+/** The hinged door whose swing an item's footprint enters (plan only), or null. */
+export function doorSwingHit(item) {
+  for (const o of PLAN.openings) {
+    if (o.kind !== 'door') continue;
+    const sw = swingRect(o);
+    if (sw && itemHitsSwing(item, sw)) return o;
+  }
+  return null;
 }
 
 /** Leaf sweep of a hinged door as { hx, hy (hinge point), r, quad: [sx, sy] } in plan cm. */

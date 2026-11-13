@@ -39,6 +39,10 @@ export function attachInteraction(V) {
   // Carpentry hooks (docs/CONTRACT.md § 8): units of made-to-measure runs (`item.carp`) are selectable but never moved,
   // rotated or resized by the furniture tools; in Carpentry mode (tool 'carpentry') a click is reported to the UI instead.
   const carpentryTool = () => tool() === 'carpentry';
+  // Optional drag handler set by the Carpentry UI (free-standing runs): { canDrag(itemId), start(e), move(e), end(e), cancel() }.
+  let carpDrag = null;
+  const carpDragOk = (it) => { try { return !!(it && carpDrag && carpDrag.canDrag(it.id)); } catch (err) { return false; } };
+  const carpDragCall = (fn, arg) => { try { if (carpDrag && carpDrag[fn]) carpDrag[fn](arg); } catch (err) { console.error('[carpentry drag]', err); } };
   function hitCarp(pp) {
     if (!store.ui.showItems) return null;
     for (let i = store.items.length - 1; i >= 0; i--) {
@@ -89,7 +93,7 @@ export function attachInteraction(V) {
     else if (st.spaceDown || tool() === 'pan') c = 'grab';
     else if (st.placing) c = 'copy';
     else if (structureTool()) c = structure.cursor();
-    else if (carpentryTool()) c = st.hoverId ? 'pointer' : 'default';
+    else if (carpentryTool()) c = g && g.type === 'c-drag' ? 'grabbing' : st.hoverId ? (carpDragOk(store.getItem(st.hoverId)) ? 'move' : 'pointer') : 'default';
     else if (tool() === 'measure') c = 'crosshair';
     else if (g && g.type === 'rotate') c = 'grabbing';
     else if (g && g.type === 'resize') c = g.cursor;
@@ -149,6 +153,7 @@ export function attachInteraction(V) {
     if (!g) return false;
     if (g.batch) { V.selfWrite = true; store.cancel(); V.selfWrite = false; }
     if (isStructureGesture(g)) structure.cancel(g);
+    if (g.type === 'c-drag') carpDragCall('cancel');
     endGesture();
     return true;
   }
@@ -308,6 +313,8 @@ export function attachInteraction(V) {
       setCursor(null); redraw();
     },
     cancelPlacing() { if (st.placing) endPlacing(null); },
+    /** Carpentry mode: drag handler for free-standing runs (null removes it). */
+    setCarpentryDrag(handler) { carpDrag = handler || null; },
     /** Rotate the placing ghost by `delta` degrees (stops auto-orientation for this placement). */
     rotatePlacing(delta = 90) {
       const pl = st.placing;
@@ -375,7 +382,7 @@ export function attachInteraction(V) {
     if (e.button !== 0) return;
     if (st.placing) { updateGhost(p, e); st.gesture = { type: 'place', start: p }; return; }
     if (structureTool()) { structure.down(p, e); setCursor(p); return; }
-    if (carpentryTool()) { st.gesture = { type: 'c-press', start: p, last: p, samples: [] }; return; }
+    if (carpentryTool()) { const it = hitCarp(pp); st.gesture = { type: 'c-press', start: p, last: p, samples: [], dragId: carpDragOk(it) ? it.id : null, startPlan: pp }; return; }
     if (tool() === 'measure') {
       const pt = snapper.snapPoint(pp, { scale: cam.scale, enabled: snapOn(e) });
       if (st.measureDraft && st.measureDraft.armed) {
@@ -473,9 +480,15 @@ export function attachInteraction(V) {
         redraw();
         break;
       case 'place': updateGhost(p, e); break;
-      case 'c-press': if (far) { startPan(p, { start: g.start, last: g.last }); cam.panBy(p.x - g.start.x, p.y - g.start.y); st.gesture.last = p; st.gesture.moved = true; redraw(); setCursor(p); } break;
+      case 'c-press': if (far && g.dragId) {
+        g.type = 'c-drag';
+        carpDragCall('start', { itemId: g.dragId, x: g.startPlan.x, y: g.startPlan.y });
+        carpDragCall('move', { itemId: g.dragId, x: pp.x, y: pp.y, dx: pp.x - g.startPlan.x, dy: pp.y - g.startPlan.y, snap: snapOn(e) });
+        setCursor(p);
+      } else if (far) { startPan(p, { start: g.start, last: g.last }); cam.panBy(p.x - g.start.x, p.y - g.start.y); st.gesture.last = p; st.gesture.moved = true; redraw(); setCursor(p); } break;
       default:
-        if (isStructureGesture(g)) { structure.move(g, p, e, far); setCursor(p); }
+        if (g.type === 'c-drag') carpDragCall('move', { itemId: g.dragId, x: pp.x, y: pp.y, dx: pp.x - g.startPlan.x, dy: pp.y - g.startPlan.y, snap: snapOn(e) });
+        else if (isStructureGesture(g)) { structure.move(g, p, e, far); setCursor(p); }
         break;
     }
   }
@@ -542,6 +555,7 @@ export function attachInteraction(V) {
         V.emit('carpentry-pick', { x: pp.x, y: pp.y, clientX: e.clientX, clientY: e.clientY, itemId: it ? it.id : null });
         break;
       }
+      case 'c-drag': carpDragCall('end', { itemId: g.dragId }); break;
       case 'press': click(p, e, store.getItem(g.itemId)); break;
       case 'press-empty': click(p, e, null); break;
       case 'marquee': finishMarquee(g); break;

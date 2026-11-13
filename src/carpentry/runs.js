@@ -13,6 +13,9 @@ import { computeWorktops } from './worktop.js';
 import { spaceAt } from '../core/geometry.js';
 import { validateCustomLayout, frontsToLayout } from './bespoke.js';
 import { toLocal } from './walls.js';
+import { PLAN } from '../core/plan.js';
+import { itemAABB, itemCorners, pointInPolygon, rectsOverlap } from '../core/geometry.js';
+import { runFootprint, doorSwingHit } from './checks.js';
 
 const L = (en, he) => ({ en, he });
 const FAIL = (en, he) => ({ ok: false, reason: L(en, he) });
@@ -248,6 +251,67 @@ export function duplicateRun(runId, opts = {}, mopts) {
 export function layoutRun(runId, mopts) {
   if (!view().run(runId)) return FAIL('No such run.', 'קו ארונות לא קיים.');
   return mutate('layout', (d) => ({ runIds: relayout(d, [runId]) }), mopts);
+}
+
+/** A run positioned freely on the floor (island), not by a wall. */
+export const isFreeRun = (run) => !!run && (run.kind === 'island' || !!run.freeStanding);
+
+/** Why a free-standing run cannot stand where it is in the draft (null = fine): room, walls, openings, door swings, other runs. */
+function placementError(run, d, roomId) {
+  const units = (run.unitIds || []).map((id) => d.peek(id)).filter((u) => u && !u.hidden);
+  if (!units.length) return null;
+  const room = roomId && PLAN.rooms.find((r) => r.id === roomId);
+  for (const u of units) {
+    if (room && !itemCorners(u).every(([x, y]) => pointInPolygon(x, y, room.polygon))) {
+      return FAIL(`${run.code} would leave the ${room.name}: keep it inside the room.`, `${run.code} יוצא מגבולות ${room.nameHe || room.name}: יש להשאירו בתוך החדר.`);
+    }
+    const b = itemAABB(u);
+    const wall = PLAN.walls.find((w) => rectsOverlap(b, w, 0.5));
+    if (wall) return FAIL(`${run.code} would run into a wall.`, `${run.code} נכנס לתוך קיר.`);
+    const op = PLAN.openings.find((o) => rectsOverlap(b, o, 0.5));
+    if (op) return FAIL(`${run.code} would block the ${op.kind === 'window' ? 'window' : 'doorway'} ${op.id}.`, `${run.code} חוסם את ${op.kind === 'window' ? 'החלון' : 'הפתח'} ${op.id}.`);
+    const door = doorSwingHit(u);
+    if (door) return FAIL(`${run.code} would stand in the swing of the door ${door.id}.`, `${run.code} נמצא בתחום הפתיחה של הדלת ${door.id}.`);
+  }
+  const own = new Set(run.unitIds);
+  for (const o of d.items()) {
+    if (!o.carp || o.hidden || own.has(o.id) || o.carp.runId === run.id) continue;
+    const ob = itemAABB(o), lo = o.elev || 0, hi = lo + (o.h || 0);
+    const hit = units.find((u) => { const ub = itemAABB(u), ul = u.elev || 0; return rectsOverlap(ub, ob, 0.5) && ul < hi - 1 && lo < ul + (u.h || 0) - 1; });
+    if (hit) { const other = d.carpentry.runs[o.carp.runId]; return FAIL(`${run.code} would overlap ${other ? other.code : 'another run'}.`, `${run.code} חופף ל-${other ? other.code : 'קו ארונות אחר'}.`); }
+  }
+  return null;
+}
+
+/**
+ * Move and / or turn a free-standing run (kitchen island) on the plan: { dx, dy } (cm) and rot (degrees, a multiple of 90,
+ * clockwise on the plan) about the centre of its footprint. One undo step, reason 'move-run'.
+ * Refused: wall-bound runs (they are positioned by their wall — updateRun / fitRun), turns that are not 90° steps, and a
+ * footprint that would leave its room, enter a wall / opening / door swing or overlap another run.
+ */
+export function moveRun(runId, { dx = 0, dy = 0, rot = 0 } = {}, mopts) {
+  const run0 = view().run(runId);
+  if (!run0) return FAIL('No such run.', 'קו ארונות לא קיים.');
+  if (!isFreeRun(run0)) return FAIL(`${run0.code} stands against a wall: it is positioned by its wall, so it cannot be dragged or turned.`, `${run0.code} צמוד לקיר ומיקומו נקבע לפי הקיר — לא ניתן להזיז או לסובב אותו.`);
+  dx = +dx || 0; dy = +dy || 0;
+  const turn = (((Math.round(+rot || 0)) % 360) + 360) % 360;
+  if (turn % 90) return FAIL('Turn an island in 90° steps.', 'יש לסובב אי בצעדים של 90°.');
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return FAIL('Invalid move.', 'הזזה לא תקינה.');
+  const fp = runFootprint(run0);
+  return mutate('move-run', (d) => {
+    const run = d.carpentry.runs[runId];
+    const roomId = run.roomId || (fp && (spaceAt(fp.x + fp.w / 2, fp.y + fp.h / 2) || {}).id) || null;
+    let { x, y } = run.anchor;
+    if (turn && fp) {
+      const cx = fp.x + fp.w / 2, cy = fp.y + fp.h / 2, c = Math.cos(turn * Math.PI / 180), s = Math.sin(turn * Math.PI / 180);
+      [x, y] = [cx + (x - cx) * c - (y - cy) * s, cy + (x - cx) * s + (y - cy) * c];
+    }
+    run.anchor = { ...run.anchor, x: r1(x + dx), y: r1(y + dy), dir: (run.anchor.dir + turn) % 360 };
+    const runIds = relayout(d, [runId]);
+    const err = placementError(run, d, roomId);
+    if (err) return err;
+    return { runIds, ids: [runId], runId };
+  }, mopts);
 }
 
 // ───────────────────────── units ─────────────────────────

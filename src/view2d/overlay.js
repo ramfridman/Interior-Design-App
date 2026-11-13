@@ -118,8 +118,8 @@ export function drawOverlay(G, V) {
       ctx.strokeRect(Math.round(G.X(x0) - 5 * d) + 0.5, Math.round(G.Y(y0) - 5 * d) + 0.5, Math.round((x1 - x0) * G.k + 10 * d), Math.round((y1 - y0) * G.k + 10 * d));
       ctx.setLineDash([]);
     }
-    // handles for a single selection
-    if (selected.length === 1 && !st.placing && (!st.gesture || st.gesture.type === 'resize' || st.gesture.type === 'rotate') && ui.tool === 'select') {
+    // handles for a single selection (none on made-to-measure carpentry units: they are sized and placed in Carpentry mode)
+    if (selected.length === 1 && !selected[0].carp && !st.placing && (!st.gesture || st.gesture.type === 'resize' || st.gesture.type === 'rotate') && ui.tool === 'select') {
       const it = selected[0];
       for (const h of itemHandles(it, cam)) {
         const x = h.x * d, y = h.y * d;

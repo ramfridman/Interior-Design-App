@@ -357,6 +357,47 @@ check('unreadable carpentry falls back to empty without throwing', Object.keys(s
 store.load(file);
 
 // ───────────────────────── performance ─────────────────────────
+group('Island: move and turn on the plan (moveRun, runClearances)');
+{
+  const isl0 = C.getRun(island.id).run, fp0 = C.runFootprint(isl0), undo0 = store._undo.length, snap0 = state();
+  const cl = C.runClearances(island.id);
+  check('runClearances: one entry per side with a level from the aisle rules', cl.length === 4 && cl.every((c) => ['ok', 'tight', 'short'].includes(c.level)) && cl.some((c) => c.d != null), JSON.stringify(cl.map((c) => [c.side, c.d, c.level])));
+  const n0 = cl.find((c) => c.side === 'n');
+  check('north clearance reaches the north kitchen run', n0 && n0.d > 0 && n0.what === 'another run', n0 && `${n0.d} ${n0.what}`);
+  let r = C.moveRun(island.id, { dx: 20, dy: -10 });
+  const fp1 = C.runFootprint(C.getRun(island.id).run);
+  check('moveRun dx 20 dy -10: ok, one undo step, footprint moved exactly', r.ok && r.changed && store._undo.length === undo0 + 1 && near(fp1.x, fp0.x + 20) && near(fp1.y, fp0.y - 10) && near(fp1.w, fp0.w), r.reason && r.reason.en);
+  store.undo();
+  check('undo restores the island', state() === snap0);
+  r = C.moveRun(island.id, { rot: 90 });
+  const run90 = C.getRun(island.id).run, fp2 = C.runFootprint(run90);
+  check('moveRun rot 90: turned about its centre (footprint 120 × 280, same centre)', r.ok && run90.anchor.dir === (isl0.anchor.dir + 90) % 360 && near(fp2.w, fp0.h) && near(fp2.h, fp0.w) && near(fp2.x + fp2.w / 2, fp0.x + fp0.w / 2) && near(fp2.y + fp2.h / 2, fp0.y + fp0.h / 2), r.reason && r.reason.en);
+  r = C.moveRun(island.id, { rot: 270 });
+  check('rot 270 more → back to the original footprint', r.ok && eq(C.runFootprint(C.getRun(island.id).run), fp0) && C.getRun(island.id).run.anchor.dir === isl0.anchor.dir);
+  store.undo(); store.undo();
+  const snap1 = state(), undo1 = store._undo.length;
+  r = C.moveRun(island.id, { rot: 45 });
+  check('rot 45 refused (90° steps), nothing changed', !r.ok && HEB.test(r.reason.he) && state() === snap1);
+  r = C.moveRun(island.id, { dy: -2000 });
+  check('moving out of the room refused with a reason', !r.ok && /room|wall/.test(r.reason.en) && state() === snap1, r.reason && r.reason.en);
+  r = C.moveRun(island.id, { dy: -(n0.d + 10) });
+  check('moving onto the north run refused (overlap)', !r.ok && /overlap/.test(r.reason.en) && state() === snap1, r.reason && r.reason.en);
+  r = C.moveRun(north.id, { dx: 10 });
+  check('a wall-bound run cannot be moved this way', !r.ok && /wall/.test(r.reason.en) && state() === snap1 && !C.isFreeRun(north) && C.isFreeRun(island));
+  r = C.moveRun(island.id, { dy: -(n0.d - 70) });
+  const tight = C.runClearances(island.id).find((c) => c.side === 'n');
+  const aisle = C.checkRun(island.id).find((f) => f.code === 'aisle');
+  check('70 cm from the run: clearance "short" and an aisle error from checkRun (≥ 90 cm rule)', r.ok && near(tight.d, 70, 0.6) && tight.level === 'short' && aisle && aisle.severity === 'error' && / 90 cm/.test(aisle.text.en), aisle && aisle.text.en);
+  store.undo();
+  check('moves are undoable, store back as before', state() === snap1 && store._undo.length === undo1);
+  store.begin();
+  for (let i = 1; i <= 4; i++) C.moveRun(island.id, { dx: 5 }, { transient: true });
+  store.commit();
+  check('a drag (begin … transient moves … commit) is ONE undo step', store._undo.length === undo1 + 1 && near(C.runFootprint(C.getRun(island.id).run).x, fp0.x + 20));
+  store.undo();
+  check('… and undoes in one go', state() === snap1);
+}
+
 group('Performance');
 const kit = [north.id, west.id, island.id];
 const t0 = performance.now(), N = 20;

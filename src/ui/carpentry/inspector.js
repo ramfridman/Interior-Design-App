@@ -167,10 +167,13 @@ export function initCarpentryInspector(right, app, C) {
           Math.abs(run.length - used) >= 0.05 ? h('span', { class: run.length > used ? 'cfree' : 'cover' }, run.length > used ? `${num(run.length - used)} free` : `${num(used - run.length)} too long`) : h('span', { class: 'cfits' }, 'fits'))),
       h('div', { class: 'cbasics__acts' },
         btn('Fit with fillers', { small: true, icon: 'fit', kbd: 'F', onClick: () => C.fit(run.id, 'fillers') }),
-        btn('Fit to wall', { small: true, icon: 'wall', onClick: () => C.fit(run.id, 'span') }),
+        Carp.isFreeRun(run)
+          ? btn('Turn 90°', { small: true, icon: 'rotate-cw', kbd: 'R', onClick: () => C.rotateRun(run.id, 90) })
+          : btn('Fit to wall', { small: true, icon: 'wall', onClick: () => C.fit(run.id, 'span') }),
         iconBtn('target', 'Show in the plan', { variant: 'outlined', onClick: () => C.focusRun(run.id) }),
         iconBtn('duplicate', 'Duplicate run', { variant: 'outlined', onClick: () => C.duplicateRun(run.id) }),
         iconBtn('trash', 'Remove run…', { variant: 'danger', onClick: () => C.removeRun(run.id) })),
+      Carp.isFreeRun(run) ? h('p', { class: 'crow__hint' }, `Drag it in the plan to move it (5 cm steps), arrow keys nudge 5 cm (Shift: 1 cm), R turns it. Keep ≥ ${Carp.RULES.aisleMin} cm all round, ${Carp.RULES.aisleRecommended}–${Carp.RULES.aisleTwoCooks} cm preferred.`) : null,
       err);
 
     const place = group('place', 'Kind, room and ends', `${k.label} · ${roomName(plan, run.roomId)}`,

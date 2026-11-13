@@ -265,6 +265,12 @@ export function createView2D(container, ctx) {
      * gfx.js). Returns a function that removes it. Call redraw() when what it paints changes.
      */
     addOverlay(fn) { if (typeof fn !== 'function') return () => {}; extraOverlays.add(fn); V.invalidate(); return () => { extraOverlays.delete(fn); V.invalidate(); }; },
+    /**
+     * Hook (Carpentry mode): `handler = { canDrag(itemId) → bool, start({ itemId, x, y }), move({ itemId, x, y, dx, dy, snap }),
+     * end({ itemId }), cancel() }` (plan cm). A press-drag on a carpentry unit the handler accepts is reported to it instead of
+     * panning; Esc / pointer-cancel calls cancel(). Pass null to remove it.
+     */
+    setCarpentryDrag(handler) { interaction.setCarpentryDrag(handler); },
     /** Request a repaint of the overlay (cheap: the cached plan layers are reused). */
     redraw() { V.invalidate(); },
     /** Test / diagnostics handle (not part of the contract). */

@@ -11,6 +11,11 @@
  *   workbench.js    drawings under the plan: elevation / plan / internal / worktop / section, with direct editing
  *   inspector.js    right sidebar: Run (specification) · Unit · Checks · Estimate · Quantities (+ quotation, carpenters)
  *   slots.js        mounts the colleague's estimate / take-off / quotation / carpenter modules
+ *
+ * Free-standing runs (islands) are moved here too: drag one in the plan (5 cm steps; Ctrl / ⌘ = 1 cm), arrow keys nudge it
+ * 5 cm (Shift: 1 cm), R turns it 90° — all through Carp.moveRun(); a drag is transient moves inside store.begin(), then
+ * ONE real moveRun() of the whole distance (one undo step). Live walkway clearances (Carp.runClearances) are painted while
+ * moving. Wall-bound runs are positioned by their wall and never move this way.
  */
 import * as Carp from '../../carpentry/index.js';
 import { itemCorners, itemAABB } from '../../core/geometry.js';
@@ -43,8 +48,11 @@ export function createCarpentry(app) {
     /** Enter Carpentry mode (from Furnish, Structure, 3D or the walk-through). */
     enter() {
       if (api.isActive()) return;
+      // A carpentry unit selected in Furnish comes along as the carpentry selection (its run + the unit).
+      const one = store.selection.length === 1 ? store.getItem(store.selection[0]) : null;
       store.clearSelection();
       store.setUI(planShown() ? { tool: 'carpentry' } : { tool: 'carpentry', mode: '2d' });
+      if (one && one.carp && Carp.getRun(one.carp.runId)) store.setUI({ carpentrySel: { runId: one.carp.runId, unitId: one.id } });
       if (app.isCompact()) toast('Carpentry: tap a run in the plan, or open Runs to start one', { action: { label: 'Runs', fn: () => app.openPanel('catalog') } });
     },
     exit() { if (api.isActive()) { cancelPick(); store.setUI({ tool: 'select' }); } },
@@ -228,10 +236,29 @@ export function createCarpentry(app) {
       emit('focus');
     },
 
+    /** Move / turn a free-standing run (island): { dx, dy, rot }. Returns true when it moved. */
+    moveRun(runId, delta) {
+      const got = Carp.getRun(runId);
+      if (!got) return false;
+      if (!Carp.isFreeRun(got.run)) { wallBoundHint(got.run); return false; }
+      const { res } = api.run(() => Carp.moveRun(runId, delta));
+      if (res && res.ok && res.changed !== false) { showClear(runId, 2600); return true; }
+      return false;
+    },
+    rotateRun(runId, deg = 90) { return api.moveRun(runId, { rot: deg }); },
+    /** Live clearances being shown: { runId, refusal } or null. */
+    clearShown: () => (drag ? { runId: drag.runId, refusal: drag.refusal } : clearFor && performance.now() < clearFor.until ? { runId: clearFor.runId, refusal: null } : null),
+
     /** Keyboard (Carpentry mode only). Returns true when the key was used. */
     handleKey(e, key) {
       const cur = api.current();
       const unit = cur && cur.unit;
+      if (cur && Carp.isFreeRun(cur.run) && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        const step = e.shiftKey ? 1 : 5;
+        const mv = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[key];
+        if (mv) { e.preventDefault(); api.moveRun(cur.run.id, { dx: mv[0], dy: mv[1] }); return true; }
+        if (key === 'r' || key === 'R') { e.preventDefault(); api.rotateRun(cur.run.id, e.shiftKey ? -90 : 90); return true; }
+      } else if ((key === 'r' || key === 'R') && cur && !e.ctrlKey && !e.metaKey) { wallBoundHint(cur.run); return true; }
       if (key === 'Delete' || key === 'Backspace') { if (unit) { e.preventDefault(); api.removeUnit(unit.id); } return true; }
       if (key === 'ArrowLeft' || key === 'ArrowRight') {
         if (!cur) return true;
@@ -255,6 +282,71 @@ export function createCarpentry(app) {
     emit,
   };
   function emit(name, payload) { for (const s of subs) if (s.name === name) { try { s.fn(payload); } catch (err) { console.error('[carpentry]', err); } } }
+
+  /* ───────── moving a free-standing run (island) in the plan ───────── */
+  let drag = null;          // { runId, applied: { x, y }, refusal }
+  let clearFor = null;      // { runId, until } — clearances shown briefly after a nudge / turn
+  let clearTimer = 0;
+  function showClear(runId, ms) {
+    clearFor = { runId, until: performance.now() + ms };
+    clearTimeout(clearTimer);
+    clearTimer = setTimeout(() => { clearFor = null; redrawPlan(); }, ms + 50);
+    redrawPlan();
+  }
+  let lastWallHint = 0;
+  function wallBoundHint(run) {
+    if (performance.now() - lastWallHint < 4000) return;
+    lastWallHint = performance.now();
+    toast(`${run.code} stands against its wall: it is positioned by the wall. Change its length or use Fit to wall instead.`);
+  }
+  call(view2d, 'setCarpentryDrag', {
+    canDrag(itemId) {
+      if (!api.isActive() || pick) return false;
+      const it = store.getItem(itemId), run = it && it.carp && Carp.runOfItem(it);
+      return !!run && Carp.isFreeRun(run);
+    },
+    start({ itemId }) {
+      const it = store.getItem(itemId), run = it && Carp.runOfItem(it);
+      if (!run) return;
+      const sel = store.ui.carpentrySel;
+      if (!sel || sel.runId !== run.id) api.select(run.id, itemId);
+      store.begin();
+      drag = { runId: run.id, applied: { x: 0, y: 0 }, refusal: null };
+      redrawPlan();
+    },
+    move({ dx, dy, snap }) {
+      if (!drag) return;
+      const step = snap ? 5 : 1;
+      const want = { x: Math.round(dx / step) * step, y: Math.round(dy / step) * step };
+      const tryTo = (tx, ty) => {
+        const ddx = tx - drag.applied.x, ddy = ty - drag.applied.y;
+        if (!ddx && !ddy) return { ok: true };
+        const res = Carp.moveRun(drag.runId, { dx: ddx, dy: ddy }, { transient: true });
+        if (res.ok) drag.applied = { x: tx, y: ty };
+        return res;
+      };
+      let res = tryTo(want.x, want.y);
+      if (!res.ok) {
+        // slide along whatever stopped it: keep the axis that still works
+        const refusal = res.reason;
+        if (!tryTo(want.x, drag.applied.y).ok) tryTo(drag.applied.x, want.y);
+        drag.refusal = refusal ? refusal.en : 'It cannot go there.';
+      } else drag.refusal = null;
+      redrawPlan();
+    },
+    end() {
+      if (!drag) return;
+      const { runId, applied } = drag;
+      drag = null;
+      store.cancel();                                   // back to where the drag began, then one real step
+      if (applied.x || applied.y) {
+        const { res } = api.run(() => Carp.moveRun(runId, { dx: applied.x, dy: applied.y }));
+        if (res && res.ok) showClear(runId, 1800);
+      }
+      redrawPlan();
+    },
+    cancel() { if (!drag) return; drag = null; store.cancel(); redrawPlan(); },
+  });
 
   /* ───────── new-run flow ───────── */
   const banner = h('div', { class: 'cpick', role: 'status', hidden: true });
@@ -422,7 +514,10 @@ export function createCarpentry(app) {
       ctx.fillText(label, X, Y + G.px(0.5));
     }
     ctx.restore();
-    // 3. The stretch a click would use.
+    // 3. Walkway clearances while an island is moved (≥ RULES.aisleMin, RULES.aisleRecommended–aisleTwoCooks preferred).
+    const cs = api.clearShown();
+    if (cs) paintClearances(G, pal, cs);
+    // 4. The stretch a click would use.
     if (pick && pick.hover) {
       const hv = pick.hover;
       ctx.save();
@@ -445,6 +540,40 @@ export function createCarpentry(app) {
       }
       ctx.restore();
     }
+  }
+  function paintClearances(G, pal, cs) {
+    const { ctx } = G;
+    let list = [];
+    try { list = Carp.runClearances(cs.runId); } catch (err) { console.error('[carpentry] clearances', err); }
+    const R = Carp.RULES, colour = { ok: pal.accent, tight: pal.warn, short: pal.danger };
+    ctx.save();
+    const fs = G.px(10.5);
+    ctx.font = `600 ${fs}px ${G.font || 'sans-serif'}`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const c of list) {
+      if (c.d == null || !c.to) continue;
+      const col = colour[c.level] || pal.ink;
+      const [x0, y0] = c.from, [x1, y1] = c.to;
+      ctx.strokeStyle = col; ctx.lineWidth = G.px(1.25); ctx.setLineDash([G.px(4), G.px(3)]);
+      ctx.beginPath(); ctx.moveTo(G.X(x0), G.Y(y0)); ctx.lineTo(G.X(x1), G.Y(y1)); ctx.stroke();
+      ctx.setLineDash([]);
+      for (const [x, y] of [c.from, c.to]) { ctx.beginPath(); ctx.arc(G.X(x), G.Y(y), G.px(2.2), 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill(); }
+      const label = `${num(Math.round(c.d))}${c.level === 'short' ? ` < ${R.aisleMin}` : ''}`;
+      const X = (G.X(x0) + G.X(x1)) / 2, Y = (G.Y(y0) + G.Y(y1)) / 2;
+      const w = ctx.measureText(label).width + G.px(10), hgt = fs + G.px(6);
+      ctx.fillStyle = col; roundRect(ctx, X - w / 2, Y - hgt / 2, w, hgt, G.px(3)); ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.fillText(label, X, Y + G.px(0.5));
+    }
+    if (cs.refusal) {
+      const b = Carp.runFootprint(Carp.getRun(cs.runId).run);
+      if (b) {
+        const X = G.X(b.x + b.w / 2), Y = G.Y(b.y) - G.px(16);
+        const w = ctx.measureText(cs.refusal).width + G.px(12), hgt = fs + G.px(8);
+        ctx.fillStyle = pal.danger; roundRect(ctx, X - w / 2, Y - hgt / 2, w, hgt, G.px(3)); ctx.fill();
+        ctx.fillStyle = '#ffffff'; ctx.fillText(cs.refusal, X, Y + G.px(0.5));
+      }
+    }
+    ctx.restore();
   }
   call(view2d, 'addOverlay', paintPlan);
 

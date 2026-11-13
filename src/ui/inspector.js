@@ -97,8 +97,9 @@ export function initInspector(root, app) {
         h('div', { class: 'ccard__body' },
           h('p', { class: 'ccard__title display' }, C.unitLabel(item)),
           h('p', { class: 'ccard__meta' }, `${mod ? mod.name.en : item.name} · ${Math.round(item.carp.width * 10) / 10} cm wide${run ? ` · ${run.name}` : ''}`),
-          h('p', { class: 'ccard__text' }, 'Made to measure: its size, position, fronts and materials are set in Carpentry, so the furniture tools leave it alone.'),
-          btn('Edit in Carpentry', { small: true, variant: 'primary', icon: 'carpentry', kbd: 'C', onClick: () => C.openUnit(item.id) }))),
+          h('p', { class: 'ccard__lead' }, 'Made-to-measure carpentry — edit in Carpentry mode'),
+          h('p', { class: 'ccard__text' }, 'Its size, position, fronts and materials are set in Carpentry, so it cannot be moved, resized or rotated here.'),
+          btn('Edit in Carpentry mode', { small: true, variant: 'primary', icon: 'carpentry', kbd: 'C', onClick: () => C.openUnit(item.id) }))),
     ];
   }
 
