@@ -76,7 +76,19 @@ async function exportDialog({ name, mime, data }) {
     });
     return;
   }
-  const text = typeof data === 'string' ? data : await data.text();
+  // Binary documents (PDF…) cannot be shown as copyable text: explain instead of failing.
+  const isText = typeof data === 'string' || /^(text\/|application\/(json|csv))/.test(mime || '');
+  if (!isText) {
+    openDialog({
+      title: 'Download not available here', size: 'md',
+      body: [
+        h('p', { class: 'dialog__text' }, `This viewer did not allow saving “${name}”.`),
+        h('p', { class: 'dialog__hint faint' }, 'Allow downloads for this page when asked and try again, or open the app in a normal browser tab, where the file saves directly.'),
+      ],
+    });
+    return;
+  }
+  const text = typeof data === 'string' ? data : (data instanceof Blob ? await data.text() : new TextDecoder().decode(data));
   const area = h('textarea', { class: 'export__text', readonly: true, spellcheck: 'false', rows: '12', 'aria-label': `Contents of ${name}` });
   area.value = text;
   const copy = btn('Copy', { variant: 'primary', icon: 'copy', attrs: { 'data-autofocus': '' }, onClick: async () => {
@@ -92,13 +104,13 @@ async function exportDialog({ name, mime, data }) {
 
 /**
  * Hand a file to the user.
- * @param {{ name: string, mime: string, data: string|Blob }} file
+ * @param {{ name: string, mime: string, data: string|Blob|Uint8Array|ArrayBuffer }} file
  * @returns {Promise<{ ok: boolean, declined?: boolean, dialog?: boolean }>}
  */
 export async function saveFile({ name, mime, data }) {
   try {
     if (!isSandboxed()) {
-      const blob = data instanceof Blob ? data : (isImage(mime) && /^data:/.test(data) ? dataUrlToBlob(data) : new Blob([data], { type: mime }));
+      const blob = data instanceof Blob ? data : (typeof data === 'string' && isImage(mime) && /^data:/.test(data) ? dataUrlToBlob(data) : new Blob([data], { type: mime }));
       browserDownload(name, blob);
       return { ok: true };
     }

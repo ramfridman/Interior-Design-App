@@ -48,6 +48,11 @@ function crawl(file) {
   }
 }
 entries.forEach(crawl);
+// Runtime-fetched assets a static scan cannot see: the PDF libraries and the fonts the quotation document embeds.
+for (const dir of ['vendor/pdf', 'vendor/fonts']) {
+  if (!exists(dir)) continue;
+  for (const f of walk(dir)) if (/\.(js|mjs|ttf|otf|woff2?)$/i.test(f)) seen.add(f);
+}
 
 // index.html → page fragment
 const html = read('index.html');

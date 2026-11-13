@@ -156,7 +156,7 @@ function create(ctx) {
     tierSeg.set(store.ui.carpentryTier || 'suggested');
     const t = { low: sumOf(all, 'low'), typical: sumOf(all, 'typical'), high: sumOf(all, 'high') };
     const key = JSON.stringify([t.low, t.typical, t.high]);
-    if (key !== lastBudget) { lastBudget = key; try { ui.setCarpentryBudget && ui.setCarpentryBudget({ low: t.low, typical: t.typical, high: t.high }); } catch (e) { /* optional hook */ } }
+    if (key !== lastBudget) { lastBudget = key; try { ui.setCarpentryBudget && ui.setCarpentryBudget(vatInclusive(t)); } catch (e) { /* optional hook */ } }
     const runsSorted = [...all.runs].sort((a, b) => (b.runId === sel.runId) - (a.runId === sel.runId));
     const kids = [
       h('header', { class: 'cp-head' },
@@ -208,3 +208,10 @@ function create(ctx) {
 
 export { create };
 export default create;
+
+/** Budget figures incl. VAT (the estimate totals are before VAT). */
+function vatInclusive(t) {
+  const f = 1 + (Number(t && t.vat) || 0.18);
+  const r = (v) => Math.round((Number(v) || 0) * f);
+  return { low: r(t.low), typical: r(t.typical), high: r(t.high) };
+}

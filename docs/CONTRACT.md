@@ -686,8 +686,8 @@ const opts = {
   include: { estimate: false, cutLists: true, carpenterForm: true, questions: true },   // estimate:true = "owner's copy"
   project: { title, address, ownerName?, phone?, email?, date: 'YYYY-MM-DD', reference },  // empty fields are omitted
   src: { store, plan: PLAN },               // the app store + PLAN (read-only; defaults: bound store, core PLAN)
-  pricebook?, tier?,                        // only used by the owner's-copy estimate page (Carp.estimate)
-  features?: Feature[],                     // optional extra special requirements (added to schedules().features)
+  pricebook?, tier?, method?,               // only for the owner's-copy estimate page (Carp.estimate; default method 'market',
+                                            // tier per run as suggested by the engine — pass tier: 'mid' for one tier)
 };
 const { doc, svgPages } = buildQuotationPreview(opts);          // sync; svgPages[i] = '<svg …>' for page i (mm size)
 const { bytes, filename, pages } = await buildQuotationPDF(opts); // Uint8Array, 'House98-Carpentry-RFQ-2026-11-13-HE.pdf'
@@ -719,7 +719,9 @@ fSplash fVoid fSection fBlind hatch`, `PALETTE` in `prims.js`) or `#rrggbb`. Pag
 `line {x1,y1,x2,y2,lw,color,dash?}` · `rect {x,y,w,h,fill?,lw?,color?,dash?}` · `poly {pts,close,fill?,lw?,color?,dash?}` ·
 `arc {cx,cy,r,a0,a1 (deg CCW as seen),lw,color,dash?}` · `text {x,y (baseline anchor),text (logical),vis (left-to-right
 drawing order),size (pt),font: light|regular|medium|bold,color,align: left|center|right (physical),w (mm, real metrics),dir,rot?,maxWidth?}` ·
-`image {x,y,w,h,src (PNG / JPEG data URL)}` · `drawing {id,kind,runId,scale,box,ops}` (a shop drawing already flattened
+`image {x,y,w,h,src (PNG / JPEG data URL)}`. A `text` whose string holds glyphs Heebo lacks (door-operation keys
+`◁ ↔ ⇤ ⇥ Λ ≡ △ ▽ ∿ ○`, circled numbers ①–⑳) carries `parts: PageOp[]` — plain text segments + small vector symbols at the
+exact advance positions; renderers draw `parts` instead of the text (no missing-glyph boxes, font-independent) · `drawing {id,kind,runId,scale,box,ops}` (a shop drawing already flattened
 to page mm). `dash` ∈ `dash | dot | center` (`DASH`, mm). Ops may carry `role` / `unitId`.
 `meta = { title, project, reference, paper, lang, filename, runs: [{ id, code, page }], sections: [{ num, title, page, level }],
 tables: [{ id, rows, drawn }], include, errors, warnings, composeMs }`.
@@ -753,7 +755,19 @@ glyph by glyph (fontkit's own RTL reversal is disabled on the embedded font); th
 furniture and title blocks mirrored); drawings themselves are never mirrored. Text widths come from the real Heebo
 advances (`metrics-data.js`, generated from the TTFs and re-checked by the test); no kerning / ligatures in either renderer.
 
-### Special requirements (`schedules().features`, feature-detected)
-Each feature `{ runId | run, ref?, num? (callout number), unitId? | unitCode?, title, text, category?, priority?, images?: [{ dataUrl, w, h, name }] }`;
-strings are rendered as typed, `{ en, he }` values pick the edition's language. Drawing ops with `role: 'callout'` are drawn
-in the accent colour (bold numbers); a drawing's `legend: [{ symbol?, text }]` is printed under its caption.
+### Special requirements, bespoke units, door operations (engine § 8 "Bespoke units…")
+* Features come from `schedules().features` (`{ runId, unitId, featureId, n, label '①', ref, code, title, text, category { en, he },
+  priority { en, he } }`) with images from `listFeatures()` (`stored: true` images fetched with `featureImage(id)`; PNG / JPEG are
+  embedded). The owner's `title` / `text` are printed exactly as typed (own paragraph direction via `autoDir`); category / priority
+  in the edition's language. They appear in a consolidated "Special requirements / דרישות מיוחדות" section after the scope, as a
+  numbered block (number = the drawing callout) at the top of the run's schedules (with images), and as one priced line each in
+  the quotation form. Must-features also reach the questions table through the engine.
+* Drawing roles: `callout` (accent, bold digit, knock-out behind it), `op-symbol` / `legend` / `cell` (dark grey), `reserved`
+  (grey); `code` texts get a paper-white knock-out box so unit codes read over door symbols. The legend is printed ONCE, on the
+  view caption line from `drawing.legend` (`key label`, keys drawn as vector symbols); the engine's `role: 'legend'` text ops are
+  dropped from the sheet and the view's bounds recomputed (keeps 1:25 on A4). Internal views (incl. bespoke `cell` layouts) get
+  their own sheet.
+* Unit schedule columns = `HEADERS.units`, plus "Door operation / אופן פתיחה" when a run has non-hinged units; corner-pantry
+  legs (`corner`) are added to the notes.
+* Owner's estimate: per-run low / typical / high and totals excl. / incl. VAT, basis (method, tier, `asOf`, VAT), each
+  component's `basis`, every `missingRates` / `noRate` line under "Priced by the carpenter (not in the estimate)", and sources.
