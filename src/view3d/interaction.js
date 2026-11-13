@@ -476,8 +476,29 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
   const offItems = items.onChange(() => { if (hoverId && !store.getItem(hoverId)) setHover(null); });
   items.setMarked(LAYER_SELECTED, store.selection);
 
+  /**
+   * The building surface under a screen position, ignoring furniture (finish drops paint the room, not the sofa).
+   * @returns {{ surface: 'floor', spaceId: string|null } | { surface: 'wall', point: THREE.Vector3, normal: THREE.Vector3 } | null}
+   */
+  function surfaceAt(clientX, clientY) {
+    setRay(clientX, clientY);
+    const st = structureHit();
+    if (st) {
+      if (st.spaceId) return { surface: 'floor', spaceId: st.spaceId };
+      if (st.normal && st.normal.y > 0.7) {
+        const s = spaceAt(st.point.x * 100, st.point.z * 100, plan);
+        return { surface: 'floor', spaceId: s ? s.id : null };
+      }
+      if (st.normal && Math.abs(st.normal.y) < 0.3) return { surface: 'wall', point: st.point.clone(), normal: st.normal.clone() };
+      return null;
+    }
+    const f = floorPoint(clientX, clientY);
+    const s = f && spaceAt(f.x, f.y, plan);
+    return s ? { surface: 'floor', spaceId: s.id } : null;
+  }
+
   return {
-    pick, floorPoint,
+    pick, floorPoint, surfaceAt,
     /** The plan was edited: drop the cached wall snap targets (they are re-derived on the next drag). */
     refreshPlan() { invalidateWallRuns(plan); },
     /** Where a walk-mode click should take the walker: plan cm, pulled back from walls / furniture. */

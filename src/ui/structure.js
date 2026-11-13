@@ -6,7 +6,7 @@
  * through core/plan-edit.js (remove, nudge, reset — with the confirmations the owner asked for) and the toasts for
  * what the plan view reports about its own gestures (`view2d.on('structure', …)`).
  */
-import { wallSegments, openingPolicy, removeWallSegment, removeOpening, moveWallSegment, updateOpening, resetPlan, planDiff, isPlanModified } from '../core/plan-edit.js';
+import { wallSegments, openingPolicy, removeWallSegment, removeOpening, moveWallSegment, resizeWallSegment, updateOpening, resetPlan, planDiff, isPlanModified } from '../core/plan-edit.js';
 import { h, call, listen } from './dom.js';
 import { icon } from './icons.js';
 import { confirmDialog, toast } from './dialogs.js';
@@ -71,6 +71,27 @@ export const openingIcon = (o) => (o.kind === 'window' ? 'window' : o.kind === '
 export const openingOffset = (o, seg) => (seg ? (o.axis === 'h' ? o.x - seg.core.x : o.y - seg.core.y) : 0);
 
 /** @param {object} app  UI context */
+/**
+ * Which end of a wall segment moves when its length is typed in the inspector. Like dragging an end grip: a free end
+ * moves and the joined end stays; when both ends are free (or both joined) the end nearer the plan origin (the
+ * house's north-west corner) stays. Ends: 0 = start (west / north), 1 = end (east / south).
+ * @returns {{ moving: 0|1, fixedName: string, movingName: string, rule: 'free-end'|'origin' }}
+ */
+export function lengthAnchor(seg) {
+  const [f0, f1] = (seg && seg.freeEnds) || [false, false];
+  const c = seg.core, hz = seg.axis === 'h';
+  const names = hz ? ['west', 'east'] : ['north', 'south'];
+  let moving, rule;
+  if (f0 !== f1) { moving = f0 ? 0 : 1; rule = 'free-end'; }
+  else {
+    const p0 = hz ? [c.x, c.y + c.h / 2] : [c.x + c.w / 2, c.y];
+    const p1 = hz ? [c.x + c.w, c.y + c.h / 2] : [c.x + c.w / 2, c.y + c.h];
+    moving = Math.hypot(p0[0], p0[1]) <= Math.hypot(p1[0], p1[1]) ? 1 : 0;
+    rule = 'origin';
+  }
+  return { moving, fixedName: names[1 - moving], movingName: names[moving], rule };
+}
+
 export function createStructure(app) {
   const { store, plan, view2d } = app;
   const root = document.getElementById('app');
@@ -196,6 +217,26 @@ export function createStructure(app) {
     moveSegment(seg, delta) {
       const res = moveWallSegment(seg.id, delta);
       if (res.ok && res.ids && res.ids[0]) api.select('segment', res.ids[0]);
+      return res;
+    },
+    /**
+     * Give a wall segment a new overall length (cm, as `seg.length` counts it) by moving one end (see lengthAnchor),
+     * through the engine with its checks; keeps it selected under its new id.
+     */
+    resizeSegment(seg, length) {
+      if (!seg || !(length > 0)) return { ok: false, reason: 'Type a length.' };
+      const { moving } = lengthAnchor(seg);
+      const hz = seg.axis === 'h', c = seg.core;
+      const a0 = hz ? c.x : c.y, a1 = hz ? c.x + c.w : c.y + c.h;
+      const delta = Math.round(length - seg.length);
+      const res = resizeWallSegment(seg.id, moving ? { end: a1 + delta } : { start: a0 - delta });
+      if (res.ok && res.ids && res.ids.length) {
+        // the piece that still holds the fixed end is the wall the owner was editing
+        const fixedAt = moving ? a0 : a1, segs = wallSegments();
+        const pick = res.ids.map((id) => segs.find((x) => x.id === id)).filter(Boolean)
+          .find((x) => { const q = hz ? [x.core.x, x.core.x + x.core.w] : [x.core.y, x.core.y + x.core.h]; return fixedAt >= q[0] && fixedAt <= q[1]; });
+        api.select('segment', pick ? pick.id : res.ids[0]);
+      }
       return res;
     },
     /** Arrow keys: one 5 cm step — a wall sideways, an opening along its wall. Returns true when the key was used. */

@@ -12,6 +12,15 @@ import { getPref, setPref } from './prefs.js';
 import { createSunControl } from './sun.js';
 
 export const DND_TYPE = 'application/x-e7-product';
+/** Extra drag type set with a finish product, so a pane can tell a floor from a wall finish while it is dragged. */
+export const finishDndType = (kind) => `application/x-e7-finish-${kind}`;
+/** 'floor' | 'wall' when the drag carries a finish, else null. */
+const draggedFinishKind = (dt) => {
+  const types = dt ? [...dt.types] : [];
+  return types.includes(finishDndType('wall')) ? 'wall' : types.includes(finishDndType('floor')) ? 'floor' : null;
+};
+const NO_FINISH_TARGET = 'Drop a finish on a room in the plan, or pick the room in the Rooms tab';
+const NO_FINISH_TARGET_3D = 'Drop a finish on a floor or an inside wall, or pick the room in the Rooms tab';
 
 /** "Nice" scale-bar lengths in cm. */
 const SCALE_STEPS = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
@@ -102,23 +111,81 @@ export function initViewport(app) {
   });
 
   /* ───────── Drag-and-drop from the catalogue ───────── */
+  // Finishes: the room (2D: under the cursor; 3D: the floor hit, or the room a wall face looks into) is highlighted
+  // while dragging — its floor for a floor finish, its walls for a wall finish — and the drop applies the finish
+  // to that room exactly like the Rooms tab (one undo step, toast with Undo).
+  const spaceOf = (id) => (id && (plan.rooms.find((r) => r.id === id) ? { kind: 'room', id }
+    : plan.outdoorAreas.find((o) => o.id === id) ? { kind: 'outdoor-area', id } : null)) || null;
+  /** The space a finish dropped at this screen position goes to: { kind, id } (room / outdoor area) or null. */
+  function finishSpaceAt(is2d, clientX, clientY) {
+    if (is2d) {
+      const pt = call(view2d, 'screenToPlan', clientX, clientY);
+      const s = pt ? spaceAt(pt.x, pt.y, plan) : null;
+      return s && (s.kind === 'room' || s.kind === 'outdoor-area') ? { kind: s.kind, id: s.id } : null;
+    }
+    const t = call(view3d, 'finishTargetAt', clientX, clientY);
+    return t ? spaceOf(t.spaceId) : null;
+  }
+  let hl2d = null;    // { spaceId, kind } highlighted in the plan
+  call(view2d, 'addOverlay', (G, pal) => {
+    const space = hl2d && [...plan.rooms, ...plan.outdoorAreas].find((s) => s.id === hl2d.spaceId);
+    if (!space || !space.polygon || space.polygon.length < 3) return;
+    const { ctx } = G, accent = (pal && pal.accent) || '#2f7cf6';
+    ctx.save();
+    ctx.beginPath();
+    space.polygon.forEach(([x, y], i) => (i ? ctx.lineTo(G.X(x), G.Y(y)) : ctx.moveTo(G.X(x), G.Y(y))));
+    ctx.closePath();
+    if (hl2d.kind === 'floor') { ctx.globalAlpha = 0.22; ctx.fillStyle = accent; ctx.fill('evenodd'); ctx.globalAlpha = 1; ctx.lineWidth = G.px(1.5); }
+    else ctx.lineWidth = G.px(5);
+    ctx.strokeStyle = accent; ctx.lineJoin = 'round';
+    ctx.stroke();
+    ctx.restore();
+  });
+  function setFinishHighlight(is2d, target) {
+    const t = target ? { spaceId: target.spaceId, kind: target.kind } : null;
+    if (is2d) {
+      if ((hl2d && hl2d.spaceId + hl2d.kind) === (t && t.spaceId + t.kind)) return;
+      hl2d = t; call(view2d, 'redraw');
+    } else call(view3d, 'setFinishHighlight', t);
+  }
+  const clearFinishHighlights = () => { setFinishHighlight(true, null); setFinishHighlight(false, null); };
+  document.addEventListener('dragend', clearFinishHighlights);
+
   for (const [pane, getView, is2d] of [[pane2d, () => view2d, true], [pane3d, () => view3d, false]]) {
     const accepts = (e) => e.dataTransfer && [...e.dataTransfer.types].includes(DND_TYPE);
+    let pending = null;
+    const hover = rafThrottle(() => {
+      if (!pending) return;
+      const { x, y, kind } = pending;
+      const s = finishSpaceAt(is2d, x, y);
+      // a wall finish covers the walls of a room; an outdoor area has none to highlight
+      setFinishHighlight(is2d, s && (kind === 'floor' || s.kind === 'room') ? { spaceId: s.id, kind } : null);
+    });
     pane.addEventListener('dragenter', (e) => { if (accepts(e)) { e.preventDefault(); pane.classList.add('is-droptarget'); } });
-    pane.addEventListener('dragover', (e) => { if (accepts(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
-    pane.addEventListener('dragleave', (e) => { if (!pane.contains(e.relatedTarget)) pane.classList.remove('is-droptarget'); });
+    pane.addEventListener('dragover', (e) => {
+      if (!accepts(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      const kind = draggedFinishKind(e.dataTransfer);
+      if (kind) { pending = { x: e.clientX, y: e.clientY, kind }; hover(); }
+    });
+    pane.addEventListener('dragleave', (e) => {
+      if (pane.contains(e.relatedTarget)) return;
+      pane.classList.remove('is-droptarget');
+      pending = null; setFinishHighlight(is2d, null);
+    });
     pane.addEventListener('drop', (e) => {
       pane.classList.remove('is-droptarget');
+      pending = null; setFinishHighlight(is2d, null);
       if (!accepts(e)) return;
       e.preventDefault();
       const product = app.catalog.getProduct(e.dataTransfer.getData(DND_TYPE));
       if (!product) return;
       const view = getView();
       if (/-finish$/.test(product.type)) {
-        const pt = is2d ? call(view, 'screenToPlan', e.clientX, e.clientY) : null;
-        const space = pt ? spaceAt(pt.x, pt.y, plan) : null;
-        if (space && (space.kind === 'room' || space.kind === 'outdoor-area')) actions.applyFinish(product, space.id);
-        else toast('Drop a finish on a room in the plan, or pick the room in the Rooms tab');
+        const space = finishSpaceAt(is2d, e.clientX, e.clientY);
+        if (space) actions.applyFinish(product, space.id);
+        else toast(is2d ? NO_FINISH_TARGET : NO_FINISH_TARGET_3D);
         return;
       }
       if (store.ui.mode === 'walk') { toast('Leave the walk-through to place items'); return; }

@@ -11,7 +11,7 @@ import { h } from './dom.js';
 import { icon } from './icons.js';
 import { btn, iconBtn, numField, section, emptyState } from './components.js';
 import { fmtLen, toUnit, fromUnit, unitDigits } from './format.js';
-import { STEP, levelBanner, levelTag, spaceName, segmentSides, segmentTitle, openingTitle, openingKind, openingIcon, openingOffset } from './structure.js';
+import { STEP, levelBanner, levelTag, spaceName, segmentSides, segmentTitle, openingTitle, openingKind, openingIcon, openingOffset, lengthAnchor } from './structure.js';
 import { changesSection } from './structure-panels.js';
 
 const SIDE = { n: 'north', s: 'south', e: 'east', w: 'west' };
@@ -37,7 +37,7 @@ export function createStructureInspector(app) {
 
   const shapeOf = (cur) => {
     if (!cur) return `none|${structure.isModified()}`;
-    if (cur.type === 'segment') { const s = cur.seg; return ['seg', s.axis, s.cls, s.thickness, s.policy.level, s.isNew, s.openingIds.join(','), units()].join('|'); }
+    if (cur.type === 'segment') { const s = cur.seg; return ['seg', s.axis, s.cls, s.thickness, s.policy.level, s.isNew, s.openingIds.join(','), s.freeEnds.join(','), units()].join('|'); }
     const o = cur.opening;
     return ['op', o.id, o.kind, o.style, o.axis, cur.policy.level, cur.seg ? cur.seg.cls : '', units()].join('|');
   };
@@ -74,6 +74,19 @@ export function createStructureInspector(app) {
       title: vertical ? 'Position of the wall’s west face, from the house west face' : 'Position of the wall’s north face, from the house north face',
       onCommit: (v) => { const s = live(); if (!move(Math.round(fromUnit(v, u) - pos(s)))) force(field, toUnit(pos(s), u), unitDigits(u)); },
     });
+    // Length: one end moves (the free one, as with its grip; else the one away from the plan origin)
+    const anchor = lengthAnchor(seg), lengthError = errorLine();
+    const lengthField = numField({
+      label: null, value: toUnit(seg.length, u), digits: unitDigits(u), step: u === 'cm' ? STEP : STEP / 100, min: 0, suffix: u, disabled: locked,
+      title: `Wall length; the ${anchor.fixedName} end stays where it is`,
+      onCommit: (v) => {
+        const s = live();
+        if (!run(lengthError, () => structure.resizeSegment(s, Math.round(fromUnit(v, u))))) force(lengthField, toUnit(live().length, u), unitDigits(u));
+      },
+    });
+    const lengthHint = anchor.rule === 'free-end'
+      ? `The joined ${anchor.fixedName} end stays; the free ${anchor.movingName} end moves, like dragging its grip. Steps of ${STEP} cm.`
+      : `The ${anchor.fixedName} end (nearer the house’s north-west corner) stays; the ${anchor.movingName} end moves. Steps of ${STEP} cm.`;
     const nudge = (dir) => iconBtn(vertical ? (dir < 0 ? 'chevron-left' : 'chevron-right') : (dir < 0 ? 'chevron-up' : 'chevron-down'),
       `Move ${STEP} cm ${vertical ? (dir < 0 ? 'west' : 'east') : (dir < 0 ? 'north' : 'south')}`, { variant: 'outlined', disabled: locked, kbd: vertical ? (dir < 0 ? '←' : '→') : (dir < 0 ? '↑' : '↓'), onClick: () => move(dir * STEP) });
     const openings = seg.openingIds.map((id) => plan.openings.find((o) => o.id === id)).filter(Boolean);
@@ -84,6 +97,7 @@ export function createStructureInspector(app) {
       length.textContent = fmtLen(s.length, units());
       sides.textContent = segmentSides(s, plan);
       force(field, toUnit(pos(s), units()), unitDigits(units()));
+      force(lengthField, toUnit(s.length, units()), unitDigits(units()));
     };
     return [
       head(seg.policy.level, 'wall', segmentTitle(seg), meta, seg.isNew ? h('span', { class: 'tag tag--new' }, 'Added by you') : null),
@@ -102,6 +116,10 @@ export function createStructureInspector(app) {
         h('div', { class: 'moverow' }, nudge(-1), field, nudge(1)),
         locked ? null : h('p', { class: 'sec__note' }, `Sideways in ${STEP} cm steps. Doors in the wall travel with it; walls that meet it follow.`),
         moveError),
+      section('Length', { aside: h('span', { class: 'sec__note' }, locked ? 'Locked' : `${anchor.movingName[0].toUpperCase()}${anchor.movingName.slice(1)} end moves`) },
+        h('div', { class: 'moverow' }, lengthField),
+        locked ? null : h('p', { class: 'sec__note' }, lengthHint),
+        lengthError),
       section(openings.length ? 'Openings in this wall' : 'Openings', openings.length
         ? h('ul', { class: 'oplist' }, openings.map((o) => h('li', null, h('button', { type: 'button', class: 'oprow', onClick: () => structure.select('opening', o.id) },
           h('span', { class: 'oprow__icon' }, icon(openingIcon(o), { size: 18 })),

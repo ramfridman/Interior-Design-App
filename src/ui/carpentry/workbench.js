@@ -11,7 +11,7 @@
  *   wheel / pinch / drag empty .. zoom / pan (vector SVG, re-rasterised at every zoom → crisp)
  *
  * The 3D tab shows the run in the app's own 3D view (the stage switches to Split while it is open, and back): the camera
- * frames the run, a section cut removes the room in front of it, "Open fronts" swings doors / pulls drawers, and units with
+ * frames the run, a section cut removes the room in front of it, "Open fronts" swings doors / pulls drawers, "Studio light" lights the run evenly in neutral white, and units with
  * fit problems are outlined with their Checks message (view3d.showCarpentry). Clicking a unit in 3D selects it here.
  *
  * The view keeps its scale and the screen position of the run's origin while the drawing changes, so nothing jumps
@@ -588,17 +588,19 @@ export function initWorkbench(app, C) {
 
   /* ───────── 3D tab ───────── */
   const stageEl = () => document.getElementById('viewport');
-  const T3 = { on: false, runId: null, prevMode: null, open: !!getPref('carp3dOpen'), cut: getPref('carp3dCut') !== false };
+  const T3 = { on: false, runId: null, prevMode: null, open: !!getPref('carp3dOpen'), cut: getPref('carp3dCut') !== false, studio: getPref('carp3dStudio') !== false };
+  const PREF3 = { open: 'carp3dOpen', cut: 'carp3dCut', studio: 'carp3dStudio' };
   const toggle = (label, tipText, key) => h('button', { type: 'button', class: 'chip c3d__toggle', 'aria-pressed': String(!!T3[key]), 'data-tip': tipText, onClick: (e) => {
-    T3[key] = !T3[key]; setPref(key === 'open' ? 'carp3dOpen' : 'carp3dCut', T3[key]);
+    T3[key] = !T3[key]; setPref(PREF3[key], T3[key]);
     e.currentTarget.setAttribute('aria-pressed', String(T3[key]));
     call(app.view3d, 'showCarpentry', { [key]: T3[key] });
   } }, label);
   const openFrontsBtn = toggle('Open fronts', 'Swing the doors open and pull the drawers out to see the internal layout', 'open');
+  const studioBtn = toggle('Studio light', 'Light the run evenly with neutral white light so colours and details read true (the normal daylight returns when you leave this tab)', 'studio');
   const cutBtn = toggle('Cut away the room in front', 'Remove the facing wall and everything between the camera and the run', 'cut');
   const frameBtn = h('button', { type: 'button', class: 'btn btn--sm', 'data-tip': 'Bring the camera back onto the run', onClick: () => call(app.view3d, 'showCarpentry', { frame: true }) }, icon('target', { size: 15 }), h('span', null, 'Frame the run'));
   const c3dList = h('div', { class: 'c3d__checks', role: 'list', 'aria-label': 'Fit problems shown in 3D' });
-  p3d.append(h('div', { class: 'c3d__bar' }, openFrontsBtn, cutBtn, frameBtn), c3dList,
+  p3d.append(h('div', { class: 'c3d__bar' }, openFrontsBtn, studioBtn, cutBtn, frameBtn), c3dList,
     h('p', { class: 'c3d__hint' }, 'The run is shown in the 3D view above, beside a small key plan. Click a unit there to select it; drag to orbit, scroll to zoom. Units outlined in orange or red have a fit problem — the message is pinned on the unit and listed here. Units are made to measure: change them in the Elevation or Plan tab or in the inspector.'));
   /** Show the run in 3D (the stage switches to the 3D view while the tab is open), list its fit problems. */
   function render3d(cur, changedRun) {
@@ -611,7 +613,7 @@ export function initWorkbench(app, C) {
     }
     const first = T3.runId !== runId;
     T3.runId = runId;
-    if (first || changedRun) requestAnimationFrame(() => call(app.view3d, 'showCarpentry', { runId, open: T3.open, cut: T3.cut, frame: true }));
+    if (first || changedRun) requestAnimationFrame(() => call(app.view3d, 'showCarpentry', { runId, open: T3.open, cut: T3.cut, studio: T3.studio, frame: true }));
     const codes = Carp.unitCodes(cur.run, cur.units), list = C.findings(runId).filter((f) => f.severity !== 'info');
     setKids(c3dList, list.length ? list.map((f) => h('button', { type: 'button', role: 'listitem', class: `c3d__check c3d__check--${f.severity}`, onClick: () => { const id = (f.unitIds || [])[0]; if (id) { C.select(runId, id); C.flash(f.unitIds); } } },
       icon(f.severity === 'error' ? 'fail' : 'warn', { size: 14 }),

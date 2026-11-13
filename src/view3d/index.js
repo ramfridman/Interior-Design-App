@@ -13,6 +13,7 @@ import { createItemsLayer } from './items.js';
 import { createInteraction } from './interaction.js';
 import { createWalk, walkFov } from './walk.js';
 import { createCarpentryLayer } from './carpentry.js';
+import { createFinishDrop } from './finish-drop.js';
 import { sunPosition, sunTimes, sunDirectionWorld, compassPoint, todayAt } from './sun.js';
 
 const CUTAWAY_CM = 120;
@@ -86,6 +87,12 @@ export function createView3D(container, ctx) {
     cutHeight: () => (mode === 'orbit' && store.ui.wallsCutaway ? CUTAWAY_CM / 100 : null),
     clipped: (p) => !!(carpentry && carpentry.clipped(p)),
   });
+  // finish drag-and-drop: target under the cursor + highlight of the floor / walls it would cover
+  const finishDrop = createFinishDrop({
+    scene, ctx, invalidate, surfaceAt: (x, y) => interaction.surfaceAt(x, y),
+    wallTop: () => (mode === 'orbit' && store.ui.wallsCutaway ? CUTAWAY_CM : plan.heights.ceiling) / 100,
+    accent: (getComputedStyle(container).getPropertyValue('--accent') || '').trim() || undefined,
+  });
   // carpentry: models follow their run, the workbench's 3D tab (section cut, open fronts, fit problems)
   const carpentry = createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay, invalidate, isWalking: () => mode === 'walk' });
   const walk = createWalk({
@@ -147,7 +154,7 @@ export function createView3D(container, ctx) {
     const t0 = performance.now();
     call(house, 'rebuildPlan');
     call(env, 'refreshPlan');
-    walk.refreshPlan(); interaction.refreshPlan(); items.refreshPlan();
+    walk.refreshPlan(); interaction.refreshPlan(); items.refreshPlan(); finishDrop.refreshPlan();
     call(daylight, 'onPlan', e);
     if (mode === 'walk' && !fly) walk.syncCamera();
     planRebuildMs = performance.now() - t0; planRebuilds++;
@@ -192,7 +199,9 @@ export function createView3D(container, ctx) {
     // lamps: on at dusk / night; walking they used to stay on all day — with the solved daylight they follow the sun too
     const dayLit = daylight && daylight.isActive();
     items.updateLamps(camera, (mode === 'walk' && !dayLit) || !sunInfo || sunInfo.elevation < LAMPS_ON_BELOW);
+    const undoStudio = carpentry.beginFrame(camera, { env, daylight });   // carpentry 3D tab "Studio light": this render only
     renderer.render(scene, camera);
+    if (undoStudio) undoStudio();
     if (dlBusy) { dirty = true; schedule(); }
     interaction.renderOverlay(renderer);
     carpentry.update(camera, canvas);
@@ -392,6 +401,10 @@ export function createView3D(container, ctx) {
     startPlacing(partial, opts) { if (mode === 'walk') exitWalk({ animate: false }); interaction.startPlacing(partial, opts); },
     cancelPlacing: () => interaction.cancelPlacing(),
     dropAt: (clientX, clientY, partial) => interaction.dropAt(clientX, clientY, partial),
+    /** Finish drag-and-drop: the room / outdoor area under a screen position ({ spaceId, surface: 'floor'|'wall' } | null). */
+    finishTargetAt: (clientX, clientY) => finishDrop.targetAt(clientX, clientY),
+    /** Highlight the floor or the walls a dragged finish would cover ({ spaceId, kind: 'floor'|'wall' }), or clear (null). */
+    setFinishHighlight: (target) => finishDrop.highlight(target || null),
     /** Off-screen high-resolution render of the current view (no outline / ghost / HUD) as a PNG data URL. */
     async snapshot({ width = 1920, height = 1080 } = {}) {
       if (contextLost || destroyed) return '';
@@ -450,7 +463,7 @@ export function createView3D(container, ctx) {
       canvas.removeEventListener('webglcontextlost', onContextLost);
       canvas.removeEventListener('webglcontextrestored', onContextRestored);
       call(daylight, 'dispose'); daylight = null;
-      carpentry.dispose(); walk.dispose(); interaction.dispose(); items.dispose(); rig.dispose();
+      carpentry.dispose(); walk.dispose(); finishDrop.dispose(); interaction.dispose(); items.dispose(); rig.dispose();
       call(house, 'dispose'); call(site, 'dispose'); call(env, 'dispose');
       renderer.dispose();
       canvas.remove(); overlay.remove();
@@ -503,12 +516,7 @@ function unavailableView(container, handlers) {
      * Carpentry workbench 3D tab: { runId (null = off), open (fronts open), cut (section cut in front of the run), frame
      * (move the camera onto the run), animate }. Omitted keys keep their value. Returns the current carpentry 3D state.
      */
-    showCarpentry(opts = {}) {
-      if (opts.frame && mode === 'walk') exitWalk({ animate: false });
-      if (opts.frame) framing = null;
-      carpentry.show(opts);
-      return carpentry.state();
-    },
+    showCarpentry: () => ({ runId: null, open: false, cut: false, studio: false, clipped: false, studioLit: false, flagged: [] }),   // nothing to show without WebGL
     startPlacing(partial, opts) { if (opts && opts.onDone) opts.onDone(null); }, cancelPlacing: noop, dropAt: () => null,
     snapshot: async () => '', itemScreenRect: () => null,
     on(event, fn) { if (!handlers.has(event)) handlers.set(event, new Set()); handlers.get(event).add(fn); return () => handlers.get(event)?.delete(fn); },

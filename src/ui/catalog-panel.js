@@ -7,7 +7,7 @@ import { icon, CATEGORY_ICON } from './icons.js';
 import { btn, iconBtn, segmented, emptyState } from './components.js';
 import { openPopover, openDialog } from './dialogs.js';
 import { fmtPrice, fmtDims, fmtUnitPrice } from './format.js';
-import { DND_TYPE } from './viewport.js';
+import { DND_TYPE, finishDndType } from './viewport.js';
 
 const isFinish = (p) => p.type === 'floor-finish' || p.type === 'wall-finish';
 const SORTS = [['relevance', 'Featured'], ['price-asc', 'Price: low to high'], ['price-desc', 'Price: high to low'], ['name', 'Name']];
@@ -161,6 +161,8 @@ export function initCatalogPanel(root, app) {
     const el = h('div', { class: 'pcard', draggable: 'true', dataset: { id: p.id } }, open, add);
     el.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData(DND_TYPE, p.id);
+      // the kind travels as a type too: drop targets can read types (not data) while dragging, to highlight the target
+      if (finish) e.dataTransfer.setData(finishDndType(p.type === 'wall-finish' ? 'wall' : 'floor'), p.id);
       e.dataTransfer.setData('text/plain', p.name);
       e.dataTransfer.effectAllowed = 'copy';
       const media = el.querySelector('.pcard__media');

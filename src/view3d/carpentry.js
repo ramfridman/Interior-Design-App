@@ -37,7 +37,7 @@ function rayRects(p, s, rects, min = 1) {
  */
 export function createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay, invalidate, isWalking }) {
   const { store, plan } = ctx;
-  const state = { runId: null, open: false, cut: true };
+  const state = { runId: null, open: false, cut: true, studio: false };
   const plane = new THREE.Plane();
   let planeSet = false, flagged = [], corridor = [];
   const group = new THREE.Group();
@@ -168,6 +168,54 @@ export function createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay
     return true;
   }
 
+  // ───────── studio light ─────────
+  // Item materials indoors take their INDIRECT light from the daylight probe field (daylight/index.js replaces the
+  // hemisphere / ambient / IBL irradiance), so only direct lights can change how they read. While a run is shown with
+  // "Studio light" on, the main render gets: two neutral-white shadowless directional lights that follow the camera
+  // (key from above-left, fill from the right), the sun eased down (no hot window patches), a fixed exposure and the
+  // Khronos PBR Neutral tone mapping (true product colours: whites stay white, no ACES hue shift). Everything is set
+  // just before renderer.render() and put back right after it (beginFrame → undo), so the normal sun / daylight look,
+  // eye adaptation and exposure are untouched the moment the tab is left or the toggle is off. The two lights are
+  // created on first use and then stay in the scene at intensity 0 outside the studio render (a constant light count
+  // avoids recompiling every material on each toggle).
+  const STUDIO = { key: 2.3, fill: 1.0, sun: 0.2, env: 0.35, exposure: 1.1, gain: 1.2 };
+  let studioLights = null;
+  const _cd = new THREE.Vector3(), _cr = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+  function ensureStudio() {
+    if (studioLights) return studioLights;
+    const mk = (name) => { const l = new THREE.DirectionalLight(0xffffff, 0); l.name = name; l.castShadow = false; l.userData.noShadow = true; scene.add(l); return l; };
+    studioLights = { key: mk('carpentry-studio-key'), fill: mk('carpentry-studio-fill') };
+    return studioLights;
+  }
+  const studioActive = () => !!(state.studio && state.runId && !isWalking());
+  /**
+   * Called right before the main render. Returns an undo function (call it right after the render), or null when the
+   * studio light is not active. `parts` = { env, daylight } (either may be missing).
+   */
+  function beginFrame(camera, parts = {}) {
+    if (!studioActive() || !camera) return null;
+    const L = ensureStudio(), env = parts.env, dl = parts.daylight, sun = env && env.sun, gainU = dl && dl.uniforms && dl.uniforms.dlGain;
+    camera.getWorldDirection(_cd).negate();                        // towards the camera
+    _cr.crossVectors(_up, _cd).normalize();                        // camera's right (seen from the run)
+    if (!Number.isFinite(_cr.x) || _cr.lengthSq() < 1e-6) _cr.set(1, 0, 0);
+    L.key.position.copy(_cd).addScaledVector(_cr, -0.55).addScaledVector(_up, 0.75).normalize();
+    L.fill.position.copy(_cd).addScaledVector(_cr, 0.8).addScaledVector(_up, 0.15).normalize();
+    L.key.updateMatrixWorld(); L.fill.updateMatrixWorld();
+    L.key.intensity = STUDIO.key; L.fill.intensity = STUDIO.fill;
+    const saved = { tm: renderer.toneMapping, ex: renderer.toneMappingExposure, envI: scene.environmentIntensity, sun: sun ? sun.intensity : null, gain: gainU ? gainU.value : null };
+    renderer.toneMapping = THREE.NeutralToneMapping;
+    renderer.toneMappingExposure = STUDIO.exposure;
+    scene.environmentIntensity = Math.max(saved.envI ?? 0, STUDIO.env);
+    if (sun) sun.intensity = saved.sun * STUDIO.sun;
+    if (gainU) gainU.value = Math.min(saved.gain, STUDIO.gain);      // the solved indirect light stays as the room's soft backdrop, capped
+    return () => {
+      L.key.intensity = 0; L.fill.intensity = 0;
+      renderer.toneMapping = saved.tm; renderer.toneMappingExposure = saved.ex; scene.environmentIntensity = saved.envI;
+      if (sun) sun.intensity = saved.sun;
+      if (gainU) gainU.value = saved.gain;
+    };
+  }
+
   const refresh = () => { if (state.runId) { applyCut(); buildChecks(); } };
   const offs = [
     store.on('carpentry', (e) => { items.resync(); if (!e || !e.transient) queueMicrotask(refresh); }),
@@ -182,7 +230,8 @@ export function createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay
   const _v = new THREE.Vector3();
   return {
     /**
-     * Show a run in 3D: { runId (null clears), open (fronts open), cut (section cut in front of the run), frame (move the camera) }.
+     * Show a run in 3D: { runId (null clears), open (fronts open), cut (section cut in front of the run), studio (neutral
+     * studio light while the run is shown), frame (move the camera) }.
      * Omitted keys keep their value.
      */
     show(opts = {}) {
@@ -190,6 +239,7 @@ export function createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay
       if ('runId' in opts) state.runId = opts.runId || null;
       if ('open' in opts) state.open = !!opts.open;
       if ('cut' in opts) state.cut = opts.cut !== false;
+      if ('studio' in opts) state.studio = !!opts.studio;
       if (prev.runId !== state.runId || prev.open !== state.open) items.resync();
       applyCut();
       buildChecks();
@@ -197,7 +247,8 @@ export function createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay
       invalidate();
     },
     frame,
-    state: () => ({ ...state, clipped: clipActive(), flagged: flagged.map((f) => f.id) }),
+    state: () => ({ ...state, clipped: clipActive(), studioLit: studioActive(), flagged: flagged.map((f) => f.id) }),
+    beginFrame,
     /** Picking: true for a world point removed by the section cut. */
     clipped: (p) => clipActive() && plane.distanceToPoint(p) < -0.005,
     /** After each render: place the check pins over their units. */
@@ -223,6 +274,7 @@ export function createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay
       offs.forEach((off) => off());
       items.setVariant(null); items.setViewHidden([]);
       clearChecks();
+      if (studioLights) { scene.remove(studioLights.key, studioLights.fill); studioLights.key.dispose(); studioLights.fill.dispose(); studioLights = null; }
       scene.remove(group); pins.remove();
       renderer.clippingPlanes = [];
     },
