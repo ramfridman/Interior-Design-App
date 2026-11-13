@@ -1473,3 +1473,191 @@ function lightSym(ctx, { w, d, p, px, v }) {
   circ(ctx, 0, 0, Math.max(R * 0.4, 1.2 * px), on ? '#ffd27a' : '#eeeae0', INK, px * 0.7);
 }
 define('outdoor-light', Object.fromEntries(['bollard', 'spike-spot', 'post-lantern', 'string', 'wall', 'step', 'solar-path', 'flood', 'lantern', 'globe'].map((k) => [k, { b: buildLight }])), lightSym);
+
+// ═════════════════════════ PLAY ═════════════════════════
+const PLAY_COLS = ['#e0552b', '#2f6f8f', '#e3b23c', '#4f8a5b'];
+const toy = (c) => K.mat(c, { roughness: 0.45, side: THREE.DoubleSide });
+/** U-shaped slide chute from (z0, y0) down to (z1, y1). */
+const chuteG = (cw, z0, y0, z1, y1) => surfG((u, t) => { const uu = 2 * u - 1; return [uu * cw / 2, y1 + (y0 - y1) * (1 - t) ** 1.6 + 0.11 * uu ** 4, lerp(z0, z1, t)]; }, 8, 14);
+const netM = (c = '#ffffff', a = 0.28) => K.mat(c, { roughness: 0.9, opacity: a, depthWrite: false, side: THREE.DoubleSide });
+
+function playSwingSet(g, o) {
+  const { w, d, h, p } = o, timber = !isMetal(p.material), fr = timber ? M(p.material, C(p.color2, '#b98a5e'), 'wood') : alu(C(p.color2, '#4f8a5b')), r = timber ? 0.045 : 0.03;
+  const xa = Math.max(0.05, w / 2 - 0.28), xf = w / 2 - r, zf = d / 2 - r, yt = h - r, list = [], ropes = [], seats = [[], []];
+  for (const s of [-1, 1]) list.push([[s * xa, yt, 0], [s * xf, 0, zf]], [[s * xa, yt, 0], [s * xf, 0, -zf]], [[s * lerp(xa, xf, 0.55), yt * 0.45, zf * 0.55], [s * lerp(xa, xf, 0.55), yt * 0.45, -zf * 0.55], r * 0.7]);
+  list.push([[-xa - 0.1, yt, 0], [xa + 0.1, yt, 0]]);
+  const n = Math.round(num(p.swings, clamp(Math.floor((2 * xa - 0.2) / 0.7), 1, 4), 1, 6)), sy = Math.min(0.5, 0.25 * h);
+  for (let i = 0; i < n; i++) { const cx = lerp(-xa, xa, (i + 0.5) / n) * 0.86; ropes.push([[cx - 0.2, yt, 0], [cx - 0.2, sy, 0]], [[cx + 0.2, yt, 0], [cx + 0.2, sy, 0]]); seats[i % 2].push([0.44, 0.03, 0.17, cx, sy, 0]); }
+  g.add(rods(list, r, fr, 8), rods(ropes, 0.005, K.mat('#3a5a8a', { roughness: 0.8 }), 4), boxes(seats[0], K.plastic(C(p.color, PLAY_COLS[0]))), boxes(seats[1], K.plastic(C(p.color3, PLAY_COLS[1]))));
+}
+function playSlide(g, o) {
+  const { w, d, h, p } = o, fr = alu(C(p.color2, '#4a6a8a')), hp = 0.72 * h, cw = Math.max(0.05, w - 0.08), x = cw / 2, pd = Math.min(0.42, d * 0.2), zb = -d / 2 + 0.12, zf = zb + pd, list = [];
+  for (const s of [-1, 1]) {
+    list.push([[s * x, 0, zb], [s * x, h - 0.02, zb]], [[s * x, 0, zf], [s * x, h - 0.02, zf]], [[s * x, h - 0.02, zb], [s * x, h - 0.02, zf]], [[s * x, 0, -d / 2 + 0.02], [s * x, hp, zb], 0.018]);
+    list.push([[s * x * 0.9, 0, lerp(zf, d / 2, 0.45)], [s * x * 0.9, 0.1 + (hp - 0.1) * 0.55 ** 1.6, lerp(zf, d / 2, 0.45)], 0.016]);
+  }
+  for (let y = 0.25; y < hp - 0.05; y += 0.25) list.push([[-x, y, lerp(-d / 2 + 0.02, zb, y / hp)], [x, y, lerp(-d / 2 + 0.02, zb, y / hp)], 0.014]);
+  g.add(rods(list, 0.02, fr, 6), box(cw, 0.035, pd + 0.04, K.plastic(C(p.color3, '#e3b23c')), 0, hp - 0.0175, (zb + zf) / 2), mesh(chuteG(cw, zf, hp, d / 2, 0.1), toy(C(p.color, PLAY_COLS[0]))));
+}
+function playTrampoline(g, o) {
+  const { w, d, h, p } = o, R = Math.min(w, d) / 2, net = flag(p.net, h > 1.5), hf = net ? Math.min(0.9, h * 0.34) : h, stl = K.metal('#b9bdc2', { roughness: 0.4, metalness: 0.7 }), col = C(p.color, '#2f6f8f'), legs = [], nl = R > 1.6 ? 6 : 4;
+  g.add(mesh(latheG([[R * 0.84, hf - 0.035], [R * 0.84, hf], [R, hf], [R, hf - 0.045]], 32), K.mat(col, { roughness: 0.7 })), cyl(R * 0.85, R * 0.85, 0.006, K.mat('#1b1c1f', { roughness: 0.85 }), 0, hf - 0.02, 0, 32), mesh(torusG(R - 0.04, 0.022, 'xz', 0, hf - 0.05, 0, 32, 6), stl));
+  for (let i = 0; i < nl; i++) { const a = (i / nl) * TAU + PI / nl, q = (da) => [Math.cos(a + da) * (R - 0.04), Math.sin(a + da) * (R - 0.04)], [ax, az] = q(-0.22), [bx, bz] = q(0.22); legs.push([[ax, hf - 0.05, az], [ax, 0.02, az]], [[bx, hf - 0.05, bz], [bx, 0.02, bz]], [[ax, 0.02, az], [bx, 0.02, bz]]); }
+  g.add(rods(legs, 0.02, stl, 6));
+  if (net) {
+    const np = R > 1.3 ? 8 : 6, poles = [];
+    for (let i = 0; i < np; i++) { const a = (i / np) * TAU; poles.push(cylG(0.022, 0.022, h - hf - 0.02, Math.cos(a) * (R - 0.03), hf + (h - hf - 0.02) / 2, Math.sin(a) * (R - 0.03), 8)); }
+    g.add(merge(poles, K.mat(C(p.color3, col), { roughness: 0.8 })), mesh(torusG(R - 0.03, 0.014, 'xz', 0, h - 0.014, 0, 32, 5), stl));
+    g.add(ns(mesh(new THREE.CylinderGeometry(R - 0.05, R - 0.05, h - hf - 0.03, 32, 1, true).translate(0, hf + (h - hf - 0.03) / 2, 0), netM('#1c1d20', 0.2))));
+  }
+}
+function playHouse(g, o) {
+  const { w, d, h, p } = o, P = shedPalette(p, '#f1e4c8', '#c0503a', '#5f8fa8'), S = shedShell(g, w, d, h, 'gable', P.wall, P.roofM, 'wood', Math.min(0.07, w * 0.08)), ws = Math.min(0.32, S.wb * 0.26), dw = Math.min(0.44, S.wb * 0.36), dh = Math.min(1.05, S.yw * 0.84), wy = S.yw * 0.62;
+  g.add(box(dw, dh, 0.03, P.doorM, -S.wb * 0.2, 0.05 + dh / 2, S.zf + 0.008), box(dw + 0.06, dh + 0.03, 0.02, K.mat('#ffffff', { roughness: 0.6 }), -S.wb * 0.2, 0.05 + (dh + 0.03) / 2, S.zf + 0.002), sphere(0.02, inox(), -S.wb * 0.2 + dw * 0.34, 0.05 + dh * 0.5, S.zf + 0.03, 8, 6));
+  shedWindow(g, S.wb * 0.24, wy, S.zf + 0.012, ws, K.mat('#ffffff', { roughness: 0.6 }), false); shedWindow(g, S.wb / 2 + 0.012, wy, 0, Math.min(ws, S.db * 0.4), K.mat('#ffffff', { roughness: 0.6 }), true);
+  g.add(box(ws + 0.08, 0.07, 0.08, K.wood('walnut'), S.wb * 0.24, wy - ws / 2 - 0.06, S.zf + 0.04), merge([0, 1, 2, 3].map((i) => new THREE.IcosahedronGeometry(0.04, 0).translate(S.wb * 0.24 + lerp(-ws / 2, ws / 2, i / 3), wy - ws / 2 - 0.01, S.zf + 0.04)), K.foliage('#d9779a')));
+}
+function playSandbox(g, o) {
+  const { w, d, h, p } = o, wd = M(p.material, C(p.color, '#c9a476'), 'wood'), roofed = h > 1, hb = roofed ? 0.26 : h, list = [];
+  for (const s of [-1, 1]) list.push([w, hb - 0.03, 0.04, 0, (hb - 0.03) / 2, s * (d / 2 - 0.02)], [0.04, hb - 0.03, d - 0.08, s * (w / 2 - 0.02), (hb - 0.03) / 2, 0], [w, 0.03, Math.min(0.14, d * 0.2), 0, hb - 0.015, s * (d / 2 - Math.min(0.07, d * 0.1))], [Math.min(0.14, w * 0.2), 0.03, d - Math.min(0.28, d * 0.4), s * (w / 2 - Math.min(0.07, w * 0.1)), hb - 0.015, 0]);
+  const sand = K.mat(C(p.color2, '#e3d3a8'), { roughness: 1 }), mound = new THREE.SphereGeometry(1, 12, 6, 0, TAU, 0, PI / 2).scale(w * 0.2, hb * 0.3, d * 0.18).translate(w * 0.1, hb * 0.6, -d * 0.08);
+  g.add(box(w - 0.08, hb * 0.6, d - 0.08, sand, 0, hb * 0.3, 0), mesh(mound, sand), cylOn(0.07, 0.055, 0.13, K.plastic(PLAY_COLS[0]), -w * 0.2, hb * 0.6, d * 0.12, 10));
+  if (roofed) {
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) list.push([0.06, h - 0.12, 0.06, sx * (w / 2 - 0.03), (h - 0.12) / 2, sz * (d / 2 - 0.03)]);
+    g.add(prismZ([[-w / 2, h - 0.14], [-w / 2, h - 0.12], [0, h], [w / 2, h - 0.12], [w / 2, h - 0.14], [0, h - 0.02]], d, K.mat(C(p.color3, '#2f6f8f'), { roughness: 0.8 })));
+  }
+  g.add(boxes(list, wd));
+}
+function playClimb(g, o) {
+  const { w, d, h, p } = o, wd = M(p.material, C(p.color2, '#b98a5e'), 'wood'), tw = Math.min(1.2, w * 0.42, d * 0.5), x0 = -w / 2, x1 = x0 + tw, z0 = -d / 2, z1 = z0 + tw, hp = Math.min(1.5, 0.5 * h), hr = 0.8 * h, ps = Math.min(0.09, tw * 0.15), xc = x0 + tw / 2, zc = z0 + tw / 2, list = [], rl = [];
+  for (const x of [x0 + ps / 2, x1 - ps / 2]) for (const z of [z0 + ps / 2, z1 - ps / 2]) list.push([ps, hr, ps, x, hr / 2, z]);
+  list.push([tw, 0.04, tw, xc, hp - 0.02, zc], [tw, 0.07, 0.03, xc, hp + 0.65, z0 + ps / 2], [tw, 0.07, 0.03, xc, hp + 0.3, z0 + ps / 2], [tw, 0.08, 0.04, xc, hr - 0.04, z0 + 0.02], [tw, 0.08, 0.04, xc, hr - 0.04, z1 - 0.02], [0.04, 0.08, tw, x0 + 0.02, hr - 0.04, zc], [0.04, 0.08, tw, x1 - 0.02, hr - 0.04, zc]);
+  g.add(boxes(list, wd), at(prismZ([[x0, hr - 0.02], [x0, hr], [xc, h], [x1, hr], [x1, hr - 0.02], [xc, h - 0.03]], tw, K.mat(C(p.color, '#4f8a5b'), { roughness: 0.8 })), 0, 0, zc));
+  for (let y = 0.25; y < hp - 0.1; y += 0.25) rl.push([[x0 + 0.03, y, z0 + ps], [x0 + 0.03, y, z1 - ps]]);
+  const hm = clamp(0.74 * h, hp + 0.2, 2.1), xe = w / 2 - 0.05;
+  for (const s of [-1, 1]) rl.push([[x1 - ps / 2, hm, zc + s * 0.22], [xe - 0.08, hm, zc + s * 0.22], 0.022], [[xe - 0.08, hm, zc + s * 0.22], [xe, 0, zc + s * Math.min(0.5, tw / 2)], 0.04]);
+  for (let x = x1 + 0.2; x < xe - 0.15; x += 0.3) rl.push([[x, hm, zc - 0.22], [x, hm, zc + 0.22]]);
+  g.add(rods(rl, 0.016, wd, 6), at(mesh(chuteG(Math.max(0.1, Math.min(0.5, tw - 2 * ps - 0.04)), z1, hp, d / 2, 0.1), toy(C(p.color3, '#e3b23c'))), xc, 0, 0));
+  const rk = seedOf(o, 'holds'), sets = [[], [], []];
+  for (let i = 0; i < 9; i++) sets[i % 3].push(new THREE.IcosahedronGeometry(0.035, 0).translate(lerp(x0 + ps + 0.08, x1 - ps - 0.08, rk()), lerp(0.15, hp - 0.15, (i + 0.5) / 9), z0 + 0.02));
+  g.add(box(tw - 2 * ps, hp, 0.02, K.wood('birch'), xc, hp / 2, z0 + 0.045)); sets.forEach((s, i) => g.add(merge(s, K.plastic(PLAY_COLS[i]))));
+}
+function playSeesaw(g, o) {
+  const { w, d, h, p } = o, fr = alu(C(p.color2, '#4a4d52')), col = K.mat(C(p.color, PLAY_COLS[0]), { roughness: 0.5 }), seat = K.plastic(C(p.color3, PLAY_COLS[1])), a = Math.atan2(0.3 * h, w / 2), L = w / Math.cos(a) - 0.1, yc = 0.5 * h, beam = new THREE.Group();
+  beam.add(box(L, 0.05, Math.min(0.12, d * 0.5), col, 0, 0, 0));
+  for (const s of [-1, 1]) beam.add(rbox(0.3, 0.035, Math.min(d, 0.26), seat, s * (L / 2 - 0.16), 0.042, 0, 0.015, 2), rods([[[s * (L / 2 - 0.42), 0.02, 0], [s * (L / 2 - 0.42), 0.26, 0]], [[s * (L / 2 - 0.42), 0.26, -d / 2 + 0.01], [s * (L / 2 - 0.42), 0.26, d / 2 - 0.01]]], 0.012, fr, 6));
+  beam.position.y = yc; beam.rotation.z = a;
+  g.add(beam, boxes([[0.06, yc, 0.03, 0.12, yc / 2, d / 2 - 0.015, 0, 0, 0.25], [0.06, yc, 0.03, -0.12, yc / 2, d / 2 - 0.015, 0, 0, -0.25], [0.06, yc, 0.03, 0.12, yc / 2, -d / 2 + 0.015, 0, 0, 0.25], [0.06, yc, 0.03, -0.12, yc / 2, -d / 2 + 0.015, 0, 0, -0.25], [0.5, 0.03, d, 0, 0.015, 0]], fr), mesh(zCylG(0.025, d, 0, yc, 0, 8), fr));
+}
+function playHoop(g, o) {
+  const { w, d, h, p } = o, blk = dark(), bh = w * 0.62, zb = d / 2 - 0.62, bd = Math.min(0.95, d * 0.5), ry = h - bh * 0.78, rz = zb + 0.03 + 0.15 + 0.225;
+  g.add(rbox(Math.min(w, 0.8), 0.2, bd, K.plastic(C(p.color2, '#1c1d20')), 0, 0.1, -d / 2 + bd / 2, 0.04, 2), rods([[[0, 0.2, -d / 2 + bd * 0.45], [0, h - bh * 0.6, zb - 0.4]], [[0, h - bh * 0.6, zb - 0.4], [0, h - bh * 0.35, zb - 0.02], 0.025], [[0, h - bh * 0.75, zb - 0.45], [0, h - bh * 0.8, zb - 0.02], 0.025], [[0, 0.2, -d / 2 + bd * 0.9], [0, h * 0.4, lerp(-d / 2 + bd * 0.45, zb - 0.4, 0.42)], 0.018]], 0.04, alu(C(p.color3, '#3a3d42')), 8));
+  g.add(ns(box(w, bh, 0.02, clear('#e9eef0', 0.4), 0, h - bh / 2, zb)), boxes([[w, 0.03, 0.03, 0, h - 0.015, zb], [w, 0.03, 0.03, 0, h - bh + 0.015, zb], [0.03, bh, 0.03, w / 2 - 0.015, h - bh / 2, zb], [0.03, bh, 0.03, -w / 2 + 0.015, h - bh / 2, zb]], blk));
+  const sq = K.mat(C(p.color, '#e0552b'), { roughness: 0.5 }), sw = 0.59, shh = 0.45;
+  g.add(boxes([[sw, 0.03, 0.005, 0, ry + shh, zb + 0.012], [sw, 0.03, 0.005, 0, ry + 0.02, zb + 0.012], [0.03, shh, 0.005, sw / 2, ry + shh / 2, zb + 0.012], [0.03, shh, 0.005, -sw / 2, ry + shh / 2, zb + 0.012], [0.1, 0.02, 0.16, 0, ry, zb + 0.09]], sq), mesh(torusG(0.225, 0.01, 'xz', 0, ry, rz, 20, 5), sq));
+  g.add(ns(mesh(new THREE.CylinderGeometry(0.225, 0.14, 0.38, 12, 1, true).translate(0, ry - 0.19, rz), netM('#ffffff', 0.45))));
+  wheelSet(g, [[Math.min(w, 0.8) / 2 - 0.05, 0.05, -d / 2 + bd - 0.06], [-Math.min(w, 0.8) / 2 + 0.05, 0.05, -d / 2 + bd - 0.06]], 0.05, 0.04, dark('#55585c'));
+}
+function playGoal(g, o) {
+  const { w, d, h, p } = o, wm = K.mat(C(p.color, '#f4f2ee'), { roughness: 0.4 }), r = Math.min(0.04, w * 0.05), x = w / 2 - r, zf = d / 2 - r, zb = -d / 2 + r, yt = h - r, zt = lerp(zf, zb, 0.35), list = [];
+  for (const s of [-1, 1]) list.push([[s * x, 0, zf], [s * x, yt, zf]], [[s * x, r, zf], [s * x, r, zb], r * 0.6], [[s * x, yt, zf], [s * x, yt, zt], r * 0.6], [[s * x, yt, zt], [s * x, r, zb], r * 0.6]);
+  list.push([[-x, yt, zf], [x, yt, zf]], [[-x, r, zb], [x, r, zb], r * 0.6], [[-x, yt, zt], [x, yt, zt], r * 0.5]);
+  g.add(rods(list, r, wm, 8));
+  const q = (a, b, c, e) => surfG((u, t) => { const m = [0, 1, 2].map((k) => lerp(lerp(a[k], b[k], u), lerp(e[k], c[k], u), t)); return m; }, Math.max(2, Math.round(w / 0.25)), 6);
+  g.add(ns(merge([q([-x, yt, zt], [x, yt, zt], [x, r, zb], [-x, r, zb]), q([-x, yt, zf], [x, yt, zf], [x, yt, zt], [-x, yt, zt]), ...[-1, 1].map((s) => surfG((u, t) => [s * x, lerp(r, yt, t), lerp(zf, lerp(zb, zt, t), u)], 4, 6))], K.mat('#ffffff', { roughness: 0.9, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide, flat: true }))));
+}
+function playPool(g, o) {
+  const { w, d, h, p } = o, R = Math.min(w, d) / 2, n = h > 0.3 ? 3 : 2, rt = h / (2 * n), cols = [C(p.color, '#3fa7d6'), C(p.color2, '#f4f2ee')], sets = [[], []];
+  for (let i = 0; i < n; i++) sets[i % 2].push(torusG(R - rt, rt, 'xz', 0, rt + i * 2 * rt, 0, 32, 8));
+  sets.forEach((s, i) => g.add(merge(s, K.mat(cols[i], { roughness: 0.35 }))));
+  g.add(cyl(R - rt, R - rt, 0.01, K.mat(cols[0], { roughness: 0.4 }), 0, 0.006, 0, 28), ns(cyl(R - 1.7 * rt, R - 1.7 * rt, 0.01, K.water(C(p.color3, '#6ec6e6'), 0.7), 0, h * 0.62, 0, 28)));
+}
+function playPingPong(g, o) {
+  const { w, d, h, p } = o, nh = Math.min(0.1525, h * 0.17), ty = h - nh, top = K.mat(C(p.color, '#2f5f8f'), { roughness: 0.5 }), fr = alu(C(p.color2, '#2b2d31')), wl = K.mat('#f4f4f0', { roughness: 0.6 }), list = [], lw = 0.02;
+  g.add(box(w, 0.02, d, top, 0, ty - 0.01, 0), boxes([[w, 0.04, 0.03, 0, ty - 0.04, d / 2 - 0.03], [w, 0.04, 0.03, 0, ty - 0.04, -d / 2 + 0.03]], fr));
+  g.add(boxes([[w, 0.002, lw, 0, ty + 0.001, d / 2 - lw / 2], [w, 0.002, lw, 0, ty + 0.001, -d / 2 + lw / 2], [lw, 0.002, d, w / 2 - lw / 2, ty + 0.001, 0], [lw, 0.002, d, -w / 2 + lw / 2, ty + 0.001, 0], [w, 0.002, 0.004, 0, ty + 0.001, 0], [0.012, nh, 0.012, 0, ty + nh / 2, d / 2 - 0.006], [0.012, nh, 0.012, 0, ty + nh / 2, -d / 2 + 0.006], [0.006, 0.015, d, 0, h - 0.0075, 0]], wl), ns(box(0.003, nh - 0.015, d - 0.02, netM('#1c1d20', 0.5), 0, ty + (nh - 0.015) / 2, 0)));
+  for (const sx of [-1, 1]) { const x = sx * w * 0.28; for (const sz of [-1, 1]) list.push([0.04, ty - 0.1, 0.04, x, 0.08 + (ty - 0.1) / 2, sz * (d / 2 - 0.12)]); list.push([0.04, 0.04, d - 0.2, x, 0.12, 0], [0.04, 0.04, d - 0.2, x, ty - 0.05, 0]); }
+  list.push([w * 0.56, 0.04, 0.04, 0, 0.12, 0]);
+  g.add(boxes(list, fr));
+  wheelSet(g, [-1, 1].flatMap((sx) => [-1, 1].map((sz) => [sx * w * 0.28, 0.05, sz * (d / 2 - 0.12)])), 0.05, 0.03, dark('#55585c'));
+}
+function playNinja(g, o) {
+  const { w, d, h, p } = o, wd = M(p.material, C(p.color2, '#8a6a4a'), 'wood'), pr = Math.min(0.07, d / 2), x = w / 2 - pr, span = 2 * (x - pr), yl = h - 0.2, sag = Math.min(0.12, span * 0.02), yy = (t) => yl - sag * (1 - (2 * t - 1) ** 2), strap = [], hang = [], wood = [], rings = [], balls = [];
+  g.add(merge([cylG(pr, pr, h, -x, h / 2, 0, 12), cylG(pr, pr, h, x, h / 2, 0, 12)], wd));
+  for (let i = 0; i < 10; i++) strap.push([[lerp(-x + pr, x - pr, i / 10), yy(i / 10), 0], [lerp(-x + pr, x - pr, (i + 1) / 10), yy((i + 1) / 10), 0]]);
+  const n = clamp(Math.round((span - 0.6) / 0.85), 2, 10);
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n, cx = lerp(-x + pr, x - pr, t), y0 = yy(t), kind = i % 4, len = 0.45 + (i % 3) * 0.12;
+    if (kind === 0) { for (const s of [-1, 1]) { hang.push([[cx + s * 0.16, y0, 0], [cx + s * 0.16, y0 - len + 0.09, 0]]); rings.push(torusG(0.09, 0.012, 'xy', cx + s * 0.16, y0 - len, 0, 14, 5)); } }
+    else if (kind === 1) { hang.push([[cx - 0.2, y0, 0], [cx - 0.2, y0 - len, 0]], [[cx + 0.2, y0, 0], [cx + 0.2, y0 - len, 0]]); wood.push([[cx - 0.26, y0 - len, 0], [cx + 0.26, y0 - len, 0]]); }
+    else if (kind === 2) { hang.push([[cx, y0, 0], [cx, y0 - len, 0]]); balls.push(new THREE.SphereGeometry(Math.min(0.1, d / 2), 12, 8).translate(cx, y0 - len - 0.08, 0)); }
+    else { hang.push([[cx - 0.17, y0, 0], [cx - 0.17, y0 - len - 0.3, 0]], [[cx + 0.17, y0, 0], [cx + 0.17, y0 - len - 0.3, 0]]); for (let k = 0; k < 3; k++) wood.push([[cx - 0.2, y0 - len + 0.2 - k * 0.25, 0], [cx + 0.2, y0 - len + 0.2 - k * 0.25, 0]]); }
+  }
+  g.add(rods(strap, 0.013, K.fabric(C(p.color, PLAY_COLS[0])), 5), rods(hang, 0.006, K.fabric('#2b2d31'), 4), rods(wood, 0.016, K.wood('birch'), 6), merge(rings, K.plastic(C(p.color3, PLAY_COLS[2]))), merge(balls, K.plastic(PLAY_COLS[1])));
+  g.add(box(span, 0.005, Math.min(0.05, d), K.fabric(C(p.color3, PLAY_COLS[2])), 0, Math.min(0.45, h * 0.25), 0));
+}
+function playMudKitchen(g, o) {
+  const { w, d, h, p } = o, wd = M(p.material, C(p.color, '#d9b98a'), 'wood'), hc = Math.min(0.58, h * 0.6), ls = 0.045, list = [], acc = K.plastic(C(p.color3, PLAY_COLS[0]));
+  for (const sx of [-1, 1]) list.push([ls, hc, ls, sx * (w / 2 - ls / 2), hc / 2, d / 2 - ls / 2], [ls, h, ls, sx * (w / 2 - ls / 2), h / 2, -d / 2 + ls / 2]);
+  list.push([w, 0.025, d, 0, hc - 0.0125, 0], [w - 2 * ls, 0.02, d - 0.04, 0, 0.14, 0], [w - 2 * ls, 0.09, 0.02, 0, hc - 0.07, d / 2 - 0.015], [w, 0.022, Math.min(0.16, d * 0.45), 0, h - 0.011, -d / 2 + Math.min(0.08, d * 0.225)]);
+  for (let i = 0; i < 3; i++) list.push([w - 2 * ls, 0.09, 0.016, 0, hc + 0.08 + i * (h - hc - 0.14) / 3, -d / 2 + 0.02]);
+  g.add(boxes(list, wd));
+  const sr = Math.min(0.13, w * 0.16, d * 0.32), sx = -w * 0.22;
+  g.add(cyl(sr, sr, 0.006, inox(), sx, hc + 0.003, 0.01, 18), cyl(sr * 0.86, sr * 0.86, 0.008, dark('#6a6f73'), sx, hc + 0.004, 0.01, 18), merge([cylG(sr * 0.6, sr * 0.6, 0.004, w * 0.14, hc + 0.002, 0.02, 14), cylG(sr * 0.6, sr * 0.6, 0.004, w * 0.34, hc + 0.002, 0.02, 14)], dark()));
+  g.add(merge([zCylG(0.02, 0.025, w * 0.14, hc - 0.07, d / 2, 10), zCylG(0.02, 0.025, w * 0.34, hc - 0.07, d / 2, 10), cylG(sr * 0.55, sr * 0.5, 0.07, w * 0.14, hc + 0.04, 0.02, 12)], acc), mesh(tubeG([[sx, hc, -d * 0.3], [sx, hc + 0.16, -d * 0.3], [sx, hc + 0.18, -d * 0.12]], 0.01, 10, 5), inox()));
+  const hy = hc + 0.08 + 2 * (h - hc - 0.14) / 3;
+  g.add(rods([-0.25, 0, 0.25].map((t) => [[t * w, hy, -d / 2 + 0.035], [t * w, hy - 0.16, -d / 2 + 0.035]]), 0.006, inox(), 4), merge([-0.25, 0, 0.25].map((t) => zCylG(0.03, 0.006, t * w, hy - 0.19, -d / 2 + 0.035, 10)), inox()));
+}
+function playSym(ctx, { w, d, h, p, px, v }) {
+  const col = C(p.color, PLAY_COLS[0]), wood = '#b98a5e';
+  if (v === 'swing-set') {
+    const xa = Math.max(5, w / 2 - 28), n = Math.round(num(p.swings, clamp(Math.floor((2 * xa - 20) / 70), 1, 4), 1, 6));
+    for (const s of [-1, 1]) { line(ctx, s * xa, 0, s * (w / 2 - 4), d / 2 - 4, C(p.color2, wood), Math.max(1.5 * px, 6)); line(ctx, s * xa, 0, s * (w / 2 - 4), -d / 2 + 4, C(p.color2, wood), Math.max(1.5 * px, 6)); }
+    line(ctx, -xa - 10, 0, xa + 10, 0, C(p.color2, wood), Math.max(2 * px, 9));
+    for (let i = 0; i < n; i++) rect(ctx, lerp(-xa, xa, (i + 0.5) / n) * 0.86, 0, 44, 17, K.tint(i % 2 ? C(p.color3, PLAY_COLS[1]) : col, 0.3), INK, px, 3);
+    dashed(ctx, px, () => rect(ctx, 0, 0, w, d, null, SOFT, px));
+  } else if (v === 'slide') {
+    const pd = Math.min(42, d * 0.2), zb = -d / 2 + 12;
+    rect(ctx, 0, (zb + pd + d / 2) / 2, w - 8, d / 2 - zb - pd, K.tint(col, 0.35), INK, px, 6); rect(ctx, 0, zb + pd / 2, w - 8, pd, K.tint(C(p.color3, '#e3b23c'), 0.3), INK, px);
+    hatch(ctx, -w / 2 + 4, -d / 2, w / 2 - 4, zb, 2, true, INK, px); line(ctx, 0, zb + pd + 12, 0, d / 2 - 14, SOFT, px); poly(ctx, [[-4 * px, d / 2 - 14 - 5 * px], [0, d / 2 - 14], [4 * px, d / 2 - 14 - 5 * px]], null, SOFT, px, false);
+  } else if (v === 'trampoline') {
+    const R = Math.min(w, d) / 2, net = flag(p.net, h > 150), c = C(p.color, '#2f6f8f');
+    circ(ctx, 0, 0, R, K.tint(c, 0.3), INK, px); circ(ctx, 0, 0, R * 0.84, '#8f9296', INK, px); circ(ctx, 0, 0, R * 0.5, null, 'rgba(255,255,255,0.5)', px);
+    if (net) { const np = R > 130 ? 8 : 6; for (let i = 0; i < np; i++) circ(ctx, Math.cos(i / np * TAU) * (R - 3), Math.sin(i / np * TAU) * (R - 3), Math.max(2.5, 1.3 * px), K.shade(c, -0.2), INK, px * 0.7); }
+  } else if (v === 'playhouse') {
+    rect(ctx, 0, 0, w, d, K.tint(C(p.color2, '#c0503a'), 0.5), INK, px, 1); hatch(ctx, -w / 2, -d / 2, w / 2, d / 2, Math.min(5, Math.floor(w / (4 * px))), false, SOFT, px); line(ctx, 0, -d / 2, 0, d / 2, INK, 1.6 * px);
+    line(ctx, -w * 0.36, d / 2 - 6, -w * 0.04, d / 2 - 6, C(p.color3, '#5f8fa8'), Math.max(2.5 * px, 3));
+  } else if (v === 'sandbox') {
+    rect(ctx, 0, 0, w, d, K.tint(C(p.color, '#c9a476'), 0.35), INK, px, 1); rect(ctx, 0, 0, w - Math.min(28, w * 0.4), d - Math.min(28, d * 0.4), '#efe3c2', INK, px);
+    const rk = K.rng(7); for (let i = 0; i < 30; i++) circ(ctx, (rk() - 0.5) * (w - 40), (rk() - 0.5) * (d - 40), 0.7 * px, 'rgba(120,100,60,0.5)', null);
+    if (h > 100) dashed(ctx, px, () => { line(ctx, 0, -d / 2, 0, d / 2, SOFT, px); });
+  } else if (v === 'climbing-frame') {
+    const tw = Math.min(120, w * 0.42, d * 0.5), x0 = -w / 2, z0 = -d / 2, xc = x0 + tw / 2, zc = z0 + tw / 2;
+    rect(ctx, (x0 + tw + w / 2) / 2, zc, w / 2 - x0 - tw, 44, null, INK, px); hatch(ctx, x0 + tw, zc - 22, w / 2 - 5, zc + 22, Math.max(1, Math.round((w - tw) / 30) - 1), false, INK, px);
+    rect(ctx, xc, (z0 + tw + d / 2) / 2, Math.min(50, tw - 22), d / 2 - z0 - tw, K.tint(C(p.color3, '#e3b23c'), 0.3), INK, px, 5);
+    rect(ctx, xc, zc, tw, tw, K.tint(C(p.color, '#4f8a5b'), 0.4), INK, px); line(ctx, xc, z0, xc, z0 + tw, INK, 1.5 * px);
+  } else if (v === 'seesaw') {
+    rect(ctx, 0, 0, w - 8, Math.min(12, d * 0.5), K.tint(col, 0.3), INK, px, 2); for (const s of [-1, 1]) { rect(ctx, s * (w / 2 - 18), 0, 30, Math.min(d, 26), K.tint(C(p.color3, PLAY_COLS[1]), 0.3), INK, px, 4); line(ctx, s * (w / 2 - 44), -d / 2, s * (w / 2 - 44), d / 2, INK, 1.5 * px); }
+    rect(ctx, 0, 0, 50, d, null, INK, px, 2);
+  } else if (v === 'basketball-hoop') {
+    const zb = d / 2 - 62, bd = Math.min(95, d * 0.5);
+    rect(ctx, 0, -d / 2 + bd / 2, Math.min(w, 80), bd, '#6a6c70', INK, px, 5); line(ctx, 0, -d / 2 + bd * 0.5, 0, zb, INK, Math.max(2 * px, 6));
+    line(ctx, -w / 2, zb, w / 2, zb, INK, Math.max(2 * px, 3)); circ(ctx, 0, zb + 40, 22.5, null, col, Math.max(1.5 * px, 2)); line(ctx, 0, zb, 0, zb + 18, col, Math.max(1.5 * px, 2));
+  } else if (v === 'football-goal') {
+    ctx.fillStyle = 'rgba(160,170,175,0.18)'; ctx.fillRect(-w / 2, -d / 2, w, d); hatch(ctx, -w / 2, -d / 2, w / 2, d / 2, Math.min(Math.round(w / 25), Math.floor(w / (3.5 * px))), false, SOFT, px * 0.7); hatch(ctx, -w / 2, -d / 2, w / 2, d / 2, Math.min(Math.round(d / 25), Math.floor(d / (3.5 * px))), true, SOFT, px * 0.7);
+    poly(ctx, [[-w / 2 + 3, d / 2 - 3], [-w / 2 + 3, -d / 2 + 3], [w / 2 - 3, -d / 2 + 3], [w / 2 - 3, d / 2 - 3]], null, INK, px, false); line(ctx, -w / 2 + 3, d / 2 - 4, w / 2 - 3, d / 2 - 4, INK, Math.max(2 * px, 7)); line(ctx, -w / 2 + 3, d / 2 - 4, w / 2 - 3, d / 2 - 4, '#f4f2ee', Math.max(px, 4.5));
+  } else if (v === 'paddling-pool') {
+    const R = Math.min(w, d) / 2, c = C(p.color, '#3fa7d6'); circ(ctx, 0, 0, R, K.tint(c, 0.3), INK, px); circ(ctx, 0, 0, R * 0.86, K.tint(C(p.color2, '#f4f2ee'), 0.3), SOFT, px); circ(ctx, 0, 0, R * 0.72, rgba('#6ec6e6', 0.75), INK, px);
+  } else if (v === 'ping-pong') {
+    rect(ctx, 0, 0, w, d, K.tint(C(p.color, '#2f5f8f'), 0.25), INK, px); rect(ctx, 0, 0, w - 4, d - 4, null, '#ffffff', Math.max(px, 1.6)); line(ctx, -w / 2, 0, w / 2, 0, '#ffffff', px); line(ctx, 0, -d / 2 - 0, 0, d / 2, INK, 1.8 * px);
+  } else if (v === 'ninja-line') {
+    const x = w / 2 - Math.min(7, d / 2), n = clamp(Math.round((2 * x - 74) / 85), 2, 10);
+    line(ctx, -x, 0, x, 0, col, Math.max(1.5 * px, 2.6)); for (let i = 0; i < n; i++) circ(ctx, lerp(-x, x, (i + 0.5) / n), 0, Math.max(2 * px, Math.min(9, d * 0.3)), K.tint(PLAY_COLS[(i + 1) % 4], 0.3), INK, px);
+    for (const s of [-1, 1]) circ(ctx, s * x, 0, Math.max(Math.min(7, d / 2), 2.2 * px), K.tint('#8a6a4a', 0.2), INK, px);
+  } else {
+    const sr = Math.min(13, w * 0.16, d * 0.32); rect(ctx, 0, 0, w, d, K.tint(C(p.color, '#d9b98a'), 0.4), INK, px, 1); rect(ctx, 0, -d / 2 + Math.min(8, d * 0.22), w, Math.min(16, d * 0.45), null, SOFT, px);
+    circ(ctx, -w * 0.22, 1, sr, '#e6eaec', INK, px); circ(ctx, w * 0.14, 2, sr * 0.6, '#55585c', INK, px); circ(ctx, w * 0.34, 2, sr * 0.6, '#55585c', INK, px);
+  }
+}
+define('play', { 'swing-set': { b: playSwingSet }, slide: { b: playSlide }, trampoline: { b: playTrampoline }, playhouse: { b: playHouse }, sandbox: { b: playSandbox }, 'climbing-frame': { b: playClimb }, seesaw: { b: playSeesaw },
+  'basketball-hoop': { b: playHoop }, 'football-goal': { b: playGoal }, 'paddling-pool': { b: playPool }, 'ping-pong': { b: playPingPong }, 'ninja-line': { b: playNinja }, 'mud-kitchen': { b: playMudKitchen } }, playSym);
