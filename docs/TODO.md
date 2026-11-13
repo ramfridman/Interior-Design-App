@@ -2,15 +2,16 @@
 
 Last updated: 13 Nov 2026. Published preview: https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
-## In progress
-- [ ] **Structure editing in the 2D plan** — drag walls, draw partitions, place / slide / resize doors and windows, colour by level (free / check with engineer / permit / locked), highlight changes vs the architect's plan. Engine (`src/core/plan-edit.js`) is done and tested.
-- [ ] **Interface for structure editing** — Furnish | Structure switch, wall and opening inspector, "changes to the architect's plan" list with reset.
-- [ ] **Sun controls** — date picker with season presets, sunrise / sunset marks, play-the-day, "true shadows" toggle. The solar engine is done.
-- [ ] Safe room double door in the **2D** symbol (3D is done).
+## Done (published as version 3, 13 Nov 2026)
+- [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
+- [x] Catalogue of 850 real Israeli-market products with prices and shop links.
+- [x] Regulations and best-practice checker with sources.
+- [x] True sunlight by date and hour (solar ephemeris, true north), date picker, presets, play-the-day, true-shadows toggle.
+- [x] Safe room doorway with both doors (2D and 3D).
+- [x] Structure editing: walls, doors, windows, passages, with the four permission levels, changes list, undo, save / open.
 
 ## Next
-- [ ] Integration test of everything together, then republish the preview.
-- [ ] Lead's UX review pass (known: dimension chains crowd the parking bays; finishes cannot be dropped onto the 3D view; tablet side panels have no scrim).
+- [ ] Lead's UX review pass (known: finishes cannot be dropped onto the 3D view; tablet side panels have no scrim; wall length has no inspector field; the Bedroom 1 / Bedroom 2 partition cannot be dragged until a bedroom door is moved away from its end; the removed-wall ghost is faint in dark theme; touch gestures for structure tools untested).
 - [ ] Performance check on a real graphics card (only a software renderer has been measured).
 - [ ] Catalogue gaps: long linear pendants, fountains / bird baths, composite decking, concrete pavers, date palms, heat-pump water heaters, clotheslines / composters.
 - [ ] Merge branch `ccr-70c095fe-io3e41` into the default branch (pull request).
