@@ -25,6 +25,7 @@
  *   'base'       {}                          – another project was opened (store.openProject): base plan, site, location
  *                                              and design all replaced, history cleared. Emitted LAST, after 'plan' / 'load' /
  *                                              … — views that captured the site or the sun at creation are rebuilt on it.
+ *   'underlay'   { reason, transient }       – the tracing underlay (store.underlay) was set, changed or removed
  *   '*'          (eventName, payload)        – everything
  *
  * PERSISTENCE
@@ -136,6 +137,13 @@ class Store {
     this.carpentry = emptyCarpentry();
     /** Large reference images of carpentry special requirements { [imageId]: dataUrl } — saved, but kept out of undo history. */
     this.carpentryImages = {};
+    /**
+     * Tracing underlay of the open project (an imported sketch under the 2D plan) or null:
+     * { image: dataUrl (JPEG / WebP), width, height (px), transform: [a, b, c, d, e, f] image px → plan cm, opacity 0…1,
+     *   visible, source?: { kind: 'pdf' | 'image', name, page } }. Saved with the project record (core/projects.js), never
+     * part of the design, the undo history or exports. Change it with setUnderlay().
+     */
+    this.underlay = null;
     this._listeners = new Map();
     this._undo = [];
     this._redo = [];
@@ -417,12 +425,13 @@ class Store {
    * per-session UI state (structure / carpentry selection, active room, walk mode). Emits 'plan' { reason: 'base' }, the
    * usual 'load' events, then 'base'. Never autosaves by itself.
    */
-  openProject({ basePlan, phase = 'fixed', design, name } = {}) {
+  openProject({ basePlan, phase = 'fixed', design, name, underlay = null } = {}) {
     clearTimeout(this._saveTimer); this._saveTimer = null;
     const persist = this.persist;
     this.persist = false;
     try {
       this._undo = []; this._redo = []; this._batch = null;
+      this.underlay = underlay && typeof underlay.image === 'string' ? { ...underlay } : null;
       if (basePlan) setBasePlan(basePlan, { phase });
       const data = design && Array.isArray(design.items) ? design : { items: [] };
       const project = { ...(data.project || {}), ...(name ? { name } : {}) };
@@ -430,6 +439,7 @@ class Store {
       if (ui.mode === 'walk') ui.mode = '3d';
       this.load({ ...data, project, ui }, { restoreUI: true, base: true });
       this.emit('history', this.historyState());
+      this.emit('underlay', { reason: 'open' });
       this.emit('base', {});
     } finally { this.persist = persist; }
   }
@@ -446,6 +456,16 @@ class Store {
     if (gone.length) this.emit('finishes', { ids: gone });
     this.emit('history', this.historyState());
     return true;
+  }
+  /**
+   * Set (object), change (`patch` merged into the current one) or remove (null) the tracing underlay. Not undoable;
+   * autosaves unless `opts.transient` (e.g. while an opacity slider is dragged). Emits 'underlay' { reason }.
+   */
+  setUnderlay(next, opts = {}) {
+    if (next == null) this.underlay = null;
+    else if (opts.replace || !this.underlay) this.underlay = typeof next.image === 'string' ? { opacity: 0.5, visible: true, ...next } : this.underlay;
+    else this.underlay = { ...this.underlay, ...next };
+    this.emit('underlay', { reason: next == null ? 'remove' : 'change', transient: !!opts.transient });
   }
   saveLocal() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.serialize())); } catch (e) { /* storage unavailable — design still works in memory */ } }
   /** Returns true if a saved design was restored. */

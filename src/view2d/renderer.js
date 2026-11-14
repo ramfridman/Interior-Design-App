@@ -18,6 +18,7 @@ import { drawOpenings } from './openings.js';
 import { drawItems, drawItem } from './items.js';
 import { drawRoomLabels, drawExteriorDims, drawInteriorDims, dimBandRect } from './annotations.js';
 import { isStructureTool, drawRemovedWalls, drawChangeMarkers } from './structure.js';
+import { drawUnderlay } from './underlay.js';
 
 const MARGIN = 192;   // device px of slack around the view in the caches
 const ITEMS_DIMMED = 0.35;
@@ -53,6 +54,7 @@ export function paintUnder(G, env, skip = null, furniture = null) {
   if (ui.showSite) step('siteGround', () => drawSiteGround(G, env));
   step('floors', () => { drawOutdoorAreas(G, env); drawRoomFloors(G, env); });
   if (ui.showGrid && !env.exporting) step('grid', () => drawGrid(G, env));
+  step('underlay', () => drawUnderlay(G, env));       // imported sketch to trace over (never exported)
   if (ui.showSite) step('siteLines', () => drawSiteLines(G, env));
   if (isStructureTool(ui.tool) && !env.exporting) {
     // the furniture steps back: dimmed, not pickable, and under the walls and door swings being edited

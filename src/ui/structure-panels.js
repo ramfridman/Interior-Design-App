@@ -8,6 +8,7 @@ import { btn, iconBtn, section, kbd } from './components.js';
 import { openPopover } from './dialogs.js';
 import { LEVELS, LEVEL_ORDER, levelTag, basePlanName } from './structure.js';
 import { phaseCard } from './projects.js';
+import { underlayCard } from './import/underlay-panel.js';
 import { planPhase } from '../core/plan-edit.js';
 
 /** Structure tools: value = store.ui.tool. Shared by the top bar and the guide so the two can never drift apart. */
@@ -52,6 +53,7 @@ export function initStructureGuide(root, app) {
       iconBtn('panel-left', 'Hide this guide', { onClick: () => app.setPanelOpen('left', false) })),
     h('div', { class: 'guide__body' },
       app.projects ? phaseCard(app) : null,
+      underlayCard(app),
       h('p', { class: 'guide__lead' }, 'Change the walls, doors and windows of your house, within what is allowed. Every wall and opening is one of four levels.'),
       legend,
       section('Tools', tools),

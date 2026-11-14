@@ -1,6 +1,7 @@
 /**
- * Projects UI: the project switcher in the top bar (current project, the others, New / Rename / Duplicate / Export /
- * Import / Delete), the "New project" dialog, the draft ↔ fixed card of the Structure guide and the hint shown on an
+ * Projects UI: the project switcher in the top bar (current project, the others, New / Import a sketch / Rename /
+ * Duplicate / Export / Import / Delete), the "New project" dialog (empty lot, copy of House 98, or a sketch → the
+ * import dialog in ./import/wizard.js, loaded on first use), the draft ↔ fixed card of the Structure guide and the hint shown on an
  * empty plan. Storage and switching are done by core/projects.js (`app.projects`); nothing here uses alert / confirm /
  * window.open, and files go through exporter.js `saveFile`.
  */
@@ -27,9 +28,9 @@ export const CITIES = [
 ];
 const TIME_ZONE = 'Asia/Jerusalem';
 
-const field = (label, input, suffix) => h('label', { class: 'field' }, h('span', { class: 'field__label' }, label), input, suffix ? h('span', { class: 'field__suffix' }, suffix) : null);
-const numInput = (value, attrs = {}) => h('input', { class: 'field__input num', type: 'text', inputmode: 'decimal', autocomplete: 'off', spellcheck: 'false', value: String(value), ...attrs });
-const readNum = (input) => { const v = Number(String(input.value).replace(',', '.').trim()); return Number.isFinite(v) ? v : NaN; };
+export const field = (label, input, suffix) => h('label', { class: 'field' }, h('span', { class: 'field__label' }, label), input, suffix ? h('span', { class: 'field__suffix' }, suffix) : null);
+export const numInput = (value, attrs = {}) => h('input', { class: 'field__input num', type: 'text', inputmode: 'decimal', autocomplete: 'off', spellcheck: 'false', value: String(value), ...attrs });
+export const readNum = (input) => { const v = Number(String(input.value).replace(',', '.').trim()); return Number.isFinite(v) ? v : NaN; };
 const when = (iso) => { try { return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); } catch (e) { return ''; } };
 
 /**
@@ -65,6 +66,7 @@ export async function openProjectMenu(app, anchor) {
     ...others.map((p) => ({ label: p.name, icon: p.builtin ? 'home' : 'plan', kbd: when(p.updatedAt), onSelect: () => switchTo(app, p.id) })),
     { separator: true },
     { label: 'New project…', icon: 'plus', onSelect: () => openNewProject(app) },
+    { label: 'Import a sketch…', icon: 'image', onSelect: () => openSketchImport(app) },
     { label: 'Rename…', icon: 'note', onSelect: () => openRename(app) },
     { label: 'Duplicate', icon: 'duplicate', onSelect: () => duplicateCurrent(app) },
     { separator: true },
@@ -151,68 +153,122 @@ export function openImportProject(app) {
   });
 }
 
-/** "New project" dialog: name; empty lot (size) or a copy of House 98; location, north, ceiling. */
+/**
+ * Location (for the sun) and north: city list or custom latitude / longitude, and north in degrees. Shared by the New
+ * project dialog and the sketch importer. `read()` → { ok, reason? , location, northAngle }.
+ * @param {{ north?: number, northHint?: string, northField?: boolean }} [o]
+ */
+export function placeFields(o = {}) {
+  const city = h('select', { class: 'select', 'aria-label': 'Location', onChange: () => syncCity() },
+    CITIES.map((c) => h('option', { value: c.id }, c.name)), h('option', { value: 'custom' }, 'Custom latitude / longitude'));
+  const lat = numInput(CITIES[0].latitude, { 'aria-label': 'Latitude in degrees' });
+  const lon = numInput(CITIES[0].longitude, { 'aria-label': 'Longitude in degrees' });
+  const north = numInput(o.north || 0, { 'aria-label': 'North direction in degrees, clockwise from the top of the plan' });
+  const custom = h('div', { class: 'newproj__row' }, field('Latitude', lat, '°'), field('Longitude', lon, '°'));
+  const el = h('div', { class: 'newproj__group' }, h('p', { class: 'newproj__label' }, 'Location (for the sun)'), city, custom,
+    o.northField === false ? null : h('div', { class: 'newproj__row' }, field('North', north, '°'), h('p', { class: 'newproj__hint' }, o.northHint || 'Clockwise from the top of the plan; 0 = north is up.')));
+  function syncCity() {
+    const c = CITIES.find((x) => x.id === city.value);
+    custom.hidden = !!c;
+    if (c) { lat.value = String(c.latitude); lon.value = String(c.longitude); }
+  }
+  syncCity();
+  return {
+    el, north,
+    /** Validated values, or { ok: false, reason }. */
+    read() {
+      const la = readNum(lat), lo = readNum(lon), n = readNum(north);
+      if (!(Math.abs(la) <= 90 && Math.abs(lo) <= 180)) return { ok: false, reason: 'Location: latitude −90…90 and longitude −180…180 degrees.' };
+      if (!Number.isFinite(n)) return { ok: false, reason: 'North: a number of degrees (0 = north is up on the plan).' };
+      const ci = CITIES.find((x) => x.id === city.value);
+      return { ok: true, location: { name: ci ? ci.name : '', latitude: la, longitude: lo, timeZone: TIME_ZONE }, northAngle: n };
+    },
+  };
+}
+
+/** Ceiling height field (metres). `read()` → cm or NaN with `reason`. */
+export function ceilingField(value = 3.0) {
+  const input = numInput(value, { 'aria-label': 'Ceiling height in metres' });
+  return {
+    el: h('div', { class: 'newproj__row' }, field('Ceiling height', input, 'm')),
+    read() { const c = readNum(input); return c >= 2.2 && c <= 6 ? { ok: true, cm: Math.round(c * 100) } : { ok: false, reason: 'Ceiling height: a number of metres between 2.20 and 6.00.' }; },
+  };
+}
+
+/** "New project" dialog: name; empty lot (size), a copy of House 98, or a sketch (→ the import dialog); location, north, ceiling. */
 export function openNewProject(app) {
   const { projects } = app;
   let from = 'blank';
   const name = h('input', { class: 'field__input', type: 'text', value: '', placeholder: 'e.g. Our new house', maxlength: '60', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Project name', style: 'text-align:left' });
   const width = numInput(25, { 'aria-label': 'Lot width (east–west) in metres' });
   const depth = numInput(20, { 'aria-label': 'Lot depth (north–south) in metres' });
-  const city = h('select', { class: 'select', 'aria-label': 'Location', onChange: () => syncCity() },
-    CITIES.map((c) => h('option', { value: c.id }, c.name)), h('option', { value: 'custom' }, 'Custom latitude / longitude'));
-  const lat = numInput(CITIES[0].latitude, { 'aria-label': 'Latitude in degrees' });
-  const lon = numInput(CITIES[0].longitude, { 'aria-label': 'Longitude in degrees' });
-  const north = numInput(0, { 'aria-label': 'North direction in degrees, clockwise from the top of the plan' });
-  const ceiling = numInput(3.0, { 'aria-label': 'Ceiling height in metres' });
+  const place = placeFields();
+  const ceiling = ceilingField(3.0);
   const error = h('p', { class: 'form__error', role: 'alert', hidden: true });
-  const custom = h('div', { class: 'newproj__row' }, field('Latitude', lat, '°'), field('Longitude', lon, '°'));
   const lotRow = h('div', { class: 'newproj__group' }, h('p', { class: 'newproj__label' }, 'Lot size'),
     h('div', { class: 'newproj__row' }, field('Width', width, 'm'), field('Depth', depth, 'm')),
     h('p', { class: 'newproj__hint' }, 'East–west × north–south. You draw the house afterwards with the Structure tools.'));
-  const placeRows = h('div', { class: 'newproj__group' }, h('p', { class: 'newproj__label' }, 'Location (for the sun)'), city, custom,
-    h('div', { class: 'newproj__row' }, field('North', north, '°'), h('p', { class: 'newproj__hint' }, 'Clockwise from the top of the plan; 0 = north is up.')));
+  const placeRows = place.el;
   const copyNote = h('p', { class: 'newproj__hint', hidden: true }, `A fresh copy of ${BUILTIN_PLAN.meta.name}: the architect’s plan, location and furniture layout.`);
-  function syncCity() {
-    const c = CITIES.find((x) => x.id === city.value);
-    custom.hidden = !!c;
-    if (c) { lat.value = String(c.latitude); lon.value = String(c.longitude); }
+  const sketchNote = h('p', { class: 'newproj__hint', hidden: true }, 'Import your drawing — a PDF from the architect, a scan or a photo of a sketch. The walls, doors and windows found in it become a draft you check and correct over the drawing. Your file stays on this device.');
+  const createBtn = btn('Create project', { variant: 'primary', onClick: create });
+  function syncFrom() {
+    lotRow.hidden = from !== 'blank'; placeRows.hidden = from !== 'blank'; copyNote.hidden = from !== 'house98'; sketchNote.hidden = from !== 'sketch';
+    ceilingRow.hidden = from === 'sketch';
+    createBtn.querySelector('.btn__label').textContent = from === 'sketch' ? 'Choose the drawing…' : 'Create project';
   }
-  function syncFrom() { lotRow.hidden = from !== 'blank'; placeRows.hidden = from !== 'blank'; copyNote.hidden = from === 'blank'; }
-  const start = segmented({ options: [{ value: 'blank', label: 'Empty lot' }, { value: 'house98', label: `Copy of House ${BUILTIN_PLAN.meta.lot || ''}`.trim() }], value: from, label: 'Start from',
+  const start = segmented({ options: [{ value: 'blank', label: 'Empty lot' }, { value: 'house98', label: `Copy of House ${BUILTIN_PLAN.meta.lot || ''}`.trim() }, { value: 'sketch', label: 'From a sketch (PDF or image)' }], value: from, label: 'Start from',
     onChange: (v) => { from = v; syncFrom(); } });
   async function create() {
     error.hidden = true;
     const bad = (text) => { error.textContent = text; error.hidden = false; };
+    if (from === 'sketch') {
+      dlg.close();
+      openSketchImport(app, { name: name.value.trim() });
+      return;
+    }
     const opts = { name: name.value.trim() || undefined, from };
-    const c = readNum(ceiling);
-    if (!(c >= 2.2 && c <= 6)) return bad('Ceiling height: a number of metres between 2.20 and 6.00.');
-    opts.ceiling = Math.round(c * 100);
+    const c = ceiling.read();
+    if (!c.ok) return bad(c.reason);
+    opts.ceiling = c.cm;
     if (from === 'blank') {
-      const w = readNum(width), d = readNum(depth), la = readNum(lat), lo = readNum(lon), n = readNum(north);
+      const w = readNum(width), d = readNum(depth);
       if (!(w >= 5 && w <= 500 && d >= 5 && d <= 500)) return bad('Lot size: width and depth in metres, between 5 and 500.');
-      if (!(Math.abs(la) <= 90 && Math.abs(lo) <= 180)) return bad('Location: latitude −90…90 and longitude −180…180 degrees.');
-      if (!Number.isFinite(n)) return bad('North: a number of degrees (0 = north is up on the plan).');
-      const ci = CITIES.find((x) => x.id === city.value);
+      const p = place.read();
+      if (!p.ok) return bad(p.reason);
       opts.lot = { width: Math.round(w * 100), depth: Math.round(d * 100) };
-      opts.location = { name: ci ? ci.name : '', latitude: la, longitude: lo, timeZone: TIME_ZONE };
-      opts.northAngle = n;
+      opts.location = p.location;
+      opts.northAngle = p.northAngle;
     }
     const res = await projects.create(opts);
     if (!res.ok) return bad(res.reason);
     dlg.close();
     toast(`Created “${res.project.name}”`, { kind: 'success' });
   }
+  const ceilingRow = ceiling.el;
   const body = h('div', { class: 'newproj' },
     field('Name', name),
-    h('div', { class: 'newproj__group' }, h('p', { class: 'newproj__label' }, 'Start from'), start, copyNote),
+    h('div', { class: 'newproj__group' }, h('p', { class: 'newproj__label' }, 'Start from'), start, copyNote, sketchNote),
     lotRow, placeRows,
-    h('div', { class: 'newproj__row' }, field('Ceiling height', ceiling, 'm')),
+    ceilingRow,
     error);
   const dlg = openDialog({ title: 'New project', size: 'md', body,
-    actions: [btn('Cancel', { variant: 'quiet', onClick: () => dlg.close() }), btn('Create project', { variant: 'primary', onClick: create })] });
-  syncCity(); syncFrom();
+    actions: [btn('Cancel', { variant: 'quiet', onClick: () => dlg.close() }), createBtn] });
+  syncFrom();
   setTimeout(() => name.focus(), 30);
   return dlg;
+}
+
+/** Open the "Import a sketch" dialog (loaded on first use, so the app's start-up is unchanged). */
+export async function openSketchImport(app, opts = {}) {
+  try {
+    const m = await import('./import/wizard.js');
+    return m.openImportWizard(app, opts);
+  } catch (e) {
+    console.error('[import] could not open', e);
+    toast('The sketch importer could not be opened.', { kind: 'error' });
+    return null;
+  }
 }
 
 /**

@@ -8,9 +8,11 @@
  *   await projects.create({ name, from: 'blank', lot: { width: 2500, depth: 2000 } });
  *   await projects.create({ name, fromPlan: buildPlan({ walls, openings }).plan });   // the sketch-import wizard
  *
- * A project = { id, name, createdAt, updatedAt, phase: 'draft' | 'fixed', builtin: boolean, basePlan, design, thumbnail? }
+ * A project = { id, name, createdAt, updatedAt, phase: 'draft' | 'fixed', builtin: boolean, basePlan, design, thumbnail?, underlay? }
  *   basePlan  complete PLAN-shaped object (plan.js shape; House 98 = the built-in plan)
  *   design    what store.serialize() returns (items, finishes, plan edits relative to basePlan, carpentry, ui…)
+ *   underlay  the tracing underlay of an imported sketch (store.underlay: a JPEG / WebP data URL + image px → plan cm
+ *             transform, opacity, visible) — kept beside the design, out of the undo history (CONTRACT § 12)
  *
  * STORAGE goes through an adapter — async { list() → summaries, get(id) → project | null, put(project), remove(id) } —
  * so an online backend can replace the local one without touching callers. `createLocalAdapter()` uses IndexedDB, falls
@@ -149,7 +151,9 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
   /** A full record of the open project as it is now. */
   function snapshot() {
     const design = store.serialize();
-    return { ...current, name: store.project.name || current.name, updatedAt: now(), phase: planPhase(), builtin: isBuiltinBase(), basePlan: clone(BASE_PLAN), design };
+    const rec = { ...current, name: store.project.name || current.name, updatedAt: now(), phase: planPhase(), builtin: isBuiltinBase(), basePlan: clone(BASE_PLAN), design };
+    if (store.underlay) rec.underlay = store.underlay;   // immutable once set (setUnderlay replaces the object): no copy needed
+    return rec;
   }
   /** Save the open project now (autosave calls this). Resolves when stored; storage errors are reported, not thrown. */
   function save() {
@@ -232,7 +236,8 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
      *   lot?: { width, depth },     // cm, 'blank' only (default 25 × 20 m)
      *   location?: { name?, latitude, longitude, timeZone? }, northAngle?: number, ceiling?: number,   // 'blank' only (ceiling: also 'house98')
      *   file?: string | object,     // 'file': a project file (or an old design file)
-     *   design?: object, open?: boolean }} opts
+     *   design?: object, open?: boolean,
+     *   underlay?: object }} opts   // tracing underlay (store.underlay shape), e.g. the imported sketch
      * @returns {Promise<{ ok: boolean, project?: object, reason?: string }>}
      */
     async create(opts = {}) {
@@ -260,6 +265,7 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
       }
       design = { ...design, project: { ...(design.project || {}), name } };
       const rec = { id: newId(), name, createdAt: now(), updatedAt: now(), phase, builtin: from === 'house98', basePlan, design };
+      if (opts.underlay && typeof opts.underlay.image === 'string') rec.underlay = { opacity: 0.5, visible: true, ...opts.underlay };
       try { await put(rec); } catch (e) { if (opts.open === false) return { ok: false, reason: 'The project could not be stored in this browser.' }; }
       if (opts.open !== false) { await flush(); await openRecord(rec); }
       emit('list');
@@ -353,7 +359,7 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
   async function openRecord(rec, { restoreUI = true } = {}) {
     const design = rec.design && Array.isArray(rec.design.items) ? rec.design : { items: [] };
     current = summaryOf(rec);
-    store.openProject({ basePlan: rec.basePlan, phase: rec.phase === 'draft' ? 'draft' : 'fixed', design: restoreUI ? design : { ...design, ui: undefined }, name: rec.name });
+    store.openProject({ basePlan: rec.basePlan, phase: rec.phase === 'draft' ? 'draft' : 'fixed', design: restoreUI ? design : { ...design, ui: undefined }, name: rec.name, underlay: rec.underlay || null });
     writeCurrent(rec.id);
     emit('open', { project: api.current() });
   }

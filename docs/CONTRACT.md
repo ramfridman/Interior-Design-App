@@ -1045,3 +1045,53 @@ thickness; ≥ the minimum wall thickness at that scale → a solid wall), then 
   openings are rarely right (no arcs in raster). Deskew estimate on a 3° tilted page: 3.0°.
 * Cost (Node, lot 98, 51 k paths): readPdf ≈ 0.7 s, scale ≈ 1 s (geometry path), walls + openings ≈ 0.2 s;
   `analysePrims` is synchronous plain-data work — run it in a worker.
+
+## 12. Sketch import UI and tracing underlay (`src/ui/import/`, `src/view2d/underlay.js`) — UI on top of § 10 / § 11
+
+**Entry points:** project menu (top-bar switcher and File → "Projects…") → "Import a sketch…"; New project dialog →
+start from "From a sketch (PDF or image)" → "Choose the drawing…". `openSketchImport(app, { name? })` in
+`src/ui/projects.js` loads `src/ui/import/wizard.js` on first use (the engine and pdf.js stay out of the start-up).
+
+**The dialog** (`openImportWizard`, one large dialog, single column on phones; nothing is created before step 5):
+1. *Drawing* — `<input type=file>` or drag-and-drop onto the dialog; PDF / PNG / JPG, read locally (`source.js`:
+   magic-number sniffing, size limits, plain-language errors for encrypted / damaged / unsupported files). Multi-page
+   PDF → page thumbnails. A vector page is read (`readPdf`) and analysed once without a scale (scale candidates,
+   `drawings`); several drawings → outlined on the page, the user clicks one. A page that is a scanned picture is
+   rendered to pixels and handled like a photo.
+2. *Scale* — must be confirmed: "Measure a known length" (two clicks, loupe ×4, snaps to vector line ends; type the
+   length), the stated scale (`text` / `dimensions` candidate), "1 : N" (PDF at paper size; pictures: + dpi), the
+   `geometry` guess labelled with its confidence in words. Live read-out: house size and a typical door at that scale.
+3. *Orientation* — rotate 0/90/180/270, mirror (`'ns'` / `'ew'`), north (drag the arrow or type degrees →
+   `meta.northAngle`), location and ceiling (`placeFields()` / `ceilingField()` shared with New project).
+4. *Review* — `analysePrims` (vector) / `readImage` (raster) at the confirmed scale and orientation, drawn over the page:
+   exterior / interior walls, doors with swing, windows, passages, `unsupported` pieces dashed amber with the
+   "redraw by hand as straight walls" explanation; counts; engine warnings; page / detection toggles. Raster →
+   "A starting point to trace over" banner. Fewer than 4 raster wall pieces count as nothing found.
+5. *Create* — name → `buildPlan` (warnings listed; errors → "Create anyway" with what was understood) →
+   `projects.create({ name, fromPlan, underlay })` → draft, Structure mode, "what next" card. Nothing found → an
+   empty draft whose lot is the picture's extent, with the underlay, to trace by hand.
+
+Heavy work runs in a module Web Worker (`src/ui/import/worker.js` via `engine-client.js runTask`: one worker per task,
+terminated on Cancel; falls back to the main thread when workers are blocked). pdf.js parsing runs in pdf.js' own worker.
+
+**Underlay** (`store.underlay`, CONTRACT § 10 project record field `underlay`):
+```js
+{ image: 'data:image/webp…' | 'data:image/jpeg…',   // ≤ 2400 px long side; a PDF is re-rendered and cropped to the house + margin
+  width, height,                                      // stored px
+  transform: [a, b, c, d, e, f],                      // stored image px → plan cm (X = a·x + c·y + e, Y = b·x + d·y + f)
+  opacity: 0…1, visible: bool, source: { kind: 'pdf' | 'pdf-scan' | 'image', name, page, lowConfidence } }
+store.setUnderlay(obj | patch | null, { transient?, replace? })   // emits 'underlay' { reason, transient }; autosaves unless transient
+store.openProject({ …, underlay })                                // projects.js passes the record's underlay
+```
+* Not part of `store.serialize()`, the undo history or the undo snapshot; saved on the project record by
+  `projects.save()` (snapshot adds it), so it survives reload, duplicate and export / import of the project file, and
+  works with the in-memory adapter.
+* Drawn by `src/view2d/underlay.js` in `paintUnder` after the room floors and grid, under walls (multiply in light
+  themes, inverted / screen in dark); skipped when `env.exporting` (PNG export), never in 3D or thumbnails.
+* Structure guide card (`underlay-panel.js underlayCard`): show / hide, strength, "Re-align…" (scale from two points +
+  real distance keeping the first point fixed; move by clicking a drawing point then the plan's wall corner; nudge
+  east / south), "Remove sketch".
+
+Tested by `tests/import.ui.test.mjs` (lot-98 PDF through the dialog → walls within 5 cm, 23 openings, 9 rooms, the
+underlay's ink within 3 cm of the page rendered with the engine's own transform, built-in project untouched, reload;
+a PNG rendering; a broken file; a blank picture).

@@ -41,7 +41,7 @@ export function createView2D(container, ctx) {
   container.appendChild(canvas);
 
   const cam = new Camera();
-  const env = { store, plan, catalog, models, pal: null, font: 'sans-serif', ui: store.ui };
+  const env = { store, plan, catalog, models, pal: null, font: 'sans-serif', ui: store.ui, onUnderlayReady: null };
   const listeners = new Map();
   const state = { hoverId: null, gesture: null, placing: null, feedback: null, marquee: null, measures: [], measureDraft: null, spaceDown: false, live: new Set(), struct: null, flash: null };
   const V = { container, canvas, cam, env, state, active: true, selfWrite: false, dpr: 1, renderer: null, snapper: null, theme: null };
@@ -179,6 +179,7 @@ export function createView2D(container, ctx) {
   }
 
   // ───────────── store wiring ─────────────
+  env.onUnderlayReady = () => { if (!destroyed) { V.renderer?.invalidate(); V.invalidate(); } };   // the sketch image finished decoding
   const interaction = attachInteraction(V);
   let planShot = planSnapshot(plan);        // fingerprint of the drawn plan, to find what the next edit touched
   const offs = [
@@ -210,6 +211,7 @@ export function createView2D(container, ctx) {
     }),
     store.on('project', () => { V.renderer.invalidate(); V.invalidate(); }),
     store.on('finishes', () => { V.renderer.invalidate(); V.invalidate(); }),
+    store.on('underlay', () => { V.renderer.invalidate(); V.invalidate(); }),
     store.on('load', () => { interaction.cancel(); state.live.clear(); state.hoverId = null; V.renderer.invalidate(); V.invalidate(); }),
   ];
 

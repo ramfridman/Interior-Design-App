@@ -1,0 +1,182 @@
+/* Sketch import (src/ui/import/): the "Import a sketch" dialog, its drawing viewer, the Structure guide's underlay
+   card and the "what next" card. Colours of the detections come from these tokens (light, then dark). */
+:root {
+  --imp-ext: #1d4e89;     /* exterior walls */
+  --imp-int: #256e43;     /* interior walls */
+  --imp-door: #6a3d9a;    /* doors and their swing */
+  --imp-win: #0f7d8c;     /* windows */
+  --imp-pass: #4b5759;    /* passages, sliding doors */
+  --imp-uns: #c77800;     /* angled / curved pieces the engine did not convert */
+}
+
+/* ── dialog: near full window on desktop, the body scrolls inside ── */
+.dialog.importdlg { max-width: min(1280px, 100%); height: min(880px, 100%); }
+.importdlg .dialog__body { display: flex; flex-direction: column; padding-bottom: var(--s-4); }
+.importdlg .dialog__foot { align-items: center; }
+.importdlg.is-drop { box-shadow: 0 0 0 3px var(--accent), var(--shadow-3); }
+.iwiz { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: var(--s-3); }
+.iwiz__spacer { flex: 1 1 auto; }
+.iwiz__content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: var(--s-3); }
+.iwiz.is-busy .iwiz__content { pointer-events: none; opacity: 0.45; }
+
+/* step indicator */
+.istep { display: flex; gap: var(--s-1); margin: 0; padding: 0; list-style: none; counter-reset: none; }
+.istep__item { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: var(--s-2); padding: 6px var(--s-2) 8px; border-bottom: 2px solid var(--line); color: var(--ink-3); font-size: var(--fs-12); }
+.istep__num { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line-strong); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.istep__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.istep__item.is-done { color: var(--ink-2); border-bottom-color: var(--ink-3); }
+.istep__item.is-done .istep__num { background: var(--sunken); }
+.istep__item.is-current { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+.istep__item.is-current .istep__num { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+.ierror { display: flex; gap: var(--s-2); align-items: flex-start; padding: var(--s-2) var(--s-3); border-radius: var(--r-2); background: var(--fail-soft); color: var(--fail); font-size: var(--fs-13); }
+.ierror[hidden] { display: none; }
+.ierror > .icon { flex: none; margin-top: 2px; }
+
+/* progress over the step, with Cancel */
+.iprogress { position: absolute; inset: 40px 0 0; z-index: 2; display: grid; place-items: center; }
+.iprogress[hidden] { display: none; }
+.iprogress__card { display: flex; flex-direction: column; align-items: center; gap: var(--s-2); width: min(360px, 92%); padding: var(--s-4); border: 1px solid var(--line); border-radius: var(--r-3); background: var(--raised); box-shadow: var(--shadow-2); text-align: center; }
+.iprogress__bar { position: relative; width: 100%; height: 3px; overflow: hidden; border-radius: 2px; background: var(--sunken); }
+.iprogress__bar > span { position: absolute; top: 0; bottom: 0; width: 34%; border-radius: 2px; background: var(--accent); animation: iprogress 1.2s var(--ease) infinite; }
+@keyframes iprogress { from { left: -34%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .iprogress__bar > span { animation: none; left: 0; width: 100%; opacity: 0.5; } }
+.iprogress__text { font-weight: 600; }
+.iprogress__hint { color: var(--ink-3); font-size: var(--fs-12); }
+
+/* step 1: the file */
+.idrop { display: flex; flex-direction: column; align-items: center; gap: var(--s-2); padding: var(--s-5) var(--s-4); border: 1.5px dashed var(--line-strong); border-radius: var(--r-3); background: var(--sunken); text-align: center; }
+.idrop--compact { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; padding: var(--s-2) var(--s-3); text-align: left; column-gap: var(--s-3); }
+.idrop--compact .idrop__icon { display: none; }
+.idrop--compact .idrop__title { font-size: var(--fs-14); }
+.idrop--compact .idrop__text { flex: 1 1 200px; }
+.idrop--compact .filepick { order: 3; }
+.idrop--compact .idrop__private { flex-basis: 100%; }
+.idrop__icon { color: var(--ink-3); }
+.idrop__title { font-size: var(--fs-16); font-weight: 600; overflow-wrap: anywhere; }
+.idrop__text { max-width: 60ch; color: var(--ink-2); font-size: var(--fs-13); }
+.idrop .filepick { margin: 0; display: inline-flex; align-items: center; gap: var(--s-1); cursor: pointer; }
+.idrop__private { display: flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: var(--fs-12); }
+.ipagesbox { display: flex; flex-direction: column; gap: var(--s-2); }
+.ipages { display: flex; gap: var(--s-2); overflow-x: auto; padding-bottom: 4px; }
+.ipages__btn { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: var(--r-2); background: var(--raised); cursor: pointer; }
+.ipages__btn:hover { border-color: var(--line-strong); }
+.ipages__btn.is-on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.ipages__img { display: grid; place-items: center; width: 110px; height: 80px; background: var(--sunken); }
+.ipages__canvas { max-width: 110px; max-height: 80px; box-shadow: var(--shadow-1); }
+.ipages__label { font-size: var(--fs-12); color: var(--ink-2); }
+.idrawings { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.idrawings__btn { width: 100%; padding: 6px var(--s-2); border: 1px solid var(--line); border-radius: var(--r-1); background: var(--raised); text-align: left; cursor: pointer; font-size: var(--fs-13); }
+.idrawings__btn.is-on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+
+/* the viewer beside a side column */
+.isplit { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--s-4); }
+.isplit__main { min-height: 0; display: flex; }
+.isplit__side { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--s-3); padding-right: 2px; }
+.iside__title { font-weight: 600; font-size: var(--fs-14); }
+.iside__text { color: var(--ink-2); font-size: var(--fs-13); }
+.isheet { position: relative; flex: 1 1 auto; min-height: 320px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-2); background: var(--sunken); }
+.isheet__canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.isheet__canvas.is-pick { cursor: crosshair; }
+.isheet__canvas.is-click { cursor: pointer; }
+.isheet__tools { position: absolute; top: var(--s-2); right: var(--s-2); display: flex; gap: 2px; padding: 2px; border-radius: var(--r-2); background: var(--overlay-bg); box-shadow: var(--shadow-1); }
+.isheet__hint { position: absolute; left: 50%; bottom: var(--s-2); transform: translateX(-50%); max-width: calc(100% - 24px); padding: 4px var(--s-3); border-radius: var(--r-2); background: var(--primary); color: var(--primary-ink); font-size: var(--fs-12); pointer-events: none; }
+.isheet__hint[hidden] { display: none; }
+
+/* step 2: scale options */
+.iopts { display: flex; flex-direction: column; gap: var(--s-2); }
+.iopt { display: flex; flex-direction: column; gap: 6px; padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--raised); }
+.iopt.is-on { border-color: var(--accent-line); box-shadow: inset 3px 0 0 var(--accent); }
+.iopt__head { display: flex; align-items: center; gap: var(--s-2); cursor: pointer; }
+.iopt__title { font-weight: 600; font-size: var(--fs-13); }
+.iopt__text { color: var(--ink-2); font-size: var(--fs-12); }
+.iopt__extra, .iopt__rows { display: flex; flex-direction: column; gap: 6px; }
+.iopt__rows .btn { align-self: flex-start; }
+.iopt .field__input:not(.num) { text-align: left; }
+.isanity { padding: var(--s-2) var(--s-3); border-radius: var(--r-2); background: var(--info-soft); font-size: var(--fs-13); }
+.isanity__title { font-weight: 600; }
+.isanity__text { color: var(--ink-2); }
+.isanity__warn { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--warn); font-weight: 600; }
+
+/* step 3: orientation */
+.iorient__page { position: relative; flex: none; height: 100%; width: auto; aspect-ratio: 1; max-width: 100%; margin: 0 auto; border: 1px solid var(--line); border-radius: var(--r-2); background: var(--sunken); overflow: hidden; }
+.isplit--orient .isplit__main { justify-content: center; align-items: stretch; }
+.iorient__img { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); transition: transform var(--t-med) var(--ease); }
+.iorient__img > canvas { display: block; width: 100%; height: auto; box-shadow: var(--shadow-1); background: #fff; }
+.inorth__box { position: absolute; right: var(--s-2); bottom: var(--s-2); display: flex; flex-direction: column; align-items: center; padding: 4px; border-radius: var(--r-3); background: var(--overlay-bg); box-shadow: var(--shadow-1); }
+.inorth { width: 84px; height: 84px; cursor: grab; touch-action: none; }
+.inorth:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 50%; }
+.inorth__ring { fill: var(--raised); stroke: var(--line-strong); stroke-width: 1.5; }
+.inorth__arrow path { fill: var(--accent); }
+.inorth__pin { fill: var(--raised); }
+.inorth__label { font-size: var(--fs-11); color: var(--ink-3); }
+
+/* step 4: review */
+.ilegend { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-13); }
+.ilegend__item { display: flex; align-items: center; gap: var(--s-2); }
+.ilegend__item > b { margin-left: auto; font-variant-numeric: tabular-nums; }
+.ilegend__sw { flex: none; width: 14px; height: 10px; border-radius: 2px; background: var(--sw); }
+.ilegend--ext { --sw: var(--imp-ext); }
+.ilegend--int { --sw: var(--imp-int); }
+.ilegend--door { --sw: var(--imp-door); }
+.ilegend--win { --sw: var(--imp-win); }
+.ilegend--pass { --sw: var(--imp-pass); }
+.ilegend--uns .ilegend__sw { background: transparent; border: 2px dashed var(--imp-uns); }
+.itoggles { display: flex; flex-direction: column; gap: 2px; padding-top: var(--s-2); border-top: 1px solid var(--line); }
+.ibanner { margin-top: 0; }
+.iwarns { display: flex; flex-direction: column; gap: 6px; }
+.iwarns__list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.iwarns__item { display: flex; gap: 6px; font-size: var(--fs-12); color: var(--ink-2); }
+.iwarns__item > .icon { flex: none; margin-top: 1px; }
+.iwarns--warn > .icon { color: var(--imp-uns); }
+.iwarns--info > .icon { color: var(--info); }
+.iwarns--fail > .icon { color: var(--fail); }
+.isplit__side .callout { margin-top: 0; }
+
+/* step 5: create */
+.icreate { max-width: 640px; }
+.icreate__main { gap: var(--s-3); }
+.ifacts { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4); margin: 0; padding: 0; list-style: none; color: var(--ink-2); font-size: var(--fs-13); }
+.ifacts b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.icreate .callout { margin-top: 0; }
+
+/* the New project dialog's three start options wrap on narrow dialogs */
+.newproj .seg { flex-wrap: wrap; }
+
+/* ── Structure guide: underlay card ── */
+.iunder { display: flex; flex-direction: column; gap: var(--s-2); margin-bottom: var(--s-3); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--raised); }
+.iunder[hidden] { display: none; }
+.iunder .phase__title > .icon { color: var(--ink-3); }
+.iunder__row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); font-size: var(--fs-13); }
+.iunder__label { color: var(--ink-2); }
+.iunder .range { flex: 1 1 auto; max-width: 160px; }
+.iunder__btns { display: flex; flex-wrap: wrap; gap: var(--s-1); }
+
+/* ── "what next" card over the plan after an import ── */
+.inext { position: fixed; z-index: 4; left: calc(var(--s-4) + env(safe-area-inset-left, 0px)); bottom: calc(var(--status-h, 28px) + var(--s-4)); width: min(360px, calc(100% - 32px));
+  display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-3) var(--s-3) var(--s-3) var(--s-4); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: var(--r-3); background: var(--raised); box-shadow: var(--shadow-2); animation: dialog-in var(--t-med) var(--ease); }
+.inext__head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.inext__title { font-weight: 600; font-size: var(--fs-16); }
+.inext__list { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; color: var(--ink-2); font-size: var(--fs-13); }
+.inext__hint { color: var(--ink-3); font-size: var(--fs-12); }
+.inext .btn { align-self: flex-start; }
+
+/* ── phones: one column, the viewer a fixed height, the dialog body scrolls ── */
+@media (max-width: 699px) {
+  .dialog.importdlg { height: 100%; }
+  .iwiz__content { flex: none; }
+  .isplit { display: flex; flex-direction: column; }
+  .isplit__main { flex: none; height: 56vh; min-height: 280px; }
+  .isplit--orient .isplit__main { height: auto; }
+  .iorient__page { width: 100%; height: auto; }
+  .isplit__side { overflow: visible; }
+  .istep__label { display: none; }
+  .istep__item.is-current { flex: 4 1 0; }
+  .istep__item.is-current .istep__label { display: inline; }
+  .inext { left: 50%; transform: translateX(-50%); bottom: calc(52px + var(--s-3) + env(safe-area-inset-bottom, 0px)); }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --imp-ext: #8dbbee; --imp-int: #7fcf9b; --imp-door: #c9a2f0; --imp-win: #6fd0dc; --imp-pass: #b6c0c0; --imp-uns: #f0b04a; }
+}
+:root[data-theme="dark"] { --imp-ext: #8dbbee; --imp-int: #7fcf9b; --imp-door: #c9a2f0; --imp-win: #6fd0dc; --imp-pass: #b6c0c0; --imp-uns: #f0b04a; }
