@@ -55,8 +55,8 @@ write('duplex-sheet-2018.dwg', docOf(floorsDxf(duplexSheet()).bytes()), 'AC1032'
 write('duplex-ground-2013.dwg', docOf(floorsDxf([duplexFloor(0)]).bytes()), 'AC1027');
 write('duplex-first-2013.dwg', docOf(floorsDxf([mapFloor(duplexFloor(1), ([x, y]) => [800 - y, x])]).bytes()), 'AC1027');
 
-// a large drawing (R2000, stored uncompressed by the format): the house plus ~6 MB of LINEs on a furniture layer.
-// Committed gzipped (the test unpacks it in memory).
+// a large drawing (R2007; acad-ts stores its pages uncompressed): the house plus enough LINEs on a furniture layer for
+// a 5.5 MB file. Committed gzipped (the test unpacks it in memory).
 {
   const doc = docOf(houseDxf({ unit: 1, insunits: 5 }).bytes());
   const furn = doc.layers.get('I-FURN');
@@ -67,14 +67,14 @@ write('duplex-first-2013.dwg', docOf(floorsDxf([mapFloor(duplexFloor(1), ([x, y]
       doc.modelSpace.entities.add(l);
     }
   };
-  doc.header.version = A.ACadVersion.AC1015;
+  doc.header.version = A.ACadVersion.AC1021;
   const base = A.DwgWriter.writeToBuffer(doc).length;
   add(0, 10000);
   const per = (A.DwgWriter.writeToBuffer(doc).length - base) / 10000;
-  const n = 10000 + Math.ceil((6.2 * 1048576 - base) / per) - 10000;
+  const n = 10000 + Math.ceil((5.5 * 1048576 - base) / per) - 10000;
   add(10000, n - 10000);
   const bytes = A.DwgWriter.writeToBuffer(doc);
-  fs.writeFileSync(path.join(here, 'big-2000.dwg.gz'), zlib.gzipSync(bytes, { level: 9 }));
-  console.log(`big-2000.dwg.gz  AC1015  ${bytes.length} bytes (${n} extra lines), gzipped ${fs.statSync(path.join(here, 'big-2000.dwg.gz')).size}`);
+  fs.writeFileSync(path.join(here, 'big-2007.dwg.gz'), zlib.gzipSync(bytes, { level: 9 }));
+  console.log(`big-2007.dwg.gz  AC1021  ${bytes.length} bytes (${n} extra lines), gzipped ${fs.statSync(path.join(here, 'big-2007.dwg.gz')).size}`);
 }
 if (notes.length) console.log(notes.slice(0, 20).join('\n'));
