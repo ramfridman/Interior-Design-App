@@ -17,6 +17,7 @@ import { createClient } from './client.js';
 export async function detectBackend({ timeout = 1500 } = {}) {
   try {
     if (typeof location === 'undefined' || !/^https?:$/.test(location.protocol)) return null;
+    if (typeof window !== 'undefined' && window.APP_ENV && window.APP_ENV.sandboxed) return null;   // packaged preview: never has a backend
     if (typeof window !== 'undefined' && window.top !== window.self) return null;      // embedded preview
     if (typeof fetch !== 'function' || typeof WebSocket !== 'function') return null;
   } catch (e) { return null; }
