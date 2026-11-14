@@ -22,7 +22,8 @@ import { normalise } from './normalise.js';
 /**
  * Whole pipeline for a vector PDF page: read → scale → walls → openings → normalise.
  * @param bytes ArrayBuffer | Uint8Array
- * @param opts { page, scale: { cmPerUnit } | { points, cm } | { ratio }, walls: {…detectWalls options}, rotate, mirror }
+ * @param opts { page, scale: { cmPerUnit } | { points, cm } | { ratio }, walls: {…detectWalls options}, rotate, mirror,
+ *               slants (default false: angled / curved wall pieces are only reported in `unsupported`) }
  */
 export async function importPdfSketch(bytes, opts = {}) {
   const prims = await readPdf(bytes, { page: opts.page || 1 });
@@ -41,7 +42,8 @@ export function analysePrims(prims, opts = {}) {
   if (sc.best.source === 'geometry') warnings.push({ code: 'scale-guessed', text: `Scale ${sc.best.label} was inferred from the drawing's geometry (no readable scale text); confirm it or measure a known distance.`, where: null });
   const big = (prims.images || []).find((im) => im.w * im.h > 0.5 * prims.pageBox.w * prims.pageBox.h);
   if (big && prims.paths.length < 200) warnings.push({ code: 'raster-page', text: 'This page is mostly a scanned image; use the image tracing path (readImage) instead.', where: null });
-  const walls = detectWalls(prims, sc.best, opts.walls || {});
+  // slants: true converts angled / curved wall pieces into `slants` (+ openings in them); default false = orthogonal only
+  const walls = detectWalls(prims, sc.best, opts.slants ? { ...(opts.walls || {}), slants: true } : opts.walls || {});
   const openings = detectOpenings(prims, walls, sc.best, opts.openings || {});
   const out = normalise({ walls, openings, scale: sc.best, pageBox: prims.pageBox }, { rotate: opts.rotate || 0, mirror: opts.mirror || false });
   out.warnings.unshift(...warnings);

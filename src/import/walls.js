@@ -14,6 +14,8 @@
  *      (default 5 cm) relative to the house's north-west corner;
  *   5. pieces thicker than the thickness window are reported and left out (furniture, columns, leaks);
  *      wall-pen lines that are not orthogonal, or curved, are reported as unsupported pieces — never bent;
+ *      with the `slants: true` option they are paired into angled walls / chains first (slants.js: before step 3's
+ *      grid the orthogonal outlines ending on such a wall are closed without it) and only unpaired lines are reported;
  *   6. exterior / interior: the outside is flood-filled from the border with every opening gap closed; a wall that
  *      faces the outside along at least half of one side is exterior.
  */
@@ -92,7 +94,8 @@ function wallFills(prims, toFrame, o) {
 /**
  * @param prims  readPdf() output (or readImage().segmentsPrims)
  * @param scale  { cmPerUnit } (from detectScale or the user)
- * @param options { snap, minThickness, maxThickness, pens: [penKey…] (override), angle (deg, override), maxOpening }
+ * @param options { snap, minThickness, maxThickness, pens: [penKey…] (override), angle (deg, override), maxOpening,
+ *                  slants (default false; true adds `slants`, `slantOpenings`, `chains` in the frame) }
  */
 export function detectWalls(prims, scale, options = {}) {
   const o = { ...DEFAULTS, ...options };

@@ -212,7 +212,14 @@ export function analyseDxf(prims, opts = {}) {
   if (out.transform && prims.inserts && prims.inserts.length) {
     const inv = affInvert(out.transform);
     for (const o of out.openings) {
-      const c = [[o.x, o.y], [o.x + o.w, o.y + o.h]].map(([x, y]) => affApply(inv, x, y));
+      let box = o;
+      if (o.axis === 'a') {   // opening in a slant (slants option): a square of its width around its centre
+        const s = (out.slants || []).find((q) => q.id === o.wall);
+        if (!s) continue;
+        const L = Math.hypot(s.x2 - s.x1, s.y2 - s.y1) || 1, cx = s.x1 + (s.x2 - s.x1) * o.at / L, cy = s.y1 + (s.y2 - s.y1) * o.at / L;
+        box = { x: cx - o.width / 2, y: cy - o.width / 2, w: o.width, h: o.width };
+      }
+      const c = [[box.x, box.y], [box.x + box.w, box.y + box.h]].map(([x, y]) => affApply(inv, x, y));
       const bx0 = Math.min(c[0][0], c[1][0]), bx1 = Math.max(c[0][0], c[1][0]), by0 = Math.min(c[0][1], c[1][1]), by1 = Math.max(c[0][1], c[1][1]);
       const ov = (q) => Math.max(0, Math.min(bx1, q.bbox.x + q.bbox.w + 1) - Math.max(bx0, q.bbox.x - 1)) * Math.max(0, Math.min(by1, q.bbox.y + q.bbox.h + 1) - Math.max(by0, q.bbox.y - 1));
       let n = null, best = 0;

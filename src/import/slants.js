@@ -68,24 +68,36 @@ function mergeLines(lines, tol, gapTol) {
 /** Bands from pairs of parallel lines. */
 function pairLines(lines, o) {
   const minT = o.minThickness - 0.5, maxT = o.maxThickness + 0.5, tol = o.mergeTol;
-  const L = lines.slice().sort((a, b) => a.th - b.th);
+  const par = SLANT_TOL.parallelDeg * DEG;
   const at = (Q, f) => { const [s0] = proj(f, ...unproj(Q, Q.s0, Q.k)), [s1, k] = proj(f, ...unproj(Q, Q.s1, Q.k)); return { s0: Math.min(s0, s1), s1: Math.max(s0, s1), k }; };
+  // clusters of near-parallel lines (chained by ≤ 1°), each scanned in order of offset: only lines within a wall
+  // thickness of each other are compared (dense parallel sets such as exploded hatches stay cheap)
+  const byTh = lines.slice().sort((a, b) => a.th - b.th), clusters = [];
+  for (const Q of byTh) { const c = clusters[clusters.length - 1]; if (c && Q.th - c[c.length - 1].th <= par) c.push(Q); else clusters.push([Q]); }
   const cands = [];
-  for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length && L[j].th - L[i].th <= SLANT_TOL.parallelDeg * DEG; j++) {
-    const A = L[i], B = L[j];
-    const f = lineFrame((A.th * A.len + B.th * B.len) / (A.len + B.len));
-    const a = at(A, f), b = at(B, f), d = Math.abs(b.k - a.k);
-    if (d < minT || d > maxT) continue;
-    const ov = Math.min(a.s1, b.s1) - Math.max(a.s0, b.s0);
-    if (ov < SLANT_TOL.overlap * Math.min(A.len, B.len)) continue;
-    const lo = Math.min(a.k, b.k), hi = Math.max(a.k, b.k), o0 = Math.max(a.s0, b.s0), o1 = Math.min(a.s1, b.s1);
-    let between = false;
-    for (const M of L) {
-      if (M === A || M === B || thDiff(M.th, f.th) > SLANT_TOL.parallelDeg * DEG) continue;
-      const m = at(M, f);
-      if (m.k > lo + tol && m.k < hi - tol && Math.min(m.s1, o1) - Math.max(m.s0, o0) > 0.5 * ov) { between = true; break; }
+  for (const C of clusters) {
+    const fc = lineFrame(C.reduce((t, Q) => t + Q.th * Q.len, 0) / C.reduce((t, Q) => t + Q.len, 0));
+    const maxLen = Math.max(...C.map((Q) => Q.len));
+    const L = C.map((Q) => ({ Q, kc: at(Q, fc).k })).sort((p, q) => p.kc - q.kc);
+    const reach = maxT + 0.02 * maxLen + tol;
+    for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length && L[j].kc - L[i].kc <= reach; j++) {
+      const A = L[i].Q, B = L[j].Q;
+      if (thDiff(A.th, B.th) > par) continue;
+      const f = lineFrame((A.th * A.len + B.th * B.len) / (A.len + B.len));
+      const a = at(A, f), b = at(B, f), d = Math.abs(b.k - a.k);
+      if (d < minT || d > maxT) continue;
+      const ov = Math.min(a.s1, b.s1) - Math.max(a.s0, b.s0);
+      if (ov < SLANT_TOL.overlap * Math.min(A.len, B.len)) continue;
+      const lo = Math.min(a.k, b.k), hi = Math.max(a.k, b.k), o0 = Math.max(a.s0, b.s0), o1 = Math.min(a.s1, b.s1);
+      let between = false;
+      for (let m = Math.max(0, i - 2); m <= Math.min(L.length - 1, j + 2) && !between; m++) {
+        const M = L[m].Q;
+        if (M === A || M === B || thDiff(M.th, f.th) > par) continue;
+        const q = at(M, f);
+        if (q.k > lo + tol && q.k < hi - tol && Math.min(q.s1, o1) - Math.max(q.s0, o0) > 0.5 * ov) between = true;
+      }
+      if (!between) cands.push({ A, B, a, b, d, f });
     }
-    if (!between) cands.push({ A, B, a, b, d, f });
   }
   // a face has wall on one side only: a line pairs on one side (the nearer partner wins where ranges overlap)
   cands.sort((p, q) => p.d - q.d);
@@ -98,9 +110,13 @@ function pairLines(lines, o) {
     if (!acc.has(c.A)) acc.set(c.A, []); if (!acc.has(c.B)) acc.set(c.B, []);
     acc.get(c.A).push({ side: sideA, s0: c.a.s0, s1: c.a.s1 }); acc.get(c.B).push({ side: sideB, s0: c.b.s0, s1: c.b.s1 });
     const endTol = 1.5 * c.d + 2;
-    const s0 = Math.abs(c.a.s0 - c.b.s0) <= endTol ? (c.a.s0 + c.b.s0) / 2 : Math.max(c.a.s0, c.b.s0);
-    const s1 = Math.abs(c.a.s1 - c.b.s1) <= endTol ? (c.a.s1 + c.b.s1) / 2 : Math.min(c.a.s1, c.b.s1);
-    bands.push(lineBand(c.f, (c.a.k + c.b.k) / 2, s0, s1, c.d, 'lines'));
+    // an end where both faces stop close together (they end on another wall's faces, or at a cap): the centre end is
+    // their mean, and the band reaches as far as the longer face; else the band stops where the overlap does
+    const m0 = Math.abs(c.a.s0 - c.b.s0) <= endTol, m1 = Math.abs(c.a.s1 - c.b.s1) <= endTol;
+    const s0 = m0 ? (c.a.s0 + c.b.s0) / 2 : Math.max(c.a.s0, c.b.s0), s1 = m1 ? (c.a.s1 + c.b.s1) / 2 : Math.min(c.a.s1, c.b.s1);
+    const b = lineBand(c.f, (c.a.k + c.b.k) / 2, s0, s1, c.d, 'lines');
+    b.e0 = m0 ? Math.min(c.a.s0, c.b.s0) : s0; b.e1 = m1 ? Math.max(c.a.s1, c.b.s1) : s1;
+    bands.push(b);
   }
   return bands;
 }
@@ -244,7 +260,7 @@ function pairOffsetCurves(curves, used, o) {
 export function touch(b, x, y, e) {
   if (b.type === 'line') {
     const s = x * b.ux + y * b.uy, k = x * b.nx + y * b.ny;
-    return Math.abs(k - b.kc) <= b.hw + e && s >= b.s0 - e && s <= b.s1 + e;
+    return Math.abs(k - b.kc) <= b.hw + e && s >= Math.min(b.s0, b.e0 ?? b.s0) - e && s <= Math.max(b.s1, b.e1 ?? b.s1) + e;
   }
   if (b.type === 'arc') {
     const dx = x - b.cx, dy = y - b.cy, d = Math.abs(Math.hypot(dx, dy) - b.rc);

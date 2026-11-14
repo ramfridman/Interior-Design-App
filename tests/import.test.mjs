@@ -188,6 +188,143 @@ function arcPts(cx, cy, r, a0, a1, n = 12) { const o = []; for (let i = 0; i <= 
   console.log(`== synthetic angled wall: warnings ${ra.warnings.map((x) => x.code).join(', ')}; unsupported ${JSON.stringify(ra.unsupported.map((u) => [u.type, u.len]))}`);
   check(!!warn && ra.unsupported.length >= 1, 'angled wall reported');
   check(compareWalls(ra.walls, walls).within === walls.length, 'angled wall: the orthogonal walls are unchanged');
+
+  // ---------- 4b. the same with the slants option: converted, the rest unchanged ----------
+  const rs = analysePrims(angled, { slants: true });
+  console.log(`== synthetic angled wall, slants option: slants ${JSON.stringify(rs.slants)}; unsupported ${rs.unsupported.length}; warnings ${rs.warnings.map((x) => x.code).join(', ') || 'none'}`);
+  const s45 = rs.slants && rs.slants[0];
+  check(rs.slants && rs.slants.length === 1 && s45.t === 20 && rs.unsupported.length === 0 && !rs.warnings.some((x) => x.code === 'angled-wall'), 'slants option: the 45° wall pair becomes one slant of 20 cm');
+  // its centre line: 10 cm off the drawn line from the house's south-east corner, 300 cm long
+  const dcl = (x, y) => Math.abs((x - 800) - (y - 500) + 10 * Math.SQRT2) / Math.SQRT2;
+  // (its house end stops 7 cm short of the corner's faces and is extended to them: ≤ 1.5 t)
+  const len45 = s45 && Math.hypot(s45.x2 - s45.x1, s45.y2 - s45.y1);
+  check(s45 && dcl(s45.x1, s45.y1) <= 0.2 && dcl(s45.x2, s45.y2) <= 0.2 && len45 >= 300 && len45 <= 330 && Math.abs(s45.y1 - 500) <= 0.1, `slants option: 45° centre line exact, house end extended to the wall face (${s45 && [s45.x1, s45.y1, s45.x2, s45.y2]})`);
+  check(JSON.stringify(rs.walls) === JSON.stringify(ra.walls) && JSON.stringify(rs.openings) === JSON.stringify(ra.openings), 'slants option: the orthogonal walls and openings are byte-identical to the default run');
+  check(!('slants' in ra), 'default run: no `slants` key');
+}
+
+// ---------- 6. angled and curved walls with the slants option (stage A6): the "Wedge" and a quarter circle ----------
+{
+  const { WEDGE, wedgeDrawing, pdfPrims, quarterOutline, QUARTER, wedgeSolids, unionOutline, slantLen } = await import('./import-slant-fixtures.mjs');
+  const d = wedgeDrawing();
+  const prims = pdfPrims({ lines: d.lines, symLines: [...d.winLines, ...d.doorLines], symArcs: d.arcs });
+  const res = analysePrims(prims, { slants: true });
+  console.log(`\n== Wedge (PDF-like), slants option: ${res.walls.length} rects, slants ${JSON.stringify(res.slants)}`);
+  console.log(`   openings ${JSON.stringify(res.openings.map((o) => (o.axis === 'a' ? [o.kind, o.wall, o.at, o.width, o.hinge, o.swing, o.outside] : [o.kind, o.x, o.y, o.w, o.h, o.hinge, o.swing, o.outside])))}; warnings ${res.warnings.map((x) => x.code).join(', ') || 'none'}`);
+  wedgeChecks('Wedge PDF', res, WEDGE, slantLen);
+
+  // the orthogonal part equals the orthogonal-only drawing of the same rectangles (without the slants)
+  const orthoOnly = (() => {
+    const polys = wedgeSolids().slice(0, 6);
+    return pdfPrims({ lines: unionOutline(polys), symLines: d.doorLines.slice(2), symArcs: d.arcs.slice(1) });
+  })();
+  const ro = analysePrims(orthoOnly);
+  const geo = (ws) => JSON.stringify(ws.map((w) => [w.x, w.y, w.w, w.h]));
+  const ogeo = (os) => JSON.stringify(os.filter((o) => o.axis !== 'a').map((o) => [o.kind, o.x, o.y, o.w, o.h, o.hinge, o.swing]));
+  check(geo(res.walls) === geo(ro.walls) && ogeo(res.openings) === ogeo(ro.openings), `Wedge: rectangles and their openings identical to the orthogonal-only drawing (${geo(res.walls)})`);
+
+  // rotation and mirrors: the same detection through normalise
+  const sc = { cmPerUnit: 50 * PT_CM };
+  const w = detectWalls(prims, sc, { slants: true }), o = detectOpenings(prims, w, sc);
+  const r0 = normalise({ walls: w, openings: o });
+  check(JSON.stringify(r0.slants) === JSON.stringify(res.slants) && JSON.stringify(r0.openings) === JSON.stringify(res.openings), 'Wedge: detectWalls / detectOpenings / normalise give the analysePrims result');
+  const B = r0.stats.bounds;
+  for (const [opt, map] of [[{ rotate: 90 }, (x, y) => [B.h - y, x]], [{ mirror: 'ns' }, (x, y) => [x, B.h - y]], [{ mirror: 'ew' }, (x, y) => [B.w - x, y]], [{ rotate: 270, mirror: 'ew' }, (x, y) => [y, x]]]) {
+    const r = normalise({ walls: w, openings: o }, opt);
+    const name = JSON.stringify(opt);
+    const okS = r0.slants.every((s) => { const a = map(s.x1, s.y1), b = map(s.x2, s.y2); return r.slants.some((q) => q.t === s.t && q.kind === s.kind && ((Math.hypot(q.x1 - a[0], q.y1 - a[1]) <= 0.15 && Math.hypot(q.x2 - b[0], q.y2 - b[1]) <= 0.15) || (Math.hypot(q.x1 - b[0], q.y1 - b[1]) <= 0.15 && Math.hypot(q.x2 - a[0], q.y2 - a[1]) <= 0.15))); });
+    const g0 = r0.openings.filter((x) => x.axis === 'a').map((x) => opGeom(x, r0.slants)), g1 = r.openings.filter((x) => x.axis === 'a').map((x) => opGeom(x, r.slants));
+    const mp = (p) => p && map(p[0], p[1]);
+    const same = (p, q) => (!p && !q) || (p && q && Math.hypot(p[0] - q[0], p[1] - q[1]) <= 0.3);
+    const okO = g0.length === g1.length && g0.every((a) => g1.some((b) => b.kind === a.kind && Math.abs(b.width - a.width) <= 0.1 && same(mp(a.c), b.c) && same(mp(a.hingePt), b.hingePt) && same(mp(a.swingPt), b.swingPt) && same(mp(a.outPt), b.outPt)));
+    // (rectangles are re-cut top-down in the output orientation, so a junction square can change hands: ≤ 2 × 20 × 10 cm²)
+    const area = (ws, kind) => ws.filter((x) => !kind || x.kind === kind).reduce((t, x) => t + x.w * x.h, 0);
+    const okW = area(r.walls) === area(r0.walls) && Math.abs(area(r.walls, 'interior') - area(r0.walls, 'interior')) <= 400;
+    const canon = r.slants.every((s) => s.y1 < s.y2 || (s.y1 === s.y2 && s.x1 <= s.x2));
+    console.log(`   ${name}: slants ${JSON.stringify(r.slants.map((s) => [s.id, s.x1, s.y1, s.x2, s.y2]))}; slant openings ${JSON.stringify(r.openings.filter((x) => x.axis === 'a').map((x) => [x.kind, x.wall, x.at, x.hinge, x.swing, x.outside]))}`);
+    check(okS && okO && okW && canon, `Wedge ${name}: centre lines, thickness, kinds, opening positions, hinge / swing / outside sides and wall areas consistent`);
+  }
+
+  // filled (poché) walls: thin filled parallelograms are slants too
+  const fillPrims = { pageBox: prims.pageBox, texts: prims.texts, images: [], paths: [...prims.paths.filter((p) => p.lw < 0.5),
+    ...wedgeSolids().map((poly) => { const k = 1 / (50 * PT_CM), pts = []; for (const [x, y] of [...poly, poly[0]]) pts.push(60 + x * k, 80 + y * k); return { pts, closed: true, stroke: false, fill: true, evenOdd: false, lw: 0, color: '#000000', fillColor: '#404040', dash: [], curved: false }; })] };
+  const rf = analysePrims(fillPrims, { slants: true });
+  console.log(`== Wedge as filled polygons, slants option: ${rf.walls.length} rects, slants ${JSON.stringify(rf.slants)}; openings ${rf.openings.length}`);
+  check(rf.slants && rf.slants.length === 2 && WEDGE.slants.every((s) => rf.slants.some((q) => q.t === s.t && q.kind === s.kind && distLine(q.x1, q.y1, s) <= 2 && distLine(q.x2, q.y2, s) <= 2)) &&
+    rf.openings.some((x) => x.axis === 'a' && x.kind === 'window') && rf.openings.some((x) => x.axis === 'a' && x.kind === 'door'), 'filled angled wall bands → slants (window and door found in them)');
+
+  // a quarter-circle wall (Béziers flattened as in a PDF) → a chain of slants
+  const q = quarterOutline();
+  const rq = analysePrims(pdfPrims({ lines: q.lines, wallArcs: q.arcs }), { slants: true });
+  const dev = Math.max(...(rq.slants || []).map((s) => { let m = 0; for (let i = 0; i <= 20; i++) { const x = s.x1 + (s.x2 - s.x1) * i / 20, y = s.y1 + (s.y2 - s.y1) * i / 20; m = Math.max(m, Math.abs(Math.hypot(x - QUARTER.cx, y - QUARTER.cy) - QUARTER.r)); } return m; }));
+  const chords = (rq.slants || []).map((s) => Math.hypot(s.x2 - s.x1, s.y2 - s.y1));
+  const info = rq.warnings.find((x) => x.code === 'curved-wall-pieces');
+  console.log(`== quarter circle r 300 (PDF Béziers): ${rq.slants && rq.slants.length} pieces, chords ${Math.min(...chords).toFixed(1)}–${Math.max(...chords).toFixed(1)} cm, max deviation from the true centre circle ${dev.toFixed(2)} cm (stats ${rq.stats.curveMaxDev}); "${info && info.text}"`);
+  check(rq.slants && rq.slants.length >= 3 && rq.slants.every((s) => s.chain === 'c1' && s.t === 20 && s.kind === 'exterior') && dev <= 2 && Math.min(...chords) >= 30, 'quarter-circle wall → one chain of slants, max deviation ≤ 2 cm, chords ≥ 30 cm, ≥ 3 pieces per 90°');
+  check(info && info.severity === 'info' && rq.stats.curveMaxDev <= 2 && rq.unsupported.length === 0, 'curved wall: info warning with the tolerance, deviation in stats, nothing left unsupported');
+  check(rq.walls.length === 4 && rq.walls.reduce((t, x) => t + x.w * x.h, 0) === QUARTER.rects.reduce((t, x) => t + x.w * x.h, 0), 'quarter circle: the four orthogonal walls exact');
+
+  // a wall 0.3° off the axis is an ordinary rectangle; an unpaired angled wall line stays unsupported
+  const S = 50, k = 1 / (S * PT_CM), P = (x, y) => [60 + x * k, 80 + y * k];
+  // a 600 × 420 box of 20 cm walls; a 10 cm partition from the north to the south wall, drawn 0.3° off the vertical
+  // (its faces shift 2 cm over 380 cm)
+  const L = (a, b, c, e) => pen([...P(a, b), ...P(c, e)], 0.7);
+  const box = [L(0, 0, 600, 0), L(600, 0, 600, 420), L(600, 420, 0, 420), L(0, 420, 0, 0), L(20, 20, 20, 400), L(580, 20, 580, 400)];
+  const tilted = { pageBox: { w: 842, h: 595 }, texts: [{ str: 'SCALE 1:50', x: 600, y: 560, w: 60, h: 8, angle: 0 }], images: [],
+    paths: [...box, L(20, 20, 301, 20), L(311, 20, 580, 20), L(20, 400, 299, 400), L(309, 400, 580, 400), L(301, 20, 299, 400), L(311, 20, 309, 400)] };
+  const rt = analysePrims(tilted, { slants: true });
+  console.log(`== 0.3° partition, slants option: rects ${JSON.stringify(rt.walls.map((x) => [x.x, x.y, x.w, x.h]))}, slants ${JSON.stringify(rt.slants || null)}`);
+  check(!rt.slants && rt.unsupported.length === 0 && rt.walls.some((x) => x.x === 300 && x.w === 10 && x.h >= 370), 'a wall 0.3° off the axis → an ordinary rectangle, not a slant');
+  const lone = { ...tilted, paths: [...box, pen([...P(100, 100), ...P(300, 300)], 0.7)] };
+  const rl = analysePrims(lone, { slants: true });
+  check(!rl.slants && rl.unsupported.length === 1 && rl.warnings.some((x) => x.code === 'angled-wall'), 'an unpaired angled wall line stays unsupported (angled-wall warning)');
+
+}
+
+function distLine(x, y, s) { const L = Math.hypot(s.x2 - s.x1, s.y2 - s.y1); return Math.abs((s.x2 - s.x1) * (s.y1 - y) - (s.x1 - x) * (s.y2 - s.y1)) / L; }
+/** Geometry of an opening in a slant (plan cm): centre, hinge jamb point, a point on the swing side and on the outside. */
+function opGeom(op, slants) {
+  const s = slants.find((q) => q.id === op.wall), L = Math.hypot(s.x2 - s.x1, s.y2 - s.y1), ux = (s.x2 - s.x1) / L, uy = (s.y2 - s.y1) / L, nx = -uy, ny = ux;
+  const c = [s.x1 + ux * op.at, s.y1 + uy * op.at];
+  const side = (lr, d) => (lr ? [c[0] + (lr === 'r' ? 1 : -1) * nx * d, c[1] + (lr === 'r' ? 1 : -1) * ny * d] : null);
+  const hingePt = op.hinge ? [c[0] + (op.hinge === 'a' ? -1 : 1) * ux * op.width / 2, c[1] + (op.hinge === 'a' ? -1 : 1) * uy * op.width / 2] : null;
+  return { kind: op.kind, width: op.width, c, hingePt, swingPt: side(op.swing, 40), outPt: side(op.outside, 40) };
+}
+/** The Wedge expectations (design § 4): slants within 2 cm, thickness exact, kinds; openings in the slants. */
+function wedgeChecks(name, res, WEDGE, slantLen) {
+  const found = res.slants || [];
+  const match = WEDGE.slants.map((s) => found.find((q) => q.t === s.t && distLine(q.x1, q.y1, s) <= 2 && distLine(q.x2, q.y2, s) <= 2));
+  check(found.length === 2 && match.every(Boolean), `${name}: both slants found, centre lines within 2 cm, thickness exact`);
+  check(match.every((q, i) => q && q.kind === WEDGE.slants[i].kind), `${name}: kinds (s01 exterior, s02 interior)`);
+  // each found slant spans the design's free length (its ends on the faces of the walls it meets)
+  const span = (q, s) => { const L = slantLen(s), ux = (s.x2 - s.x1) / L, uy = (s.y2 - s.y1) / L, a = (q.x1 - s.x1) * ux + (q.y1 - s.y1) * uy, b = (q.x2 - s.x1) * ux + (q.y2 - s.y1) * uy; return [Math.min(a, b), Math.max(a, b)]; };
+  const [a1, b1] = match[0] ? span(match[0], WEDGE.slants[0]) : [NaN, NaN], [a2, b2] = match[1] ? span(match[1], WEDGE.slants[1]) : [NaN, NaN];
+  console.log(`   ${name}: s01 found from ${a1.toFixed(1)} to ${b1.toFixed(1)} cm along the design centre line (design 0–${slantLen(WEDGE.slants[0]).toFixed(1)}); s02 from ${a2.toFixed(1)} to ${b2.toFixed(1)} (design 0–${slantLen(WEDGE.slants[1]).toFixed(1)})`);
+  check(a1 >= 0 && a1 <= 15 && b1 >= slantLen(WEDGE.slants[0]) - 15 && b1 <= slantLen(WEDGE.slants[0]) && a2 >= -10 && a2 <= 0 && b2 >= slantLen(WEDGE.slants[1]) && b2 <= slantLen(WEDGE.slants[1]) + 10, `${name}: slant ends on the faces of the walls they meet`);
+  const sop = res.openings.filter((o) => o.axis === 'a');
+  const win = sop.find((o) => match[0] && o.wall === match[0].id), door = sop.find((o) => match[1] && o.wall === match[1].id);
+  const geoOf = (o, q) => opGeom(o, [q]);
+  // window: centre at half of s01's design length, 120 wide, outside to the east
+  const s1 = WEDGE.slants[0], L1 = slantLen(s1), wc = [s1.x1 + (s1.x2 - s1.x1) / 2, s1.y1 + (s1.y2 - s1.y1) / 2];
+  const wg = win && geoOf(win, match[0]);
+  check(win && win.kind === 'window' && Math.abs(win.width - 120) <= 0.5 && Math.hypot(wg.c[0] - wc[0], wg.c[1] - wc[1]) <= 2 && win.exterior && wg.outPt && wg.outPt[0] > wc[0] && win.sill === 90 && win.assumed.includes('sill'),
+    `${name}: window in s01 (at within 2 cm, 120 wide, outside east: ${win && [win.at, win.width, win.outside]})`);
+  // door: centre at s02's midpoint, 80 wide, hinge at the design's jamb a (nearer (25, 300)), swinging to the north-west
+  const s2 = WEDGE.slants[1], L2 = slantLen(s2), u2 = [(s2.x2 - s2.x1) / L2, (s2.y2 - s2.y1) / L2], dc = [s2.x1 + u2[0] * L2 / 2, s2.y1 + u2[1] * L2 / 2];
+  const hinge = [dc[0] - u2[0] * 40, dc[1] - u2[1] * 40], swingPt = [dc[0] - u2[1] * 40, dc[1] + u2[0] * 40];
+  const dg = door && geoOf(door, match[1]);
+  check(door && door.kind === 'door' && Math.abs(door.width - 80) <= 0.5 && Math.hypot(dg.c[0] - dc[0], dg.c[1] - dc[1]) <= 2 && !door.exterior && door.style === 'interior',
+    `${name}: door in s02 (at within 2 cm, 80 wide, interior: ${door && [door.at, door.width, door.style]})`);
+  check(door && Math.hypot(dg.hingePt[0] - hinge[0], dg.hingePt[1] - hinge[1]) <= 2 && Math.hypot(dg.swingPt[0] - swingPt[0], dg.swingPt[1] - swingPt[1]) <= 2, `${name}: door hinge / swing (${door && [door.hinge, door.swing]})`);
+  // the orthogonal walls: the design's rectangles with the two rect doors cut out (cell union), kinds
+  const want = [{ x: 0, y: 0, w: 1000, h: 20 }, { x: 0, y: 20, w: 20, h: 760 }, { x: 0, y: 780, w: 200, h: 20 }, { x: 290, y: 780, w: 310, h: 20 }, { x: 500, y: 20, w: 10, h: 330 }, { x: 500, y: 430, w: 10, h: 350 }];
+  const cw = compareWalls(res.walls, want, 0);
+  check(cw.symDiffCm2 === 0, `${name}: rectangles = the design's (wall area identical, symmetric difference ${cw.symDiffCm2} cm²)`);
+  check(res.walls.every((x) => (x.x >= 500 && x.x + x.w <= 510 ? x.kind === 'interior' : x.kind === 'exterior')), `${name}: rect kinds (partition interior, the rest exterior)`);
+  const pd = res.openings.find((o) => o.axis === 'v'), ed = res.openings.find((o) => o.axis === 'h');
+  check(pd && pd.kind === 'door' && pd.y === 350 && pd.h === 80 && pd.hinge === 'n' && pd.swing === 'e' && !pd.exterior && ed && ed.kind === 'door' && ed.x === 200 && ed.w === 90 && ed.exterior && ed.outside === 's',
+    `${name}: partition door interior, entry door exterior (the slant closes the outline)`);
+  check(res.unsupported.length === 0 && !res.warnings.some((x) => /angled-wall|curved-wall$|pair-fill|open-outline/.test(x.code)), `${name}: nothing unsupported, outlines closed (warnings ${res.warnings.map((x) => x.code).join(', ') || 'none'})`);
 }
 
 // ---------- 5. raster: House 98 rendered at 150 dpi (best effort, reported, not gated on perfection) ----------

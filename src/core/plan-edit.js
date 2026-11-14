@@ -26,6 +26,7 @@
 import { PLAN } from './plan.js';
 import { pointInPolygon, polygonArea, invalidatePlanCaches } from './geometry.js';
 import { OPTIONAL_KEYS, optionalKeysProblem, optionalPart, setOptionalKeys, normalizeOptionalKeys } from './plan-schema.js';
+import { GROUND, upperLevels, levelOf, levelIndex, nextLevelId, recomputeElevations, levelName, footprintOf } from './levels.js';
 
 /** Plan keys written only when needed (schema 2: angled walls, several levels — see plan-schema.js). Never on House 98. */
 export { OPTIONAL_KEYS };
@@ -47,6 +48,7 @@ export const REASONS = Object.freeze({
   exteriorWall: 'Exterior walls are the building envelope and structure — they cannot be added, moved or removed. Their windows and doors can be changed with a building-permit amendment.',
   permit: 'Changing an exterior opening requires a building-permit amendment.',
   thick: (t) => `This ${t} cm wall may be structural — confirm with your structural engineer before changing it.`,
+  level: 'Adding or removing a floor, or changing its height, changes the building — it requires a building permit.',
 });
 
 const OPENING_KINDS = {
@@ -107,6 +109,7 @@ function mamadOf(base) {
   return { room: inner, shell, rects: [shell, ...walls.filter((w) => overlapArea(w, shell) < w.w * w.h)] };
 }
 const NO_MAMAD = Object.freeze({ room: null, shell: null, rects: [] });
+const isJunction = (s) => s.id.includes('seg:j:');
 
 /**
  * Everything the derivation reads from the base plan, swapped as a whole when the base plan or the phase changes.
@@ -325,11 +328,13 @@ function buildWalls(m, prevWalls) {
   rects.sort((a, b) => a.y - b.y || a.x - b.x);
   const key = (r) => `${r.x},${r.y},${r.w},${r.h}`, old = new Map(), used = new Set();
   let next = 0;
-  for (const w of [...ENV.baseWalls, ...(prevWalls || [])]) { const n = parseInt(String(w.id).slice(1), 10); if (n > next) next = n; }
-  for (const w of prevWalls || []) if (!old.has(key(w))) old.set(key(w), w.id);
+  // upper levels: wall ids carry the level prefix ('L1|w03') so they are unique across levels; L0 ids are unchanged
+  const pre = ENV.pre || '', mine = (w) => !pre || String(w.id).startsWith(pre + 'w');
+  for (const w of [...ENV.baseWalls, ...(prevWalls || [])]) { const n = pre ? (mine(w) ? parseInt(String(w.id).slice(pre.length + 1), 10) : 0) : parseInt(String(w.id).slice(1), 10); if (n > next) next = n; }
+  for (const w of prevWalls || []) if (!old.has(key(w)) && mine(w)) old.set(key(w), w.id);
   return rects.map((r) => {
     let id = old.get(key(r));
-    if (!id || used.has(id)) id = 'w' + String(++next).padStart(2, '0');
+    if (!id || used.has(id)) id = pre + 'w' + String(++next).padStart(2, '0');
     used.add(id);
     return { id, x: r.x, y: r.y, w: r.w, h: r.h, kind: r.kind, cls: r.cls };
   });
@@ -481,7 +486,10 @@ function buildRooms(m, prevRooms) {
   comps.forEach((c, cid) => { for (const [p, a] of c.overlap) if (a > prev[p].bestArea) { prev[p].bestArea = a; prev[p].best = cid; } });
   const zones = prevRooms.flatMap((r) => r.zones || []);
   const taken = new Set(prevRooms.map((r) => r.id));
+  const reserved = reservedRoomIds();                                   // room ids are global across levels
+  if (reserved) for (const id of reserved) taken.add(id);
   const kept = new Array(prev.length).fill(null), fresh = [], roomOf = new Array(comps.length);
+  let room;
   comps.forEach((c, cid) => {
     let winner = -1, parent = -1;
     for (const p of [...c.overlap.keys()].sort((a, b) => a - b)) {      // ties → the room listed first
@@ -489,11 +497,15 @@ function buildRooms(m, prevRooms) {
       if (parent < 0 || a > c.overlap.get(parent)) parent = p;
       if (prev[p].best === cid && (winner < 0 || a > c.overlap.get(winner))) winner = p;
     }
-    const src = winner >= 0 ? prev[winner].room : null;
+    let src = winner >= 0 ? prev[winner].room : null;
     let polygon = roomPolygon(m, comp, cid, c.cells);
+    if (src && reserved && reserved.has(src.id)) {                      // its id is another level's: same room, new id
+      room = { ...src, id: null, polygon, label: interiorPoint(polygon) };
+      fresh.push(room); roomOf[cid] = room;
+      return;
+    }
     if (src && cyclicEqual(polygon, src.polygon)) polygon = src.polygon;
     const area = polygonArea(polygon), mine = zones.filter((z) => pointInPolygon(z.label[0], z.label[1], polygon));
-    let room;
     if (src) {
       const before = polygonArea(src.polygon), same = polygon === src.polygon;
       const keepLabel = same || (Math.abs(area - before) < 0.15 * before && distToPolygon(src.label[0], src.label[1], polygon) >= 30);
@@ -559,7 +571,7 @@ function derive(solids, openings, prevRooms, prevWalls) {
     const tile = cellRect(m, c.t.i0, c.t.i1, c.t.j0, c.t.j1), v = c.axis === 'v';
     const jm = (c.j0 + c.j1) >> 1, im = (c.i0 + c.i1) >> 1;
     return {
-      id: c.junction ? `seg:j:${c.x}:${c.y}` : v ? `seg:v:${c.x}:${c.y}:${c.y + c.h}` : `seg:h:${c.y}:${c.x}:${c.x + c.w}`,
+      id: (ENV.pre || '') + (c.junction ? `seg:j:${c.x}:${c.y}` : v ? `seg:v:${c.x}:${c.y}:${c.y + c.h}` : `seg:h:${c.y}:${c.x}:${c.x + c.w}`),
       axis: c.axis, ...tile, thickness: c.thickness, length: v ? tile.h : tile.w, cls: c.cls,
       policy: ENV.draft ? { level: 'free', reason: '' } : c.cls === 'mamad' ? { level: 'locked', reason: REASONS.mamad } : c.cls === 'exterior' ? { level: 'locked', reason: REASONS.exteriorWall }
         : c.cls === 'thick' ? { level: 'warn', reason: REASONS.thick(c.thickness) } : { level: 'free', reason: '' },
@@ -574,12 +586,12 @@ function derive(solids, openings, prevRooms, prevWalls) {
 }
 
 // ---------------------------------------------------------------- live state
-let host = { record() {}, changed() {}, intent() {} };
+let host = { record() {}, changed() {}, intent() {}, content() { return null; } };
 let modified = false, analysis = null, stateKey = null;
 let foreign = new WeakMap();
 
 /** Called once by the store: `record(opts)` takes the undo snapshot BEFORE a change, `changed(payload)` announces it. */
-export function bindPlanHost(h) { host = { record: h.record || (() => {}), changed: h.changed || (() => {}), intent: h.intent || (() => {}) }; }
+export function bindPlanHost(h) { host = { record: h.record || (() => {}), changed: h.changed || (() => {}), intent: h.intent || (() => {}), content: h.content || (() => null) }; }
 
 /**
  * Live collaboration (CONTRACT § 13): every successful top-level mutation is reported as `host.intent(name, args)` so a
@@ -588,9 +600,14 @@ export function bindPlanHost(h) { host = { record: h.record || (() => {}), chang
 let intentDepth = 0;
 function tracked(name, impl, args) {
   intentDepth++;
+  // on a plan with several levels the level the call ran on is recorded first ('setActiveLevel'), so a re-run after a
+  // conflict edits the same level; a one-level plan records exactly what it always did
+  const at = intentDepth === 1 && upperLevels(PLAN).length ? activeLevel() : null;
   try {
     const r = impl(...args);
-    if (intentDepth === 1 && r && r.ok) { try { host.intent(name, JSON.parse(JSON.stringify(args))); } catch (e) { /* not recorded */ } }
+    if (intentDepth === 1 && r && r.ok) {
+      try { const a = JSON.parse(JSON.stringify(args)); if (at) host.intent('setActiveLevel', [at]); host.intent(name, a); } catch (e) { /* not recorded */ }
+    }
     return r;
   } finally { intentDepth--; }
 }
@@ -599,9 +616,173 @@ const solidsOf = (plan) => [...plan.walls, ...plan.openings];
 const current = () => analysis || (analysis = derive(solidsOf(PLAN), PLAN.openings, PLAN.rooms, PLAN.walls));
 const analysisOf = (plan) => {
   if (plan === PLAN) return current();
+  const lv = viewLevel.get(plan);
+  if (lv) return levelState(lv).d;                                 // a level view (levelPlan): that level's policy
   if (!foreign.has(plan.walls)) foreign.set(plan.walls, derive(solidsOf(plan), plan.openings, plan.rooms, plan.walls));
   return foreign.get(plan.walls);
 };
+
+// ---------------------------------------------------------------- levels (stage F1): per-level views, the active level
+/*
+ * L0 is the top-level plan and is edited exactly as before (no level code runs on a one-level plan's edits).
+ * An upper level is edited by SWAPPING its arrays into PLAN (walls / openings / rooms / wallOutline, and its merged
+ * heights), its analysis into `analysis` and its policy environment into ENV for the duration of one call: the same
+ * engine code then runs on that level, and `commit` installs the result into it (PLAN.levels gets a new array with a
+ * new object for that level; L0 is untouched). The swap never spans a host call (record / changed / intent), so
+ * nothing outside this module ever sees it.
+ */
+let activeId = GROUND;
+let swap = null;                   // { id, lv, saved } while an upper level is swapped into PLAN
+let levelEnvs = new Map();         // level id → policy environment (reset whenever ENV is)
+let levelData = new WeakMap();     // level object → { arrays, d }: its arrays (derived when saved without rooms) + analysis
+const views = new WeakMap();       // a level's stored `walls` array → its PLAN-shaped view (stable identity)
+const viewLevel = new WeakMap();   // view → the level object it shows now
+const viewHeights = new WeakMap(); // view → the plan heights its merged heights were made from
+
+function resetLevelCaches() { levelEnvs = new Map(); levelData = new WeakMap(); }
+
+/** derive() under another policy environment. */
+function deriveIn(env, solids, openings, prevRooms, prevWalls) {
+  const saved = ENV; ENV = env;
+  try { return derive(solids, openings, prevRooms, prevWalls); } finally { ENV = saved; }
+}
+/** L0's live arrays, also while a level is swapped in. */
+const liveL0 = () => (swap ? swap.saved : PLAN);
+
+/**
+ * Room ids held by OTHER levels than the one being derived — new rooms avoid them (room ids are global, so finishes and
+ * collab keys need no level). null on a one-level plan. A lower level saved without rooms contributes its derived ones.
+ */
+function reservedRoomIds() {
+  if (ENV.reserved !== undefined) return ENV.reserved;
+  const levels = upperLevels(PLAN);
+  if (!levels.length) return null;
+  const me = ENV.level || GROUND, ids = new Set();
+  let myIdx = levelIndex(PLAN, me);
+  if (myIdx < 0) myIdx = Infinity;                                 // a level being added (on top)
+  if (me !== GROUND) for (const r of liveL0().rooms) ids.add(r.id);
+  levels.forEach((l, i) => {
+    if (l.id === me) return;
+    if (Array.isArray(l.rooms)) for (const r of l.rooms) ids.add(r.id);
+    else if (i + 1 < myIdx) for (const r of levelState(l).arrays.rooms) ids.add(r.id);
+  });
+  return ids;
+}
+
+/**
+ * Policy environment of an upper level. A level of the base plan is classified against it like L0 (exterior walls
+ * locked, mamad shell, isNew) unless drafting; a level the base plan does not have is new construction: nothing on it
+ * is locked (as while drafting).
+ */
+function levelEnv(id) {
+  let env = levelEnvs.get(id);
+  if (env) return env;
+  const base = levelOf(BASE_PLAN, id), pre = id + '|';
+  const draftEnv = { draft: true, solids: [], mamad: NO_MAMAD, outdoorAreas: [], baseWalls: [], level: id, pre };
+  if (!base) env = draftEnv;
+  else {
+    const bd = base.rooms && base.wallOutline ? base : deriveIn(draftEnv, [...base.walls, ...base.openings], base.openings, base.rooms || [], base.walls);
+    const draft = phase === 'draft';
+    env = { draft, solids: [...bd.walls, ...bd.openings], mamad: draft ? NO_MAMAD : mamadOf(bd), outdoorAreas: base.outdoorAreas || [], baseWalls: bd.walls, level: id, pre };
+  }
+  levelEnvs.set(id, env);
+  return env;
+}
+
+/** Arrays and analysis of a level (cached per level object; a level saved without rooms / outline gets derived ones). */
+function levelState(lv) {
+  let st = levelData.get(lv);
+  if (st) return st;
+  const d = deriveIn(levelEnv(lv.id), [...lv.walls, ...lv.openings], lv.openings, Array.isArray(lv.rooms) ? lv.rooms : [], lv.walls);
+  st = { arrays: Array.isArray(lv.rooms) && Array.isArray(lv.wallOutline) ? lv : d, d };
+  levelData.set(lv, st);
+  return st;
+}
+
+/**
+ * PLAN-shaped view of one level: that level's walls, wallOutline, openings, rooms, slants, stairs, voids and
+ * outdoorAreas, the plan's shared meta, site, bounds and assumptions, `heights` = the plan's merged with the level's,
+ * plus `levelId` and `elevation`. For 'L0' (or no id) it is `plan` itself; null for an unknown level.
+ * The view object is the same for as long as the level's stored walls array is (its fields are refreshed in place, like
+ * PLAN's), so caches keyed by the view or by `walls` keep working. Every pure function that takes `plan` works on it
+ * (wallSegments, geometry, regulations, renderers). Treat it as read-only.
+ */
+export function levelPlan(plan = PLAN, id = activeLevel()) {
+  if (id == null || id === GROUND) return plan;
+  const lv = levelOf(plan, id);
+  if (!lv) return null;
+  const st = levelState(lv), a = st.arrays, H = plan === PLAN && swap ? swap.saved.heights : plan.heights;
+  let v = views.get(lv.walls);
+  if (!v) { v = {}; views.set(lv.walls, v); }
+  if (viewLevel.get(v) !== lv || viewHeights.get(v) !== H) {
+    v.heights = { ...H, ...lv.heights };
+    viewHeights.set(v, H);
+  }
+  viewLevel.set(v, lv);
+  v.meta = plan.meta; v.bounds = plan.bounds;
+  v.walls = a.walls; v.wallOutline = a.wallOutline; v.openings = a.openings; v.rooms = a.rooms;
+  v.outdoorAreas = lv.outdoorAreas || v.outdoorAreas || [];
+  v.site = plan.site; v.assumptions = plan.assumptions;
+  if (lv.slants) v.slants = lv.slants; else delete v.slants;
+  if (lv.stairs) v.stairs = lv.stairs; else delete v.stairs;
+  v.voids = lv.voids || v.voids || [];
+  v.levelId = lv.id; v.elevation = lv.elevation;
+  return v;
+}
+
+/** The level the editing calls work on ('L0' = ground; falls back to 'L0' when that level no longer exists). */
+export function activeLevel() {
+  if (activeId !== GROUND && !levelOf(PLAN, activeId)) activeId = GROUND;
+  return activeId;
+}
+/**
+ * Choose the level every editing call and query works on (not part of the plan state: no undo step, no event).
+ * @returns {{ ok: true, levelId } | { ok: false, reason }}
+ */
+export function setActiveLevel(id) {
+  const want = id == null ? GROUND : id;
+  if (want !== GROUND && !levelOf(PLAN, want)) return fail(`There is no level ${want}.`);
+  activeId = want;
+  return { ok: true, levelId: want };
+}
+
+function swapIn(id) {
+  const lv = levelOf(PLAN, id), st = levelState(lv), heights = levelPlan(PLAN, id).heights;
+  swap = { id, lv, saved: { walls: PLAN.walls, openings: PLAN.openings, rooms: PLAN.rooms, wallOutline: PLAN.wallOutline, heights: PLAN.heights, analysis, env: ENV } };
+  PLAN.walls = st.arrays.walls; PLAN.openings = st.arrays.openings; PLAN.rooms = st.arrays.rooms; PLAN.wallOutline = st.arrays.wallOutline;
+  PLAN.heights = heights; analysis = st.d; ENV = levelEnv(id);
+}
+function swapOut() {
+  const { saved } = swap;
+  PLAN.walls = saved.walls; PLAN.openings = saved.openings; PLAN.rooms = saved.rooms; PLAN.wallOutline = saved.wallOutline;
+  PLAN.heights = saved.heights; analysis = saved.analysis; ENV = saved.env;
+  swap = null;
+}
+/** Run `fn` with level `id` swapped in (L0, or a call nested in a level call: as is). `missing` = result for an unknown level. */
+function onLevel(id, fn, missing) {
+  if (swap || id == null || id === GROUND) return fn();
+  if (!levelOf(PLAN, id)) return missing !== undefined ? missing : fail(`There is no level ${id}.`);
+  swapIn(id);
+  try { return fn(); } finally { if (swap) swapOut(); }
+}
+/** The level holding the opening / room with this id (ids are global), else the active level. */
+function levelHolding(key, id) {
+  if (swap) return swap.id;
+  if (!upperLevels(PLAN).length) return GROUND;
+  if (PLAN[key].some((x) => x.id === id)) return GROUND;
+  for (const l of upperLevels(PLAN)) if (levelState(l).arrays[key].some((x) => x.id === id)) return l.id;
+  return activeLevel();
+}
+const onActive = (impl) => (...a) => onLevel(activeLevel(), () => impl(...a));
+const onHolder = (key, impl) => (id, ...a) => onLevel(levelHolding(key, id), () => impl(id, ...a));
+/** Every opening id on every level (opening ids are global). */
+function allOpeningIds() {
+  const ids = new Set();
+  for (const o of liveL0().openings) ids.add(o.id);
+  for (const l of upperLevels(PLAN)) for (const o of l.openings) ids.add(o.id);
+  if (swap) for (const o of PLAN.openings) ids.add(o.id);
+  return ids;
+}
 
 const GEOMETRY_KEYS = ['kind', 'axis', 'x', 'y', 'w', 'h', 'width', 'height', 'sill'];
 const LOOK_KEYS = ['style', 'hinge', 'swing'];
@@ -618,6 +799,10 @@ function sameSolid(a, b) {
 function isArchitectPlan(d, opt = optionalPart(PLAN)) {
   const base = BASE_PLAN;
   if (!sameOptional(opt, base)) return false;
+  return sameAsBase(d, base);
+}
+/** Do derived walls / openings / rooms equal a base level's (same solids, openings, room names)? */
+function sameAsBase(d, base) {
   if (d.openings.length !== base.openings.length || d.rooms.length !== base.rooms.length) return false;
   for (const b of base.openings) { const o = d.openings.find((x) => x.id === b.id); if (!o || !sameOpening(o, b, GEOMETRY_KEYS) || !sameOpening(o, b, LOOK_KEYS)) return false; }
   for (const b of base.rooms) { const r = d.rooms.find((x) => x.id === b.id); if (!r || r.name !== b.name || r.type !== b.type || !!r.wet !== !!b.wet) return false; }
@@ -638,10 +823,12 @@ export function wallBounds(walls, openings = []) {
   for (const r of [...walls, ...openings]) { x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y); x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h); }
   return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
 }
-/** While drafting, the house grows with the walls: PLAN.bounds follows them (a fixed plan keeps its base bounds). */
+/** While drafting, the house grows with the walls (of every level): PLAN.bounds follows them (a fixed plan keeps its base bounds). */
 function syncBounds() {
   if (!ENV.draft) { if (JSON.stringify(PLAN.bounds) !== JSON.stringify(BASE_PLAN.bounds)) PLAN.bounds = clone(BASE_PLAN.bounds); return; }
-  const b = wallBounds(PLAN.walls, PLAN.openings) || BASE_PLAN.bounds;
+  const ups = upperLevels(PLAN);
+  const b = (ups.length ? wallBounds([...PLAN.walls, ...ups.flatMap((l) => l.walls)], [...PLAN.openings, ...ups.flatMap((l) => l.openings.filter((o) => o.axis !== 'a'))])
+    : wallBounds(PLAN.walls, PLAN.openings)) || BASE_PLAN.bounds;
   if (JSON.stringify(b) !== JSON.stringify(PLAN.bounds)) PLAN.bounds = clone(b);
 }
 
@@ -650,7 +837,7 @@ function syncBounds() {
  * schema-2 keys the plan must carry (from a saved state); undefined keeps the live ones (an edit never changes them).
  */
 function install(d, opt) {
-  const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
+  const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a)), lv0 = PLAN.levels;
   if (opt === undefined) opt = optionalPart(PLAN);
   if (isArchitectPlan(d, opt)) setBase();
   else {
@@ -660,13 +847,45 @@ function install(d, opt) {
   }
   stateKey = null; invalidatePlanCaches();
   const after = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
-  return { walls: before[0] !== after[0], openings: before[1] !== after[1], rooms: before[2] !== after[2] };
+  return { walls: before[0] !== after[0], openings: before[1] !== after[1], rooms: before[2] !== after[2], levels: levelsChanged(lv0) };
+}
+/** Did PLAN.levels change since it was `lv0`? (false on a one-level plan) */
+const levelsChanged = (lv0) => lv0 !== PLAN.levels && JSON.stringify(lv0) !== JSON.stringify(PLAN.levels);
+
+/**
+ * Install new optional keys (an upper level edited, added, removed…) with L0 unchanged: back to the exact base plan if
+ * everything equals it again, else the plan is modified. Lazy schema: no upper level left → no `levels`, no `schema`.
+ */
+function installOptional(opt) {
+  const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a)), lv0 = PLAN.levels;
+  const next = optionalPart(normalizeOptionalKeys({ ...opt }));
+  if (isArchitectPlan({ walls: PLAN.walls, openings: PLAN.openings, rooms: PLAN.rooms }, next)) setBase();
+  else { setOptionalKeys(PLAN, next); modified = true; syncBounds(); }
+  stateKey = null; invalidatePlanCaches();
+  const after = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
+  return { walls: before[0] !== after[0], openings: before[1] !== after[1], rooms: before[2] !== after[2], levels: levelsChanged(lv0) };
+}
+
+/** A level object with the derived arrays `d` installed (the exact base level again when it equals it). */
+function withDerived(lv, d) {
+  const base = levelOf(BASE_PLAN, lv.id);
+  if (base && sameAsBase(d, levelState(base).arrays)) return clone(base);
+  return { ...lv, walls: d.walls, wallOutline: d.wallOutline, openings: d.openings, rooms: d.rooms };
+}
+/** Install derived arrays into upper level `id`. */
+function installLevel(id, d) {
+  const levels = upperLevels(PLAN), lv = levels.find((l) => l.id === id), next = withDerived(lv, d);
+  const changed = installOptional({ ...optionalPart(PLAN), levels: levels.map((l) => (l === lv ? next : l)) });
+  const now = levelOf(PLAN, id);
+  if (now && now.walls === d.walls) levelData.set(now, { arrays: now, d });   // its analysis is already known
+  return changed;
 }
 
 const doorless = (rooms, openings) => rooms.filter((r) => !openings.some((o) => o.kind !== 'window' && (o.rooms || []).includes(r.id)));
 
 /** Record undo, install, announce. `res` = { level, ids, warnings? }. */
 function commit(d, reason, res, opts = {}) {
+  if (swap) return commitLevel(d, reason, res, opts);
   const had = new Set(doorless(PLAN.rooms, PLAN.openings).map((r) => r.id));
   host.record(opts);
   const changed = install(d);
@@ -675,6 +894,19 @@ function commit(d, reason, res, opts = {}) {
   if (res.level === 'permit') warnings.unshift(REASONS.permit);
   for (const r of doorless(PLAN.rooms, PLAN.openings)) if (!had.has(r.id)) warnings.push(`${r.name} has no door or passage now.`);
   host.changed({ reason, changed, transient: !!opts.transient });
+  return { ok: true, level: res.level, warnings, ids: res.ids || [] };
+}
+/** commit() for an upper level: un-swap, record, install into that level, announce (payload `levelId`). */
+function commitLevel(d, reason, res, opts) {
+  const id = swap.id, had = new Set(doorless(PLAN.rooms, PLAN.openings).map((r) => r.id));
+  swapOut();
+  host.record(opts);
+  const changed = installLevel(id, d), v = levelPlan(PLAN, id);
+  const warnings = [...(res.warnings || [])];
+  if (res.level === 'warn' && res.reason) warnings.unshift(res.reason);
+  if (res.level === 'permit') warnings.unshift(REASONS.permit);
+  for (const r of doorless(v.rooms, v.openings)) if (!had.has(r.id)) warnings.push(`${r.name} has no door or passage now.`);
+  host.changed({ reason, changed, transient: !!opts.transient, levelId: id });
   return { ok: true, level: res.level, warnings, ids: res.ids || [] };
 }
 
@@ -696,13 +928,13 @@ const validRoom = (r) => r && typeof r.id === 'string' && Array.isArray(r.polygo
  * @returns {{ ok: boolean, reason?: string, changed: { walls, openings, rooms } }}
  */
 export function applyPlanState(state) {
-  const none = { walls: false, openings: false, rooms: false };
+  const none = { walls: false, openings: false, rooms: false, levels: false };
   const toBase = (reason) => {
     if (!modified) return { ok: !reason, reason, changed: none };
-    const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
+    const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a)), lv0 = PLAN.levels;
     setBase(); stateKey = null; invalidatePlanCaches();
     const base = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
-    return { ok: !reason, reason, changed: { walls: before[0] !== base[0], openings: before[1] !== base[1], rooms: before[2] !== base[2] } };
+    return { ok: !reason, reason, changed: { walls: before[0] !== base[0], openings: before[1] !== base[1], rooms: before[2] !== base[2], levels: levelsChanged(lv0) } };
   };
   if (!state) return toBase();
   try {
@@ -720,7 +952,8 @@ export function applyPlanState(state) {
     const intact = d.problems.length === 0 && (ENV.draft || (d.rooms.length > 0
       && locked.every((g) => coverage(g, solids) > 0.999)
       && Math.abs(footprint(d.walls, d.openings, d.rooms) - footprint(BASE_PLAN.walls, BASE_PLAN.openings, BASE_PLAN.rooms)) < 1
-      && BASE_PLAN.openings.filter(inMamad).every((b) => { const o = d.openings.find((x) => x.id === b.id); return o && JSON.stringify(o) === JSON.stringify(b); })));
+      && BASE_PLAN.openings.filter(inMamad).every((b) => { const o = d.openings.find((x) => x.id === b.id); return o && JSON.stringify(o) === JSON.stringify(b); })
+      && levelsIntact(opt.levels)));
     if (!intact) return toBase('The saved plan edits do not fit this house — the architect\'s plan was restored.');
     // keep the saved rectangles (ids included) when they describe the same walls, so undo / redo is exact
     const area = (list) => list.reduce((a, r) => a + r.w * r.h, 0);
@@ -731,16 +964,28 @@ export function applyPlanState(state) {
   }
 }
 
+/** Saved upper levels keep the locked walls of the base plan's levels (a removed level is a whole-level change, allowed). */
+function levelsIntact(levels) {
+  for (const b of upperLevels(BASE_PLAN)) {
+    const l = (levels || []).find((x) => x.id === b.id);
+    if (!l) continue;
+    const solids = [...l.walls, ...l.openings.filter((o) => o.axis !== 'a')];
+    if (!analysisOf(levelPlan(BASE_PLAN, b.id)).segments.every((g) => g.policy.level !== 'locked' || coverage(g, solids) > 0.999)) return false;
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------- queries
 /**
  * The selectable units of the plan: maximal straight stretches of wall (openings included) between junctions
  * with perpendicular walls / wall ends. Segments tile the wall solids exactly once. Treat the result as read-only.
  * @returns {Array<{ id, axis, x, y, w, h, thickness, length, cls, policy: { level, reason }, openingIds, isNew, core, between }>}
  */
-export function wallSegments(plan = PLAN) { return analysisOf(plan).segments; }
+export function wallSegments(plan) { return analysisOf(plan === undefined ? (swap ? PLAN : levelPlan(PLAN, activeLevel())) : plan).segments; }
 
-/** Segment under / nearest to a plan point (within `tol` cm), or null. */
-export function segmentAt(x, y, tol = 6) {
+/** Segment under / nearest to a plan point (within `tol` cm) on the active level, or null. */
+export function segmentAt(...a) { return onLevel(activeLevel(), () => segmentAtImpl(...a), null); }
+function segmentAtImpl(x, y, tol = 6) {
   let best = null, bd = Infinity;
   for (const s of current().segments) { const d = rectDist(x, y, s); if (d < bd) { bd = d; best = s; } }
   return best && bd <= tol ? best : null;
@@ -754,7 +999,8 @@ function policyOfOpening(o) {
   return { level: 'free', reason: '' };
 }
 /** What may be done with a door / window: `{ level: 'free' | 'permit' | 'locked', reason }`. */
-export function openingPolicy(openingId) {
+export function openingPolicy(openingId) { return onLevel(levelHolding('openings', openingId), () => openingPolicyImpl(openingId), { level: 'locked', reason: 'No such opening.' }); }
+function openingPolicyImpl(openingId) {
   const o = PLAN.openings.find((x) => x.id === openingId);
   return o ? policyOfOpening(o) : { level: 'locked', reason: 'No such opening.' };
 }
@@ -886,7 +1132,8 @@ function planAddWall(input) {
 }
 
 /** Dry run of addWall for live feedback while drawing: `{ ok, reason?, rect?, level? }` (rect = the trimmed wall). */
-export function canAddWall(input) {
+export function canAddWall(input) { return onLevel(activeLevel(), () => canAddWallImpl(input)); }
+function canAddWallImpl(input) {
   const r = planAddWall(input);
   return r.ok ? { ok: true, rect: r.rect, level: r.level } : r;
 }
@@ -897,7 +1144,7 @@ const idsIn = (d, rect, axis) => d.segments.filter((s) => s.axis === axis && ove
  * Draw a new partition from (x1, y1) to (x2, y2) (centre line, cm). Axis-aligned (the smaller delta is dropped),
  * snapped to 5 cm, trimmed / extended (≤ 15 cm) to the faces of the walls it meets.
  */
-export function addWall(...args) { return tracked('addWall', addWallImpl, args); }
+export function addWall(...args) { return tracked('addWall', onActive(addWallImpl), args); }
 function addWallImpl(input, opts) {
   const r = planAddWall(input);
   if (!r.ok) return r;
@@ -915,7 +1162,7 @@ const coreSpan = (s) => (s.axis === 'h' ? { c0: s.core.y, c1: s.core.y + s.core.
 const inCore = (s) => (o) => overlapArea(o, s.core) > 0;
 
 /** Remove a wall segment and the openings in it. Junction squares stay with the walls that meet there. */
-export function removeWallSegment(...args) { return tracked('removeWallSegment', removeWallSegmentImpl, args); }
+export function removeWallSegment(...args) { return tracked('removeWallSegment', onActive(removeWallSegmentImpl), args); }
 function removeWallSegmentImpl(segmentId, opts) {
   const q = editableSegment(segmentId);
   if (!q.ok) return q;
@@ -931,7 +1178,7 @@ function removeWallSegmentImpl(segmentId, opts) {
  * Move a wall segment sideways by `delta` cm (+ = east / south). Walls that meet its ends stretch or shrink to
  * follow; its doors travel with it.
  */
-export function moveWallSegment(...args) { return tracked('moveWallSegment', moveWallSegmentImpl, args); }
+export function moveWallSegment(...args) { return tracked('moveWallSegment', onActive(moveWallSegmentImpl), args); }
 function moveWallSegmentImpl(segmentId, delta, opts) {
   const q = editableSegment(segmentId);
   if (!q.ok) return q;
@@ -1060,7 +1307,7 @@ function planMoveWall(s, d0) {
  * Change where a wall segment starts / ends along its own axis (plan cm; omitted = unchanged). Ends are trimmed /
  * extended to wall faces like addWall. Shortening an end that met another wall leaves a gap of ≥ 60 cm.
  */
-export function resizeWallSegment(...args) { return tracked('resizeWallSegment', resizeWallSegmentImpl, args); }
+export function resizeWallSegment(...args) { return tracked('resizeWallSegment', onActive(resizeWallSegmentImpl), args); }
 function resizeWallSegmentImpl(segmentId, range, opts) {
   const q = editableSegment(segmentId);
   if (!q.ok) return q;
@@ -1118,7 +1365,7 @@ function planAddOpening(input) {
   if (!num(p.x) || !num(p.y)) return fail('An opening needs a position.');
   const width = snap(num(p.width) ? p.width : K.width);
   let s = null, sd = Infinity;
-  for (const g of current().segments) { if (g.id.startsWith('seg:j')) continue; const dist = rectDist(p.x, p.y, g.core); if (dist < sd) { sd = dist; s = g; } }
+  for (const g of current().segments) { if (isJunction(g)) continue; const dist = rectDist(p.x, p.y, g.core); if (dist < sd) { sd = dist; s = g; } }
   if (!s || sd > REACH) return fail('There is no wall here.');
   if (s.cls === 'mamad') return fail(REASONS.mamad);
   const exterior = s.cls === 'exterior';
@@ -1134,19 +1381,26 @@ function planAddOpening(input) {
  * Dry run of addOpening: where would a `kind` of `width` centred near (x, y) land?
  * @returns {{ ok, reason?, segmentId?, rect?, level? }}
  */
-export function canAddOpening(input) {
+export function canAddOpening(input) { return onLevel(activeLevel(), () => canAddOpeningImpl(input)); }
+function canAddOpeningImpl(input) {
   const r = planAddOpening(input);
   return r.ok ? { ok: true, segmentId: r.segmentId, rect: r.rect, level: r.level } : r;
 }
 
-const newOpeningId = (kind) => { const pre = kind === 'window' ? 'win' : kind === 'opening' ? 'pass' : 'door'; let n = 1; while (PLAN.openings.some((o) => o.id === `${pre}-new-${n}`)) n++; return `${pre}-new-${n}`; };
+/** New opening id, unique across every level ('door-new-n' | 'win-new-n' | 'pass-new-n'). */
+const newOpeningId = (kind, taken = upperLevels(PLAN).length ? allOpeningIds() : null) => {
+  const pre = kind === 'window' ? 'win' : kind === 'opening' ? 'pass' : 'door';
+  const used = taken ? (id) => taken.has(id) : (id) => PLAN.openings.some((o) => o.id === id);
+  let n = 1; while (used(`${pre}-new-${n}`)) n++;
+  return `${pre}-new-${n}`;
+};
 const HINGES = { h: ['w', 'e'], v: ['n', 's'] }, SWINGS = { h: ['n', 's'], v: ['w', 'e'] };
 
 /**
  * Cut a door / window / sliding door / door-less passage into the wall nearest to (x, y).
  * Defaults: door 80 × 210, window 100 × 100 sill 110, sliding door 160 × 210, passage 90 × 210.
  */
-export function addOpening(...args) { return tracked('addOpening', addOpeningImpl, args); }
+export function addOpening(...args) { return tracked('addOpening', onActive(addOpeningImpl), args); }
 function addOpeningImpl(input, opts) {
   const r = planAddOpening(input);
   if (!r.ok) return r;
@@ -1175,7 +1429,7 @@ function addOpeningImpl(input, opts) {
  * Change a door / window. patch: { offset (cm from the start of its wall segment) | x, y (new centre — it slides
  * along its own wall, kept ≥ 10 cm from wall ends and other openings), width, height, sill, style, hinge, swing }.
  */
-export function updateOpening(...args) { return tracked('updateOpening', updateOpeningImpl, args); }
+export function updateOpening(...args) { return tracked('updateOpening', onHolder('openings', updateOpeningImpl), args); }
 function updateOpeningImpl(id, patch, opts) {
   const o = PLAN.openings.find((x) => x.id === id), p = patch || {};
   if (!o) return fail('No such opening.');
@@ -1213,7 +1467,7 @@ function updateOpeningImpl(id, patch, opts) {
 }
 
 /** Remove a door / window; the gap is filled with wall. */
-export function removeOpening(...args) { return tracked('removeOpening', removeOpeningImpl, args); }
+export function removeOpening(...args) { return tracked('removeOpening', onHolder('openings', removeOpeningImpl), args); }
 function removeOpeningImpl(id, opts) {
   const o = PLAN.openings.find((x) => x.id === id);
   if (!o) return fail('No such opening.');
@@ -1226,7 +1480,7 @@ function removeOpeningImpl(id, opts) {
 }
 
 /** Re-hang a door: 'hinge' swaps the hinge jamb, 'swing' the side it opens into. */
-export function flipDoor(...args) { return tracked('flipDoor', flipDoorImpl, args); }
+export function flipDoor(...args) { return tracked('flipDoor', onHolder('openings', flipDoorImpl), args); }
 function flipDoorImpl(id, how, opts) {
   const o = PLAN.openings.find((x) => x.id === id);
   if (!o) return fail('No such opening.');
@@ -1236,7 +1490,7 @@ function flipDoorImpl(id, how, opts) {
 }
 
 /** Rename / re-type a room: patch { name, nameHe, type, wet }. Names follow the room through later edits. */
-export function updateRoom(...args) { return tracked('updateRoom', updateRoomImpl, args); }
+export function updateRoom(...args) { return tracked('updateRoom', onHolder('rooms', updateRoomImpl), args); }
 function updateRoomImpl(id, patch, opts) {
   const room = PLAN.rooms.find((r) => r.id === id), p = patch || {};
   if (!room) return fail('No such room.');
@@ -1258,10 +1512,136 @@ function resetPlanImpl(opts = {}) {
   return { ok: true, level: 'free', warnings: [], ids: [] };
 }
 
+// ---------------------------------------------------------------- levels: add / remove / update (stage F1)
+const LEVEL_LIMITS = { ceiling: [200, 600], slab: [0, 100], parapet: [0, 200] };
+/** Heights patch → { heights } or { reason }. */
+function readLevelHeights(patch, from) {
+  const h = { ...from };
+  for (const [k, [lo, hi]] of Object.entries(LEVEL_LIMITS)) {
+    if (patch[k] == null) continue;
+    const v = Math.round(patch[k]);
+    if (!num(patch[k]) || v < lo || v > hi) return { reason: `The ${k === 'slab' ? 'floor slab' : k} must be ${lo}–${hi} cm.` };
+    h[k] = v;
+  }
+  return { heights: h };
+}
+/** Same level objects where only the elevation changed get their cached arrays / analysis carried over. */
+function carryLevelData(before, after) {
+  for (const l of after) { const o = before.find((x) => x.id === l.id); if (o && o !== l && o.walls === l.walls && levelData.has(o) && !levelData.has(l)) levelData.set(l, levelData.get(o)); }
+}
+/** Record, install the new level list, announce. */
+function commitLevels(levels, reason, id, opts = {}) {
+  host.record(opts);
+  const before = upperLevels(PLAN);
+  carryLevelData(before, levels);
+  const changed = installOptional({ ...optionalPart(PLAN), levels });
+  host.changed({ reason, changed, transient: !!opts.transient, levelId: id });
+  return changed;
+}
+
+/**
+ * Add a level on top. `copyExterior` (default true): the envelope of the level below (its exterior walls, the outer
+ * walls of a safe room included) and the windows in it are copied up; doors are not. Heights default to the level
+ * below's; elevation = below's elevation + its ceiling + the new slab. Rooms are derived. Ids: 'L<n>'.
+ * @param {{ copyExterior?: boolean, name?: string, nameHe?: string, heights?: { ceiling, slab, parapet } }} [input]
+ * @returns {{ ok: true, level, warnings, ids: [levelId] } | { ok: false, reason }}
+ */
+export function addLevel(...args) { return tracked('addLevel', addLevelImpl, args); }
+function addLevelImpl(input, opts) {
+  const p = input || {}, levels = upperLevels(PLAN), id = nextLevelId(PLAN);
+  const belowId = levels.length ? levels[levels.length - 1].id : GROUND, bh = levelPlan(PLAN, belowId).heights;
+  const hr = readLevelHeights(p.heights || {}, { ceiling: bh.ceiling, slab: num(bh.slab) ? bh.slab : 20, parapet: num(bh.parapet) ? bh.parapet : 40 });
+  if (hr.reason) return fail(hr.reason);
+  let walls = [], openings = [];
+  if (p.copyExterior !== false) {
+    const taken = allOpeningIds();
+    onLevel(belowId, () => {
+      const envelope = current().segments.filter((g) => g.cls === 'exterior' || g.between.some((b) => b != null && isOutdoorId(b)));
+      walls = envelope.map((g) => ({ x: g.x, y: g.y, w: g.w, h: g.h, kind: 'exterior' }));
+      openings = PLAN.openings.filter((o) => o.kind === 'window' && o.exterior && o.axis !== 'a' && envelope.some((g) => g.openingIds.includes(o.id))).map((o) => {
+        const { rooms, exterior, outside, ...rest } = o;
+        const nid = newOpeningId('window', taken); taken.add(nid);
+        return { ...rest, id: nid, rooms: [] };
+      });
+    });
+  }
+  for (const o of openings) if (o.sill + o.height > hr.heights.ceiling - HEAD_ROOM) return fail(`The windows copied up do not fit under a ${hr.heights.ceiling} cm ceiling.`);
+  const env = levelEnv(id);
+  let d = deriveIn(env, [...walls, ...openings], openings, [], []);
+  if (d.problems.length) { const bad = new Set(d.problems.map((x) => x.id)); openings = openings.filter((o) => !bad.has(o.id)); d = deriveIn(env, [...walls, ...openings], openings, [], []); }
+  const lv = { id };
+  if (typeof p.name === 'string' && p.name.trim()) lv.name = p.name.trim();
+  if (typeof p.nameHe === 'string' && p.nameHe.trim()) lv.nameHe = p.nameHe.trim();
+  Object.assign(lv, { elevation: 0, heights: hr.heights, walls: d.walls, wallOutline: d.wallOutline, openings: d.openings, rooms: d.rooms });
+  const next = recomputeElevations([...levels, lv], PLAN.heights);
+  levelData.set(next[next.length - 1], { arrays: next[next.length - 1], d });
+  commitLevels(next, 'add-level', id, opts);
+  const fixed = phase !== 'draft';
+  return { ok: true, level: fixed ? 'permit' : 'free', warnings: fixed ? [REASONS.level] : [], ids: [id] };
+}
+
+/**
+ * Remove a level: the top one, or any level with no walls and no openings (the levels above then come down).
+ * What still stands on it — items, carpentry runs, finishes of its rooms (store, via the host), stairs leading to it —
+ * is reported in `content`; while there is any, the call is refused unless `opts.force` (the caller then deals with it:
+ * e.g. removes those items in the same store.begin() … commit()). Finishes of its rooms are dropped by the store
+ * ('finishes' event; undo brings them back).
+ * @returns {{ ok: true, level, warnings, ids: [levelId], content } | { ok: false, reason, content? }}
+ */
+export function removeLevel(...args) { return tracked('removeLevel', removeLevelImpl, args); }
+function removeLevelImpl(id, opts = {}) {
+  if (id === GROUND || id == null) return fail('The ground floor cannot be removed.');
+  const levels = upperLevels(PLAN), i = levels.findIndex((l) => l.id === id);
+  if (i < 0) return fail(`There is no level ${id}.`);
+  const lv = levels[i], empty = !lv.walls.length && !lv.openings.length;
+  if (i !== levels.length - 1 && !empty) return fail('Only the top floor can be removed (or a floor with nothing drawn on it).');
+  const held = host.content(id, levelPlan(PLAN, id).rooms.map((r) => r.id)) || {};
+  const stairs = [...(PLAN.stairs || []), ...levels.flatMap((l) => l.stairs || [])].filter((st) => st.to === id).map((st) => st.id);
+  const content = { items: held.items || [], runs: held.runs || [], finishes: held.finishes || [], stairs };
+  const n = content.items.length + content.runs.length + content.finishes.length + content.stairs.length;
+  if (n && !opts.force) {
+    const parts = [[content.items.length, 'item'], [content.runs.length, 'carpentry run'], [content.finishes.length, 'room finish'], [content.stairs.length, 'stair']]
+      .filter(([k]) => k).map(([k, w]) => `${k} ${w}${k === 1 ? '' : 's'}`);
+    return { ok: false, reason: `${levelName(PLAN, id)} still holds ${parts.join(', ')} — move or delete them first.`, content };
+  }
+  if (activeId === id) activeId = i > 0 ? levels[i - 1].id : GROUND;
+  commitLevels(recomputeElevations(levels.filter((l) => l !== lv), PLAN.heights), 'remove-level', id, opts);
+  const fixed = phase !== 'draft';
+  return { ok: true, level: fixed ? 'permit' : 'free', warnings: fixed ? [REASONS.level] : [], ids: [id], content };
+}
+
+/**
+ * Rename a level or change its heights: patch { name, nameHe, heights: { ceiling, slab, parapet } } (cm). A new
+ * ceiling or slab moves the levels above (elevations are recomputed). The ground level's heights are the house's.
+ */
+export function updateLevel(...args) { return tracked('updateLevel', updateLevelImpl, args); }
+function updateLevelImpl(id, patch, opts) {
+  if (id === GROUND || id == null) return fail('The ground floor\'s heights are the house\'s own — change them in the project settings.');
+  const p = patch || {}, levels = upperLevels(PLAN), lv = levels.find((l) => l.id === id);
+  if (!lv) return fail(`There is no level ${id}.`);
+  const next = { ...lv };
+  for (const k of ['name', 'nameHe']) if (typeof p[k] === 'string') { if (p[k].trim()) next[k] = p[k].trim(); else delete next[k]; }
+  if (p.heights) {
+    const hr = readLevelHeights(p.heights, lv.heights);
+    if (hr.reason) return fail(hr.reason);
+    const tall = levelState(lv).arrays.openings.find((o) => o.sill + o.height > hr.heights.ceiling - HEAD_ROOM);
+    if (tall) return fail(`The ${openingName(tall)} ${tall.id} would not fit under a ${hr.heights.ceiling} cm ceiling — lower it first.`);
+    next.heights = hr.heights;
+  }
+  if (JSON.stringify(next) === JSON.stringify(lv)) return { ok: true, level: 'free', warnings: [], ids: [id] };
+  const heights = JSON.stringify(next.heights) !== JSON.stringify(lv.heights);
+  if (levelData.has(lv)) levelData.set(next, levelData.get(lv));
+  commitLevels(recomputeElevations(levels.map((l) => (l === lv ? next : l)), PLAN.heights), 'update-level', id, opts);
+  const permit = heights && phase !== 'draft' && !!levelOf(BASE_PLAN, id);
+  return { ok: true, level: permit ? 'permit' : 'free', warnings: permit ? [REASONS.level] : [], ids: [id] };
+}
+
 // ---------------------------------------------------------------- diff against the architect's plan
+let diffBase = null;               // the base (level) planDiff compares with: BASE_PLAN, or a base level's view
 const spaceName = (id) => {
   if (id == null || id === 'outside') return 'outside';
-  const s = PLAN.rooms.find((r) => r.id === id) || BASE_PLAN.rooms.find((r) => r.id === id) || BASE_PLAN.outdoorAreas.find((r) => r.id === id);
+  const base = diffBase || BASE_PLAN;
+  const s = PLAN.rooms.find((r) => r.id === id) || base.rooms.find((r) => r.id === id) || (base.outdoorAreas || []).find((r) => r.id === id);
   return s ? s.name : id;
 };
 const centreOf = (r) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
@@ -1277,11 +1657,36 @@ const whereOpening = (o) => (o.rooms || []).map(spaceName).join(' / ');
 export function planDiff() {
   const items = [];
   if (!modified || ENV.draft) return { changed: false, items };
-  const base = analysisOf(BASE_PLAN), cur = current(), solids = solidsOf(PLAN), coreLen = (s) => (s.axis === 'h' ? s.core.w : s.core.h);
-  const gone = base.segments.filter((s) => coverage(s.core, solids) < 0.5), carried = [];
+  if (!upperLevels(PLAN).length && !upperLevels(BASE_PLAN).length) return { changed: true, items: diffItems(BASE_PLAN) };
+  // several levels: L0 as always, then each upper level against the base plan's level; every entry carries `levelId`
+  for (const it of diffItems(BASE_PLAN)) items.push({ ...it, levelId: GROUND });
+  const ids = [...new Set([...upperLevels(BASE_PLAN), ...upperLevels(PLAN)].map((l) => l.id))];
+  for (const id of ids) {
+    const was = levelOf(BASE_PLAN, id), now = levelOf(PLAN, id);
+    const at = (plan) => { const b = wallBounds(levelPlan(plan, id).walls); return b ? centreOf(b) : { x: 0, y: 0 }; };
+    if (!was) items.push({ kind: 'level-added', level: 'permit', text: `Added a floor: ${levelName(PLAN, id)}`, at: at(PLAN), ref: id, levelId: id });
+    else if (!now) items.push({ kind: 'level-removed', level: 'permit', text: `Removed a floor: ${levelName(BASE_PLAN, id)}`, at: at(BASE_PLAN), ref: id, levelId: id });
+    else {
+      if (JSON.stringify(was.heights) !== JSON.stringify(now.heights)) items.push({ kind: 'level-changed', level: 'permit', text: `${levelName(PLAN, id)}: heights changed`, at: at(PLAN), ref: id, levelId: id });
+      if (now === was || JSON.stringify(now.walls) === JSON.stringify(was.walls) && JSON.stringify(now.openings) === JSON.stringify(was.openings) && JSON.stringify(now.rooms) === JSON.stringify(was.rooms)) continue;
+      const baseView = levelPlan(BASE_PLAN, id);
+      onLevel(id, () => {
+        diffBase = baseView;
+        try { for (const it of diffItems(baseView)) items.push({ ...it, levelId: id }); } finally { diffBase = null; }
+      });
+    }
+  }
+  return { changed: true, items };
+}
+
+/** The changes of the live (or swapped-in) level against `base` (BASE_PLAN or a base level's view). */
+function diffItems(base) {
+  const items = [];
+  const baseAn = analysisOf(base), cur = current(), solids = solidsOf(PLAN), coreLen = (s) => (s.axis === 'h' ? s.core.w : s.core.h);
+  const gone = baseAn.segments.filter((s) => coverage(s.core, solids) < 0.5), carried = [];
   // a short new piece in line with an existing wall is that wall stretched to follow a move, not a new wall
   const stretch = (n) => { const a = coreSpan(n); return cur.segments.some((g) => { const b = coreSpan(g); return !g.isNew && g.axis === n.axis && a.c0 === b.c0 && a.c1 === b.c1 && Math.min(Math.abs(b.a0 - a.a1), Math.abs(a.a0 - b.a1)) <= TMAX; }); };
-  const added = cur.segments.filter((s) => s.isNew && !s.id.startsWith('seg:j') && !stretch(s));
+  const added = cur.segments.filter((s) => s.isNew && !isJunction(s) && !stretch(s));
   for (const g of gone) {
     const pos = (s) => (s.axis === 'h' ? s.core.y : s.core.x), a = coreSpan(g);
     const twin = added.find((n) => { const b = coreSpan(n); return n.axis === g.axis && n.thickness === g.thickness && Math.abs(pos(n) - pos(g)) <= 200 && overlapLen(a.a0, a.a1, b.a0, b.a1) >= 0.5 * Math.min(coreLen(g), coreLen(n)); });
@@ -1294,10 +1699,10 @@ export function planDiff() {
   }
   for (const n of added) items.push({ kind: 'wall-added', level: 'free', text: `New ${n.thickness} cm partition ${sides(n)} (${metres(coreLen(n))})`, at: centreOf(n.core), ref: n.id });
   if (!items.length && !sameSolid(PLAN.walls.concat(PLAN.openings), ENV.solids)) {
-    const a = cur.segments.find((s) => coverage(s.core, ENV.solids) < 0.999) || base.segments.find((s) => coverage(s.core, solids) < 0.999);
+    const a = cur.segments.find((s) => coverage(s.core, ENV.solids) < 0.999) || baseAn.segments.find((s) => coverage(s.core, solids) < 0.999);
     if (a) items.push({ kind: 'wall-moved', level: a.policy.level === 'locked' ? 'free' : a.policy.level, text: `Changed the length of the ${wallName(a)} ${sides(a)}`, at: centreOf(a.core), ref: a.id });
   }
-  for (const b of BASE_PLAN.openings) {
+  for (const b of base.openings) {
     const o = PLAN.openings.find((x) => x.id === b.id), level = b.exterior ? 'permit' : 'free';
     if (!o) { if (coverage(b, solids) >= 0.5) items.push({ kind: 'opening-removed', level, text: `Closed the ${openingName(b)} (${b.width} cm) — ${whereOpening(b)}`, at: centreOf(b), ref: b.id }); continue; }
     const what = [];
@@ -1311,8 +1716,8 @@ export function planDiff() {
     if (o.hinge !== b.hinge || o.swing !== b.swing) what.push('re-hung');
     if (what.length) items.push({ kind: 'opening-changed', level: geometry ? level : 'free', text: `${openingName(o)[0].toUpperCase() + openingName(o).slice(1)} — ${whereOpening(o)}: ${what.join(', ')}`, at: centreOf(o), ref: o.id });
   }
-  for (const o of PLAN.openings) if (!BASE_PLAN.openings.some((b) => b.id === o.id)) items.push({ kind: 'opening-added', level: o.exterior ? 'permit' : 'free', text: `New ${openingName(o)} ${labelOf(o)} — ${whereOpening(o)}`, at: centreOf(o), ref: o.id });
-  return { changed: true, items };
+  for (const o of PLAN.openings) if (!base.openings.some((b) => b.id === o.id)) items.push({ kind: 'opening-added', level: o.exterior ? 'permit' : 'free', text: `New ${openingName(o)} ${labelOf(o)} — ${whereOpening(o)}`, at: centreOf(o), ref: o.id });
+  return items;
 }
 
 /** Test / tooling hook: everything derived from a plan's walls + openings (the same function used on load and after every edit). */
@@ -1340,8 +1745,9 @@ export function setBasePlan(planData, opts = {}) {
   for (const k of Object.keys(BASE_PLAN)) if (!OPTIONAL_KEYS.includes(k)) PLAN[k] = clone(BASE_PLAN[k]);
   setOptionalKeys(PLAN, optionalCopy(BASE_PLAN));                            // last, in OPTIONAL_KEYS order (as the base)
   ENV = makeEnv(BASE_PLAN, phase);
-  foreign = new WeakMap();
+  foreign = new WeakMap(); resetLevelCaches();
   modified = false; analysis = null; stateKey = null;
+  activeLevel();
   syncBounds();
   invalidatePlanCaches();
 }
@@ -1364,7 +1770,7 @@ export function setPlanPhase(next) {
   if (want === phase) return { changed: false };
   if (want === 'fixed') setBasePlan(currentPlanData(), { phase: 'fixed' });
   else {
-    phase = 'draft'; ENV = makeEnv(BASE_PLAN, phase); foreign = new WeakMap();
+    phase = 'draft'; ENV = makeEnv(BASE_PLAN, phase); foreign = new WeakMap(); resetLevelCaches();
     analysis = null; stateKey = null; syncBounds(); invalidatePlanCaches();
   }
   return { changed: true };
@@ -1375,6 +1781,7 @@ export function currentPlanData() {
   const out = {};
   for (const k of Object.keys(PLAN)) out[k] = clone(PLAN[k]);
   out.walls = out.walls.map(({ cls, ...w }) => w);
+  if (Array.isArray(out.levels)) for (const l of out.levels) if (Array.isArray(l.walls)) l.walls = l.walls.map(({ cls, ...w }) => w);
   return out;
 }
 
@@ -1385,9 +1792,11 @@ export function currentPlanData() {
  * (`{ id, type: 'overlap' | 'jamb' | 'blocked' }` for openings that do not sit cleanly in a wall).
  * Runs as a draft (nothing locked, no safe-room shell). Used by `plan-build.js`.
  */
-export function analyseWalls(walls, openings, { prevRooms = [], outdoorAreas = [] } = {}) {
+export function analyseWalls(walls, openings, { prevRooms = [], outdoorAreas = [], level = null, reservedRoomIds = null } = {}) {
   const saved = ENV;
-  ENV = { draft: true, solids: [], mamad: NO_MAMAD, outdoorAreas, baseWalls: [] };
+  // `level` ('L1'…): ids for an upper level (prefixed wall / segment ids); `reservedRoomIds`: ids new rooms must avoid
+  ENV = { draft: true, solids: [], mamad: NO_MAMAD, outdoorAreas, baseWalls: [], reserved: reservedRoomIds && reservedRoomIds.size ? reservedRoomIds : null,
+    ...(level && level !== GROUND ? { level, pre: level + '|' } : {}) };
   try {
     const d = derive([...walls, ...openings], openings, prevRooms, []);
     return { walls: d.walls, openings: d.openings, rooms: d.rooms, wallOutline: d.wallOutline, problems: d.problems, segments: d.segments };

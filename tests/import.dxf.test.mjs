@@ -231,6 +231,59 @@ runHouse('house, mm', houseDxf({ unit: 0.1, insunits: 4 }).bytes(), 0.1);
   check(res.unsupported.some((u) => u.type === 'curved') && res.unsupported.some((u) => u.type === 'angled'), 'both pieces listed as unsupported (with where)');
   const cw = compareWalls(res.walls, PLAN.walls, 1);
   check(cw.missing.length === 0 && cw.symDiffCm2 === 0, 'the orthogonal walls are unchanged');
+  check(!('slants' in res), 'default (slants option off): no `slants` key');
+
+  // the slants option: the 30° wall becomes a slant; the bay's two arcs are a translated copy of each other (not a band
+  // of constant thickness: 14.5–20 cm apart) and stay reported
+  const rs = analyseDxf(prims, { slants: true });
+  const s30 = (rs.slants || [])[0];
+  const ang = s30 && ((Math.atan2(s30.y2 - s30.y1, s30.x2 - s30.x1) * 180 / Math.PI) + 180) % 180;
+  console.log(`== curved + angled, slants option: slants ${JSON.stringify(rs.slants)}; unsupported ${JSON.stringify(rs.unsupported.map((u) => [u.type, u.len]))}; warnings ${rs.warnings.map((x) => x.code).join(', ')}`);
+  check(rs.slants && rs.slants.length === 1 && s30.t === 20 && Math.abs(ang - 30) < 0.05 && Math.abs(Math.hypot(s30.x2 - s30.x1, s30.y2 - s30.y1) - 300) < 0.2, `slants option: the 30° wall → one slant, 20 cm, 300 cm long (${ang && ang.toFixed(2)}°)`);
+  check(!rs.unsupported.some((u) => u.type === 'angled') && rs.unsupported.some((u) => u.type === 'curved') && !rs.warnings.some((x) => x.code === 'angled-wall'), 'slants option: the angled wall leaves `unsupported`, the uneven bay stays');
+  check(JSON.stringify(rs.walls) === JSON.stringify(res.walls) && JSON.stringify(rs.openings) === JSON.stringify(res.openings), 'slants option: orthogonal walls and openings byte-identical to the default run');
+}
+
+// ---------- (d2) the "Wedge" (design § 4) and a quarter-circle wall in DXF, slants option ----------
+{
+  const { WEDGE, wedgeDrawing, dxfOf, quarterOutline, QUARTER, slantLen } = await import('./import-slant-fixtures.mjs');
+  const dl = (x, y, s) => { const L = Math.hypot(s.x2 - s.x1, s.y2 - s.y1); return Math.abs((s.x2 - s.x1) * (s.y1 - y) - (s.x1 - x) * (s.y2 - s.y1)) / L; };
+  const d = wedgeDrawing();
+  const prims = readDxf(dxfOf({ lines: d.lines, symLines: d.doorLines, symArcs: d.arcs, winLines: d.winLines }).bytes());
+  const r0 = analyseDxf(prims);
+  const res = analyseDxf(prims, { slants: true });
+  console.log(`\n== Wedge DXF, slants option: rects ${JSON.stringify(res.walls.map((w) => [w.x, w.y, w.w, w.h, w.kind[0]]))}`);
+  console.log(`   slants ${JSON.stringify(res.slants)}; openings ${JSON.stringify(res.openings.map((o) => (o.axis === 'a' ? [o.kind, o.wall, o.at, o.width, o.hinge, o.swing, o.outside, o.evidence && o.evidence.block] : [o.kind, o.x, o.y, o.w, o.h, o.hinge, o.swing, o.outside])))}`);
+  console.log(`   default run: ${r0.walls.length} rects, unsupported ${r0.unsupported.length}, warnings ${r0.warnings.map((x) => x.code).join(', ')}`);
+  const match = WEDGE.slants.map((s) => (res.slants || []).find((q) => q.t === s.t && q.kind === s.kind && dl(q.x1, q.y1, s) <= 2 && dl(q.x2, q.y2, s) <= 2));
+  check(res.slants && res.slants.length === 2 && match.every(Boolean), 'Wedge DXF: both slants, centre lines within 2 cm, thickness exact, kinds right');
+  const sop = res.openings.filter((o) => o.axis === 'a');
+  const win = match[0] && sop.find((o) => o.wall === match[0].id), door = match[1] && sop.find((o) => o.wall === match[1].id);
+  const at = (q, s, frac) => { const L = slantLen(s), p = [s.x1 + (s.x2 - s.x1) * frac, s.y1 + (s.y2 - s.y1) * frac], Lq = Math.hypot(q.x2 - q.x1, q.y2 - q.y1); return Math.abs((p[0] - q.x1) * (q.x2 - q.x1) / Lq + (p[1] - q.y1) * (q.y2 - q.y1) / Lq); };
+  check(win && win.kind === 'window' && Math.abs(win.at - at(match[0], WEDGE.slants[0], 0.5)) <= 2 && Math.abs(win.width - 120) <= 0.5 && win.exterior, `Wedge DXF: window in s01 at half its length (${win && win.at})`);
+  // the door's hinge jamb is the design's jamb a (nearer (25, 300)); its leaf swings to the right of the design direction
+  const s2 = WEDGE.slants[1], q2 = match[1];
+  const sameDir = q2 && (q2.x2 - q2.x1) * (s2.x2 - s2.x1) + (q2.y2 - q2.y1) * (s2.y2 - s2.y1) > 0;
+  check(door && door.kind === 'door' && Math.abs(door.at - at(q2, s2, 0.5)) <= 2 && Math.abs(door.width - 80) <= 0.5 && door.hinge === (sameDir ? 'a' : 'b') && door.swing === (sameDir ? 'r' : 'l') && !door.exterior,
+    `Wedge DXF: door in s02 at its midpoint, hinge / swing right (${door && [door.at, door.hinge, door.swing]})`);
+  const want = [{ x: 0, y: 0, w: 1000, h: 20 }, { x: 0, y: 20, w: 20, h: 760 }, { x: 0, y: 780, w: 200, h: 20 }, { x: 290, y: 780, w: 310, h: 20 }, { x: 500, y: 20, w: 10, h: 330 }, { x: 500, y: 430, w: 10, h: 350 }];
+  const cw = compareWalls(res.walls, want, 0);
+  check(cw.symDiffCm2 === 0 && res.unsupported.length === 0, `Wedge DXF: rectangles = the design's (symmetric difference ${cw.symDiffCm2} cm²), nothing unsupported`);
+  check(r0.unsupported.length === 4 && !('slants' in r0), 'Wedge DXF, default: the angled pieces are only reported (today\'s behaviour)');
+
+  // quarter circle as ARC entities
+  const q = quarterOutline();
+  const rq = analyseDxf(readDxf(dxfOf({ lines: q.lines, wallArcs: q.arcs }).bytes()), { slants: true });
+  const dev = Math.max(...(rq.slants || [{ x1: 0, y1: 0, x2: 0, y2: 0 }]).map((s) => { let m = 0; for (let i = 0; i <= 20; i++) { const x = s.x1 + (s.x2 - s.x1) * i / 20, y = s.y1 + (s.y2 - s.y1) * i / 20; m = Math.max(m, Math.abs(Math.hypot(x - QUARTER.cx, y - QUARTER.cy) - QUARTER.r)); } return m; }));
+  console.log(`== quarter circle DXF (ARC): ${rq.slants && rq.slants.length} pieces, max deviation ${dev.toFixed(2)} cm, stats ${rq.stats.curveMaxDev}; ${rq.warnings.map((x) => x.text).join(' | ')}`);
+  check(rq.slants && rq.slants.length >= 3 && rq.slants.every((s) => s.chain === 'c1' && s.t === 20) && dev <= 2 && rq.unsupported.length === 0, 'quarter-circle ARC wall → one chain, max deviation ≤ 2 cm');
+  // the same wall as bulged polylines (bulge tan(90° / 4))
+  const wb = dxfOf({ lines: q.lines });
+  const X = (x) => 12000 + x, Y = (y) => 30000 - y, b = -Math.tan(Math.PI / 8);
+  for (const r of [QUARTER.r - QUARTER.t / 2, QUARTER.r + QUARTER.t / 2]) wb.lwpoly([[X(QUARTER.cx), Y(QUARTER.cy - r)], [X(QUARTER.cx + r), Y(QUARTER.cy)]], { layer: 'A-WALL', bulges: [b] });
+  const rb = analyseDxf(readDxf(wb.bytes()), { slants: true });
+  console.log(`== quarter circle DXF (bulges): ${rb.slants && rb.slants.length} pieces, stats ${rb.stats.curveMaxDev}`);
+  check(rb.slants && rb.slants.length === rq.slants.length && rb.slants.every((s, i) => Math.hypot(s.x1 - rq.slants[i].x1, s.y1 - rq.slants[i].y1) <= 0.2), 'bulged polylines → the same chain as the ARCs');
 }
 
 // ---------- (e) binary, truncated, not a DXF ----------

@@ -1014,6 +1014,64 @@ re-derived. `transform = [a, b, c, d, e, f]`: page units → plan cm (`X = a·x 
 `where` boxes are in plan cm. `analysePrims` adds `scaleCandidates`, `page`, `pageCount` and `no-scale` /
 `scale-guessed` / `raster-page` warnings.
 
+**Angled and curved walls — the `slants` option** (stage A6 of docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md; `src/import/slants.js`).
+`analysePrims(prims, { slants: true, … })`, `importPdfSketch(bytes, { slants: true })`, `analyseDxf(prims, { slants: true })`
+(or `detectWalls(…, { slants: true })` → `detectOpenings` → `normalise`). **Default `false`: the output is exactly the
+orthogonal-only result** (byte for byte; angled / curved pieces only in `unsupported`). With `true`:
+* **Angled walls**: wall-pen (DXF: wall-layer) lines that are parallel within 1°, overlap ≥ 60 % of the shorter one and
+  are 7–40 cm apart (no parallel line between them; a line pairs on one side only) → one slant `{ id 'sNN', x1, y1, x2,
+  y2 (centre line, plan cm, 0.1 cm), t (cm, rounded), kind 'exterior' | 'interior' }`. A centre end is the mean of the
+  two face ends when they stop within 1.5 t + 2 cm of each other (faces ending on another wall's two faces → the
+  centre-line junction; on its near face → on that face), else the end of the overlap. Thin filled parallelograms
+  (poché; DXF hatches on wall layers become their boundary lines) are slants the same way. Caps and jamb lines lying on
+  a slant are part of it. A free end (touching no rectangle or slant) is extended along the centre line to the nearest
+  wall face (rectangle or slant) within 1.5 t. Lines within 1° of an axis are orthogonal as before (so a wall 0.3° off
+  is a rectangle; nothing within 0.5° becomes a slant). Unpaired angled lines stay in `unsupported` (`angled-wall`).
+* **Orthogonal walls next to slants**: the slant's lines are not part of the parity fill; orthogonal outline lines ending
+  on a slant are closed without it — collinear pieces either side are bridged (a wall a slant abuts stays one wall),
+  a horizontal and a vertical end meeting inside the slant are extended to their corner, two parallel ends (a wall
+  abutting the slant) are closed at the corner that touches the slant first (the design's "rect end on a slant" rule;
+  the joint triangle is the plan engine's), short orthogonal caps / jogs on the slant are dropped. Rectangles keep the
+  5 cm snap; slants are not snapped. Exterior / interior: the slants are rasterised (cells within t/2 + 0.75 snap of the
+  centre line) into the same outside flood fill; a slant is exterior when a face sees the outside along ≥ 20 % of its
+  length or ≥ 40 cm (rectangles: unchanged rule, now with the slants closing the envelope).
+* **Curved walls**: curved wall pieces (DXF ARC / bulge / ELLIPSE / SPLINE, PDF Béziers as flattened; a PDF path is cut at
+  its corners and its straight orthogonal runs go back to the orthogonal fill) that fit circles pair when concentric,
+  7–40 cm apart and overlapping ≥ 60 % of the shorter sweep; other curves when one stays at a constant offset (spread
+  ≤ 2 cm) from the other. Each band → a chain of slants on the centre curve, vertices on it, tagged `chain: 'cN'` (in
+  order along the curve): at least 3 pieces per 90° (≤ 30° each), then refined until the sagitta ≤ 2 cm as long as
+  chords stay ≥ 30 cm (when both cannot hold — centre radius under ≈ 58 cm — the 30° rule wins and the deviation is
+  reported as it is). Warning `curved-wall-pieces` (`severity: 'info'`): "Curved wall drawn as N straight pieces, within
+  2 cm (largest deviation d cm)"; `stats.curveMaxDev` = the largest sagitta. Translated copies of an arc (thickness
+  varying along the wall) do not pair and stay `unsupported`. Openings in curved walls are not detected.
+* **Openings in slants**: two collinear slants (thickness ±1 cm, direction within 1°, centre lines < 2 cm apart) with a
+  gap of 25–400 cm become one continuous slant and an opening in the PLAN shape "opening in a slant": `{ id, kind,
+  style, width, height, sill, wall: 'sNN', axis: 'a', at (cm from x1, y1 along the centre line to the opening centre,
+  0.1 cm), hinge: 'a' | 'b' (jamb nearer the start / end), swing: 'l' | 'r' and outside: 'l' | 'r' (sides relative to
+  x1 → x2; 'r' = the right-hand normal (−uy, ux) on screen), exterior, assumed, confidence }` — evidence and defaults
+  as for orthogonal gaps (arc of 0.7–1.15 × the gap centred on a jamb → door, innerDoor / two half leaves; thin lines
+  parallel to the slant spanning ≥ 70 % → window, ≥ 200 cm → sliding door; an empty gap ≤ `maxPassage` → passage
+  `opening` / `open`). A face line running on across the gap means a junction: the pieces join, no opening. Opening ids
+  continue the orthogonal counters (`door-n`, `win-n` …); in `openings` they follow the rect openings, by wall then `at`.
+* **`normalise`** maps centre lines through the same mirror, rotation and shift as the rectangles (origin = the
+  rectangles' NW corner, as before), swaps `l` ↔ `r` (swing, outside, innerDoor) under a mirror, then turns every slant
+  (a chain as a whole) to start at its northern end (west on a tie) — `at` from the new start, hinge `a` ↔ `b`, sides
+  `l` ↔ `r` — and re-numbers `s01…` / `c1…` north-west first, the openings following their wall. Output `{ walls,
+  openings, slants, … }` with `slants` **omitted when there is none** (then the object is today's, also with the option
+  on). `stats` gains `slants`, `chains`, `slantOpenings`, `curveMaxDev` only when slants were found; `unsupported`
+  shrinks accordingly. `detectWalls` (frame cm) adds `slants`, `slantOpenings`, `chains` when the option is on.
+* **Not for `buildPlan` yet**: the plan engine does not take slants until stage A1; the import dialog keeps treating
+  angled / curved walls as "redraw by hand" (it does not pass the option).
+* Measured (tests/import.test.mjs, tests/import.dxf.test.mjs; fixtures in tests/import-slant-fixtures.mjs): the design's
+  "Wedge" drawn as the union outline of its walls with door swings and glass lines, as PDF-like primitives and as DXF —
+  both slants on the design centre lines (end points ≤ 0.05 cm off the lines), thickness exact, kinds right; the window
+  in s01 and the door in s02 at their design positions (≤ 0.1 cm), hinge / swing / outside right; rectangles = the
+  design's (symmetric difference 0) and identical to the drawing of the rectangles alone; rotation by 90°, both mirrors
+  and 270° + mirror consistent. A quarter-circle wall of centre radius 300 cm → 7 pieces, chord 67 cm, largest deviation
+  from the true circle 1.9 cm (PDF Béziers and DXF ARC / bulge alike). Lot 98 / lot 99 give the same output with the
+  option on (no angled wall pieces there). Cost: nothing on the default path; with the option, lot 98 detectWalls +
+  detectOpenings within the timing noise (≈ 60 ms either way).
+
 **`readImage(image, { cmPerPx? | points + cm, deskew = true, propose = true, threshold?, walls?, rotate?, mirror? })`**
 (raster: PNG / JPG / a scanned page rendered to pixels; `image` = ImageData-like `{ width, height, data }` or
 `{ width, height, gray }`) → `{ threshold (Otsu; coloured pixels never count as ink), deskew: { angle (drawing's tilt,
@@ -1038,7 +1096,8 @@ thickness; ≥ the minimum wall thickness at that scale → a solid wall), then 
 * Scale: the reference PDFs carry no text objects (all text is stroked), so their 1:100 comes from geometry (confidence
   0.48, flagged); the UI should ask the user to confirm or measure a known distance.
 * Openings drawn over continuous wall lines (no gap in the outline) cannot be found. Doors without swing arcs come out
-  as passages. Angled / curved walls are reported, not converted. One floor per page; several floors on one sheet are
+  as passages. Angled / curved walls are reported, not converted (with the `slants` option: converted, see above).
+  One floor per page; several floors on one sheet are
   separate `drawings` (pick one). Furniture or fixtures drawn with the wall pen and closed can be mistaken for walls when
   ≤ 50 cm thick; thicker ones are rejected with a warning.
 * Raster is a proposal, never exact: on House 98 rendered at 150 dpi (scale from two picked points) 75 % of the wall
@@ -1127,7 +1186,11 @@ blocks are expanded as written, their parameters ignored), annotative scaling, M
 text, field codes, non-planar entities, OCS extrusions other than ±Z, very old R12 files without TABLES (layers then
 default to colour 7), and DXF written by non-Autodesk tools may hold surprises. Doors are found from their drawn arcs
 (block geometry included) — a door block drawn without a swing arc gives a passage; window blocks must draw lines
-along the wall. Curved and angled walls are reported, not converted (the engine is orthogonal).
+along the wall. Curved and angled walls are reported, not converted (the engine is orthogonal) — unless the caller
+passes `slants: true` (§ 11 "the `slants` option"): then wall-layer line pairs, arcs, bulges and wall hatches that form
+angled / curved bands become `slants` / chains, measured on the Wedge and quarter-circle DXFs (ARC and bulge) with the
+same accuracy as the PDF-like fixtures, and the 30° wall above becomes one slant (the bulged bay, two translated arcs,
+stays reported).
 
 ## 12. Sketch import UI and tracing underlay (`src/ui/import/`, `src/view2d/underlay.js`) — UI on top of § 10 / § 11
 
