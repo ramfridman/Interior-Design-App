@@ -20,6 +20,8 @@ export function initCatalogPanel(root, app) {
   const state = { category: null, subcategory: null, query: '', retailers: new Set(), minPrice: null, maxPrice: null, sort: 'relevance', own: false };
   const own = ownProductsFor(app);   // "Add your own product" (CONTRACT § 16)
   const openAddOwn = () => { detail && detail.close(); own.openAdd({ zone: store.ui.catalogZone, category: state.category }); };
+  // a product just added for the other section (indoor / outdoor): show that section, so it can be found at once
+  app.onOwnProductAdded = (p) => { if (p && p.zone && p.zone !== store.ui.catalogZone) store.setUI({ catalogZone: p.zone }); };
   let results = [];
   let detail = null;
 

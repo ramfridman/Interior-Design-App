@@ -176,8 +176,8 @@ function createOwnProducts(app) {
         const box = h('input', { type: 'checkbox', class: 'check__input', id, checked: cur === true, onChange: () => set(box.checked ? true : null) });
         return h('label', { class: 'check own__check' }, box, h('span', { class: 'check__label' }, op.label));
       }
-      const num = h('input', { class: 'own__input own__input--num', id, type: 'text', inputmode: 'decimal', value: cur != null ? String(cur) : '', placeholder: op.unit === 'cm' ? 'cm' : '',
-        'aria-describedby': `own-err-${op.key}`, onInput: () => set(num.value.trim() === '' ? null : num.value.trim()) });
+      const num = h('input', { class: 'own__input own__input--num', id, type: 'text', inputmode: 'decimal', value: cur != null ? String(cur) : '',
+        placeholder: op.unit === 'cm' ? 'cm' : 'As the model', 'aria-describedby': `own-err-${op.key}`, onInput: () => set(num.value.trim() === '' ? null : num.value.trim()) });
       return h('div', { class: 'own__row', dataset: { field: op.key } }, h('label', { class: 'own__label', for: id }, op.label, op.unit ? h('span', { class: 'own__opt' }, op.unit) : null), num, err(op.key));
     }
     function paintOptions() {
@@ -217,9 +217,18 @@ function createOwnProducts(app) {
       return { id: 'own-preview', type: t, params: { ...input.params }, placement: catalog.MODEL_TYPES[t] ? catalog.MODEL_TYPES[t].placement : 'floor',
         dims: { w: ok(w, 1, 3000) ? w : sz.w || 60, d: ok(d, 1, 3000) ? d : sz.d || 60, h: ok(hh, 0.5, 1000) ? hh : sz.h || 60 } };
     };
+    // the new picture is laid over the last one and replaces it once rendered (no flash of the plan symbol)
     const paintPreview = debounce(() => {
       if (!input.type) { setKids(previewMedia); return; }
-      setKids(previewMedia, app.thumbs.el(subject(), { size: phone ? 200 : 260, lazy: false }));
+      const el = app.thumbs.el(subject(), { size: phone ? 200 : 260, lazy: false });
+      const old = [...previewMedia.children];
+      previewMedia.append(el);
+      const done = () => { for (const o of old) o.remove(); };
+      if (!old.length || el.classList.contains('is-loaded')) { done(); return; }
+      el.classList.add('own__pnext');
+      const mo = new MutationObserver(() => { if (el.classList.contains('is-loaded')) { mo.disconnect(); el.classList.remove('own__pnext'); done(); } });
+      mo.observe(el, { attributes: true, attributeFilter: ['class'] });
+      setTimeout(() => { mo.disconnect(); el.classList.remove('own__pnext'); done(); }, 6000);   // no 3D renderer: keep the symbol
     }, 250);
     function paintPreviewText() {
       const p = readNumber(input.price);

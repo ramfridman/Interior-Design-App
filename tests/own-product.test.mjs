@@ -28,7 +28,7 @@ const ctx = { store, plan: PLAN, catalog };
 
 /** What a person typed for a sofa from a shop the catalogue does not have. */
 const sofaInput = (o = {}) => ({
-  url: 'https://www.kaza.co.il/products/oslo-sofa', retailer: 'kaza.co.il', name: 'Oslo 3-seat sofa', brand: 'Kaza', note: 'Ask for the linen cover',
+  url: 'https://www.shop.example.com/products/oslo-sofa', retailer: 'shop.example.com', name: 'Oslo 3-seat sofa', brand: 'Nordhaus', note: 'Ask for the linen cover',
   price: '4,990', priceUnit: 'item', priceOnRequest: false, zone: 'indoor', category: 'living', type: 'sofa',
   params: { color: '#8A5A3B', seats: '3', chaise: 'left', nonsense: 'x' }, dims: { w: '212', d: '94', h: '81' }, ...o,
 });
@@ -54,12 +54,12 @@ group('validation and the product shape');
   check('finish: tile size checked, no width × depth × height needed', validateOwnInput({ ...sofaInput({ type: 'floor-finish', category: 'finishes', dims: {} }), params: { tileW: '60', tileH: '120' } }).ok
     && !!validateOwnInput({ ...sofaInput({ type: 'floor-finish', category: 'finishes', dims: {} }), params: { tileW: '900' } }).errors.tileW);
   check('readNumber reads what people type', readNumber('4,990') === 4990 && readNumber('12,5') === 12.5 && readNumber(' ₪ 85 ') === 85 && readNumber('x') === null);
-  check('shop name from a link', shopFromUrl('https://www.kaza.co.il/products/x') === 'kaza.co.il' && shopFromUrl('not a link') === '');
+  check('shop name from a link', shopFromUrl('https://www.shop.example.com/products/x') === 'shop.example.com' && shopFromUrl('not a link') === '');
   const p = make({}, { now: () => '2026-11-14T10:00:00.000Z', createdBy: 'a@example.com' });
   check('id own-<short id>, own: true, createdBy kept', isOwnId(p.id) && /^own-[a-z0-9]{8}$/.test(p.id) && p.own === true && p.createdBy === 'a@example.com', p.id);
   check('catalogue shape: price, unit, dims, type, params, zone, category, subcategory, placement, tags', p.price === 4990 && p.priceUnit === 'item' && p.dims.w === 212 && p.type === 'sofa'
     && p.params.color === '#8a5a3b' && p.params.seats === 3 && p.params.chaise === 'left' && !('nonsense' in p.params) && p.zone === 'indoor' && p.category === 'living'
-    && p.subcategory === 'sofas' && p.placement === 'floor' && p.tags.includes('own') && p.url.startsWith('https://') && p.brand === 'Kaza' && p.note === 'Ask for the linen cover', JSON.stringify(p));
+    && p.subcategory === 'sofas' && p.placement === 'floor' && p.tags.includes('own') && p.url.startsWith('https://') && p.brand === 'Nordhaus' && p.note === 'Ask for the linen cover', JSON.stringify(p));
   const ask = make({ priceOnRequest: true, price: '' });
   check('price on request: price null + priceOnRequest', ask.price === null && ask.priceOnRequest === true);
   const back = inputFromProduct(p);
@@ -94,7 +94,7 @@ const P1 = make({}, { now: () => '2026-11-14T10:00:00.000Z' });
   // place it twice, then edit: both items follow
   const it1 = store.addItem({ ...catalog.itemFromProduct(catalog.getProduct(P1.id), { x: 400, y: 400 }), id: 'p1' });
   store.addItem({ ...catalog.itemFromProduct(catalog.getProduct(P1.id), { x: 800, y: 400, rot: 90 }), id: 'p2' });
-  check('placed like a catalogue product (price, link, shop, size)', it1.productId === P1.id && it1.price === 4990 && it1.url === P1.url && it1.retailer === 'kaza.co.il' && it1.w === 212);
+  check('placed like a catalogue product (price, link, shop, size)', it1.productId === P1.id && it1.price === 4990 && it1.url === P1.url && it1.retailer === 'shop.example.com' && it1.w === 212);
   const edited = buildOwnProduct({ ...inputFromProduct(P1), price: '4490', dims: { w: 230, d: 96, h: 82 }, params: { color: '#3e5c76' } }, { prev: P1 });
   store.updateCustomProduct(P1.id, edited);
   const p2 = store.getItem('p2');
@@ -116,11 +116,11 @@ const P1 = make({}, { now: () => '2026-11-14T10:00:00.000Z' });
 // ---------------------------------------------------------------------------------------------------------------
 group('merge into the catalogue: search, category, supplier filter, "only mine", sort');
 {
-  const q = catalog.searchProducts({ query: 'kaza' });
+  const q = catalog.searchProducts({ query: 'example' });
   check('search finds it by shop and name', q.some((p) => p.id === P1.id) && catalog.searchProducts({ query: 'oslo sofa' }).some((p) => p.id === P1.id));
   check('category rail counts it', catalog.categoryCounts('indoor').living === catalog.catalogProducts().filter((p) => p.zone === 'indoor' && p.category === 'living').length + 1);
-  check('supplier filter lists the shop (both products from it)', catalog.retailers('indoor').some((r) => r.name === 'kaza.co.il' && r.count === 2));
-  check('filter by its shop', catalog.searchProducts({ retailer: 'kaza.co.il' }).every((p) => isOwnId(p.id)) && catalog.searchProducts({ retailer: 'kaza.co.il' }).some((p) => p.id === P1.id));
+  check('supplier filter lists the shop (both products from it)', catalog.retailers('indoor').some((r) => r.name === 'shop.example.com' && r.count === 2));
+  check('filter by its shop', catalog.searchProducts({ retailer: 'shop.example.com' }).every((p) => isOwnId(p.id)) && catalog.searchProducts({ retailer: 'shop.example.com' }).some((p) => p.id === P1.id));
   const mine = catalog.searchProducts({ own: true });
   check('"only products I added"', mine.length === 2 && mine.every((p) => isOwnId(p.id)));
   const asc = catalog.searchProducts({ zone: 'indoor', sort: 'price-asc' });
@@ -141,7 +141,7 @@ group('price on request in the shopping list, totals and CSV');
   check('excluded from the total, counted for the note', s.onRequest === 1 && Math.round(s.total) === 4490 * 2, `${s.total} ${s.onRequest}`);
   check('not "still to choose"', !s.pending.some((r) => r.ids.includes('g1')));
   const csv = shoppingCSV(ctx);
-  check('CSV: "price on request", empty cost, the link, and a "Not in the total" line', /Linked lamp,kaza\.co\.il,1,pcs,price on request,,/.test(csv) && /Not in the total,1 product with price on request is not in the total\./.test(csv) && csv.includes(P1.url), csv.split('\r\n').filter((l) => /Linked|Not in/.test(l)).join(' | '));
+  check('CSV: "price on request", empty cost, the link, and a "Not in the total" line', /Linked lamp,shop\.example\.com,1,pcs,price on request,,/.test(csv) && /Not in the total,1 product with price on request is not in the total\./.test(csv) && csv.includes(P1.url), csv.split('\r\n').filter((l) => /Linked|Not in/.test(l)).join(' | '));
   check('shoppingTotal carries the count', shoppingTotal(ctx).onRequest === 1);
   // a finish with price on request
   const F = buildOwnProduct({ ...sofaInput({ type: 'floor-finish', category: 'finishes', name: 'Terrazzo tile', priceOnRequest: true, price: '', dims: {} }), params: { pattern: 'terrazzo', tileW: '60', tileH: '60', color: '#d9d2c5' } }, { now: () => '2026-11-14T12:00:00.000Z' });
@@ -191,7 +191,7 @@ group('delete with placed items: they stay as generic items with their size');
   const after = sizes.map(([id]) => store.getItem(id));
   check('items stay, generic, size and position kept, no price / link / shop', after.every((it, k) => it && it.generic && it.productId === null && it.price === null && it.url === null && it.retailer === null
     && it.w === sizes[k][1] && it.d === sizes[k][2] && it.h === sizes[k][3] && it.x === sizes[k][4]));
-  check('gone from the catalogue', !catalog.getProduct(P1.id) && !catalog.searchProducts({ query: 'kaza' }).some((p) => p.id === P1.id));
+  check('gone from the catalogue', !catalog.getProduct(P1.id) && !catalog.searchProducts({ query: 'example' }).some((p) => p.id === P1.id));
   check('the shopping list now has them "still to choose"', buildShopping(ctx).pending.some((r) => r.ids.includes(sizes[0][0])));
   store.undo();
   check('undo: product back, items linked again', !!store.getCustomProduct(P1.id) && store.getItem(sizes[0][0]).productId === P1.id && store.getItem(sizes[0][0]).price === 4490);
