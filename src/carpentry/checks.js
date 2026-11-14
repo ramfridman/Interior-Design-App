@@ -32,7 +32,7 @@ function findingsFor(run, v) {
   const add = (severity, code, en, he, units = []) => out.push({ severity, code, text: L(en, he), unitIds: units.map((x) => x.id || x), runId: run.id });
   const floor = list.filter((x) => isFloorLevel(x.level)).sort((a, b) => a.at - b.at), wall = list.filter((x) => !isFloorLevel(x.level)).sort((a, b) => a.at - b.at);
   const C = (x) => x.code;
-  const ceiling = ceilingOf(run), plan = planOf(run), floor = runLevel(run);
+  const ceiling = ceilingOf(run), plan = planOf(run), runFloor = runLevel(run);
 
   // ── sizes and fit ──
   for (const row of [['floor', floor], ['wall', wall]]) {
@@ -237,7 +237,7 @@ function findingsFor(run, v) {
 
   // ── room: aisle, door swings, clashes ──
   const runIds = new Set(list.map((x) => x.id)), markers = new Set(list.map((x) => x.u.carp.appliance && x.u.carp.appliance.itemId).filter(Boolean));
-  const others = v.items.filter((it) => !it.hidden && !runIds.has(it.id) && !markers.has(it.id) && it.zone !== 'outdoor' && !NOT_CLASHING.has(it.type) && !(it.carp && it.carp.runId === run.id) && itemFloor(it, v) === floor);
+  const others = v.items.filter((it) => !it.hidden && !runIds.has(it.id) && !markers.has(it.id) && it.zone !== 'outdoor' && !NOT_CLASHING.has(it.type) && !(it.carp && it.carp.runId === run.id) && itemFloor(it, v) === runFloor);
   const linked = new Set();
   for (const r of v.runs()) for (const sd of ['left', 'right']) { const e = r.ends && r.ends[sd]; if (e && e.type === 'run') { if (r.id === run.id) linked.add(e.runId); if (e.runId === run.id) linked.add(r.id); } }
   const aisleNeed = ['kitchen', 'island'].includes(run.kind) ? RULES.aisleMin : ['wardrobe', 'entry', 'utility', 'pantry'].includes(run.kind) ? RULES.wardrobeAisle : 70;
