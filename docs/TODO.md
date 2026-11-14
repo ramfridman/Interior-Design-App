@@ -59,7 +59,8 @@ Order of work:
   - [x] A6a import of angled and curved walls, engine side, off by default (generated test drawings only; end points within 0.05 cm on the angled test house, curves within 2 cm)
   - [x] F1 levels in the engine (`tests/levels.test.mjs`)
   - [x] F2 2D per level (`tests/levels-2d.test.mjs`, `tests/e2e.levels.mjs`) · [x] F3 3D stacking (`tests/levels-3d.test.mjs`)
-  - [ ] F4a stairs: geometry, 3D model, sourced rules [running] · F4b stair tool in the plan · F7 regulations / carpentry per floor + Settings switch [running]
+  - [x] F4a stairs: geometry (straight / L / U), 3D model, regulation checks sourced from the Planning and Building Regulations (`tests/stairs.test.mjs`; guard heights are from a secondary source and reported as info)
+  - [ ] F4b stair tool in the plan (also make the Duplex test void regulation-size: y 266–670) · F7 regulations / carpentry per floor + Settings switch [running]
   - [ ] later: F4 stairs · F5 walk across floors · F6 daylight per level · F7 regulations / carpentry per level · F8 import per floor
   - [x] A1 mixed derive (`tests/slants.test.mjs`)
   - [ ] A2 editing angled walls [running] · later: A2 editing angled walls · A3 2D tools · A4 3D shell · A5 regulations / carpentry / walk · A6b import dialog · A7 exact daylight on angled faces

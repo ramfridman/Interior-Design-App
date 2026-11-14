@@ -46,6 +46,8 @@ import { Soup, buildOpenings, openingFrame, mergeSoups, casterMaterial, casterMe
 import { levelIds, levelElevation, levelHeights, footprintOf, GROUND } from '../core/levels.js';
 import { levelPlan } from '../core/plan-edit.js';
 import { difference, offset, union } from '../core/polykernel.js';
+import { stairArrivalDir, stairGeometry, stairSides } from '../core/stairs.js';
+import { buildStairMesh, stairMaterials } from './stairs.js';
 
 const OUT = 0, WALL = 1, OPENING = 2, ROOM = 3;
 const SKIRT_H = 0.07, SKIRT_T = 0.012;        // skirting board (m)
@@ -417,13 +419,8 @@ function buildSlabSoup(shape) {
 }
 
 const RAIL_H = 1.05, RAIL_POST = 0.04, RAIL_SPACING = 1.2, RAIL_INSET = 0.05;   // m: guard rail height, post size, max bay, set back from the void edge
-const UP_VEC = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
-/** Walking direction of a stair (plan unit vector): its `up` side, else from its rotation (rot 0 = towards the north). */
-function stairUp(st) {
-  if (st && UP_VEC[st.up]) return UP_VEC[st.up];
-  const a = ((Number(st && st.rot) || 0) * Math.PI) / 180;
-  return [Math.sin(a), -Math.cos(a)];
-}
+/** Walking direction of a stair where it arrives (plan unit vector) — core/stairs.js, the single source of truth. */
+const stairUp = (st) => stairArrivalDir(st);
 /**
  * A simple guard rail around each void of a level (1.05 m: posts + top rail, mid rail, bottom rail), set back 5 cm
  * onto the floor. The edge where the void's stair arrives (`void.stair` → that stair's walking direction) stays open.
@@ -879,6 +876,7 @@ export function buildHouse(ctx) {
       else if (i < ai) { s.setCutaway(null); s.setRoofVisible(true); }
     });
     // hidden upper levels keep blocking the sun in the sun study (like the hidden roof of the active level)
+    applyStairsView();
     for (const m of [...stand.children]) stand.remove(m);
     if (view.study) list.forEach((id, i) => {
       if (i <= ai) return;
@@ -887,7 +885,37 @@ export function buildHouse(ctx) {
     });
   }
 
+  // ── stairs (stage F4a): one mesh per stair, placed on its bottom level; rebuilt when stairs / levels / walls change ──
+  let stairsGroup = null, stairMats = null, stairsSig = '';
+  function syncStairs() {
+    const list = ids(), all = [];
+    list.forEach((id, i) => { for (const st of viewOf(id).stairs || []) if (st && st.id) all.push({ st, id, i }); });
+    const sig = all.length ? JSON.stringify(all.map(({ st, id }) => [id, st, levelElevation(plan, id), idOf(viewOf(id).walls), idOf(viewOf(id).slants)]))
+      + JSON.stringify(list.map((id) => [levelElevation(plan, id), levelHeights(plan, id).slab])) : '';
+    if (sig === stairsSig) return;
+    stairsSig = sig;
+    if (stairsGroup) for (const m of [...stairsGroup.children]) { m.geometry.dispose(); stairsGroup.remove(m); }
+    if (!all.length) return;
+    if (!stairsGroup) { stairsGroup = new THREE.Group(); stairsGroup.name = 'house-stairs'; group.add(stairsGroup); stairMats = stairMaterials(); }
+    for (const { st, id, i } of all) {
+      const to = st.to && list.includes(st.to) ? st.to : (st.to ? null : list[i + 1]);
+      if (!to) continue;
+      const rise = levelElevation(plan, to) - levelElevation(plan, id), geo = stairGeometry(st, { rise });
+      if (!geo) continue;
+      const mesh = buildStairMesh(st, geo, stairMats, { sides: stairSides(st, geo, viewOf(id)), underside: rise - (levelHeights(plan, to).slab || 0), levelId: id });
+      mesh.position.y = elevationOf(id);
+      stairsGroup.add(mesh);
+    }
+  }
+  /** A stair belongs to its bottom level and is shown with it (so also while a level above it is the one shown). */
+  function applyStairsView() {
+    if (!stairsGroup) return;
+    const list = ids(), ai = view.whole ? list.length - 1 : Math.max(0, list.indexOf(view.level));
+    for (const m of stairsGroup.children) m.visible = list.indexOf(m.userData.levelId) <= ai;
+  }
+
   syncLevels();
+  syncStairs();
   applyView();
 
   const ground = () => storeys.get(GROUND).s;
@@ -905,6 +933,7 @@ export function buildHouse(ctx) {
     rebuildPlan(e) {
       const t0 = performance.now();
       syncLevels(e && typeof e === 'object' ? e : null);
+      syncStairs();
       applyView();
       return performance.now() - t0;
     },
@@ -934,6 +963,7 @@ export function buildHouse(ctx) {
     dispose() {
       for (const rec of storeys.values()) rec.s.dispose(true);
       storeys.clear(); floorMeshes.length = 0;
+      if (stairsGroup) { for (const m of stairsGroup.children) m.geometry.dispose(); stairMats.dispose(); stairsGroup = null; }
       standMat.dispose();
       disposeMaterials();
       group.clear();

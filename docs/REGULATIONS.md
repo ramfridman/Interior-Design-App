@@ -314,6 +314,45 @@ room or kitchen is left with less than 8 % / 5 % of window, or a bathroom / WC l
 §2.20–2.21). They are reported only when the architect's version of the room passed. All ordinary checks (room size,
 light, door and passage widths, corridor widths, routes, safe room) are recomputed on the edited geometry as well.
 
+### 1.14 Stairs inside a dwelling — PBR Part C, chapter ב' sign ב' (מדרגות) and chapter ח' sign ה' (מגורים)
+
+Read in the consolidated text (Wikisource raw text of PBR, November 2026). Chapter ח' (dwellings), §3.8.5.1, applies the
+general stair sign (§3.2.2.x) to stairs in residential buildings "unless said otherwise in this sign"; §3.8.5.7(א)
+applies Part C to stairs **inside a dwelling** except §3.2.2.6, §3.2.2.10(2) and (5), §3.2.2.16 and §3.2.3.1.
+Definitions (§3.1.1.1): *"רום מדרגה"* riser — vertical distance between consecutive treads; *"שלח מדרגה"* going —
+horizontal distance nosing to nosing, square to the step; *"מזקף ראש"* headroom — vertical distance from the plane of
+the nosings (or of the walking level) to the lowest part of the building above (drawing 3.2.2.4).
+
+| Rule id | Requirement | Number | Section | Confidence |
+| --- | --- | --- | --- | --- |
+| `stair-riser` | Riser height, uniform along a flight | **10–17.5 cm** | §3.2.2.5(א), (ד) | high |
+| `stair-going` | Going (tread depth) | **≥ 26 cm** (28 / 16.5 only in public buildings without a lift, (ג)) | §3.2.2.5(ב) | high |
+| `stair-comfort` | *"2 רומים + שלח = 61 סנטימטרים עד 63 סנטימטרים"* | **61–63 cm** | §3.2.2.5(ד) | high |
+| `stair-width` | Stairs inside a dwelling (*"בתוך דירה – רוחבן של מדרגות יהיה 0.80 מטרים לפחות"*); 1.10 m in general, 0.90 m shared stairs of a building with ≤ 2 dwellings | **≥ 0.80 m** | §3.2.2.2(1), §3.8.5.7(ב); measured per §3.2.2.3 | high |
+| `stair-headroom` | *"גובה מזקף ראש מעל מדרגות יהיה 2.10 מטרים לפחות כאשר הוא נמדד אנכית מעל מישור המקביל למשיק אפי המדרגות"* | **≥ 2.10 m** above the nosing line | §3.2.2.4; also Part B §2.03(ג) | high |
+| `stair-void` | The floor opening must cover where the slab above would be lower than the 2.10 m headroom (derived from §3.2.2.4) | — | §3.2.2.4 | high |
+| `stair-flight` | Steps per flight inside a dwelling (*"מספר המדרגות במהלך מדרגות לא יעלה על 18"*); the general 3–16 (22 at ≤ 15.5 cm) of §3.2.2.6 does not apply in a dwelling (§3.8.5.2) | **≤ 18** (checked as risers) | §3.8.5.7(ד) | high |
+| `stair-landing` | Landing used to change direction at least the minimum stair width; free width in the direction of travel at least the minimum stair width; the 1.20 m between straight flights does not apply in a dwelling | **≥ 0.80 m** | §3.2.2.10(1), §3.8.5.7(א), (ג) | high |
+| `stair-handrail` | Handrail on both sides of a flight of 3 or more steps; inside a dwelling one side is enough | — | §3.2.2.15, §3.8.5.6 | high |
+| `stair-nosing` | Nosing depth; riser angle ≥ 60° | **≤ 4 cm** | §3.2.2.11 | high |
+| `stair-guard` | Guard to SI 1142 wherever adjacent levels differ by ≥ 60 cm (open sides of a stair, the floor opening) | **60 cm** drop | SAFETY reg. 4(א), 7; PBR §3.2.2.17 | high |
+| `stair-guard-height` | **Unverified — secondary source.** SI 1142 guard height 1.05 m on level edges, 0.90 m along a stair (measured from the tread / nosing line), gaps ≤ 10 cm. Reported as *info* only | 1.05 / 0.90 m | pro.co.il, "תכנון מדרגות לבית" (19.01.2025) — <https://www.pro.co.il/general-contractors/guide/designing-stairs-for-the-house>; the standard is not open-access | medium |
+
+Also read, not checked: timber treads / landings must be ≥ 4.5 cm thick unless non-combustible (§3.2.2.9); spiral,
+alternating-tread and winder (trapezoid) stairs are allowed inside a dwelling (§3.8.5.3, §3.8.5.4 — out of scope, F4
+draws straight / L / U only); dimensional tolerance 5 mm between adjacent steps, 10 mm per flight (§3.2.2.13).
+
+How the checker measures (`src/regulations/stairs.js`, geometry `src/core/stairs.js`): riser = floor-to-floor rise ÷
+risers; width = the drawn width (handrails are not deducted); headroom = slab underside of the floor above minus the
+highest nosing-line point under slab (outside its openings); the required opening = the part of the stair where the
+nosing line is higher than (slab underside − 2.10 m). **Not handled:** beams or bulkheads under the slab, the
+3D-model 4 cm tread vs. the 4.5 cm combustibility rule, stairs outside the footprint of the floor above.
+
+**The "Duplex" test house** (tests/fixtures/houses.mjs) has 18 risers of 16.67 cm, going 29 cm (2R + G = 62.3 cm,
+pass) and an opening `v1` to y 640: with the 2.10 m rule the slab must be open to y 666.2, so `v1` leaves 1.95 m of
+headroom and is reported (`stair-headroom`, `stair-void` fail). This contradicts the design note "headroom passes"
+— the fixture opening is about 26 cm too short.
+
 ---
 
 ## 2. STANDARDS that do **not** apply (or were not confirmed) for a private house
