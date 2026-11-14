@@ -96,3 +96,8 @@ Ids are prefixed by supplier (`habitat-`, `kare-`, `knob-`, `kado-`, `design4you
 * No price: tollmans.co.il showroom site, Karney listings, Aqua Creations (USD gallery only).
 * Not reachable or blocked: Zara Home Israel, H&M Home (403), Golf, Vardinon, CWC, HouseIn, Deco-Or, Rugsil, SHW (403), Kastiel, KualaStyle, Million Chairs, ID Design and several others (unreachable through the proxy).
 * Mashbir (fashion), Urban Home (gadgets), HomeWorkshop (password page): not relevant.
+
+
+## Second pass (14 Nov 2026)
+New blocks marked `>>> <supplier>-2 (second pass 2026-11-14)` in lighting-decor.js. Per-supplier evidence, ratings (none checked, no `top-rated`), exclusions and the lists of suppliers with no public price / blocked / still skipped are in docs/CATALOG-RESEARCH.md section "Second pass (14 Nov 2026)". Summary for this file: Ubject 6 pendants, Daniel Light Design 14 pendants = 20 products.
+Data origin: prices from each shop's own page (WooCommerce/Shopify store API values that equal the displayed price, Zaga/Daniel Light/Tollman's from the page text); sizes from labelled blocks on the page, or, for Kaza, from the size triple labelled depth x height x width by the site's own script; Ubject only where the unlabeled order does not matter.
