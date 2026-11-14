@@ -445,5 +445,37 @@ async function realWorld(record, names) {
   await W.close();
 }
 
+{
+  // levels (stage F1): A adds a level and draws on it → B receives identical plan data; then A edits L1 while B edits L0
+  // concurrently → the plan guard rejects one, the engine re-runs it on the newer plan, on its own level: both kept
+  const { buildPlan } = await import('../src/core/plan-build.js');
+  const { DUPLEX } = await import('./fixtures/houses.mjs');
+  const { stairs: _s, voids: _v, ...l1 } = DUPLEX.levels[0];
+  const duplex = buildPlan({ walls: DUPLEX.walls, openings: DUPLEX.openings, heights: DUPLEX.heights, meta: { name: 'Duplex' }, levels: [l1] }, { levels: true }).plan;
+  const record = { id: 'real3', name: 'Duplex', phase: 'fixed', basePlan: duplex, design: { items: [] } };
+  const W = await realWorld(record, [['A'], ['B']]);
+  const [A, B] = W.reps;
+  await W.pumpAll();
+  const same2 = async () => { const [sa, sb, ka, kb] = await Promise.all([A.call('serialize'), B.call('serialize'), A.call('planKey'), B.call('planKey')]); return sa === sb && ka === kb; };
+  ok((await A.call('levelsKey')) === (await B.call('levelsKey')) && (await A.call('levelsKey')) !== 'null', 'levels: both replicas open the Duplex with its upper level');
+  const add = await A.call('addLevel', {});
+  await W.pumpAll();
+  const [la, lb] = [JSON.parse(await A.call('levelsKey')), JSON.parse(await B.call('levelsKey'))];
+  ok(add.ok && la.length === 2 && JSON.stringify(la) === JSON.stringify(lb) && await same2(), 'levels: A adds a level → B receives identical plan data');
+  const w2 = await A.call('wallOn', ['L2', { x1: 650, y1: 20, x2: 650, y2: 780 }]);
+  await W.pumpAll();
+  ok(w2.ok && w2.ids[0].startsWith('L2|') && await same2() && JSON.parse(await B.call('levelsKey'))[1].walls.length > la[1].walls.length, 'levels: A draws a wall on the new level → identical on B' + (w2.ok ? '' : ': ' + w2.reason));
+  const toastsBefore = B.toasts.length + A.toasts.length;
+  const a1 = await A.call('wallOn', ['L1', { x1: 650, y1: 20, x2: 650, y2: 780 }]);
+  const b0 = await B.call('wallOn', ['L0', { x1: 900, y1: 20, x2: 900, y2: 780 }]);
+  await W.pumpAll();
+  const lv = JSON.parse(await A.call('levelsKey'));
+  const pa = JSON.parse(await A.call('serialize')).planEdits;
+  ok(a1.ok && b0.ok && await same2() && lv[0].walls.some((w) => w.x === 645) && pa.walls.some((w) => w.x === 895) && A.toasts.length + B.toasts.length === toastsBefore,
+    'levels: concurrent edits on L1 (A) and L0 (B): the guard re-runs one on the newer plan, on its own level — both kept, identical' + (A.toasts.concat(B.toasts).length ? ' (toasts: ' + A.toasts.concat(B.toasts).join(' | ') + ')' : ''));
+  ok((await A.call('activeLevel')) === 'L1' && (await B.call('activeLevel')) === 'L0', 'levels: a re-run leaves each person on their own level');
+  await W.close();
+}
+
 console.log(`\ncollab: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

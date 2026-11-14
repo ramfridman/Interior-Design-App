@@ -377,6 +377,57 @@ resetPlan()                                   // back to the architect's plan (u
 * Engine ↔ store hooks, not for views: `planState()`, `planStateKey()`, `applyPlanState(state)`, `bindPlanHost(host)`,
   `recomputePlan(plan)`.
 
+### Levels — several floors (stage F1, additive; UI behind `FEATURES.levels`, see docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md)
+L0 (ground) is the top-level plan, unchanged. Upper levels live in `PLAN.levels` (bottom-up; written only while there is
+one, with `schema: 2` — removing the last one gives back the schema-1 plan byte for byte): `{ id: 'L1'…, name?, nameHe?,
+elevation, heights: { ceiling, slab, parapet }, walls, wallOutline, openings, rooms, voids?, slants?, stairs?, outdoorAreas? }`.
+```js
+import { levelPlan, activeLevel, setActiveLevel, addLevel, removeLevel, updateLevel } from './core/plan-edit.js';
+import { levelIds, levelOf, levelElevation, levelHeights, levelName, footprintOf, GROUND } from './core/levels.js';  // pure
+levelPlan(plan = PLAN, id) → PLAN-shaped view | null  // 'L0' → plan itself. That level's walls, wallOutline, openings, rooms,
+                          // slants, stairs, voids, outdoorAreas + the shared meta, site, bounds, assumptions; heights = plan's
+                          // merged with the level's; levelId, elevation. SAME object while the level's walls array is the same
+                          // (fields refreshed in place, like PLAN). Every `plan`-taking function works on it: wallSegments(view),
+                          // spaceAt(x, y, view), wallFaces(view), regulations, renderers. Read-only.
+setActiveLevel(id) → { ok, levelId } | { ok: false, reason }   // not undoable, no event; store.setUI({ level }) calls it
+activeLevel() → 'L0' | 'L1' …                            // falls back to 'L0' when that level is gone
+addLevel({ copyExterior = true, name?, nameHe?, heights? })  // new TOP level 'L<n>'; elevation = below's elevation + its
+        // ceiling + the new slab; heights default to the level below's. copyExterior: the envelope of the level below
+        // (exterior walls, a safe room's outer walls included) and its windows are copied up — doors are not; rooms derived.
+        // ids = [levelId]; level 'permit' (+ REASONS.level) in a fixed plan.
+removeLevel(id, { force? })   // the top level, or an empty one (levels above come down). While items / carpentry runs
+        // (`level` field), finishes of its rooms or stairs leading to it remain → { ok: false, reason, content: { items,
+        // runs, finishes, stairs } } unless force; with force the same `content` comes back and the caller deals with it
+        // (e.g. store.begin(); removeLevel(id, { force: true }); store.removeItems(content.items); store.commit()).
+        // Finishes of its rooms are dropped by the store ('finishes' event; undo restores them).
+updateLevel(id, { name, nameHe, heights: { ceiling, slab, parapet } })   // not L0; refused if an opening would not fit;
+        // elevations above are recomputed
+```
+* **Every § 7 call works on the active level** (`segmentAt`, `canAddWall`, `canAddOpening`, `wallSegments()` without
+  argument, `addWall`, `removeWallSegment`, `moveWallSegment`, `resizeWallSegment`, `addOpening`), and the calls by id
+  on the level that holds that id (`updateOpening`, `removeOpening`, `flipDoor`, `openingPolicy`, `updateRoom`).
+  `resetPlan` resets every level. One undo step covers the whole plan state (`planState()` carries `levels`).
+* **L0 is literally the old code path** (an upper level is edited by swapping its arrays and policy into the same engine
+  for the duration of the call), so one-level plans, ids, events, files and collab docs are byte-identical.
+* **Ids.** Room ids (`room-<n>`) and opening ids (`door-new-<n>` …) are unique across ALL levels (finishes and collab keys
+  need no level). L0 wall / segment ids are unchanged; on upper levels they are prefixed: `L1|w03`, `L1|seg:v:…`.
+* **Policy.** A level the base plan has is classified against the base plan's level exactly like L0 (exterior walls
+  locked in a fixed plan; "outdoors" = outside that level's footprint); a level the base plan does not have is new
+  construction (nothing locked). Draft: everything free on every level.
+* **`planDiff()`** on a plan with levels: L0's entries as before plus each upper level's, every entry with `levelId`;
+  whole-level entries `kind: 'level-added' | 'level-removed' | 'level-changed'` (level `'permit'`, `ref` = level id).
+  A one-level plan's entries are unchanged (no `levelId` key).
+* **Events.** `'plan'` `changed` gains `levels: bool` (PLAN.levels changed; also for undo / redo / load / remote); an edit on
+  an upper level emits `changed: { walls: false, openings: false, rooms: false, levels: true }` and `levelId`. New reasons
+  `'add-level' | 'remove-level' | 'update-level'`. `applyPlanState().changed` has `levels` too.
+* **Store.** `store.spaceOf(item)` uses `item.level` (absent = L0) via `levelPlan`; finishes clean-up keeps rooms of every
+  level; `ui.level` falls back to `'L0'` when the open plan has no such level (another project, undo, a remote removal).
+* **Collab.** `addLevel`, `removeLevel`, `updateLevel` are tracked intents (`PLAN_CALLS`); on a plan with levels every
+  tracked call is preceded by an intent `setActiveLevel(level)` so a re-run after a conflict edits the same level; the
+  re-run restores the person's own active level.
+* `meta.floors` is not kept in step by the editing calls (meta is not part of the plan state) — count `levelIds(PLAN)`.
+* Tests: `node tests/levels.test.mjs`; the collaboration case is in `tests/collab.test.mjs`.
+
 ### Notes for the view / UI teams
 * New opening kind `'opening'` (style `'open'`): draw it as a clear gap with jambs — no leaf, no swing arc; it is
   walkable (`walkBlockers()` only blocks walls and windows).
@@ -867,7 +918,8 @@ isBuiltinBase() → bool  // the base plan is House 98: the architect's layout /
 planPhase() → 'draft' | 'fixed'
 setPlanPhase(phase)     // engine only — use store.setPlanPhase()
 currentPlanData()       // plain copy of the live plan as a complete PLAN-shaped object
-analyseWalls(walls, openings, { prevRooms, outdoorAreas }) → { walls, openings, rooms, wallOutline, problems, segments }  // pure
+analyseWalls(walls, openings, { prevRooms, outdoorAreas, level?, reservedRoomIds? }) → { walls, openings, rooms, wallOutline, problems, segments }  // pure
+        // level 'L1'…: ids for that upper level ('L1|w01', 'L1|seg:…'); reservedRoomIds: room ids new rooms must avoid
 wallBounds(walls, openings?) → { x, y, w, h } | null
 ```
 **Phases.** `'fixed'` = the base plan is the house as built: § 7 applies unchanged (four permission levels, changes list
@@ -911,6 +963,13 @@ const { ok, plan, warnings } = buildPlan({ walls, openings, meta, heights, site,
   (House 98's), `assumptions` (every default used, shown to the user). `ok` = no `error` warnings.
 * `warnings`: `[{ level: 'error' | 'warning' | 'info', text, ref? }]`, plain English. Never throws.
 * `emptyPlan({ meta, heights, lot, margins, street })` = an empty lot (house drawn later with the Structure tools).
+* **Upper floors (stage F1).** `buildPlan(input, { levels: true })` (or while `FEATURES.levels` is on; `{ levels: false }`
+  forces today's behaviour) accepts `levels: [{ id?, name?, nameHe?, heights?, walls, openings, voids?, stairs?, slants?,
+  elevation? }]` bottom-up: each level is read and derived like L0 (rooms named, outline, opening sides; wall ids
+  `L1|wNN`; room and opening ids unique across levels; warnings prefixed with the floor's name), heights default to L0's,
+  `elevation` is computed (below's elevation + its ceiling + this slab; a different given value is a warning), the origin
+  is the NW corner of all levels, `bounds` their union, `meta.floors` = 1 + levels. Without the option or the flag,
+  floors stay an `error` as before. With `passThrough: true` the optional data is now moved with the origin too.
 
 ### Projects (`projects.js`)
 ```js

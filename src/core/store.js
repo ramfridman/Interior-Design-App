@@ -207,11 +207,12 @@ class Store {
   }
   /**
    * `ui.level` must name a level of the open plan: an unknown one (another project, a level removed by undo or by
-   * someone else) falls back to 'L0'. The plan engine's active level follows it. Silent (like activeSpace).
+   * someone else) falls back to 'L0'. Silent (like activeSpace). `push`: the plan engine's active level follows ui.level
+   * (setUI, load); otherwise the engine keeps its own (it falls back to L0 by itself when its level goes).
    */
-  _syncLevel() {
+  _syncLevel(push = false) {
     if (this.ui.level !== GROUND && !levelOf(PLAN, this.ui.level)) this.ui.level = GROUND;
-    if (activeLevel() !== this.ui.level) setActiveLevel(this.ui.level);
+    if (push && activeLevel() !== this.ui.level) setActiveLevel(this.ui.level);
   }
 
   // ---------- history ----------
@@ -364,7 +365,7 @@ class Store {
     const keys = Object.keys(patch).filter((k) => this.ui[k] !== patch[k]);
     if (!keys.length) return;
     Object.assign(this.ui, patch);
-    if (keys.includes('level')) this._syncLevel();
+    if (keys.includes('level')) this._syncLevel(true);
     this.emit('ui', { keys });
   }
   setProject(patch, opts = {}) {
@@ -459,7 +460,7 @@ class Store {
     this.carpentryImages = data.carpentryImages && typeof data.carpentryImages === 'object' ? { ...data.carpentryImages } : {};
     this.project = { ...defaultProject(), ...(data.project || {}) };
     if (data.ui && opts.restoreUI) this.ui = { ...DEFAULT_UI, ...data.ui };
-    this._syncLevel();
+    this._syncLevel(true);
     this.selection = [];
     this._pruneFinishes();
     if (opts.base) this.emit('plan', { reason: 'base', changed: { walls: true, openings: true, rooms: true, levels: true } });

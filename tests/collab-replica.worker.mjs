@@ -46,6 +46,11 @@ const calls = {
   async removeSeg(id) { const r = PE.removeWallSegment(id); await tick(); return r; },
   async doorIn(id) { const s = PE.wallSegments().find((x) => x.id === id); const r = PE.addOpening({ kind: 'door', x: s.core.x + s.core.w / 2, y: s.core.y + s.core.h / 2 }); await tick(); return r; },
   async wallAt(n) { const r = n === 1 ? PE.addWall({ x1: 300, y1: 1100, x2: 300, y2: 1320 }) : PE.addWall({ x1: 1200, y1: 700, x2: 1200, y2: 1000 }); await tick(); return r; },
+  // levels (stage F1)
+  async addLevel(opts) { const r = PE.addLevel(opts); await tick(); return r; },
+  async wallOn([level, input]) { PE.setActiveLevel(level); const r = PE.addWall(input); await tick(); return r; },
+  levelsKey() { return JSON.stringify(PLAN.levels === undefined ? null : PLAN.levels); },
+  activeLevel() { return PE.activeLevel(); },
   async tryEdit() { const it = store.items[0]; if (it) store.updateItem(it.id, { x: it.x + 50 }); else store.addItem({ type: 'chair', w: 50, d: 50, h: 80, x: 500, y: 500 }); await tick(); return true; },
 
   /** Every mutating store / plan-edit / carpentry API once (each its own user action). */
