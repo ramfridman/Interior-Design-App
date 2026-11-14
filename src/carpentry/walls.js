@@ -6,7 +6,7 @@
  * `rot` (degrees clockwise). along = (cos dir, sin dir), front normal = (−sin dir, cos dir).
  */
 import { PLAN } from '../core/plan.js';
-import { wallFaces, spaceAt, pointInRect } from '../core/geometry.js';
+import { wallFaces, spaceAt, inWall, openingFrame, openingPoint } from '../core/geometry.js';
 
 const DEG = Math.PI / 180;
 const rnd = (v) => Math.round(v * 1000) / 1000;
@@ -28,7 +28,7 @@ export function toLocal(anchor, x, y) {
 /** rot (front direction) from an outward wall normal. */
 export function dirFromNormal(nx, ny) { return ((Math.round(Math.atan2(-nx, ny) / DEG) % 360) + 360) % 360; }
 
-const solidAt = (x, y, plan = PLAN) => plan.walls.some((w) => pointInRect(x, y, w));
+const solidAt = (x, y, plan = PLAN) => inWall(x, y, plan);
 
 function distToSeg(px, py, f) {
   const vx = f.x2 - f.x1, vy = f.y2 - f.y1, L2 = vx * vx + vy * vy || 1;
@@ -37,12 +37,16 @@ function distToSeg(px, py, f) {
 }
 
 /** Wall faces plus the room-side edges of openings collinear with a face (so a click in a doorway finds its wall). */
-function facesWithOpenings(plan) {
+export function facesWithOpenings(plan) {
   const faces = wallFaces(plan), out = [...faces];
   for (const o of plan.openings) {
-    const edges = o.axis === 'h' ? [[o.x, o.y, o.x + o.w, o.y], [o.x, o.y + o.h, o.x + o.w, o.y + o.h]] : [[o.x, o.y, o.x, o.y + o.h], [o.x + o.w, o.y, o.x + o.w, o.y + o.h]];
-    for (const [x1, y1, x2, y2] of edges) {
-      const f = faces.find((g) => (o.axis === 'h' ? g.y1 === y1 && g.y2 === y1 && g.ny !== 0 && (g.ny > 0 ? y1 === o.y + o.h : y1 === o.y) : g.x1 === x1 && g.x2 === x1 && g.nx !== 0 && (g.nx > 0 ? x1 === o.x + o.w : x1 === o.x)));
+    const F = openingFrame(o, plan);
+    for (const sgn of [-1, 1]) {
+      // the opening's edge on one wall face, and the wall face (same line, same outward normal) it continues
+      const [x1, y1] = openingPoint(F, 0, sgn < 0 ? 0 : F.T), [x2, y2] = openingPoint(F, F.L, sgn < 0 ? 0 : F.T);
+      const nx = sgn * F.nx, ny = sgn * F.ny;
+      const on = (x, y) => (x - x1) * F.nx + (y - y1) * F.ny === 0;
+      const f = faces.find((g) => g.nx === nx && g.ny === ny && on(g.x1, g.y1) && on(g.x2, g.y2));
       if (f) out.push({ x1, y1, x2, y2, nx: f.nx, ny: f.ny, opening: o.id });
     }
   }
@@ -72,8 +76,11 @@ export function wallSpanAt(x, y, opts = {}) {
     if (horiz ? g.y1 === c && g.y2 === c : g.x1 === c && g.x2 === c) iv.push({ a: horiz ? Math.min(g.x1, g.x2) : Math.min(g.y1, g.y2), b: horiz ? Math.max(g.x1, g.x2) : Math.max(g.y1, g.y2), o: null });
   }
   for (const o of plan.openings) {
-    if (horiz && o.axis === 'h' && (f.ny > 0 ? o.y + o.h === c : o.y === c)) iv.push({ a: o.x, b: o.x + o.w, o });
-    if (!horiz && o.axis === 'v' && (f.nx > 0 ? o.x + o.w === c : o.x === c)) iv.push({ a: o.y, b: o.y + o.h, o });
+    // openings in a wall that runs along the face, with their face on the face's line
+    const F = openingFrame(o, plan), sgn = f.nx * F.nx + f.ny * F.ny;
+    if (Math.abs(sgn) < 0.999) continue;
+    const p = openingPoint(F, 0, sgn > 0 ? F.T : 0), q = openingPoint(F, F.L, sgn > 0 ? F.T : 0);
+    if ((horiz ? p[1] : p[0]) === c) iv.push({ a: horiz ? p[0] : p[1], b: horiz ? q[0] : q[1], o });
   }
   iv.sort((p, q) => p.a - q.a || p.b - q.b);
   const p = horiz ? x : y;
@@ -91,8 +98,8 @@ export function wallSpanAt(x, y, opts = {}) {
   const anchor = { x: startPt[0], y: startPt[1], dir };
   const length = chain.b - chain.a;
   const along = (px, py) => toLocal(anchor, px, py)[0];
-  const openings = chain.parts.filter((s) => s.o).map(({ o }) => {
-    const pa = along(horiz ? o.x : c, horiz ? c : o.y), pb = along(horiz ? o.x + o.w : c, horiz ? c : o.y + o.h);
+  const openings = chain.parts.filter((s) => s.o).map(({ o, a, b }) => {
+    const pa = along(horiz ? a : c, horiz ? c : a), pb = along(horiz ? b : c, horiz ? c : b);
     return { id: o.id, kind: o.kind, style: o.style, from: rnd(Math.min(pa, pb)), to: rnd(Math.max(pa, pb)), width: o.width, sill: o.sill || 0, height: o.height, top: (o.sill || 0) + o.height, hinge: o.hinge, swing: o.swing };
   }).sort((p1, p2) => p1.from - p2.from);
   const endType = (pt, sign) => {

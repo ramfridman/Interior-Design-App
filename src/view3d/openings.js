@@ -16,6 +16,7 @@
  * visible, cut parts stop casting and one invisible full-height copy casts instead, so the sun patches stay true.
  */
 import * as THREE from 'three';
+import { openingFrame as wallFrame, openingFaceName } from '../core/geometry.js';
 
 const DEG = Math.PI / 180;
 const DOOR_OPEN_ANGLE = 85 * DEG;
@@ -145,7 +146,7 @@ const isHinged = (o) => o.kind === 'door';
 
 /** The plan side that canonical +Z (the opening's front) points to. */
 function frontOf(o) {
-  const sides = o.axis === 'h' ? ['n', 's'] : ['w', 'e'];
+  const sides = [openingFaceName(o, -1), openingFaceName(o, 1)];
   if (isHinged(o) && sides.includes(o.swing)) return o.swing;
   if (sides.includes(o.outside)) return o.outside;
   return sides[1];
@@ -165,25 +166,33 @@ function framePlaneOffset(o, t, front) {
  * @returns {{ front: 'n'|'s'|'e'|'w', t: number, mid: number, plane: number }}
  */
 export function openingFrame(o) {
-  const front = frontOf(o);
-  const t = o.axis === 'h' ? o.h : o.w;
-  const mid = o.axis === 'h' ? o.y + o.h / 2 : o.x + o.w / 2;
+  const front = frontOf(o), W = wallFrame(o);
+  const t = W.T;
+  const mid = W.cx * W.nx + W.cy * W.ny;                            // centre plane, as a coordinate across the wall
   return { front, t, mid, plane: mid + SIGN[front] * framePlaneOffset(o, t, front) };
 }
 
 /** Free solid wall length (cm) next to a jamb, on the canonical ±X side — decides where the mamad shutter parks. */
-function wallRunBeside(o, plan, dirName) {
-  const s = SIGN[dirName];
-  let edge = o.axis === 'h' ? (s > 0 ? o.x + o.w : o.x) : (s > 0 ? o.y + o.h : o.y), run = 0;
+export function wallRunBeside(o, plan, dirName) {
+  const s = SIGN[dirName], F = wallFrame(o, plan);
+  // rect pieces (walls and the gap itself) in the opening's frame: start / length along the wall, start / depth across it
+  const along = (r) => r.x * F.ux + r.y * F.uy, len = (r) => r.w * Math.abs(F.ux) + r.h * Math.abs(F.uy);
+  const across = (r) => r.x * F.nx + r.y * F.ny, depth = (r) => r.w * Math.abs(F.nx) + r.h * Math.abs(F.ny);
+  const c0 = across(o), c1 = c0 + depth(o);
+  let edge = s > 0 ? along(o) + len(o) : along(o), run = 0;
   for (let guard = 0; guard < 8; guard++) {
-    const next = plan.walls.find((w) => (o.axis === 'h'
-      ? w.y <= o.y && w.y + w.h >= o.y + o.h && (s > 0 ? w.x === edge : w.x + w.w === edge)
-      : w.x <= o.x && w.x + w.w >= o.x + o.w && (s > 0 ? w.y === edge : w.y + w.h === edge)));
+    const next = plan.walls.find((w) => across(w) <= c0 && across(w) + depth(w) >= c1 && (s > 0 ? along(w) === edge : along(w) + len(w) === edge));
     if (!next) break;
-    const len = o.axis === 'h' ? next.w : next.h;
-    run += len; edge += s * len;
+    const l = len(next);
+    run += l; edge += s * l;
   }
   return run;
+}
+
+/** Rigid transform (metres) that puts an opening's canonical frame in the wall with canonical +Z towards `side`. */
+export function openingPlacement(o, side) {
+  const F = wallFrame(o);
+  return new THREE.Matrix4().makeRotationY(YAW[side]).setPosition(F.cx / 100, 0, F.cy / 100);
 }
 
 // ───────────────────────── builders (metres, canonical frame) ─────────────────────────
@@ -413,11 +422,7 @@ export function buildOpenings(plan, opts) {
     for (const o of plan.openings || []) {
       try {
         const F = openingFrame(o), front = F.front;
-        const along = (o.axis === 'h' ? o.x + o.w / 2 : o.y + o.h / 2) / 100;
-        const place = (side) => {
-          const m = new THREE.Matrix4().makeRotationY(YAW[side]);
-          return m.setPosition(o.axis === 'h' ? along : F.mid / 100, 0, o.axis === 'h' ? F.mid / 100 : along);
-        };
+        const place = (side) => openingPlacement(o, side);
         const G = {
           plan, front, w: o.width / 100, t: F.t / 100, y0: (o.sill || 0) / 100, y1: ((o.sill || 0) + o.height) / 100,
           zf: framePlaneOffset(o, F.t, front) / 100, out: o.exterior && o.outside ? (o.outside === front ? 1 : -1) : 1,

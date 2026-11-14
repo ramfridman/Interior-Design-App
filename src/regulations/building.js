@@ -2,9 +2,9 @@
  * Checks that depend only on the building and the lot (plan data + ceiling height + mamad wall finish).
  * Everything is computed from `plan` — no coordinates are hard-coded.
  */
-import { areaM2, pointInPolygon, polygonBounds, pointInRect } from '../core/geometry.js';
+import { areaM2, pointInPolygon, polygonBounds, pointInRect, convexOverlap, edgeNormal, rectExtent, inWallOrOpening, openingFrame, openingPoint, openingPoly, wallPolys } from '../core/geometry.js';
 import { ruleById, refString } from './rules.js';
-import { m, num, planRev, rectPoly, rectObstacle, freeDepth, largestInnerRect, narrowPassages, overshoot, segDist, polyInside } from './geom.js';
+import { m, num, planRev, rectPoly, wallObstacle, openingObstacle, freeDepth, largestInnerRect, narrowPassages, overshoot, segDist, polyInside } from './geom.js';
 
 /** Build one finding; category / kind / reference come from the rule. */
 export function finding(ruleId, severity, key, title, detail, extra) {
@@ -18,7 +18,7 @@ const CORRIDOR = new Set(['corridor', 'hall', 'passage', 'lobby']);
 const pct = (v) => (v * 100).toFixed(1) + '%';
 const centre = (poly) => { const b = polygonBounds(poly); return { x: b.x + b.w / 2, y: b.y + b.h / 2 }; };
 const spot = (space) => (space.label ? { x: space.label[0], y: space.label[1] } : centre(space.polygon));
-const openingCentre = (o) => ({ x: o.x + o.w / 2, y: o.y + o.h / 2 });
+const openingCentre = (o) => { const F = openingFrame(o); return { x: F.cx, y: F.cy }; };
 const isDoor = (o) => o.kind === 'door' || o.kind === 'sliding-door';
 const isPassage = (o) => o.kind === 'opening';                         // door-less passage added by the owner
 const isGlazed = (o) => o.kind === 'window' || o.kind === 'sliding-door' || /glass/.test(o.style || '');
@@ -298,27 +298,36 @@ function checkDoors(plan, out) {
 
 // ───────────────────────── safe room ─────────────────────────
 
-/** Walls and openings lying along each edge of a rectilinear room, with thickness and whether the far side is outdoors. */
+/**
+ * Walls and openings lying along each edge of a room, with thickness and whether the far side is outdoors.
+ * Works on any edge direction; walls and openings are rects (their x / y / w / h), projected on the edge's axes.
+ */
 export function roomSides(plan, room) {
-  const poly = room.polygon, sides = [];
+  const poly = room.polygon, sides = [], wp = wallPolys(plan);
+  const lo = (r, d) => rectExtent(r, d[0], d[1])[0], ext = (r, d) => rectExtent(r, d[0], d[1])[1];
   for (let i = 0; i < poly.length; i++) {
     const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % poly.length];
-    if (x1 !== x2 && y1 !== y2) continue;
-    const horizontal = y1 === y2;
-    const a = horizontal ? Math.min(x1, x2) : Math.min(y1, y2), b = horizontal ? Math.max(x1, x2) : Math.max(y1, y2);
+    if (x1 === x2 && y1 === y2) continue;
+    // p = the edge's normal in a fixed orientation ((0, 1) for horizontal, (1, 0) for vertical edges), e = along the edge
+    const p = edgeNormal(x1, y1, x2, y2);
+    let e = [p[1], -p[0] + 0];
+    if (e[0] + e[1] < 0 || (e[0] + e[1] === 0 && e[0] < 0)) e = [-e[0] + 0, -e[1] + 0];
+    const ea = x1 * e[0] + y1 * e[1], eb = x2 * e[0] + y2 * e[1], a = Math.min(ea, eb), b = Math.max(ea, eb), c = x1 * p[0] + y1 * p[1];
     const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-    const n = horizontal ? [0, pointInPolygon(mx, my + 1, poly) ? -1 : 1] : [pointInPolygon(mx + 1, my, poly) ? -1 : 1, 0];
-    const strip = horizontal ? { x: a, y: n[1] < 0 ? y1 - 2 : y1, w: b - a, h: 2 } : { x: n[0] < 0 ? x1 - 2 : x1, y: a, w: 2, h: b - a };
-    const touching = (r) => {
-      const ox = Math.min(r.x + r.w, strip.x + strip.w) - Math.max(r.x, strip.x), oy = Math.min(r.y + r.h, strip.y + strip.h) - Math.max(r.y, strip.y);
-      return ox > 0 && oy > 0 && (horizontal ? ox : oy) > 5;
+    const s = pointInPolygon(mx + p[0], my + p[1], poly) ? -1 : 1, n = [s * p[0] + 0, s * p[1] + 0];   // n points away from the room
+    const s0 = s < 0 ? c - 2 : c, sw = b - a;                                                           // a 2 cm strip beyond the edge
+    const strip = !e[0] || !e[1] ? null : [[x1, y1], [x2, y2], [x2 + n[0] * 2, y2 + n[1] * 2], [x1 + n[0] * 2, y1 + n[1] * 2]];
+    const touching = (r, rp) => {
+      const ox = Math.min(lo(r, e) + ext(r, e), a + sw) - Math.max(lo(r, e), a), oy = Math.min(lo(r, p) + ext(r, p), s0 + 2) - Math.max(lo(r, p), s0);
+      return ox > 0 && oy > 0 && ox > 5 && (!strip || convexOverlap(strip, rp(), 0));
     };
-    const walls = plan.walls.filter(touching), openings = plan.openings.filter(touching);
+    const walls = plan.walls.filter((w, k) => touching(w, () => wp[k])), openings = plan.openings.filter((o) => touching(o, () => openingPoly(o)));
     if (!walls.length && !openings.length) continue;
-    const thick = (r) => (horizontal ? r.h : r.w);
+    const thick = (r) => ext(r, p);
     const thickness = Math.min(...walls.map(thick), ...(walls.length ? [] : openings.map(thick)));
     const px = mx + n[0] * (thickness + 10), py = my + n[1] * (thickness + 10);
-    sides.push({ dir: horizontal ? (n[1] < 0 ? 'north' : 'south') : (n[0] < 0 ? 'west' : 'east'), n, walls, openings, thickness, exterior: !roomAt(plan, px, py), at: { x: mx, y: my } });
+    const dir = Math.abs(n[1]) >= Math.abs(n[0]) ? (n[1] < 0 ? 'north' : 'south') : (n[0] < 0 ? 'west' : 'east');
+    sides.push({ dir, n, walls, openings, thickness, exterior: !roomAt(plan, px, py), at: { x: mx, y: my } });
   }
   return sides;
 }
@@ -411,10 +420,10 @@ function checkMamad(plan, H, store, catalog, out, metrics) {
           + (ok ? '.' : ' — otherwise the door must be shielded by a concrete wall as the Home Front Command specification details. Confirm with the architect.'), { spaceId: r.id, at: dAt }));
 
         // free floor in front of the door, up to the first wall (an interior wall the owner adds can come too close)
-        if (!wallObstacles) wallObstacles = [...plan.walls.map((w) => rectObstacle(w, { wall: w })), ...plan.openings.filter((x) => x.kind === 'window').map((x) => rectObstacle(x, { wall: x }))];
-        const horizontal = o.axis === 'h';
-        const face = horizontal ? [dAt.x, side.n[1] > 0 ? o.y + o.h : o.y] : [side.n[0] > 0 ? o.x + o.w : o.x, dAt.y];
-        const { depth, hit } = freeDepth({ o: face, u: side.n, v: horizontal ? [1, 0] : [0, 1], hw: o.width / 2 }, 400, wallObstacles, { inset: 1 });
+        if (!wallObstacles) wallObstacles = [...plan.walls.map((w, i) => wallObstacle(plan, i, { wall: w })), ...plan.openings.filter((x) => x.kind === 'window').map((x) => openingObstacle(x, { wall: x }))];
+        const F = openingFrame(o, plan), outFace = side.n[0] * F.nx + side.n[1] * F.ny > 0;
+        const face = openingPoint(F, F.L / 2, outFace ? F.T : 0);                 // centre of the door's face on that side
+        const { depth, hit } = freeDepth({ o: face, u: side.n, v: [F.ux, F.uy], hw: o.width / 2 }, 400, wallObstacles, { inset: 1 });
         const w = hit && hit.wall;
         const light = w && (w.cls === 'partition' || (w.kind === 'interior' && Math.min(w.w, w.h) < 15));
         const sev = depth < o.width ? 'fail' : depth < 110 ? 'warn' : depth < 130 && o.width < 80 && !light ? 'info' : 'pass';
@@ -461,7 +470,7 @@ function rayToExterior(plan, from, n, skip) {
     const x = from.x + n[0] * d, y = from.y + n[1] * d;
     if (x < b.x || y < b.y || x > b.x + b.w || y > b.y + b.h) return d - skip;
     if (plan.walls.some((w) => w.kind === 'exterior' && pointInRect(x, y, w)) || plan.openings.some((o) => o.exterior && pointInRect(x, y, o))) return d - skip;
-    if (!roomAt(plan, x, y) && !plan.walls.some((w) => pointInRect(x, y, w)) && !plan.openings.some((o) => pointInRect(x, y, o))) return d - skip;
+    if (!roomAt(plan, x, y) && !inWallOrOpening(x, y, plan)) return d - skip;
   }
   return 3000;
 }
@@ -487,7 +496,7 @@ const SIDE_NAME = { n: 'north', e: 'east', s: 'south', w: 'west' };
 function checkSite(plan, out) {
   const site = plan.site;
   if (!site || !site.boundary) return;
-  const wallPolys = plan.walls.map(rectPoly);
+  const wallOutlines = wallPolys(plan);
 
   // setbacks of the house from each property line
   const parts = [];
@@ -495,7 +504,7 @@ function checkSite(plan, out) {
   for (const side of ['w', 'n', 'e', 's']) {
     const e = boundaryEdge(site.boundary, side); if (!e) continue;
     let dist = Infinity;
-    for (const poly of wallPolys) for (const [x, y] of poly) dist = Math.min(dist, segDist(x, y, e.a[0], e.a[1], e.b[0], e.b[1]));
+    for (const poly of wallOutlines) for (const [x, y] of poly) dist = Math.min(dist, segDist(x, y, e.a[0], e.a[1], e.b[0], e.b[1]));
     const need = site.setbacks && site.setbacks[side];
     const ok = need == null || dist >= need - 2;
     if (!ok) worst = 'fail';
@@ -508,7 +517,7 @@ function checkSite(plan, out) {
 
   // building line
   if (site.buildingLine) {
-    const over = Math.max(0, ...wallPolys.map((p) => overshoot(p, site.buildingLine)));
+    const over = Math.max(0, ...wallOutlines.map((p) => overshoot(p, site.buildingLine)));
     out.push(finding('building-line', over <= 1 ? 'pass' : 'fail', 'house', over <= 1 ? 'House is inside the building line' : `House crosses the building line by ${Math.round(over)} cm`,
       over <= 1 ? 'Every wall of the house lies inside the building line drawn on the site plan.' : `Part of the house lies ${Math.round(over)} cm beyond the building line — this is not permitted without a formal relaxation (הקלה).`));
     for (const a of plan.outdoorAreas || []) {

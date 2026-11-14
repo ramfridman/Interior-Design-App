@@ -1,7 +1,7 @@
 /**
  * Geometry helpers for the regulation checks. Pure functions; plan space (cm, +x east, +y south).
  */
-import { polygonBounds, pointInPolygon, DEG } from '../core/geometry.js';
+import { polygonBounds, pointInPolygon, DEG, openingFrame, openingPoint, openingBox, openingHinge, openingPoly, wallPolys } from '../core/geometry.js';
 
 export const rectPoly = (r) => [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]];
 export const m = (cm, digits = 2) => (cm / 100).toFixed(digits);
@@ -145,18 +145,15 @@ export function freeDepth(frame, max, obstacles, { inset = 3, a0 = -frame.hw, a1
 
 /** Obstacle record for a plan rectangle. */
 export const rectObstacle = (r, extra) => ({ poly: rectPoly(r), bb: { x: r.x, y: r.y, w: r.w, h: r.h }, ...extra });
+/** Obstacle record for wall `i` of a plan: its polygon (wallPolys) and bounding box. */
+export const wallObstacle = (plan, i, extra) => ({ ...rectObstacle(plan.walls[i], extra), poly: wallPolys(plan)[i] });
+/** Obstacle record for an opening's gap. */
+export const openingObstacle = (o, extra) => ({ ...rectObstacle(o, extra), poly: openingPoly(o) });
 
 /** Quarter-circle swept by a hinged door leaf, as a convex polygon; null for sliding doors / windows. */
 export function doorSwing(o) {
   if (o.kind !== 'door' || !o.hinge || !o.swing) return null;
-  let hx, hy, closed, open;
-  if (o.axis === 'v') {
-    hy = o.hinge === 'n' ? o.y : o.y + o.h; closed = [0, o.hinge === 'n' ? 1 : -1];
-    hx = o.swing === 'w' ? o.x : o.x + o.w; open = [o.swing === 'w' ? -1 : 1, 0];
-  } else {
-    hx = o.hinge === 'w' ? o.x : o.x + o.w; closed = [o.hinge === 'w' ? 1 : -1, 0];
-    hy = o.swing === 'n' ? o.y : o.y + o.h; open = [0, o.swing === 'n' ? -1 : 1];
-  }
+  const { x: hx, y: hy, closed, open } = openingHinge(o);
   const R = o.width, poly = [[hx, hy]];
   for (let a = 0; a <= 90; a += 15) {
     const ca = Math.cos(a * DEG), sa = Math.sin(a * DEG);
@@ -170,16 +167,12 @@ export function doorSwing(o) {
  * and the approach rectangle (`depth` cm deep across the opening width).
  */
 export function openingSides(o, depth = 60, dist = 20) {
-  const cx = o.x + o.w / 2, cy = o.y + o.h / 2;
+  const F = openingFrame(o);
   const sides = [];
   for (const sgn of [-1, 1]) {
-    if (o.axis === 'v') {
-      const face = sgn < 0 ? o.x : o.x + o.w;
-      sides.push({ n: [sgn, 0], probe: [face + sgn * dist, cy], rect: { x: sgn < 0 ? face - depth : face, y: o.y, w: depth, h: o.h } });
-    } else {
-      const face = sgn < 0 ? o.y : o.y + o.h;
-      sides.push({ n: [0, sgn], probe: [cx, face + sgn * dist], rect: { x: o.x, y: sgn < 0 ? face - depth : face, w: o.w, h: depth } });
-    }
+    const n = [sgn * F.nx + 0, sgn * F.ny + 0];
+    const [fx, fy] = openingPoint(F, F.L / 2, sgn < 0 ? 0 : F.T);               // centre of the face
+    sides.push({ n, probe: [fx + n[0] * dist, fy + n[1] * dist], rect: openingBox(F, 0, F.L, sgn < 0 ? -depth : F.T, depth) });
   }
   return sides;
 }

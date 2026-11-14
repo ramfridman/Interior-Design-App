@@ -4,7 +4,7 @@
  * Errors = cannot be built / installed as drawn; warnings = against best practice; info = notes for the designer.
  */
 import { PLAN } from '../core/plan.js';
-import { itemAABB } from '../core/geometry.js';
+import { itemAABB, openingHinge } from '../core/geometry.js';
 import { view } from './state.js';
 import { RULES } from './spec.js';
 import { unitsOf, positions, geometryOf, unitCodes, isFloorLevel } from './layout.js';
@@ -335,16 +335,11 @@ export function doorSwingHit(item) {
   return null;
 }
 
-/** Leaf sweep of a hinged door as { hx, hy (hinge point), r, quad: [sx, sy] } in plan cm. */
-function swingRect(o) {
+/** Leaf sweep of a hinged door as { hx, hy (hinge point), r, sx, sy } in plan cm: the quadrant on the sx / sy side of the hinge. */
+export function swingRect(o) {
   if (!o.swing || !o.hinge) return null;
-  const r = o.width;
-  if (o.axis === 'v') {
-    const hy = o.hinge === 'n' ? o.y : o.y + o.h, hx = o.swing === 'e' ? o.x + o.w : o.x;
-    return { hx, hy, r, sx: o.swing === 'e' ? 1 : -1, sy: o.hinge === 'n' ? 1 : -1 };
-  }
-  const hx = o.hinge === 'w' ? o.x : o.x + o.w, hy = o.swing === 's' ? o.y + o.h : o.y;
-  return { hx, hy, r, sx: o.hinge === 'w' ? 1 : -1, sy: o.swing === 's' ? 1 : -1 };
+  const h = openingHinge(o);
+  return { hx: h.x, hy: h.y, r: o.width, sx: h.closed[0] + h.open[0], sy: h.closed[1] + h.open[1] };
 }
 function itemHitsSwing(it, sw) {
   const b = itemAABB(it);
@@ -354,14 +349,25 @@ function itemHitsSwing(it, sw) {
   const nx = Math.max(ix0, Math.min(sw.hx, ix1)), ny = Math.max(iy0, Math.min(sw.hy, iy1));
   return Math.hypot(nx - sw.hx, ny - sw.hy) < sw.r - 1;
 }
-/** Clear distance along an axis-aligned ray to the first wall / item. */
-function rayClear(px, py, dx, dy, items, max) {
+/**
+ * Distance along the unit ray (dx, dy) from (px, py) to the near side of an axis-aligned rect (negative when the point
+ * is past it or inside it), or null when the ray's line misses the rect.
+ */
+function rayToRect(px, py, dx, dy, r) {
+  let t0 = -Infinity, t1 = Infinity;
+  for (const [p, d, lo, hi] of [[px, dx, r.x, r.x + r.w], [py, dy, r.y, r.y + r.h]]) {
+    if (d === 0) { if (p < lo || p > hi) return null; continue; }
+    const a = (lo - p) / d, b = (hi - p) / d;
+    t0 = Math.max(t0, Math.min(a, b)); t1 = Math.min(t1, Math.max(a, b));
+  }
+  return t1 < t0 ? null : t0;
+}
+/** Clear distance along a ray (unit direction) to the first wall / item. */
+export function rayClear(px, py, dx, dy, items, max) {
   let best = { d: max, what: 'nothing', whatHe: 'מכשול' }, hit = false;
   const test = (r, what, whatHe) => {
-    let d;
-    if (dx !== 0) { if (py < r.y || py > r.y + r.h) return; d = dx > 0 ? r.x - px : px - (r.x + r.w); }
-    else { if (px < r.x || px > r.x + r.w) return; d = dy > 0 ? r.y - py : py - (r.y + r.h); }
-    if (d >= -0.5 && d < best.d) { best = { d: Math.max(0, d), what, whatHe }; hit = true; }
+    const d = rayToRect(px, py, dx, dy, r);
+    if (d != null && d >= -0.5 && d < best.d) { best = { d: Math.max(0, d), what, whatHe }; hit = true; }
   };
   for (const w of PLAN.walls) test(w, 'a wall', 'קיר');
   for (const it of items) test(itemAABB(it), it.carp ? 'another run' : (it.name || it.type), it.carp ? 'קו ארונות אחר' : (it.name || it.type));

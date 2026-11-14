@@ -9,13 +9,16 @@
  * Local frame per opening: u runs along the wall (0..L), v across its thickness (0..T).
  */
 import { css } from './color.js';
+import { openingFrame, openingPoint, openingFaceSign, openingJambSign } from '../core/geometry.js';
 
 function frame(o) {
-  const h = o.axis === 'h';
-  return { L: h ? o.w : o.h, T: h ? o.h : o.w, P: (u, v) => (h ? [o.x + u, o.y + v] : [o.x + v, o.y + u]) };
+  const F = openingFrame(o);
+  return { L: F.L, T: F.T, P: (u, v) => openingPoint(F, u, v) };
 }
-/** v coordinate of the wall face on a compass side. */
-const faceV = (o, T, side) => ((o.axis === 'h' ? side === 'n' : side === 'w') ? 0 : T);
+/** v coordinate of the wall face on a side (`swing` / `outside` letter). */
+const faceV = (o, T, side) => (openingFaceSign(o, side) < 0 ? 0 : T);
+/** Pure helpers exposed for tests (tests/geometry.test.mjs). */
+export { frame as openingLocalFrame, faceV as openingFaceV };
 
 function localBox(G, f, u0, v0, u1, v1, fill, stroke, lw = 1) {
   const a = f.P(u0, v0), b = f.P(u1, v1);
@@ -60,13 +63,13 @@ function drawSlidingDoor(G, pal, o) {
 }
 
 /**
- * One hinged leaf with its swing. `d` = { hinge, swing, width } (compass sides); `look` = { heavy, dashed }.
+ * One hinged leaf with its swing. `d` = { hinge, swing, width } (the plan's side letters); `look` = { heavy, dashed }.
  * A dashed leaf is the secondary (inner) door of a double doorway.
  */
 function drawLeaf(G, pal, o, f, d, look = {}) {
   const { ctx } = G, { L, T } = f;
   const W = Math.min(L, d.width || L);
-  const hingeAtStart = d.hinge === 'n' || d.hinge === 'w';
+  const hingeAtStart = openingJambSign(o, d.hinge) < 0;
   const uh = hingeAtStart ? 0 : L, dir = hingeAtStart ? 1 : -1;
   const vs = faceV(o, T, d.swing || 'n'), out = vs === 0 ? -1 : 1;
   const H = f.P(uh, vs), tip = f.P(uh, vs + out * W), closed = f.P(uh + dir * W, vs);

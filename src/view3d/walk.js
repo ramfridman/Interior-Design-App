@@ -4,7 +4,7 @@
  * Movement : WASD / arrows (← → turn, A D strafe), Q / E turn, Shift run, gamepad sticks, touch joystick (left half).
  * Looking  : Pointer Lock when the browser grants it, otherwise click-drag; touch: drag on the right half.
  * Glide    : click / tap a spot (no drag) to glide there.
- * Collision: the walker is a circle tested against rotated rectangles (walls + windows from walkBlockers(), tall floor
+ * Collision: the walker is a circle tested against rotated rectangles (walls + windows from walkBoxes(), tall floor
  *            furniture). Motion is sub-stepped (≤ 8 cm) and penetrations are pushed out along the contact normal, which
  *            gives wall sliding without corner jitter or tunnelling. Blockers that contain the walker when a move starts
  *            are ignored until they have been left.
@@ -12,7 +12,7 @@
  * Plan units inside this module are METRES (x east, y south); the public API speaks plan centimetres.
  */
 import * as THREE from 'three';
-import { walkBlockers, spaceAt } from '../core/geometry.js';
+import { walkBoxes, spaceAt, openingFrame } from '../core/geometry.js';
 import { groundY } from './items.js';
 import { sideVec, sideHeading } from './camera.js';
 
@@ -39,11 +39,14 @@ export function defaultWalkStart(plan) {
   const door = plan.openings.find((o) => o.id === 'door-entry') || plan.openings.find((o) => o.kind === 'door' && o.exterior);
   if (!door) return { x: plan.bounds.x + plan.bounds.w / 2, y: plan.bounds.y + plan.bounds.h / 2, heading: 0 };
   const inward = door.swing || { n: 's', s: 'n', e: 'w', w: 'e' }[door.outside] || 'w';
-  const v = sideVec(inward), depth = (door.axis === 'v' ? door.w : door.h) / 2 + 55;
-  return { x: door.x + door.w / 2 + v[0] * depth, y: door.y + door.h / 2 + v[1] * depth, heading: sideHeading(inward) };
+  const F = openingFrame(door, plan), v = sideVec(inward), depth = F.T / 2 + 55;
+  return { x: F.cx + v[0] * depth, y: F.cy + v[1] * depth, heading: sideHeading(inward) };
 }
 
-const rectBlocker = (r) => ({ cx: (r.x + r.w / 2) / 100, cy: (r.y + r.h / 2) / 100, hw: r.w / 200, hh: r.h / 200, cos: 1, sin: 0, wall: true });
+/** Oriented box in plan cm (walkBoxes()) → walker blocker in metres. */
+const boxBlocker = (b) => ({ cx: b.cx / 100, cy: b.cy / 100, hw: b.hw / 100, hh: b.hh / 100, cos: b.cos, sin: b.sin, wall: true });
+/** Collision boxes (metres) of the plan's walls and windows. */
+export const wallBlockers = (plan) => walkBoxes({ ...plan }).map(boxBlocker);
 
 function furnitureBlockers(items, models) {
   const out = [];
@@ -111,7 +114,7 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
   const sb = plan.site.bounds;
   const lot = { x0: sb.x / 100 - LOT_MARGIN, x1: (sb.x + sb.w) / 100 + LOT_MARGIN, y0: sb.y / 100 - LOT_MARGIN, y1: (sb.y + sb.h) / 100 + LOT_MARGIN };
   // a shallow copy defeats any per-plan cache in core: the plan's arrays are replaced when the owner edits the house
-  const readWalls = () => walkBlockers({ ...plan }).map(rectBlocker);
+  const readWalls = () => wallBlockers(plan);
   let walls = readWalls();
 
   let active = false;

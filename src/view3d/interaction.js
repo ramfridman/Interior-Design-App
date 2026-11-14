@@ -7,7 +7,7 @@
  * tone mapping) and costs nothing when nothing is selected or hovered.
  */
 import * as THREE from 'three';
-import { wallFaces, wallsHitByItem, itemAABB, isIndoors, spaceAt, pointInRect } from '../core/geometry.js';
+import { wallFaces, wallsHitByItem, itemAABB, isIndoors, spaceAt, inWallOrOpening } from '../core/geometry.js';
 import { groundY, visibleDeep, bakeModel, LAYER_SELECTED, LAYER_HOVER } from './items.js';
 
 const SNAP_DIST = 8;        // cm — snap to a wall face when the item edge is this close
@@ -27,9 +27,9 @@ export function invalidateWallRuns(plan) { _runs.delete(plan); }
 export function wallRuns(plan) {
   const hit = _runs.get(plan);
   if (hit && hit.walls === plan.walls && hit.openings === plan.openings && hit.outline === plan.wallOutline) return hit.runs;
-  const solid = (x, y) => plan.walls.some((w) => pointInRect(x, y, w)) || plan.openings.some((o) => pointInRect(x, y, o));
+  const solid = (x, y) => inWallOrOpening(x, y, plan);
   const lines = new Map();
-  for (const f of wallFaces({ ...plan })) {                             // copy → core's own face cache (keyed on PLAN) is bypassed
+  for (const f of wallFaces(plan)) {
     const vertical = f.nx !== 0;
     const c = vertical ? f.x1 : f.y1;
     const a0 = vertical ? Math.min(f.y1, f.y2) : Math.min(f.x1, f.x2), a1 = vertical ? Math.max(f.y1, f.y2) : Math.max(f.x1, f.x2);

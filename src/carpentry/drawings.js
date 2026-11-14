@@ -23,7 +23,7 @@ import { unitCodes as codesOf, unitsOf as unitsOfRun } from './layout.js';
 import { unitsOf, positions, geometryOf, unitCodes, isFloorLevel } from './layout.js';
 import { spanOfRun, toLocal } from './walls.js';
 import { computeWorktops } from './worktop.js';
-import { itemCorners } from '../core/geometry.js';
+import { itemCorners, openingHinge } from '../core/geometry.js';
 
 const L = (en, he) => ({ en, he });
 export const LW = { heavy: 0.5, medium: 0.35, thin: 0.18, hair: 0.13 };
@@ -395,8 +395,7 @@ function plan(run, G, v) {
       if (!c) continue;
       D.rect(...c, LW.thin, { role: 'opening', fill: o.kind === 'window' ? 'glass' : undefined });
       if (o.kind === 'door' && o.hinge && o.swing) {
-        const sw = o.axis === 'v' ? { hx: o.swing === 'e' ? o.x + o.w : o.x, hy: o.hinge === 'n' ? o.y : o.y + o.h, ex: o.swing === 'e' ? 1 : -1, ey: 0, cx: 0, cy: o.hinge === 'n' ? 1 : -1 }
-          : { hx: o.hinge === 'w' ? o.x : o.x + o.w, hy: o.swing === 's' ? o.y + o.h : o.y, ex: 0, ey: o.swing === 's' ? 1 : -1, cx: o.hinge === 'w' ? 1 : -1, cy: 0 };
+        const hg = openingHinge(o), sw = { hx: hg.x, hy: hg.y, ex: hg.open[0], ey: hg.open[1], cx: hg.closed[0], cy: hg.closed[1] };
         const h = P(sw.hx, sw.hy), open = P(sw.hx + sw.ex * o.width, sw.hy + sw.ey * o.width), closed = P(sw.hx + sw.cx * o.width, sw.hy + sw.cy * o.width);
         const ang = (p) => (Math.atan2(p[1] - h[1], p[0] - h[0]) * 180) / Math.PI;
         let a0 = ang(closed), a1 = ang(open);

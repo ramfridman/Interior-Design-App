@@ -1,10 +1,10 @@
 /**
  * Checks on the furniture layout inside the house (store.items against the plan).
  */
-import { itemCorners, polygonBounds, pointInPolygon, convexOverlap, wallsHitByItem, wallFaces, itemLocalToPlan, DEG } from '../core/geometry.js';
+import { itemCorners, polygonBounds, pointInPolygon, convexOverlap, wallsHitByItem, wallFaces, itemLocalToPlan, DEG, openingFrame, openingPoly, rectExtent, wallPolys } from '../core/geometry.js';
 import { finding } from './building.js';
 import {
-  rectPoly, rectObstacle, m, num, cmStr, segDist, polyDist, faceFrame, freeDepth, compass, doorSwing, openingSides,
+  rectPoly, wallObstacle, openingObstacle, m, num, cmStr, segDist, polyDist, faceFrame, freeDepth, compass, doorSwing, openingSides,
   makeGrid, cloneGrid, fillPoly, clearance, flood, reachedNear, cellsNear, planRev,
 } from './geom.js';
 
@@ -41,8 +41,8 @@ export function buildContext({ store, plan, catalog }) {
   const byRoom = new Map(plan.rooms.map((r) => [r.id, []]));
   for (const it of items) if (it.room) byRoom.get(it.room.id).push(it);
   const walls = [
-    ...plan.walls.map((w) => rectObstacle(w, { wall: w })),
-    ...plan.openings.filter((o) => o.kind === 'window').map((o) => rectObstacle(o, { opening: o })),
+    ...plan.walls.map((w, i) => wallObstacle(plan, i, { wall: w })),
+    ...plan.openings.filter((o) => o.kind === 'window').map((o) => openingObstacle(o, { opening: o })),
   ];
   return { plan, store, catalog, items, byRoom, walls, H };
 }
@@ -73,7 +73,7 @@ function checkPlacement(ctx, out) {
     const indoor = it.zone !== 'outdoor';
     if (indoor || it.bb.x < plan.bounds.x + plan.bounds.w) {
       const hit = wallsHitByItem(it, plan);
-      const win = plan.openings.filter((o) => o.kind === 'window' && convexOverlap(it.poly, rectPoly(o), 1));
+      const win = plan.openings.filter((o) => o.kind === 'window' && convexOverlap(it.poly, openingPoly(o), 1));
       if (hit.length || win.length) {
         inWall++;
         out.push(finding('item-in-wall', 'fail', it.id, `${it.name || it.type} overlaps ${hit.length ? 'a wall' : 'a window'}`,
@@ -204,7 +204,7 @@ function houseGrid(plan) {
     g = makeGrid(plan.bounds, 5);
     g.rev = rev;
     for (const r of plan.rooms) fillPoly(g, r.polygon, 1);
-    for (const o of plan.openings) if (o.kind !== 'window') fillPoly(g, rectPoly(o), 1);
+    for (const o of plan.openings) if (o.kind !== 'window') fillPoly(g, openingPoly(o), 1);
     const n = g.free.length;                                   // scratch buffers reused on every run
     g.scratch = old && old.free.length === n ? old.scratch
       : { free: new Uint8Array(n), dist: new Float32Array(n), wide: new Uint8Array(n), narrow: new Uint8Array(n), queue: new Int32Array(n) };
@@ -460,7 +460,7 @@ function checkKitchen(ctx, out) {
         { itemIds: [sink.id, hob.id, fridge.id], spaceId: roomId, at: at(hob) }));
     }
     if (hob) {
-      const win = ctx.plan.openings.find((o) => o.kind === 'window' && polyDist(hob.poly, rectPoly(o)) < 15 && rangesOverlap(hob.bb, o));
+      const win = ctx.plan.openings.find((o) => o.kind === 'window' && polyDist(hob.poly, openingPoly(o)) < 15 && rangesOverlap(hob.bb, o));
       if (win) {
         out.push(finding('kitchen-hood-window', 'info', hob.id, 'Cooktop sits under a window',
           `${hob.name || 'The cooktop'} is directly below the ${win.width} cm window (sill ${win.sill} cm). A wall-mounted hood cannot be fitted there — plan a ceiling or downdraft extractor, keep curtains away from the burners, and note that a breeze can blow out a gas flame.`,
@@ -493,7 +493,11 @@ function checkKitchen(ctx, out) {
     }
   }
 }
-const rangesOverlap = (bb, o) => (o.axis === 'h' ? bb.x < o.x + o.w && o.x < bb.x + bb.w : bb.y < o.y + o.h && o.y < bb.y + bb.h);
+/** Do a box and an opening overlap along the opening's wall? */
+const rangesOverlap = (bb, o) => {
+  const F = openingFrame(o), [b0, bl] = rectExtent(bb, F.ux, F.uy), [o0, ol] = rectExtent(o, F.ux, F.uy);
+  return b0 < o0 + ol && o0 < b0 + bl;
+};
 
 // ───────────────────────── bathrooms: electrical zones ─────────────────────────
 
@@ -570,15 +574,15 @@ function checkMamadItems(ctx, out) {
 /** Polygons of the external wall pieces of a room (used for "TV on an internal wall"). */
 function openingSidesOfRoom(plan, room) {
   const bb = polygonBounds(room.polygon);
-  const exterior = [];
-  for (const w of plan.walls) {
+  const exterior = [], polys = wallPolys(plan);
+  for (const [i, w] of plan.walls.entries()) {
     const touches = w.x <= bb.x + bb.w + 1 && w.x + w.w >= bb.x - 1 && w.y <= bb.y + bb.h + 1 && w.y + w.h >= bb.y - 1;
     if (!touches) continue;
     const cx = w.x + w.w / 2, cy = w.y + w.h / 2;
     const dx = cx < bb.x ? -1 : cx > bb.x + bb.w ? 1 : 0, dy = cy < bb.y ? -1 : cy > bb.y + bb.h ? 1 : 0;
     if (dx && dy) continue;
     const px = cx + dx * (w.w / 2 + 10), py = cy + dy * (w.h / 2 + 10);
-    if (!plan.rooms.some((r) => pointInPolygon(px, py, r.polygon))) exterior.push(rectPoly(w));
+    if (!plan.rooms.some((r) => pointInPolygon(px, py, r.polygon))) exterior.push(polys[i]);
   }
   return { exterior };
 }

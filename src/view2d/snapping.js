@@ -11,7 +11,7 @@
  * `plan.openings` — they are never kept across plan revisions. Drawing a new wall has its own snapping:
  * the centre line goes flush with / in line with existing walls, the ends go to wall faces, the rest to the 5 cm grid.
  */
-import { wallFaces, itemAABB, itemCorners, pointInPolygon, snapTo, clamp, normDeg, DEG, wallsHitByItem } from '../core/geometry.js';
+import { wallFaces, itemAABB, itemCorners, pointInPolygon, snapTo, clamp, normDeg, DEG, wallsHitByItem, openingFrame, openingPoint } from '../core/geometry.js';
 import { wallSegments } from '../core/plan-edit.js';
 
 const PLAN_GRID = 5;   // cm — the plan engine's grid for walls and openings
@@ -37,10 +37,10 @@ export const faceRot = (nx, ny) => normDeg(Math.round(Math.atan2(-nx, ny) / DEG)
 export function buildRuns(plan) {
   const segs = wallFaces(plan).map((f) => ({ ...f, o: null }));
   for (const o of plan.openings) {
-    if (o.axis === 'h') {
-      segs.push({ x1: o.x, y1: o.y, x2: o.x + o.w, y2: o.y, nx: 0, ny: -1, o }, { x1: o.x, y1: o.y + o.h, x2: o.x + o.w, y2: o.y + o.h, nx: 0, ny: 1, o });
-    } else {
-      segs.push({ x1: o.x, y1: o.y, x2: o.x, y2: o.y + o.h, nx: -1, ny: 0, o }, { x1: o.x + o.w, y1: o.y, x2: o.x + o.w, y2: o.y + o.h, nx: 1, ny: 0, o });
+    const F = openingFrame(o, plan);
+    for (const sgn of [-1, 1]) {                       // the gap's edge on each wall face, normal pointing away from the wall
+      const [x1, y1] = openingPoint(F, 0, sgn < 0 ? 0 : F.T), [x2, y2] = openingPoint(F, F.L, sgn < 0 ? 0 : F.T);
+      segs.push({ x1, y1, x2, y2, nx: sgn * F.nx + 0, ny: sgn * F.ny + 0, o });
     }
   }
   const groups = new Map();
