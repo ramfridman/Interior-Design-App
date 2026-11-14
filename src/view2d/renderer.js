@@ -16,7 +16,7 @@ import { drawOutdoorAreas, drawRoomFloors, drawGrid } from './floors.js';
 import { drawWalls } from './walls.js';
 import { drawOpenings } from './openings.js';
 import { drawItems, drawItem } from './items.js';
-import { drawRoomLabels, drawExteriorDims, drawInteriorDims, dimBandRect } from './annotations.js';
+import { drawRoomLabels, drawExteriorDims, drawInteriorDims, dimBandRect, drawSlantDimensions } from './annotations.js';
 import { isStructureTool, drawRemovedWalls, drawChangeMarkers } from './structure.js';
 import { drawUnderlay } from './underlay.js';
 import { drawGhostBelow, drawLotReference } from './levels.js';
@@ -25,6 +25,7 @@ import { drawStairs } from './stairs.js';
 const MARGIN = 192;   // device px of slack around the view in the caches
 const ITEMS_DIMMED = 0.35;
 const DIRTY_PAD = 12;   // CSS px added around a repainted plan rectangle (outlines, halos, markers)
+const SLANT_DIM_PX = 52;   // CSS px an angled wall's dimensions and angle arc reach beyond it
 
 /** Optional per-layer timing (diagnostics only): env.profile = {} collects ms per layer, forcing a raster flush after each. */
 function profiler(G, env) {
@@ -86,6 +87,7 @@ export function paintOver(G, env) {
   const boxes = createBoxes();
   if (ui.showSite && (!env.level || env.level === 'L0')) drawSiteLabels(G, env, boxes);
   if (ui.showDimensions) step('extDims', () => drawExteriorDims(G, env, boxes));
+  if (ui.showDimensions && Array.isArray(env.plan.slants) && env.plan.slants.length) step('slantDims', () => drawSlantDimensions(G, env, boxes));   // angled walls
   if (ui.showRoomLabels) step('labels', () => drawRoomLabels(G, env, boxes));
   if (ui.showDimensions) step('intDims', () => drawInteriorDims(G, env, boxes));
   drawChangeMarkers(G, env);
@@ -106,6 +108,9 @@ export function createRenderer(canvas, env) {
   function repaintDirty(cam, dpr, live, cw, ch) {
     const rects = cache.dirty.rects.slice();
     for (const side of cache.dirty.sides) { const band = dimBandRect(env.plan, env.ui, cam.scale, side); if (band) rects.push(band); }
+    // angled walls: their aligned dimensions and angle arc reach about 48 CSS px beyond the wall
+    const m = SLANT_DIM_PX / cam.scale;
+    for (const r of cache.dirty.slants || []) rects.push({ x: r.x - m, y: r.y - m, w: r.w + 2 * m, h: r.h + 2 * m });
     // rectangles that touch are painted as one
     const boxes = [];
     for (const r of rects) {
@@ -156,6 +161,7 @@ export function createRenderer(canvas, env) {
       const d = cache.dirty || (cache.dirty = { rects: [], sides: new Set() });
       if (dirt.rect) d.rects.push(dirt.rect);
       for (const side of dirt.sides || []) d.sides.add(side);
+      if (dirt.slants) (d.slants || (d.slants = [])).push(...dirt.slants);
     },
     /**
      * Paint one frame.

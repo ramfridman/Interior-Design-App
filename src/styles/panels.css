@@ -162,6 +162,13 @@
 .moverow .field { flex: 1 1 auto; }
 .sinsp__hung { margin-bottom: var(--s-2); color: var(--ink-2); font-size: var(--fs-12); }
 .sinsp__flips .btn { min-width: 0; }
+/* angled walls (stage A3): the tag, the "keep in place" end choice and the two move buttons */
+.tag--angled { background: var(--hover); color: var(--ink-2); }
+.sinsp__keep { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; }
+.sinsp__keep .seg { flex: 1 1 auto; min-width: 0; }
+.sinsp__keep .seg__label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sinsp__slantmove .btn { min-width: 0; justify-content: flex-start; }
+.sinsp__slantmove .btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sinsp__style { margin-top: var(--s-2); min-height: var(--ctl); }
 .sinsp__style .select { flex: 0 1 60%; min-width: 0; }
 .oplist { display: flex; flex-direction: column; margin: 0 calc(var(--s-2) * -1); }

@@ -840,7 +840,7 @@ export function createStructureTools(V, io) {
 
   // ───────────── pointer entry points (called by interaction.js) ─────────────
   function down(p, e) {
-    lastEvent = e; S.pointer = p;
+    lastEvent = e; S.pointer = p; S.touch = e.pointerType === 'touch';
     const tool = io.tool(), pp = io.toPlan(p);
     if (tool === 'wall') {
       if (S.draft && S.draft.armed) { updateDraft(p, e); st.gesture = { type: 's-wall-2', start: p }; return; }
@@ -868,7 +868,7 @@ export function createStructureTools(V, io) {
   }
 
   function move(g, p, e, far) {
-    lastEvent = e; S.pointer = p;
+    lastEvent = e; S.pointer = p; S.touch = e.pointerType === 'touch';
     switch (g.type) {
       case 's-press': if (far) { beginDrag(g, p, e); if (g.batch) move(g, p, e, true); } break;
       case 's-move-wall': dragMoveWall(g, p, e); break;

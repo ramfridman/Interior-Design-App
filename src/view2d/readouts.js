@@ -31,7 +31,11 @@ export function drawGuides(G, pal, guides) {
     const vert = g.x1 === g.x2, ext = g.kind === 'wall' ? 0 : 10 * d;
     const lw = g.kind === 'wall' ? G.px(2.5) : G.px(1), off = lw % 2 ? 0.5 : 0;
     ctx.beginPath();
-    if (vert) { ctx.moveTo(Math.round(x1) + off, Math.min(y1, y2) - ext); ctx.lineTo(Math.round(x1) + off, Math.max(y1, y2) + ext); }
+    if (g.x1 !== g.x2 && g.y1 !== g.y2) {
+      // along an angled wall's face
+      const L = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / L, uy = (y2 - y1) / L;
+      ctx.moveTo(x1 - ux * ext, y1 - uy * ext); ctx.lineTo(x2 + ux * ext, y2 + uy * ext);
+    } else if (vert) { ctx.moveTo(Math.round(x1) + off, Math.min(y1, y2) - ext); ctx.lineTo(Math.round(x1) + off, Math.max(y1, y2) + ext); }
     else { ctx.moveTo(Math.min(x1, x2) - ext, Math.round(y1) + off); ctx.lineTo(Math.max(x1, x2) + ext, Math.round(y1) + off); }
     if (g.kind === 'center') ctx.setLineDash([6 * d, 3 * d, 1.5 * d, 3 * d]);
     ctx.strokeStyle = pal.guide; ctx.lineWidth = lw; ctx.stroke(); ctx.setLineDash([]);

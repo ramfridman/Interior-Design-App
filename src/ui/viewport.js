@@ -3,7 +3,7 @@
  * catalogue, and the quiet controls that float over each view (zoom, compass, scale bar, camera, sun, walk HUD).
  * The sun control itself lives in sun.js.
  */
-import { spaceAt } from '../core/geometry.js';
+import { spaceAt, slantPolys } from '../core/geometry.js';
 import { h, append, call, listen, clamp, rafThrottle } from './dom.js';
 import { icon } from './icons.js';
 import { btn, iconBtn, kbd } from './components.js';
@@ -413,6 +413,8 @@ function drawMinimap(canvas, plan, pos, { root = null, level = 'L0' } = {}) {
   }
   g.fillStyle = ink;
   for (const w of plan.walls) g.fillRect(ox + w.x * s, oy + w.y * s, Math.max(1.5, w.w * s), Math.max(1.5, w.h * s));
+  // angled walls (stage A3): their joined footprints
+  for (const poly of slantPolys(plan)) { g.beginPath(); poly.forEach(([x, y], i) => (i ? g.lineTo(ox + x * s, oy + y * s) : g.moveTo(ox + x * s, oy + y * s))); g.closePath(); g.fill(); }
   if (root && hasLevels(root)) {
     // voids in the floor (dashed), then the stairs of this floor
     g.save(); g.setLineDash([4, 3]); g.strokeStyle = ink; g.globalAlpha = 0.6; g.lineWidth = 1;

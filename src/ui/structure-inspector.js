@@ -17,7 +17,8 @@ import { h } from './dom.js';
 import { icon } from './icons.js';
 import { btn, iconBtn, numField, section, emptyState } from './components.js';
 import { fmtLen, toUnit, fromUnit, unitDigits } from './format.js';
-import { STEP, levelBanner, levelTag, spaceName, segmentSides, segmentTitle, openingTitle, openingKind, openingIcon, openingOffset, lengthAnchor } from './structure.js';
+import { STEP, levelBanner, levelTag, spaceName, segmentSides, segmentTitle, openingTitle, openingKind, openingIcon, openingOffset, lengthAnchor,
+  slantEnds, slantAngle, slantSideSpace, slantDoorWords } from './structure.js';
 import { changesSection } from './structure-panels.js';
 
 const SIDE = { n: 'north', s: 'south', e: 'east', w: 'west' };
@@ -46,9 +47,14 @@ export function createStructureInspector(app) {
     if (!cur) return `none|${structure.isModified()}`;
     if (cur.type === 'stair') return ['stair', cur.id, JSON.stringify(cur.info.data), cur.info.covers, cur.policy.level, units()].join('|');
     if (cur.type === 'void') return ['void', cur.id, JSON.stringify(cur.info.void), cur.info.covers, cur.policy.level, units()].join('|');
-    if (cur.type === 'segment') { const s = cur.seg; return ['seg', s.axis, s.cls, s.thickness, s.policy.level, s.isNew, s.openingIds.join(','), s.freeEnds.join(','), units()].join('|'); }
+    if (cur.type === 'segment') {
+      const s = cur.seg;
+      // an angled wall: its end names change with its direction
+      const ends = s.axis === 'a' ? Object.values(slantEnds(s)).join('/') : '';
+      return ['seg', s.axis, s.id, s.cls, s.thickness, s.policy.level, s.isNew, s.openingIds.join(','), s.freeEnds.join(','), ends, units()].join('|');
+    }
     const o = cur.opening;
-    return ['op', o.id, o.kind, o.style, o.axis, cur.policy.level, cur.seg ? cur.seg.cls : '', units()].join('|');
+    return ['op', o.id, o.kind, o.style, o.axis, cur.policy.level, cur.seg ? cur.seg.cls : '', o.axis === 'a' && cur.seg ? Object.values(slantEnds(cur.seg)).join('/') : '', units()].join('|');
   };
 
   /* ───────── Nothing selected ───────── */
@@ -66,8 +72,87 @@ export function createStructureInspector(app) {
     h('div', { class: `sinsp__tile sinsp__tile--${level}` }, icon(glyph, { size: 26 })),
     h('div', { class: 'insp__id' }, h('h3', { class: 'sinsp__title display' }, title, tag), meta));
 
+  /* ───────── Angled wall (stage A3) ───────── */
+  function renderSlant(seg) {
+    const locked = seg.policy.level === 'locked';
+    const u = units();
+    const live = () => { const cur = structure.selected(); return cur && cur.type === 'segment' ? cur.seg : seg; };
+    const names = slantEnds(seg);
+    const meta = h('p', { class: 'insp__meta' });
+    const length = h('dd', { class: 'num' }), angleOut = h('dd', { class: 'num' }), sides = h('dd');
+    const moveError = errorLine(), removeError = errorLine(), lengthError = errorLine(), angleError = errorLine();
+    const move = (delta) => run(moveError, () => structure.moveSegment(live(), delta));
+    const [left, right] = [slantSideSpace(seg, 'l'), slantSideSpace(seg, 'r')];
+    const towards = (side) => (left === right ? (side === 'l' ? `the ${names.a}-left side` : 'the other side') : spaceName(side === 'l' ? left : right, plan()));
+    const nudge = (sg) => btn(`5 cm into ${towards(sg < 0 ? 'l' : 'r')}`, { small: true, icon: sg < 0 ? 'chevron-left' : 'chevron-right', disabled: locked,
+      tip: `Move the wall ${STEP} cm across itself, towards ${towards(sg < 0 ? 'l' : 'r')}`, onClick: () => move(sg * STEP) });
+    const anchor = lengthAnchor(seg);
+    const lengthField = numField({
+      label: null, value: toUnit(seg.length, u), digits: unitDigits(u) + 1, step: u === 'cm' ? STEP : STEP / 100, min: 0, suffix: u, disabled: locked,
+      title: `Wall length; the ${anchor.fixedName} end stays where it is`,
+      onCommit: (v) => { if (!run(lengthError, () => structure.resizeSegment(live(), fromUnit(v, u)))) force(lengthField, toUnit(live().length, u), unitDigits(u) + 1); },
+    });
+    // the angle: typed, it turns the wall about the end the owner keeps (its length stays)
+    let keep = 'a';
+    const keepCtl = segmented({ options: [{ value: 'a', label: `${names.a} end` }, { value: 'b', label: `${names.b} end` }], value: keep, label: 'End that stays', cls: 'seg--keep', onChange: (v) => { keep = v; } });
+    const angleField = numField({
+      label: 'Angle', value: slantAngle(seg), digits: 1, step: 1, min: -360, max: 360, suffix: '°', disabled: locked,
+      title: 'Angle of the wall, counter-clockwise from east; typing one turns the wall about the end that stays',
+      onCommit: (v) => {
+        const s = live(), cur = slantAngle(s), dirNow = (360 - Math.atan2(s.y2 - s.y1, s.x2 - s.x1) * 180 / Math.PI) % 360;
+        // keep the wall's own direction (a → b): the typed line angle, on the side of 180° the wall already points to
+        const want = ((dirNow - cur + v) % 360 + 360) % 360;
+        if (!run(angleError, () => structure.rotateSegment(s, want, keep))) force(angleField, slantAngle(live()), 1);
+      },
+    });
+    const openings = seg.openingIds.map((id) => plan().openings.find((o) => o.id === id)).filter(Boolean);
+    patch = (cur) => {
+      const s = cur.seg;
+      meta.textContent = `Angled · ${fmtLen(s.length, units())} long, ${s.thickness} cm thick, ${slantAngle(s)}°`;
+      length.textContent = fmtLen(s.length, units());
+      angleOut.textContent = `${slantAngle(s)}° from east`;
+      sides.textContent = segmentSides(s, plan());
+      force(lengthField, toUnit(s.length, units()), unitDigits(units()) + 1);
+      force(angleField, slantAngle(s), 1);
+    };
+    return [
+      head(seg.policy.level, 'wall', segmentTitle(seg), meta, [h('span', { class: 'tag tag--angled' }, 'Angled'), seg.isNew ? h('span', { class: 'tag tag--new' }, 'Added by you') : null]),
+      levelBanner(seg.policy.level, seg.policy.reason || 'Move, turn or remove this wall as you like, or put a door in it.'),
+      h('div', { class: 'insp__actions' }, h('div', { class: 'actrow', role: 'group', 'aria-label': 'Wall actions' },
+        iconBtn('target', 'Show on the plan', { variant: 'outlined', onClick: () => { const s = live(); structure.focusPoint({ x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2 }); } }),
+        iconBtn('trash', 'Remove wall', { kbd: 'Delete', variant: 'danger', disabled: locked,
+          onClick: async () => { const res = await structure.removeSegment(live(), { quiet: true }); show(removeError, res.ok || res.cancelled ? '' : res.reason); } })),
+      removeError),
+      section('Wall', h('dl', { class: 'facts facts--wide' },
+        h('dt', null, 'Length'), length,
+        h('dt', null, 'Thickness'), h('dd', { class: 'num' }, `${seg.thickness} cm`),
+        h('dt', null, 'Angle'), angleOut,
+        h('dt', null, 'Separates'), sides,
+        h('dt', null, 'Drawn by'), h('dd', null, seg.isNew ? 'You' : 'The architect'))),
+      section('Move', { aside: h('span', { class: 'sec__note' }, locked ? 'Locked' : 'Across the wall') },
+        h('div', { class: 'grid2 sinsp__slantmove' }, nudge(-1), nudge(1)),
+        locked ? null : h('p', { class: 'sec__note' }, `In ${STEP} cm steps (arrow keys too). Doors in the wall travel with it; walls that meet it follow.`),
+        moveError),
+      section('Length', { aside: h('span', { class: 'sec__note' }, locked ? 'Locked' : `${anchor.movingName[0].toUpperCase()}${anchor.movingName.slice(1)} end moves`) },
+        h('div', { class: 'moverow' }, lengthField),
+        lengthError),
+      section('Angle', { aside: h('span', { class: 'sec__note' }, locked ? 'Locked' : 'Counter-clockwise from east') },
+        h('div', { class: 'moverow sinsp__angle' }, angleField),
+        locked ? null : h('div', { class: 'sinsp__keep' }, h('span', { class: 'setrow__label' }, 'Keep in place'), keepCtl),
+        locked ? null : h('p', { class: 'sec__note' }, 'Typing an angle turns the wall about the end you keep; its length stays. Near 0° or 90° it becomes a straight wall.'),
+        angleError),
+      section(openings.length ? 'Openings in this wall' : 'Openings', openings.length
+        ? h('ul', { class: 'oplist' }, openings.map((o) => h('li', null, h('button', { type: 'button', class: 'oprow', onClick: () => structure.select('opening', o.id) },
+          h('span', { class: 'oprow__icon' }, icon(openingIcon(o), { size: 18 })),
+          h('span', { class: 'oprow__text' }, h('span', { class: 'oprow__name truncate' }, openingTitle(o)), h('span', { class: 'oprow__meta num' }, dims(o))),
+          levelTag(openingPolicy(o.id).level), icon('chevron-right', { size: 14 })))))
+        : h('p', { class: 'sec__empty' }, seg.cls === 'exterior' ? 'None. Use the Door or Window tool to add one (permit needed).' : locked ? 'None.' : 'None. Use the Door or Passage tool to add one.')),
+    ];
+  }
+
   /* ───────── Wall segment ───────── */
   function renderSegment(seg) {
+    if (seg.axis === 'a') return renderSlant(seg);
     const locked = seg.policy.level === 'locked';
     const vertical = seg.axis === 'v';     // runs north–south → moves east / west
     const u = units();
@@ -142,6 +227,7 @@ export function createStructureInspector(app) {
   function renderOpening(cur) {
     const o = cur.opening, seg = cur.seg, level = cur.policy.level, locked = level === 'locked';
     const horizontal = o.axis === 'h';     // wall runs east–west
+    const angled = o.axis === 'a' && !!seg, endsOf = angled ? slantEnds(seg) : null;
     const live = () => { const now = structure.selected(); return now && now.type === 'opening' ? now : cur; };
     const sizeError = errorLine(), hangError = errorLine(), removeError = errorLine();
     const meta = h('p', { class: 'insp__meta' });
@@ -154,7 +240,11 @@ export function createStructureInspector(app) {
       width: cmField('Width', 'width', 'Clear width of the opening'),
       height: cmField('Height', 'height', 'Height of the opening'),
       sill: o.kind === 'window' ? cmField('Sill', 'sill', 'Height of the sill above the floor') : null,
-      offset: numField({
+      offset: angled ? numField({
+        label: `From ${endsOf.a} end`, value: openingOffset(o, seg), digits: 1, step: STEP, suffix: 'cm', disabled: locked,
+        title: `Distance along the wall from its ${endsOf.a} end to the opening`,
+        onCommit: (v) => { const x = live().opening; if (!run(sizeError, () => updateOpening(o.id, { at: Math.round((v + x.width / 2) * 10) / 10 }))) { const now = live(); force(fields.offset, openingOffset(now.opening, now.seg), 1); } },
+      }) : numField({
         label: horizontal ? 'From west end' : 'From north end', value: openingOffset(o, seg), digits: 0, step: STEP, suffix: 'cm', disabled: locked || !seg,
         title: `Distance from the ${horizontal ? 'west' : 'north'} end of the wall to the opening`,
         onCommit: (v) => { if (!run(sizeError, () => updateOpening(o.id, { offset: v }))) { const now = live(); force(fields.offset, openingOffset(now.opening, now.seg)); } },
@@ -168,6 +258,7 @@ export function createStructureInspector(app) {
     const flip = (how, label, glyph) => btn(label, { small: true, icon: glyph, disabled: locked, onClick: () => run(hangError, () => flipDoor(o.id, how)) });
     const into = (now) => {
       const side = now.opening.swing;
+      if (now.opening.axis === 'a' && now.seg) return spaceName(slantSideSpace(now.seg, side), plan());
       const [a, b] = now.seg ? now.seg.between : now.opening.rooms || [];
       return spaceName(side === 'n' || side === 'w' ? a : b, plan());
     };
@@ -177,8 +268,8 @@ export function createStructureInspector(app) {
       meta.textContent = now.seg ? segmentSides(now.seg, plan()) : x.rooms && x.rooms.length === 2 ? `Between ${spaceName(x.rooms[0], plan())} and ${spaceName(x.rooms[1], plan())}` : dims(x);
       force(fields.width, x.width); force(fields.height, x.height);
       if (fields.sill) force(fields.sill, x.sill);
-      force(fields.offset, openingOffset(x, now.seg));
-      if (x.kind === 'door' && x.hinge && x.swing) hung.textContent = `Hinged on the ${SIDE[x.hinge]} jamb, opens into ${into(now)}.`;
+      force(fields.offset, openingOffset(x, now.seg), x.axis === 'a' ? 1 : 0);
+      if (x.kind === 'door' && x.hinge && x.swing) hung.textContent = x.axis === 'a' && now.seg ? slantDoorWords(x, now.seg, plan()) : `Hinged on the ${SIDE[x.hinge]} jamb, opens into ${into(now)}.`;
     };
 
     const doorway = o.innerDoor
@@ -197,7 +288,7 @@ export function createStructureInspector(app) {
       head(level, openingIcon(o), openingTitle(o), meta),
       levelBanner(level, cur.policy.reason || 'Move, resize, re-hang or remove it as you like.'),
       h('div', { class: 'insp__actions' }, h('div', { class: 'actrow', role: 'group', 'aria-label': 'Opening actions' },
-        iconBtn('target', 'Show on the plan', { variant: 'outlined', onClick: () => { const x = live().opening; structure.focusPoint({ x: x.x + x.w / 2, y: x.y + x.h / 2 }); } }),
+        iconBtn('target', 'Show on the plan', { variant: 'outlined', onClick: () => { const x = live().opening; structure.focusPoint(x.axis === 'a' ? { x: x.cx, y: x.cy } : { x: x.x + x.w / 2, y: x.y + x.h / 2 }); } }),
         seg ? iconBtn('wall', `Select its wall (${segmentTitle(seg).toLowerCase()})`, { variant: 'outlined', onClick: () => { const now = live(); if (now.seg) structure.select('segment', now.seg.id); } }) : null,
         iconBtn('trash', `Remove ${openingKind(o).toLowerCase()}`, { kbd: 'Delete', variant: 'danger', disabled: locked,
           onClick: async () => { const res = await structure.removeOpening(live().opening, { quiet: true }); show(removeError, res.ok || res.cancelled ? '' : res.reason); } })),

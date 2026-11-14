@@ -7,13 +7,16 @@ import { css } from './color.js';
 import { exteriorChains, interiorDims, dimText, spanThrough } from './dimensions.js';
 import { isBelowWalls, isFloating } from './items.js';
 import { boundaryEdge } from './site.js';
+import { wallSegments } from '../core/plan-edit.js';
+import { drawSlantDims } from './slant-dims.js';
+import { uprightAngle } from './slant-tools.js';
 
 /** Dimension chains of the current plan revision (the engine replaces plan.walls / openings / rooms on every edit). */
 let dimsCache = null;
 function plansDims(plan) {
   const c = dimsCache;
-  if (!c || c.walls !== plan.walls || c.openings !== plan.openings || c.rooms !== plan.rooms) {
-    dimsCache = { walls: plan.walls, openings: plan.openings, rooms: plan.rooms, chains: exteriorChains(plan), interior: interiorDims(plan) };
+  if (!c || c.walls !== plan.walls || c.openings !== plan.openings || c.rooms !== plan.rooms || c.slants !== plan.slants) {
+    dimsCache = { walls: plan.walls, openings: plan.openings, rooms: plan.rooms, slants: plan.slants, chains: exteriorChains(plan), interior: interiorDims(plan) };
   }
   return dimsCache;
 }
@@ -367,6 +370,53 @@ function zoneOffsets(room, dim, G) {
   return out.length ? out : [dim.at];
 }
 
+/** Aligned dimensions and angle arcs of every angled wall of the level (dimensions display on). */
+export function drawSlantDimensions(G, env, boxes) {
+  const { plan, pal, ui } = env;
+  const segs = wallSegments(plan), rects = segs.filter((s) => s.axis !== 'a' && !s.id.includes('seg:j:'));
+  for (const s of segs) {
+    if (s.axis !== 'a') continue;
+    const m = 60 / G.scale;
+    if (!G.visible(s.x - m, s.y - m, s.x + s.w + m, s.y + s.h + m)) continue;
+    const openings = s.openingIds.map((id) => plan.openings.find((o) => o.id === id)).filter(Boolean);
+    drawSlantDims(G, pal, s, openings, rects, { units: ui.units, boxes, color: pal.dim });
+  }
+}
+
+/** Interior dimension of a room with slanted sides along one of its main directions (dir 'a': any angle). */
+function drawAlignedInteriorDim(G, env, boxes, dim, obstacles) {
+  const { pal, ui } = env, { ctx } = G, d = G.dpr, ink = pal.dim, size = 9.5;
+  const lenPx = (dim.to - dim.from) * G.scale;
+  if (lenPx < 64) return;
+  const label = dimText(dim.to - dim.from, ui.units), angle = uprightAngle(Math.atan2(dim.uy, dim.ux));
+  const tw = G.measure(label, size, 500) + 6 * d, th = (size + 3) * d;
+  const P = (t) => [G.X(dim.px + dim.ux * t), G.Y(dim.py + dim.uy * t)];
+  let best = null;
+  for (const t of [0.5, 0.32, 0.68]) {
+    const [cx, cy] = P(dim.from + (dim.to - dim.from) * t);
+    const c = Math.abs(Math.cos(angle)), s = Math.abs(Math.sin(angle)), hw = (tw * c + th * s) / 2, hh = (tw * s + th * c) / 2;
+    const box = { x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh };
+    if (boxes.collides(box, 2 * d)) continue;
+    const cost = overlap(box, obstacles) + Math.abs(t - 0.5) * 40 * d * d;
+    if (!best || cost < best.cost) best = { cost, cx, cy, box, t };
+  }
+  if (!best) return;
+  boxes.add(best.box);
+  const [x0, y0] = P(dim.from), [x1, y1] = P(dim.to), gap = tw / 2 + 2 * d, mid = dim.from + (dim.to - dim.from) * best.t;
+  const [gx0, gy0] = P(mid), sx = dim.ux, sy = dim.uy;
+  ctx.beginPath();
+  if (Math.hypot(gx0 - x0, gy0 - y0) > gap + 2) { ctx.moveTo(x0, y0); ctx.lineTo(gx0 - sx * gap, gy0 - sy * gap); }
+  if (Math.hypot(x1 - gx0, y1 - gy0) > gap + 2) { ctx.moveTo(gx0 + sx * gap, gy0 + sy * gap); ctx.lineTo(x1, y1); }
+  ctx.strokeStyle = css(ink, 0.55); ctx.lineWidth = 1; ctx.stroke();
+  ctx.beginPath();
+  for (const [x, y, dir] of [[x0, y0, 1], [x1, y1, -1]]) {
+    const a = 5 * d, w = 2 * d;
+    ctx.moveTo(x, y); ctx.lineTo(x + dir * sx * a - sy * w, y + dir * sy * a + sx * w); ctx.lineTo(x + dir * sx * a + sy * w, y + dir * sy * a - sx * w); ctx.closePath();
+  }
+  ctx.fillStyle = css(ink, 0.7); ctx.fill();
+  G.text(label, best.cx, best.cy, { size, weight: 500, color: ink, angle, halo: pal.halo });
+}
+
 export function drawInteriorDims(G, env, boxes) {
   const { plan, pal, ui } = env, { ctx } = G, d = G.dpr;
   if (G.scale < 0.3) return;
@@ -374,6 +424,7 @@ export function drawInteriorDims(G, env, boxes) {
   const size = 9.5, ink = pal.dim;
   const inset = 11 / G.scale;      // cm: primary dimensions hug a wall, 11 px inside the room
   for (const dim of plansDims(plan).interior) {
+    if (dim.dir === 'a') { drawAlignedInteriorDim(G, env, boxes, dim, obstacles); continue; }
     const lenPx = (dim.to - dim.from) * G.scale;
     if (lenPx < 64) continue;
     const horiz = dim.dir === 'h';
@@ -381,7 +432,7 @@ export function drawInteriorDims(G, env, boxes) {
     const tw = G.measure(label, size, 500) + 6 * d, th = (size + 3) * d;
     const room = plan.rooms.find((r) => r.id === dim.room);
     const b = room ? polygonBounds(room.polygon) : null;
-    const positions = dim.primary && b
+    const positions = dim.fixed ? [dim.at] : dim.primary && b
       ? (horiz ? [b.y + inset, b.y + b.h - inset] : [b.x + inset, b.x + b.w - inset])
       : zoneOffsets(room, dim, G);
     let best = null;

@@ -11,7 +11,7 @@
  * `plan.openings` — they are never kept across plan revisions. Drawing a new wall has its own snapping:
  * the centre line goes flush with / in line with existing walls, the ends go to wall faces, the rest to the 5 cm grid.
  */
-import { wallFaces, itemAABB, itemCorners, pointInPolygon, snapTo, clamp, normDeg, DEG, wallsHitByItem, openingFrame, openingPoint } from '../core/geometry.js';
+import { wallFaces, itemAABB, itemCorners, pointInPolygon, snapTo, clamp, normDeg, DEG, wallsHitByItem, openingFrame, openingPoint, slantPolys } from '../core/geometry.js';
 import { wallSegments } from '../core/plan-edit.js';
 
 const PLAN_GRID = 5;   // cm — the plan engine's grid for walls and openings
@@ -35,14 +35,17 @@ export const faceRot = (nx, ny) => normDeg(Math.round(Math.atan2(-nx, ny) / DEG)
  * { horiz, c, a0, a1, nx, ny, openings: [{ o, a0, a1 }] } — `c` is the constant coordinate, a0..a1 the extent.
  */
 export function buildRuns(plan) {
-  const segs = wallFaces(plan).map((f) => ({ ...f, o: null }));
+  const all = wallFaces(plan).map((f) => ({ ...f, o: null }));
   for (const o of plan.openings) {
     const F = openingFrame(o, plan);
     for (const sgn of [-1, 1]) {                       // the gap's edge on each wall face, normal pointing away from the wall
       const [x1, y1] = openingPoint(F, 0, sgn < 0 ? 0 : F.T), [x2, y2] = openingPoint(F, F.L, sgn < 0 ? 0 : F.T);
-      segs.push({ x1, y1, x2, y2, nx: sgn * F.nx + 0, ny: sgn * F.ny + 0, o });
+      all.push({ x1, y1, x2, y2, nx: sgn * F.nx + 0, ny: sgn * F.ny + 0, o });
     }
   }
+  // faces of angled walls (stage A3) become diagonal runs, after the orthogonal ones
+  const isDiag = (s) => Math.abs(s.nx) > 1e-9 && Math.abs(s.ny) > 1e-9;
+  const segs = all.filter((s) => !isDiag(s)), diag = all.filter(isDiag);
   const groups = new Map();
   for (const s of segs) {
     const horiz = s.ny !== 0;
@@ -61,22 +64,69 @@ export function buildRuns(plan) {
       if (s.o) cur.openings.push({ o: s.o, a0: s.a0, a1: s.a1 });
     }
   }
+  if (diag.length) runs.push(...diagonalRuns(diag));
   return runs;
 }
+
+/**
+ * Diagonal wall runs: collinear faces of angled walls (same outward normal, same line) merged across their openings.
+ * { diag: true, nx, ny, ux, uy, c, a0, a1, openings } — the face is the line { p : p·n = c }, a0..a1 its extent along
+ * u = (−ny, nx) (as p·u), so a point of it is n·c + u·a.
+ */
+export function diagonalRuns(faces) {
+  const groups = new Map();
+  for (const s of faces) {
+    const nx = s.nx, ny = s.ny, ux = -ny, uy = nx, c = s.x1 * nx + s.y1 * ny;
+    const p = s.x1 * ux + s.y1 * uy, q = s.x2 * ux + s.y2 * uy;
+    const key = `${nx.toFixed(6)}|${ny.toFixed(6)}|${c.toFixed(2)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ nx, ny, ux, uy, c, a0: Math.min(p, q), a1: Math.max(p, q), o: s.o });
+  }
+  const runs = [];
+  for (const list of groups.values()) {
+    list.sort((a, b) => a.a0 - b.a0);
+    let cur = null;
+    for (const s of list) {
+      if (cur && s.a0 <= cur.a1 + 0.05) cur.a1 = Math.max(cur.a1, s.a1);
+      else { cur = { diag: true, nx: s.nx, ny: s.ny, ux: s.ux, uy: s.uy, c: s.c, a0: s.a0, a1: s.a1, openings: [] }; runs.push(cur); }
+      if (s.o) cur.openings.push({ o: s.o, a0: s.a0, a1: s.a1 });
+    }
+  }
+  return runs;
+}
+
+/** A point on a diagonal run at `a` along it, `off` cm out from the face. */
+export const diagPoint = (r, a, off = 0) => [r.nx * (r.c + off) + r.ux * a, r.ny * (r.c + off) + r.uy * a];
+
+/**
+ * Put an item's back on a diagonal run: turned to it (faceRot), its back on the face, kept within the run's length.
+ * @returns {{ x, y, rot, a }}
+ */
+export function onDiagRun(it, r) {
+  const half = it.w / 2, len = r.a1 - r.a0;
+  let a = it.x * r.ux + it.y * r.uy;
+  a = len >= it.w ? clamp(a, r.a0 + half, r.a1 - half) : (r.a0 + r.a1) / 2;
+  const [x, y] = diagPoint(r, a, it.d / 2);
+  return { x, y, rot: diagRot(r.nx, r.ny), a };
+}
+/** faceRot for an angled face, to 0.1° (whole degrees would leave a long sofa's corner off the wall). */
+export const diagRot = (nx, ny) => { const d = normDeg(Math.round(Math.atan2(-nx, ny) / DEG * 10) / 10); return d >= 360 ? 0 : d; };
 
 const boxOf = (b) => ({ lo: [b.x, b.y], hi: [b.x + b.w, b.y + b.h] });
 
 export function createSnapper({ plan: planOrGetter, store, shown = null }) {
   // `plan` may be a function returning the plan (level view) to snap to now — the 2D view shows one level at a time
   const cur = typeof planOrGetter === 'function' ? planOrGetter : () => planOrGetter;
-  let runs = [], solids = [], corners = [], rev = null;
+  let runs = [], druns = [], solids = [], spolys = [], corners = [], rev = null;
   /** Rebuild the snap targets if the plan was edited since they were built. */
   function sync() {
     const plan = cur();
     if (rev && rev.walls === plan.walls && rev.openings === plan.openings && rev.outline === plan.wallOutline) return;
     rev = { walls: plan.walls, openings: plan.openings, outline: plan.wallOutline };
-    runs = buildRuns(plan);
-    solids = [...plan.walls, ...plan.openings];
+    const all = buildRuns(plan);
+    runs = all.filter((r) => !r.diag); druns = all.filter((r) => r.diag);
+    solids = [...plan.walls, ...plan.openings.filter((o) => o.axis !== 'a')];
+    spolys = slantPolys(plan);
     corners = [...new Map(plan.wallOutline.flatMap(([x1, y1, x2, y2]) => [[`${x1},${y1}`, [x1, y1]], [`${x2},${y2}`, [x2, y2]]])).values()];
   }
   const threshold = (scale, px = 12) => clamp(px / scale, 1.5, 40);
@@ -181,8 +231,48 @@ export function createSnapper({ plan: planOrGetter, store, shown = null }) {
     return best ? best.r : null;
   }
 
+  /** The diagonal run (an angled wall's face) an item's back should go to, or null — like backRun. */
+  function backDiag(it, reach, state) {
+    let best = null;
+    for (const r of druns) {
+      const s = it.x * r.nx + it.y * r.ny - r.c, a = it.x * r.ux + it.y * r.uy;
+      if (s < -2 || s > it.d / 2 + reach || a < r.a0 - 2 || a > r.a1 + 2) continue;
+      const score = s - (state && state.run === r ? 4 : 0);
+      if (!best || score < best.score) best = { score, r };
+    }
+    return best;
+  }
+  /** An item on a diagonal run: back flush with the face, turned to it; the guide runs along the face. */
+  function attachDiag(it, r, res) {
+    const p = onDiagRun(it, r), half = it.w / 2;
+    res.x = p.x; res.y = p.y; res.rot = p.rot; res.attached = r;
+    const [x1, y1] = diagPoint(r, p.a - half), [x2, y2] = diagPoint(r, p.a + half);
+    res.guides.push({ x1, y1, x2, y2, kind: 'wall', diag: true });
+    return res;
+  }
+
   /** Wall-mounted items: glue the back to the nearest wall face and slide along it. */
   function attachToWall(it, res, thr, opts) {
+    if (druns.length) {
+      // angled walls: the nearest face of any direction wins
+      let bd = null;
+      for (const r of druns) {
+        const s = it.x * r.nx + it.y * r.ny - r.c;
+        if (s < -30) continue;
+        const a = it.x * r.ux + it.y * r.uy, ac = clamp(a, r.a0, r.a1);
+        const dist = Math.hypot(Math.abs(s), a - ac) + (s < 0 ? 20 : 0) - (opts.state && opts.state.run === r ? 6 : 0);
+        if (!bd || dist < bd.dist) bd = { dist, r };
+      }
+      let bo = null;
+      for (const r of runs) {
+        const s = r.horiz ? (it.y - r.c) * r.ny : (it.x - r.c) * r.nx;
+        if (s < -30) continue;
+        const a = clamp(r.horiz ? it.x : it.y, r.a0, r.a1);
+        const dist = Math.hypot(Math.abs(s), (r.horiz ? it.x : it.y) - a) + (s < 0 ? 20 : 0) - (opts.state && opts.state.run === r ? 6 : 0);
+        if (!bo || dist < bo.dist) bo = { dist, r };
+      }
+      if (bd && bd.dist <= 180 && (!bo || bd.dist < bo.dist)) { if (opts.state) opts.state.run = bd.r; return attachDiag(it, bd.r, res); }
+    }
     let best = null;
     for (const r of runs) {
       const s = r.horiz ? (it.y - r.c) * r.ny : (it.x - r.c) * r.nx;
@@ -240,6 +330,19 @@ export function createSnapper({ plan: planOrGetter, store, shown = null }) {
     const thr = threshold(opts.scale);
     if (it.placement === 'wall') return attachToWall(it, res, thr, opts);
     let lockX = false, lockY = false;
+    if (opts.autoOrient && hasBack(it) && druns.length) {
+      // angled walls: a face of an angled wall nearer than any straight one takes the item (flush, turned to it)
+      const reach = Math.max(10, threshold(opts.scale, 18)), dg = backDiag(it, reach, opts.state);
+      if (dg) {
+        let so = Infinity;
+        for (const r of runs) {
+          const s = r.horiz ? (it.y - r.c) * r.ny : (it.x - r.c) * r.nx, a = r.horiz ? it.x : it.y;
+          if (s < -2 || s > it.d / 2 + reach || a < r.a0 - 2 || a > r.a1 + 2) continue;
+          so = Math.min(so, s - (opts.state && opts.state.run === r ? 4 : 0));
+        }
+        if (dg.score < so) { if (opts.state) opts.state.run = dg.r; return attachDiag(it, dg.r, res); }
+      }
+    }
     if (opts.autoOrient && hasBack(it)) {
       const r = backRun(it, Math.max(10, threshold(opts.scale, 18)), opts.state);
       if (r) {
@@ -335,6 +438,14 @@ export function createSnapper({ plan: planOrGetter, store, shown = null }) {
         if (at < lo[j] || at > hi[j]) continue;
         if (from > lo[i] + 0.5 && from < hi[i] - 0.5) return;       // this side is inside a wall: nothing to report
         offer(dir > 0 ? lo[i] : hi[i]);
+      }
+      // angled walls: where the ray first meets a footprint's edge
+      for (const poly of spolys) {
+        for (let k = 0; k < poly.length; k++) {
+          const p = poly[k], q = poly[(k + 1) % poly.length];
+          if ((p[j] - at) * (q[j] - at) > 0 || p[j] === q[j]) continue;
+          offer(p[i] + (q[i] - p[i]) * ((at - p[j]) / (q[j] - p[j])));
+        }
       }
       if (hit == null || (hit - from) * dir > maxDist) {
         for (let k = 0; k < boundary.length; k++) {
@@ -442,6 +553,8 @@ export function createSnapper({ plan: planOrGetter, store, shown = null }) {
 
   return {
     get runs() { sync(); return runs; },
+    /** Diagonal runs (faces of angled walls). */
+    get diagRuns() { sync(); return druns; },
     threshold, snapBox, snapItem, snapCoord, snapPoint, clearances, problems, snapWallLine, snapWallEnd, snapWallPoint,
   };
 }

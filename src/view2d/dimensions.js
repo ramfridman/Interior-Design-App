@@ -5,7 +5,8 @@
  *   • interior clear dimensions (W × D) of every rectangular room and of the named zones of open spaces.
  * The compute functions are pure; `drawDimensions` renders them with collision-free text.
  */
-import { polygonBounds } from '../core/geometry.js';
+import { polygonBounds, slantPolys, openingPoly } from '../core/geometry.js';
+import { hasSlantedEdge, mainDirection, spanAlong } from './slant-tools.js';
 
 const uniq = (arr) => [...new Set(arr)].sort((a, b) => a - b);
 
@@ -20,21 +21,71 @@ export function facadeProfile(plan, side) {
   const lo = (r) => (horiz ? r.x : r.y), hi = (r) => (horiz ? r.x + r.w : r.y + r.h);
   const depth = (r) => (side === 'n' ? r.y : side === 's' ? r.y + r.h : side === 'w' ? r.x : r.x + r.w);
   const nearer = (a, b) => (side === 'n' || side === 'w' ? a < b : a > b);
-  const rects = [...plan.walls.map((r) => ({ r, opening: null })), ...plan.openings.map((r) => ({ r, opening: r }))];
+  const angled = Array.isArray(plan.slants) && plan.slants.length > 0;
+  const rects = [...plan.walls.map((r) => ({ r, opening: null })), ...plan.openings.filter((o) => !angled || o.axis !== 'a').map((r) => ({ r, opening: r }))];
+  // angled walls (stage A3): each footprint is projected onto this side; its openings count as openings only on the side
+  // the wall mainly faces (elsewhere they are part of its projection). Their depth is taken where they are crossed.
+  if (angled) rects.push(...slantProfileShapes(plan, side));
+  const depthAt = (c, mid) => (c.poly ? polyDepth(c.poly, side, mid) : depth(c.r));
   const cuts = uniq(rects.flatMap(({ r }) => [lo(r), hi(r)]));
   const out = [];
   for (let i = 0; i < cuts.length - 1; i++) {
     const mid = (cuts[i] + cuts[i + 1]) / 2;
-    let best = null;
+    let best = null, bestDepth = 0;
     for (const c of rects) {
       if (lo(c.r) > mid || hi(c.r) < mid) continue;
-      if (!best || nearer(depth(c.r), depth(best.r))) best = c;
+      const dep = depthAt(c, mid);
+      if (dep == null) continue;
+      if (!best || nearer(dep, bestDepth)) { best = c; bestDepth = dep; }
     }
     if (!best) continue;
-    const seg = { from: cuts[i], to: cuts[i + 1], depth: depth(best.r), opening: best.opening };
+    const seg = { from: cuts[i], to: cuts[i + 1], depth: best.poly ? Math.round(bestDepth * 10) / 10 : bestDepth, opening: best.opening };
+    if (best.slant) seg.slant = best.slant;
     const prev = out[out.length - 1];
     if (prev && prev.to === seg.from && prev.depth === seg.depth && prev.opening === seg.opening) prev.to = seg.to;
-    else out.push(seg);
+    // the projection of one angled wall (or of one opening in it) is one piece, at its outermost depth
+    else if (prev && prev.to === seg.from && seg.slant && prev.slant === seg.slant && prev.opening === seg.opening) {
+      prev.to = seg.to;
+      if (side === 'n' || side === 'w' ? seg.depth < prev.depth : seg.depth > prev.depth) prev.depth = seg.depth;
+    } else out.push(seg);
+  }
+  return out;
+}
+
+/**
+ * The outermost extent of a polygon on a side, across the line at `at` (x for 'n' / 's', y for 'w' / 'e'): its min y on
+ * the north side, max x on the east side … null when the line misses it.
+ */
+export function polyDepth(poly, side, at) {
+  const horiz = side === 'n' || side === 's';
+  let best = null;
+  for (let i = 0; i < poly.length; i++) {
+    const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % poly.length];
+    const a1 = horiz ? x1 : y1, a2 = horiz ? x2 : y2, c1 = horiz ? y1 : x1, c2 = horiz ? y2 : x2;
+    if ((at < Math.min(a1, a2)) || (at > Math.max(a1, a2))) continue;
+    const vals = a1 === a2 ? [c1, c2] : [c1 + (c2 - c1) * ((at - a1) / (a2 - a1))];
+    for (const v of vals) if (best == null || (side === 'n' || side === 'w' ? v < best : v > best)) best = v;
+  }
+  return best;
+}
+/** Which side an angled wall mainly faces (its outward face normal; for an interior one the side of its larger extent). */
+function mainSide(s, poly) {
+  const len = Math.hypot(s.x2 - s.x1, s.y2 - s.y1) || 1, nx = -(s.y2 - s.y1) / len, ny = (s.x2 - s.x1) / len;
+  return Math.abs(nx) >= Math.abs(ny) ? ['w', 'e'] : ['n', 's'];
+}
+/** The angled walls of a plan as profile shapes ({ r: AABB, poly, opening, slant }) plus their openings on their main sides. */
+function slantProfileShapes(plan, side) {
+  const out = [], polys = slantPolys(plan), byId = new Map(plan.slants.map((s) => [s.id, s]));
+  for (const poly of polys) {
+    const s = byId.get(poly.id);
+    if (!s) continue;
+    out.push({ r: polygonBounds(poly), poly, opening: null, slant: s.id });
+    if (!mainSide(s, poly).includes(side)) continue;
+    for (const o of plan.openings) {
+      if (o.axis !== 'a' || o.wall !== s.id) continue;
+      const q = openingPoly(o, plan);
+      out.push({ r: polygonBounds(q), poly: q, opening: o, slant: s.id });
+    }
   }
   return out;
 }
@@ -101,6 +152,7 @@ export function interiorDims(plan) {
     out.push({ dir, from: span[0], to: span[1], at, room, primary });
   };
   for (const room of plan.rooms) {
+    if (!isRect(room.polygon) && !(room.zones && room.zones.length) && hasSlantedEdge(room.polygon)) { slantedRoomDims(room, out); continue; }
     if (isRect(room.polygon)) {
       const b = polygonBounds(room.polygon);
       push('h', [b.x, b.x + b.w], b.y + b.h * 0.5, room.id, true);
@@ -113,6 +165,29 @@ export function interiorDims(plan) {
       }
     }
   }
+  return out;
+}
+
+/**
+ * A room with slanted sides (stage A3): its clear width and depth along its main directions (mainDirection), through
+ * points beside its label point. On an axis frame they are ordinary 'h' / 'v' dimensions (fixed at that line); on a turned
+ * frame 'a' dimensions { dir: 'a', px, py, ux, uy, from, to } (parameters along (ux, uy) from (px, py)).
+ */
+export function slantedRoomDims(room, out = []) {
+  const poly = room.polygon, th = mainDirection(poly) * Math.PI / 180;
+  const u = [Math.cos(th), Math.sin(th)], v = [-Math.sin(th), Math.cos(th)];
+  const [lx, ly] = room.label || [0, 0];
+  const add = (dirv, shift) => {
+    const px = lx + shift[0], py = ly + shift[1], sp = spanAlong(poly, px, py, dirv[0], dirv[1]);
+    if (!sp || sp[1] - sp[0] < 40) return;
+    if (Math.abs(dirv[1]) < 1e-9) out.push({ dir: 'h', from: px + sp[0] * Math.sign(dirv[0]), to: px + sp[1] * Math.sign(dirv[0]), at: py, room: room.id, primary: false, fixed: true });
+    else if (Math.abs(dirv[0]) < 1e-9) out.push({ dir: 'v', from: py + sp[0] * Math.sign(dirv[1]), to: py + sp[1] * Math.sign(dirv[1]), at: px, room: room.id, primary: false, fixed: true });
+    else out.push({ dir: 'a', px, py, ux: dirv[0], uy: dirv[1], from: sp[0], to: sp[1], room: room.id, primary: false });
+  };
+  // beside the label (as the zone dimensions are): the width a little below it, the depth a little to its side
+  add(u, [v[0] * 28, v[1] * 28]);
+  add(v, [u[0] * 70, u[1] * 70]);
+  for (const d of out) if (d.dir !== 'a' && d.from > d.to) [d.from, d.to] = [d.to, d.from];
   return out;
 }
 

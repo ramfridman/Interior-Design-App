@@ -7,7 +7,8 @@
  * what the plan view reports about its own gestures (`view2d.on('structure', …)`).
  */
 import { wallSegments, openingPolicy, removeWallSegment, removeOpening, moveWallSegment, resizeWallSegment, updateOpening, resetPlan, planDiff, isPlanModified, isBuiltinBase, levelPlan,
-  stairInfo, voidInfo, updateStair, removeStair, removeVoid, planPhase, REASONS } from '../core/plan-edit.js';
+  stairInfo, voidInfo, updateStair, removeStair, removeVoid, planPhase, REASONS, rotateWallEnd } from '../core/plan-edit.js';
+import { endNames, dirOfShown, shownAngle, lineFrame } from '../view2d/slant-tools.js';
 import { h, call, listen } from './dom.js';
 import { icon } from './icons.js';
 import { confirmDialog, toast } from './dialogs.js';
@@ -70,8 +71,25 @@ const OPENING_KINDS = { door: 'Door', window: 'Window', 'sliding-door': 'Sliding
 export const openingKind = (o) => OPENING_KINDS[o.kind] || 'Opening';
 export const openingTitle = (o) => (OPENING_TITLES[o.kind] && OPENING_TITLES[o.kind][o.style]) || openingKind(o);
 export const openingIcon = (o) => (o.kind === 'window' ? 'window' : o.kind === 'opening' ? 'passage' : 'door');
-/** Distance from the start (west / north end) of the wall segment to the near jamb of an opening, cm. */
-export const openingOffset = (o, seg) => (seg ? (o.axis === 'h' ? o.x - seg.core.x : o.y - seg.core.y) : 0);
+/**
+ * Distance from the start (west / north end) of the wall segment to the near jamb of an opening, cm. An opening in an
+ * angled wall: from the wall's start (x1, y1) along its centre line.
+ */
+export const openingOffset = (o, seg) => (o.axis === 'a' ? Math.round((o.at - o.width / 2) * 10) / 10 : seg ? (o.axis === 'h' ? o.x - seg.core.x : o.y - seg.core.y) : 0);
+
+/* ───────── Angled walls (stage A3) ───────── */
+/** Compass names of an angled wall's ends: { a: 'north-east', b: 'south-west' } (as seen from its middle). */
+export const slantEnds = (seg) => endNames(seg.x1, seg.y1, seg.x2, seg.y2);
+/** The angle of an angled wall as a line, counter-clockwise from east, 0–180° (0.1°). */
+export const slantAngle = (seg) => { const a = shownAngle(seg.x2 - seg.x1, seg.y2 - seg.y1) % 180; return Math.round(a * 10) / 10; };
+/** The space on the 'l' / 'r' side of an angled wall (from its `between`). */
+export const slantSideSpace = (seg, side) => (seg.between || [])[side === 'r' ? 1 : 0];
+/** "Hinged at the north-east end, opens into Kitchen." for a door in an angled wall. */
+export function slantDoorWords(o, seg, plan) {
+  if (!o || o.kind !== 'door' || !seg) return '';
+  const names = slantEnds(seg);
+  return `Hinged at the ${o.hinge === 'b' ? names.b : names.a} end, opens into ${spaceName(slantSideSpace(seg, o.swing), plan)}.`;
+}
 
 /** @param {object} app  UI context */
 /**
@@ -82,6 +100,11 @@ export const openingOffset = (o, seg) => (seg ? (o.axis === 'h' ? o.x - seg.core
  */
 export function lengthAnchor(seg) {
   const [f0, f1] = (seg && seg.freeEnds) || [false, false];
+  if (seg && seg.axis === 'a') {
+    // an angled wall: its free end moves; with both free / both joined, its end 'b' (x2, y2)
+    const names = slantEnds(seg), moving = f0 !== f1 ? (f0 ? 0 : 1) : 1;
+    return { moving, fixedName: moving ? names.a : names.b, movingName: moving ? names.b : names.a, rule: f0 !== f1 ? 'free-end' : 'end' };
+  }
   const c = seg.core, hz = seg.axis === 'h';
   const names = hz ? ['west', 'east'] : ['north', 'south'];
   let moving, rule;
@@ -276,6 +299,12 @@ export function createStructure(app) {
     resizeSegment(seg, length) {
       if (!seg || !(length > 0)) return { ok: false, reason: 'Type a length.' };
       const { moving } = lengthAnchor(seg);
+      if (seg.axis === 'a') {
+        const delta = Math.round((length - seg.length) * 10) / 10;
+        const res = resizeWallSegment(seg.id, moving ? { end: delta } : { start: delta });
+        if (res.ok && res.ids && res.ids[0]) api.select('segment', res.ids[0]);
+        return res;
+      }
       const hz = seg.axis === 'h', c = seg.core;
       const a0 = hz ? c.x : c.y, a1 = hz ? c.x + c.w : c.y + c.h;
       const delta = Math.round(length - seg.length);
@@ -287,6 +316,18 @@ export function createStructure(app) {
           .find((x) => { const q = hz ? [x.core.x, x.core.x + x.core.w] : [x.core.y, x.core.y + x.core.h]; return fixedAt >= q[0] && fixedAt <= q[1]; });
         api.select('segment', pick ? pick.id : res.ids[0]);
       }
+      return res;
+    },
+    /**
+     * Turn an angled wall to `deg` (the line's angle, counter-clockwise from east) about its end `fixed` ('a' | 'b'),
+     * keeping its length (rotateWallEnd: snapped and joined like a dragged end). Keeps it selected under its new id.
+     */
+    rotateSegment(seg, deg, fixed = 'a') {
+      if (!seg || seg.axis !== 'a' || !Number.isFinite(deg)) return { ok: false, reason: 'Type an angle.' };
+      const F = fixed === 'b' ? [seg.x2, seg.y2] : [seg.x1, seg.y1], [ux, uy] = dirOfShown(deg), sg = fixed === 'b' ? -1 : 1;
+      const len = seg.length, x = Math.round((F[0] + sg * ux * len) * 10) / 10, y = Math.round((F[1] + sg * uy * len) * 10) / 10;
+      const res = rotateWallEnd(seg.id, fixed === 'b' ? 'a' : 'b', { x, y, angled: true });
+      if (res.ok && res.ids && res.ids[0]) api.select('segment', res.ids[0]);
       return res;
     },
     /** Arrow keys: one 5 cm step — a wall sideways, an opening along its wall. Returns true when the key was used. */
@@ -301,9 +342,21 @@ export function createStructure(app) {
         return true;
       }
       const axis = cur.type === 'segment' ? cur.seg.axis : cur.opening.axis;
-      const d = cur.type === 'segment' ? (axis === 'v' ? dx : dy) : (axis === 'h' ? dx : dy);
-      if (!d) return false;
-      const res = cur.type === 'segment' ? api.moveSegment(cur.seg, d * STEP) : updateOpening(cur.id, { offset: openingOffset(cur.opening, cur.seg) + d * STEP });
+      let d = cur.type === 'segment' ? (axis === 'v' ? dx : dy) : (axis === 'h' ? dx : dy);
+      let res;
+      if (axis === 'a') {
+        // an angled wall moves across itself (the arrow's side of it), an opening in one along it; an arrow (nearly)
+        // along the wall / across it does nothing
+        const sg = cur.type === 'segment' ? cur.seg : cur.seg || null;
+        if (!sg) return false;
+        const f = lineFrame(sg.x1, sg.y1, sg.x2, sg.y2), dot = cur.type === 'segment' ? dx * f.nx + dy * f.ny : dx * f.ux + dy * f.uy;
+        if (Math.abs(dot) < 0.3) return false;
+        d = Math.sign(dot);
+        res = cur.type === 'segment' ? api.moveSegment(cur.seg, d * STEP) : updateOpening(cur.id, { at: Math.round((cur.opening.at + d * STEP) * 10) / 10 });
+      } else {
+        if (!d) return false;
+        res = cur.type === 'segment' ? api.moveSegment(cur.seg, d * STEP) : updateOpening(cur.id, { offset: openingOffset(cur.opening, cur.seg) + d * STEP });
+      }
       const refusal = api.report(res);
       const locked = (cur.type === 'segment' ? cur.seg.policy.level : cur.policy.level) === 'locked';
       if (refusal && locked) levelToast(refusal, 'locked');

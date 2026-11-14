@@ -327,12 +327,16 @@ export function planSnapshot(plan) {
 export function planDirt(a, b) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   const add = (r) => { x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y); x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h); };
+  // angled walls also carry their aligned dimensions and angle arc beside them (screen px): collected separately
+  const slants = [];
   for (const [k, w] of a.walls) if (!b.walls.has(k)) add(w);
   for (const [k, w] of b.walls) if (!a.walls.has(k)) add(w);
   for (const name of ['openings', 'rooms', 'segs', 'stairs']) {
-    for (const [k, v] of a[name]) { const o = b[name].get(k); if (!o || o.sig !== v.sig) { add(v.rect); if (o) add(o.rect); } }
-    for (const [k, v] of b[name]) if (!a[name].has(k)) add(v.rect);
+    for (const [k, v] of a[name]) { const o = b[name].get(k); if (!o || o.sig !== v.sig) { add(v.rect); if (o) add(o.rect); if (name === 'segs' && k.includes('seg:a:')) { slants.push(v.rect); if (o) slants.push(o.rect); } } }
+    for (const [k, v] of b[name]) if (!a[name].has(k)) { add(v.rect); if (name === 'segs' && k.includes('seg:a:')) slants.push(v.rect); }
   }
   const sides = Object.keys(b.chains).filter((side) => a.chains[side] !== b.chains[side]);
-  return { rect: x1 >= x0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null, sides };
+  const out = { rect: x1 >= x0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null, sides };
+  if (slants.length) out.slants = slants.map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h }));
+  return out;
 }
