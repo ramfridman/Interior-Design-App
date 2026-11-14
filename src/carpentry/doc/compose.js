@@ -10,6 +10,8 @@ import { sheetGeometry, packDrawings, drawSheet } from './sheets.js';
 import { keyPlanOps } from './keyplan.js';
 import { hasLevels, levelName, levelIds } from '../../core/levels.js';
 import { levelPlan } from '../../core/plan-edit.js';
+import { STONES } from '../stones.js';
+import { STONE_SUPPLIERS } from '../stone-suppliers.js';
 
 const L = (en, he) => ({ en, he });
 const { vocab } = Carp;
@@ -30,8 +32,12 @@ const SPEC_ROWS = [
   [S.handles, (r) => cat(vocab('handleType', r.spec.handles.type), r.spec.handles.type === 'bar' ? cat(' ', String(r.spec.handles.length), cm) : '', ['bar', 'knob', 'edge-pull'].includes(r.spec.handles.type) ? cat(', ', vocab('finish', r.spec.handles.finish)) : '')],
   [S.plinth, (r) => (r.spec.plinth.height > 0 ? cat(String(r.spec.plinth.height), cm, ', ', L('set back ', 'נסיגה '), String(r.spec.plinth.setback), cm, ', ', vocab('plinthFinish', r.spec.plinth.finish)) : null)],
   [S.hardwareGrade, (r) => cat(vocab('hardwareGrade', r.spec.hardware.grade), ' · ', free(r.spec.hardware.hinge), ' · ', free(r.spec.hardware.drawers))],
-  [S.worktopRow, (r) => (r.spec.worktop.material === 'none' || !(r.worktops || []).length ? null : cat(vocab('worktopMaterial', r.spec.worktop.material), ', ', String(r.spec.worktop.thickness), mm, ', ', free(r.spec.worktop.color), ', ', vocab('worktopEdge', r.spec.worktop.edge)))],
-  [S.splashback, (r) => (r.spec.splashback.material === 'none' || r.spec.worktop.material === 'none' ? null : cat(vocab('splashback', r.spec.splashback.material), ', ', L('height ', 'גובה '), String(r.spec.splashback.height), cm))],
+  [S.worktopRow, (r) => (r.spec.worktop.material === 'none' || !(r.worktops || []).length ? null
+    : r.spec.worktop.stone ? cat(vocab('worktopMaterial', r.spec.worktop.material), ': ', Carp.stoneText(r.spec.worktop.stone, { thickness: r.spec.worktop.thickness }), ', ', vocab('worktopEdge', r.spec.worktop.edge))
+      : cat(vocab('worktopMaterial', r.spec.worktop.material), ', ', String(r.spec.worktop.thickness), mm, ', ', free(r.spec.worktop.color), ', ', vocab('worktopEdge', r.spec.worktop.edge)))],
+  [S.splashback, (r) => (r.spec.splashback.material === 'none' || r.spec.worktop.material === 'none' ? null
+    : Carp.splashStone(r.spec) ? cat(vocab('splashback', r.spec.splashback.material), ': ', Carp.stoneText(Carp.splashStone(r.spec)), ', ', L('height ', 'גובה '), String(r.spec.splashback.height), cm)
+      : cat(vocab('splashback', r.spec.splashback.material), ', ', L('height ', 'גובה '), String(r.spec.splashback.height), cm))],
   [S.lighting, (r) => { const l = [r.spec.lighting.underWall && S.underWallLed, r.spec.lighting.inCabinet && S.inCabinetLed].filter(Boolean); return l.length ? L(l.map((x) => x.en).join('; '), l.map((x) => x.he).join('; ')) : S.noLighting; }],
   [S.heights, (r) => cat(L('worktop ', 'משטח '), String(r.spec.heights.worktop), cm, ' · ', L('top line ', 'קו עליון '), String(r.spec.heights.topLine), cm, ' · ', vocab('aboveTop', r.spec.heights.aboveTop))],
 ];
@@ -189,7 +195,7 @@ export function composeQuotation(o = {}) {
     rows: runsX.map((r) => ({ cells: {
       code: r.code, name: multi ? `${runName(r, lang)} · ${T(floorL(r))}` : runName(r, lang), room: roomOf(planOfRun(r), r, lang), kind: vocab('runKind', r.kind), len: fmtCm(r.length),
       units: String(sched.units.filter((u) => u.runId === r.id).length), fronts: vocab('frontMaterial', r.spec.fronts.material),
-      wt: r.spec.worktop.material === 'none' || !r.worktops.length ? '—' : vocab('worktopMaterial', r.spec.worktop.material),
+      wt: r.spec.worktop.material === 'none' || !r.worktops.length ? '—' : r.spec.worktop.stone ? cat(vocab('worktopMaterial', r.spec.worktop.material), ' — ', Carp.stoneName(r.spec.worktop.stone)) : vocab('worktopMaterial', r.spec.worktop.material),
     } })),
   });
   {
@@ -213,6 +219,7 @@ export function composeQuotation(o = {}) {
   B.heading(sec.spec, S.spec, { key: 'spec' });
   B.para(S.specNote, ST.small, { gap: 2 });
   B.keyValues(SPEC_ROWS.map(([k, fn]) => [k, specLine(runsX, fn, lang)]).filter(([, v]) => v), { labelW: 0.22, id: 'spec' });
+  stoneSupplierBlock(B, runsX, lang, o.stoneSuppliers || STONE_SUPPLIERS);
 
   // ═════ 3 included / excluded ═════
   B.heading(sec.inclusions, L('Included and excluded', 'כלול ולא כלול'), { key: 'inclusions' });
@@ -430,7 +437,7 @@ export function composeQuotation(o = {}) {
   if (sec.estimate) {
     B.textPage();
     B.heading(sec.estimate, S.estimate, { key: 'estimate' });
-    const e = Carp.estimate('all', { tier: o.tier, method: o.method, pricebook: o.pricebook, src: esrc });
+    const e = Carp.estimate('all', { tier: o.tier, method: o.method, pricebook: o.pricebook, src: esrc, stones: o.stones || STONES, stoneSuppliers: o.stoneSuppliers || STONE_SUPPLIERS });
     B.para(S.estimateNote, { ...ST.body, color: 'accent', font: 'medium' });
     B.para(e.label, ST.h3, { gap: 1 });
     B.para(e.disclaimer, ST.body);
@@ -528,3 +535,38 @@ function materialLabel(p) {
   return v.en === String(p.material) ? vocab('frontMaterial', p.material) : v;
 }
 const edgeShort = (t) => ({ 'abs-1': 'ABS 1', 'abs-2': 'ABS 2', 'pvc-0.4': 'PVC 0.4', laser: 'Laser', painted: 'Paint' }[t] || String(t || ''));
+
+/**
+ * "Stone supplier": for every chosen worktop / splashback stone, the supplier the slab was listed by, with its published
+ * contact (name, town, address, phone, website as published; "not published" where missing). Nothing when no stone is chosen.
+ */
+function stoneSupplierBlock(B, runs, lang, suppliers) {
+  const seen = new Map();
+  for (const r of runs) {
+    const wt = r.spec.worktop && r.spec.worktop.material !== 'none' && (r.worktops || []).length ? r.spec.worktop.stone : null;
+    const sb = r.spec.splashback && r.spec.splashback.material === 'stone' ? r.spec.splashback.stone : null;
+    for (const st of [wt, sb]) {
+      if (!st || !st.supplierId) continue;
+      const e = seen.get(st.supplierId) || { st, stones: new Map(), runs: new Set() };
+      e.stones.set(st.id, st); e.runs.add(r.code); seen.set(st.supplierId, e);
+    }
+  }
+  if (!seen.size) return;
+  B.heading('', S.stoneSupplier, { level: 3 });
+  B.para(S.stoneSupplierNote, ST.small, { gap: 1.5 });
+  const T = (v) => tr(v, lang), np = T(S.notPublished);
+  for (const [id, e] of seen) {
+    const s = (suppliers || []).find((x) => x.id === id) || null;
+    const name = s ? (lang === 'he' ? `${s.nameHe || s.name}${s.nameHe && s.name ? ` (${s.name})` : ''}` : s.name) : (lang === 'he' ? e.st.supplierNameHe || e.st.supplierName : e.st.supplierName) || id;
+    const stones = [...e.stones.values()].map((st) => T(Carp.stoneName(st))).join('; ');
+    const rows = [
+      [S.stoneSupplierName, name],
+      [S.stoneSupplierFor, `${[...e.runs].join(', ')}: ${stones}`],
+      [S.location, s ? (lang === 'he' ? s.addressHe || s.cityHe || s.address || s.city : s.address || s.city) || np : np],
+      [S.phone, (s && s.phone) || np],
+      [S.website, (s && s.website) || np],
+      [S.source, s && s.sources && s.sources[0] ? `${s.sources[0].url} (${T(S.checked)} ${s.sources[0].checkedAt})${s.listingOnly ? ` · ${T(S.listingOnly)}` : ''}` : np],
+    ];
+    B.keyValues(rows, { labelW: 0.22, id: `stone-supplier:${id}` });
+  }
+}

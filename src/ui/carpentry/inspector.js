@@ -13,7 +13,7 @@ import { upperLevels, levelName } from '../../core/levels.js';
 import * as Carp from '../../carpentry/index.js';
 import { h, setKids, rafThrottle } from '../dom.js';
 import { icon } from '../icons.js';
-import { btn, iconBtn, numField, toggle, segmented, emptyState } from '../components.js';
+import { btn, iconBtn, numField, toggle, segmented, emptyState, extLink } from '../components.js';
 import { openDialog, openMenu } from '../dialogs.js';
 import { mountSlot, loadSlot, slotContext, placeholder } from './slots.js';
 import { rowOf } from './index.js';
@@ -34,6 +34,7 @@ export function initCarpentryInspector(right, app, C) {
   const headTitle = h('div', { class: 'cinsp__title' });
   const quoteBtn = btn('Quotation package…', { small: true, variant: 'primary', icon: 'quote', tip: 'Drawings, schedules and the quotation request for carpenters', onClick: openQuotation });
   const carpBtn = btn('Find a carpenter', { small: true, icon: 'carpenter', tip: 'Carpenters near Afikim', onClick: openCarpenters });
+  const stoneBtn = btn('Find a stone supplier', { small: true, icon: 'gem', tip: 'Worktop-stone suppliers and fabricators, nearest first', onClick: openStoneSuppliers, attrs: { 'data-fk': 'find-stone' } });
   const tabBtns = new Map(), panels = new Map();
   const checksBadge = h('span', { class: 'badge badge--tab', hidden: true });
   const tablist = h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Carpentry panels' }, CTABS.map((t) => {
@@ -57,7 +58,7 @@ export function initCarpentryInspector(right, app, C) {
     return p;
   }));
   const el = h('div', { class: 'cinsp', 'aria-label': 'Carpentry inspector' },
-    h('header', { class: 'cinsp__head' }, headTitle, h('div', { class: 'cinsp__headacts' }, quoteBtn, carpBtn),
+    h('header', { class: 'cinsp__head' }, headTitle, h('div', { class: 'cinsp__headacts' }, quoteBtn, carpBtn, stoneBtn),
       iconBtn('panel-right', 'Hide this panel', { class: 'cinsp__hide', onClick: () => app.setPanelOpen('right', false) })),
     h('div', { class: 'side__head side__head--tabs cinsp__tabs' }, tablist),
     body);
@@ -96,6 +97,39 @@ export function initCarpentryInspector(right, app, C) {
     openDialog({ title: 'Find a carpenter', size: 'lg', cls: 'dialog--ccarp', body: bodyEl || placeholder('Carpenters — coming soon', 'Carpentry workshops near the house, nearest first, with their specialties and contacts.'),
       onClose: () => { try { inst && inst.destroy && inst.destroy(); } catch (err) { console.error(err); } } });
     try { inst && inst.update && inst.update(selNow()); } catch (err) { console.error(err); }
+  }
+
+  async function openStoneSuppliers() {
+    const create = await loadSlot('stoneSuppliers');
+    let inst = null, bodyEl;
+    try { inst = create ? create(slotContext(app)) : null; bodyEl = inst && inst.el; } catch (err) { console.error('[carpentry] stone suppliers failed', err); }
+    openDialog({ title: 'Find a stone supplier', size: 'lg', cls: 'dialog--ccarp dialog--cstonesup', body: bodyEl || placeholder('Stone suppliers — coming soon', 'Worktop-stone suppliers and fabricators near the house, nearest first.'),
+      onClose: () => { try { inst && inst.destroy && inst.destroy(); } catch (err) { console.error(err); } } });
+    try { inst && inst.update && inst.update(selNow()); } catch (err) { console.error(err); }
+  }
+  async function chooseStone(runId, target) {
+    try { const m = await import('./stone-picker.js'); m.openStonePicker({ C, runId, target }); } catch (err) { console.error('[carpentry] stone picker failed', err); }
+  }
+  /** The chosen stone as a compact card (swatch, names, finish / thickness / supplier) — or null. */
+  function stoneCard(st, sub, actions) {
+    const sw = h('span', { class: 'cstone-sw cstone-sw--sm', style: { '--sw': /^#[0-9a-f]{6}$/i.test(st.hex || '') ? st.hex : '#ccc' } });
+    import('./stone-picker.js').then((m) => { sw.innerHTML = m.swatchSVG(st, 60, 40); }).catch(() => {});
+    const n = Carp.stoneName(st);
+    return h('div', { class: 'cstone-cur', 'data-fk': 'stone-cur' }, sw,
+      h('div', { class: 'cstone-cur__txt' }, h('p', { class: 'cstone-cur__name' }, n.en), h('p', { class: 'cstone-cur__sub faint' }, sub)),
+      h('div', { class: 'cstone-cur__acts' }, actions));
+  }
+  /** Calm, quoted note: what the suppliers themselves say about natural stone (loaded with the stone list). */
+  function naturalNote(material) {
+    const host = h('div', { class: 'cstone-natnote' });
+    import('./stone-picker.js').then((m) => m.loadStoneData()).then((d) => {
+      const qs = d.statements.filter((q) => !/onyx/i.test(q.topic) || material === 'onyx');
+      if (!qs.length) return;
+      host.replaceChildren(h('details', { class: 'cstone-nat' }, h('summary', null, icon('info', { size: 14 }), h('span', null, `What suppliers say about natural stone (${qs.length})`)),
+        h('ul', null, qs.map((q) => { const sp = d.suppliers.find((x) => x.id === q.supplierId); return h('li', null, h('span', null, `${sp ? sp.name : q.supplierId}: “${q.glossEn}” `), extLink('source', q.url, 'cp-link')); })),
+        h('p', { class: 'faint' }, 'Quoted from the suppliers’ pages; they do not all agree. Ask your fabricator.')));
+    }).catch(() => {});
+    return host;
   }
 
   /* ───────── control helpers ───────── */
@@ -198,13 +232,24 @@ export function initCarpentryInspector(right, app, C) {
         select('f-th', 'Thickness', [[16, '16 mm'], [18, '18 mm'], [19, '19 mm'], [22, '22 mm']], f.thickness, (v) => spec('fronts.thickness', +v))));
 
     const w = s.worktop || {};
-    const worktop = group('worktop', isIsland ? 'Worktop and island' : 'Worktop', hasWorktop ? `${en('worktopMaterial', w.material).split(' (')[0]} ${w.thickness} mm · ${w.color || ''}` : 'None',
-      select('w-mat', 'Material', vocabOpts('worktopMaterial'), w.material, (v) => spec('worktop.material', v)),
+    const wst = hasWorktop && w.stone ? w.stone : null;
+    const stoneable = (m) => ['quartz', 'porcelain', 'granite', 'marble', 'marble-local', 'quartzite', 'travertine', 'onyx'].includes(m);
+    // material change: a chosen slab of another material no longer applies (cleared); the thickness goes to the material's default
+    const setMaterial = (v) => upd({ spec: { worktop: { material: v, ...(Carp.WORKTOP_THICKNESS[v] && v !== w.material ? { thickness: Carp.WORKTOP_THICKNESS[v] } : {}), ...(wst && wst.material !== v ? { stone: null } : {}) } } });
+    const thicknessOpts = [...new Set([12, 20, 28, 30, 40, ...((wst && wst.thicknesses) || [])])].sort((a, b) => a - b).map((t) => [t, `${t} mm`]);
+    const colour = colourRow('w-col', wst ? 'Custom colour' : 'Colour', WORKTOP_COLOURS, w.color, w.colorHex, (n, c) => upd({ spec: { worktop: { color: n, colorHex: c, ...(wst ? { stone: null } : {}) } } }));
+    const worktop = group('worktop', isIsland ? 'Worktop and island' : 'Worktop', hasWorktop ? (wst ? `${Carp.stoneName(wst).en.replace(/ collection,/, ',')} · ${w.thickness} mm` : `${en('worktopMaterial', w.material).split(' (')[0]} ${w.thickness} mm · ${w.color || ''}`) : 'None',
+      select('w-mat', 'Material', vocabOpts('worktopMaterial'), w.material, setMaterial),
       hasWorktop ? [
+        wst ? stoneCard(wst, [Carp.finishLabel(wst.finish).en, `${w.thickness} mm`, wst.supplierName].filter(Boolean).join(' · '),
+          [btn('Change stone…', { small: true, icon: 'gem', onClick: () => chooseStone(run.id, 'worktop'), attrs: { 'data-fk': 'w-stone' } })])
+          : stoneable(w.material) || w.material === 'none' ? h('div', { class: 'crow cstone-pick' }, btn('Choose a stone…', { small: true, icon: 'gem', onClick: () => chooseStone(run.id, 'worktop'), attrs: { 'data-fk': 'w-stone' } }),
+            h('p', { class: 'crow__hint' }, 'Real slabs from Israeli suppliers — Caesarstone, Dekton, PoloStone, natural marble and granite. Or set a custom colour below.')) : null,
+        Carp.isNaturalStone(w.material) ? naturalNote(w.material) : null,
         h('div', { class: 'grid2' },
-          select('w-th', 'Thickness', [[12, '12 mm'], [20, '20 mm'], [28, '28 mm'], [30, '30 mm'], [40, '40 mm']], w.thickness, (v) => spec('worktop.thickness', +v)),
+          select('w-th', 'Thickness', thicknessOpts, w.thickness, (v) => spec('worktop.thickness', +v)),
           select('w-edge', 'Edge', vocabOpts('worktopEdge'), w.edge, (v) => spec('worktop.edge', v))),
-        colourRow('w-col', 'Colour', WORKTOP_COLOURS, w.color, w.colorHex, (n, c) => upd({ spec: { worktop: { color: n, colorHex: c } } })),
+        wst ? h('details', { class: 'cstone-custom' }, h('summary', null, 'Custom colour (a stone not in the list)'), h('p', { class: 'crow__hint' }, 'Setting a custom colour replaces the chosen stone.'), colour) : colour,
         h('div', { class: 'grid3' },
           fk(numField({ label: 'Depth', value: w.depth, min: 30, max: 160, suffix: 'cm', onCommit: (v) => spec('worktop.depth', v) }), 'w-d'),
           fk(numField({ label: 'Upstand', value: w.upstand || 0, min: 0, max: 30, suffix: 'cm', onCommit: (v) => spec('worktop.upstand', v) }), 'w-up'),
@@ -266,8 +311,13 @@ export function initCarpentryInspector(right, app, C) {
       select('e-c', 'Carcass', vocabOpts('edge'), E.carcass, (v) => spec('edge.carcass', v)));
 
     const SB = s.splashback || {};
-    const splash = hasWorktop ? group('splash', 'Splashback', SB.material === 'none' ? 'None' : `${en('splashback', SB.material)} · ${num(SB.height)} cm`,
-      select('sb-m', 'Material', vocabOpts('splashback'), SB.material, (v) => spec('splashback.material', v)),
+    const sbStone = Carp.splashStone(s);
+    const splash = hasWorktop ? group('splash', 'Splashback', SB.material === 'none' ? 'None' : `${sbStone && SB.material === 'stone' ? Carp.stoneName(sbStone).en : en('splashback', SB.material)} · ${num(SB.height)} cm`,
+      select('sb-m', 'Material', vocabOpts('splashback'), SB.material, (v) => { if (v === 'stone' && !SB.stone) { spec('splashback.material', v); chooseStone(run.id, 'splashback'); } else spec('splashback.material', v); }),
+      SB.material === 'same-as-worktop' ? (wst ? h('p', { class: 'crow__hint', 'data-fk': 'sb-same' }, `Same slab as the worktop: ${Carp.stoneName(wst).en}.`)
+        : h('div', { class: 'crow cstone-pick' }, btn('Choose a stone…', { small: true, icon: 'gem', onClick: () => chooseStone(run.id, 'worktop'), attrs: { 'data-fk': 'sb-stone' } }), h('p', { class: 'crow__hint' }, 'The splashback uses the worktop stone — choosing one sets both.'))) : null,
+      SB.material === 'stone' ? (SB.stone ? stoneCard(SB.stone, [Carp.finishLabel(SB.stone.finish).en, SB.stone.supplierName].filter(Boolean).join(' · '), [btn('Change stone…', { small: true, icon: 'gem', onClick: () => chooseStone(run.id, 'splashback'), attrs: { 'data-fk': 'sb-stone' } })])
+        : h('div', { class: 'crow cstone-pick' }, btn('Choose a stone…', { small: true, icon: 'gem', onClick: () => chooseStone(run.id, 'splashback'), attrs: { 'data-fk': 'sb-stone' } }))) : null,
       SB.material === 'none' ? null : numRow('sb-h', 'Height', SB.height, (v) => spec('splashback.height', v), { max: 120 })) : null;
 
     const LG = s.lighting || {};

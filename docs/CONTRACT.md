@@ -1681,7 +1681,7 @@ renderPrims(prims, { pxPerUnit, canvas?, crop?, hide?: Set<layer>, highlight?: S
 ```
 
 **`readDxf(bytes | string, { cmPerUnit? })`** reads **ASCII DXF R12 … 2018** (binary DXF and DWG are refused with a
-plain message) and returns the **same primitive structure as `readPdf`** — `{ pageBox, paths, texts, images: [] }`, every
+plain message; DWG files go through `readDwg`, § 11.2) and returns the **same primitive structure as `readPdf`** — `{ pageBox, paths, texts, images: [] }`, every
 path / text with its `layer` — plus `kind: 'dxf'`, `dims`, `inserts`, `blocks`, `layers`, `layouts`, `extents`,
 `skipped`, `warnings` and `dxf: { units: { code ($INSUNITS), name, cmPerUnit | null, measurement, dimlfac, version,
 codepage }, unitGuess, duPerPageUnit, cmPerPageUnit, toPage (drawing units → page units) }`.
@@ -1756,6 +1756,67 @@ angled / curved bands become `slants` / chains, measured on the Wedge and quarte
 same accuracy as the PDF-like fixtures, and the 30° wall above becomes one slant (the bulged bay, two translated arcs,
 stays reported).
 
+### 11.2 DWG (`src/import/dwg-read.js`, `vendor/dwg/`) — AutoCAD's own format, read through the DXF path
+
+```js
+import { readDwg, dwgVersion, DWG_VERSIONS, MAX_DWG_BYTES } from './import/index.js';
+const prims = await readDwg(bytes, { cmPerUnit? });   // async (WebAssembly); then firstLook / analyseDxf exactly as § 11.1
+```
+
+**Reader.** GNU LibreDWG compiled to WebAssembly — the npm package `@mlightcad/libredwg-web` 0.8.8, vendored as
+`vendor/dwg/libredwg-web.js` (Emscripten glue, 114 KB, ASCII) + `libredwg-web.wasm` (11.4 MB). Loaded with a dynamic
+`import()` and a `fetch` of the `.wasm` from our own origin **only when a DWG is read** (the app's start-up does not
+change); the compiled module is kept per page / worker and every read gets a fresh instance (64 MB initial memory,
+growing on demand; dropped after the read). `readDwg` runs LibreDWG's own DWG → DXF conversion (`dwg_write_dxf`, i.e.
+`dwg2dxf`) in the module's in-memory file system and passes the DXF bytes to `readDxf`, so the result has **exactly
+`readDxf`'s structure** — units from the drawing's header (`$INSUNITS`, `$MEASUREMENT`, `$DIMLFAC`), layers with
+colour / frozen / off / line weight, blocks and inserts (nesting, arrays, mirroring), dimensions, texts, hatches,
+splines, extents, the layouts list, `kind: 'dxf'` — plus `source: { format: 'dwg', version ('AC1018' …), release
+('2004–2006' …), reader, dxfBytes, wasmMemoryBytes, readerLog }`. `dxf.js` (units, layer roles) and the detectors
+run unchanged. Why this route rather than an adapter from the library's own entity model: it reuses all of
+`dxf-read.js` (blocks, bulges, splines, hatches, encodings) with no second interpretation, and on every test file it
+gives results byte-identical to the DXF twin (below). A DXF that was given a `.dwg` name is read as DXF.
+* **Versions read**: R13 (`AC1012`), R14 (`AC1014`), 2000 (`AC1015`), 2004 (`AC1018`), 2007 (`AC1021`), 2010 (`AC1024`),
+  2013 (`AC1027`), 2018 (`AC1032` — AutoCAD 2019 to today still save this format). R13 / R14 have no `$INSUNITS`: the
+  unit comes from the dimensions / geometry as for a unitless DXF. Refused with a plain message: R12 and older
+  (`dwg-old-version`; LibreDWG's support is experimental), unknown newer codes (`dwg-new-version`).
+* **Plain errors** (`err.plain`, `err.code`): `dwg-empty`, `dwg-not-dwg` (does not start like a DWG), `dwg-too-big`
+  (> 40 MB), `dwg-old-version`, `dwg-new-version`, `dwg-unreadable` (truncated / damaged, password-protected, or the
+  converter stopped — a WebAssembly trap is caught, that instance dropped), `dwg-no-reader` (the module could not be
+  loaded, or the page's CSP does not allow WebAssembly), and readDxf's `dxf-empty` with DWG wording. Each ends with
+  what to do ("save it as DXF from your CAD program").
+* **Runs** in the import worker (`engine-client.js` task `dwg-read` → `{ prims, look }`, the worker awaits it), on the
+  main thread where workers are refused; in Node (the tests) from the same files.
+* **Security / hosting**: no `eval` / `new Function` (embind's two code generators were replaced by closures in the
+  vendored glue — `vendor/dwg/make.mjs`), no SharedArrayBuffer, no threads, nothing from other origins. Compiling
+  WebAssembly needs `script-src … 'wasm-unsafe-eval'`, which `dev/build-site.mjs` now writes into `_headers` (the
+  Worker in `server/` only rewrites `connect-src`; Cloudflare static assets serve `.wasm` as `application/wasm`). The
+  dev servers serve `.wasm` as `application/wasm`; both build scripts ship the `.wasm`, the GPL text and the README.
+* **Licence**: LibreDWG is under the GNU GPL, version 3 (the package says "GPL-3.0"; LibreDWG upstream "version 3 or
+  later"). Its text is `vendor/dwg/LICENSE-GPL-3.0.txt`; source and changes are listed in `vendor/dwg/README.md`.
+  Including it makes this part of the app subject to the GPL's terms when the app is distributed (docs/HOSTING-PLAN.md).
+
+**Accuracy** (`tests/import.dwg.test.mjs`; fixtures in `tests/fixtures/dwg/`, written from the DXF fixtures of § 11.1
+by `make-fixtures.mjs` with acad-ts 3.8.0 — an independent DWG writer — then read here by LibreDWG): the built-in house
+in cm in all eight versions R13 … 2018, in mm (2018), with Hebrew layer names (2000 with code page 1255, 2018), the
+Wedge (2018, `slants` option) and the two-floor Duplex (both plans on one 2018 sheet; two 2013 files, the first floor
+turned 90°) — walls, openings (kind, width, hinge, swing), slants, drawings, stair / void symbols and the floor
+alignment are **byte-identical to the DXF twin**; wall area identical to `plan.js`; units from the file (R13 / R14:
+1 cm from the dimensions). A 6 MB R2000 file (the house + 480 polylines of 1 000 vertices) reads in ≈ 2 s in Node with
+the WebAssembly memory staying at its initial 64 MB. In headless Chromium (`tests/import.dwg.browser.test.mjs`): the
+built site under its production headers boots without loading the reader, reads a DWG on the main thread and in the
+worker with no console errors; without `'wasm-unsafe-eval'` the plain `dwg-no-reader` message appears; the artifact
+package's side files read a DWG too. Through the dialog: `tests/import.ui.test.mjs` § 3b2.
+
+**Honest limits.** Every DWG tested was written by acad-ts from generated drawings — **no DWG saved by AutoCAD (or
+another CAD program) has been read here**; such files may hold objects (proxies, custom objects, dynamic blocks,
+annotative scales) that LibreDWG converts differently or not at all. Observed: on acad-ts files in the R13 / R14 /
+2000 formats with more than about 4 000 objects, LibreDWG's DXF conversion traps ("memory access out of bounds"; the
+same drawings in the 2004+ formats convert, 130 000 lines tested) — the user gets `dwg-unreadable`; whether AutoCAD's
+own R2000 files are affected is unknown. Password-protected and damaged files are refused, not repaired. Size: up to
+40 MB of DWG (the DXF in memory is several times larger). The conversion is one synchronous call: in the worker the
+dialog stays responsive and Cancel ends it; on the main-thread fallback the page waits for it.
+
 ## 12. Sketch import UI and tracing underlay (`src/ui/import/`, `src/view2d/underlay.js`) — UI on top of § 10 / § 11
 
 **Entry points:** project menu (top-bar switcher and File → "Projects…") → "Import a sketch…"; New project dialog →
@@ -1819,11 +1880,14 @@ Paper-space layouts are listed as not read. Step 2: the first option reads "The 
 "Measure a known length"; "Choose the drawing unit" (mm / cm / m / inch / foot); a geometry guess when nothing better
 exists; the same live sanity read-out. Steps 3–5 as for a PDF (`dxf-analyse` with the confirmed scale, roles, drawing,
 rotation, mirror). The stored underlay is a fresh `renderPrims` rendering of the house + margin (all visible layers,
-≤ 2400 px) with `source: { kind: 'dxf', name, units }`. **DWG**: never parsed (no DWG library — licensing is the owner's
-decision); the dialog explains that DWG is AutoCAD's closed format and how to get a DXF in a minute (Save As → DXF in
-AutoCAD and most CAD programs, the free ODA File Converter, or ask the architect), and Next stays disabled. Worker
-errors keep `plain` / `code`, so DXF problems show their plain message. Tested by the DXF part of
-`tests/import.ui.test.mjs` (DWG explained, binary DXF refused, Hebrew layer panel pre-ticked and highlighted, units
+≤ 2400 px) with `source: { kind: 'dxf', name, units }`. **DWG** (§ 11.2): `sniff` → `'dwg'`; step 1 runs the worker
+task `dwg-read` ("Reading the DWG…") and from then on the file is handled exactly as a DXF (`S.kind = 'dxf'`: layer
+panel, units option — "The DWG says so", several drawings, floors, angled walls when their switches are on); the file
+line reads "AutoCAD DWG (2004–2006 format) · drawn in …". Only when a particular DWG cannot be read does the dialog
+show the plain error and a short note ("This DWG cannot be read here — save it as DXF": Save As → DXF in the CAD
+program, or ask for a DXF / PDF), and Next stays disabled (`S.kind = 'dwg'`). The drop zone and both file pickers list
+DWG. Worker errors keep `plain` / `code`, so DXF / DWG problems show their plain message. Tested by the DXF part of
+`tests/import.ui.test.mjs` (an unreadable DWG gets the note, a real DWG goes through to a project — § 3b2 —, binary DXF refused, Hebrew layer panel pre-ticked and highlighted, units
 option first and chosen, project walls identical to the built-in house, 23 openings, 9 rooms, the DXF underlay's ink on
 both faces of the north wall within 3 cm).
 

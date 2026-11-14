@@ -26,7 +26,7 @@ function csv(rows) {
 
 function create(ctx) {
   const { store, Carp, ui } = ctx;
-  let pricebook = null, loadError = null;
+  let pricebook = null, loadError = null, stoneData = null;
   let sel = { runId: null, unitId: null };
   let vat = false;
   let lastBudget = '';
@@ -48,7 +48,7 @@ function create(ctx) {
   // ───────────── data ─────────────
   function compute() {
     const tier = store.ui.carpentryTier || undefined;
-    const opts = { tier, pricebook, method: 'market' };
+    const opts = { tier, pricebook, method: 'market', stones: stoneData && stoneData.stones, stoneSuppliers: stoneData && stoneData.suppliers };
     const all = Carp.estimate('all', opts);
     const one = sel.runId && Carp.getRun(sel.runId) ? Carp.estimate(sel.runId, opts) : null;
     return { all, one };
@@ -92,6 +92,8 @@ function create(ctx) {
           : h('p', { class: 'cp-line__basis num' }, basis, l.derived && chip('derived', 'cp-chip--derived', 'Derived from other rates in the price book, not a published rate'),
             l.confidence && chip(CONF_LABEL[l.confidence] ? l.confidence : String(l.confidence), `cp-chip--conf cp-chip--${l.confidence}`, CONF_LABEL[l.confidence] || '')),
         l.note && h('p', { class: 'cp-line__note faint' }, l.note.en || l.note),
+        l.why && h('p', { class: 'cp-line__why' }, h('b', null, l.basis === 'slab' ? 'Rate used: this slab’s published price. ' : 'Rate used: the material’s book rate. '), l.why.en || l.why),
+        !noRate && (l.fromPrice || l.vatStatus) && h('p', { class: 'cp-line__why faint' }, [l.fromPrice && 'A “from” price: the real price can be higher.', l.vatStatus && `VAT: ${l.vatStatus}.`].filter(Boolean).join(' ')),
         !noRate && (sources.length || l.includes) && h('details', { class: 'cp-line__more' },
           h('summary', null, `Sources (${sources.length})`),
           l.includes && h('p', { class: 'cp-line__inc faint', dir: 'auto' }, l.includes),
@@ -197,6 +199,8 @@ function create(ctx) {
   let destroyed = false;
   const offs = ['carpentry', 'items', 'plan', 'ui'].map((e) => store.on(e, refresh));
   render();
+  // the stone list lets a chosen slab's own published price be used (optional: without it the material rate applies)
+  Promise.all([import('../../carpentry/stones.js'), import('../../carpentry/stone-suppliers.js')]).then(([a, b]) => { stoneData = { stones: a.STONES, suppliers: b.STONE_SUPPLIERS }; if (pricebook && !destroyed) render(); }).catch(() => {});
   import('../../carpentry/pricebook.js').then((m) => { pricebook = m.default; render(); }).catch((e) => { loadError = 'The price book could not be loaded.'; console.error(e); render(); });
 
   return {

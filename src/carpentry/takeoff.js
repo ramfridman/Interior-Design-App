@@ -15,6 +15,7 @@ import { MODULES, islandBays } from './modules.js';
 import { RULES, vocab } from './spec.js';
 import { unitsOf, positions, geometryOf, unitCodes, isFloorLevel } from './layout.js';
 import { computeWorktops } from './worktop.js';
+import { splashStone, stoneText } from './stone.js';
 import { cornerShape, polyArea, BY_CARPENTER } from './bespoke.js';
 
 const L = (en, he) => ({ en, he });
@@ -274,7 +275,8 @@ function splashOf(run, worktops) {
   const s = run.spec.splashback;
   if (!s || s.material === 'none' || run.kind === 'island' || !worktops.length) return { m2: 0, material: s ? s.material : 'none', height: 0 };
   const len = worktops.filter((p) => !p.waterfall).reduce((a, p) => a + p.length, 0);
-  return { m2: r3((len * s.height) / 1e4), material: s.material, height: s.height, lengthM: r3(len / 100) };
+  const st = splashStone(run.spec);
+  return { m2: r3((len * s.height) / 1e4), material: s.material, height: s.height, lengthM: r3(len / 100), ...(st ? { stone: { ...st } } : {}) };
 }
 
 /** Sum a run list into totals per material, edge type, fronts, hardware, worktop. */
@@ -296,7 +298,9 @@ function totalsOf(runs) {
     r.extraFronts.forEach((p) => { addPanel(p); frontCount += p.qty; frontArea += p.areaM2; });
     for (const h of r.hardware) hw(hwt, h.kind, h.qty, h);
     for (const p of r.worktops) {
-      const k = `${p.material}|${p.thickness}`, cur = wt.get(k) || { material: p.material, thickness: p.thickness, label: vocab('worktopMaterial', p.material), areaM2: 0, pieces: 0, polishedM: 0, upstandM: 0, cutouts: {} };
+      const k = `${p.material}|${p.thickness}${p.stone ? `|${p.stone.id}|${p.stone.finish || ''}` : ''}`;
+      const cur = wt.get(k) || { material: p.material, thickness: p.thickness, label: vocab('worktopMaterial', p.material), areaM2: 0, pieces: 0, polishedM: 0, upstandM: 0, cutouts: {},
+        ...(p.stone ? { stone: { ...p.stone }, stoneLabel: stoneText(p.stone, { thickness: p.thickness }) } : {}) };
       cur.areaM2 = r3(cur.areaM2 + p.areaM2); cur.pieces += 1; cur.polishedM = r3(cur.polishedM + p.polishedM); cur.upstandM = r3(cur.upstandM + p.upstandM);
       for (const c of p.cutouts) cur.cutouts[c.kind] = (cur.cutouts[c.kind] || 0) + 1;
       wt.set(k, cur);

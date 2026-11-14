@@ -260,7 +260,11 @@ export function updateRun(runId, patch = {}, mopts) {
     for (const k of ['name', 'nameHe', 'notes', 'roomId']) if (patch[k] !== undefined) run[k] = patch[k];
     if (patch.kind && VOCAB.runKind[patch.kind]) run.kind = patch.kind;
     if (patch.levels) run.levels = [...patch.levels];
-    if (patch.spec) run.spec = deepMerge(run.spec, patch.spec);
+    if (patch.spec) {
+      run.spec = deepMerge(run.spec, patch.spec);
+      // a chosen stone is cleared with `stone: null` (custom colour): the key goes, so the spec reads as before it was chosen
+      for (const g of ['worktop', 'splashback']) if (run.spec[g] && run.spec[g].stone === null) delete run.spec[g].stone;
+    }
     if (patch.length != null) { if (!(+patch.length > 0)) return FAIL('Length must be positive.', 'האורך חייב להיות חיובי.'); run.length = r1(+patch.length); }
     if (patch.anchor) run.anchor = { ...run.anchor, ...patch.anchor };
     if (patch.ends) for (const s of ['left', 'right']) if (patch.ends[s]) run.ends[s] = typeof patch.ends[s] === 'string' ? { type: patch.ends[s] } : clone(patch.ends[s]);

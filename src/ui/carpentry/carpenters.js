@@ -33,7 +33,7 @@ function saveTracker(t) { try { localStorage.setItem(STORE_KEY, JSON.stringify(t
 
 function create(ctx) {
   const { store, Carp, ui } = ctx;
-  let list = [], pricebook = null, loadError = null, destroyed = false;
+  let list = [], pricebook = null, loadError = null, destroyed = false, stones = null;
   let tracker = loadTracker();
   const meta = () => (tracker._meta = tracker._meta || { quotesIncVat: true });
   const filters = { dist: 'all', type: 'all', kitchens: false, wardrobes: false, source: 'all' };
@@ -127,7 +127,7 @@ function create(ctx) {
   let estimate = null;
   function computeEstimate() {
     if (!pricebook) return;
-    try { const e = Carp.estimate('all', { tier: store.ui.carpentryTier || undefined, pricebook, method: 'market' }); estimate = e && e.total ? e.total : null; } catch (err) { estimate = null; }
+    try { const e = Carp.estimate('all', { tier: store.ui.carpentryTier || undefined, pricebook, method: 'market', stones }); estimate = e && e.total ? e.total : null; } catch (err) { estimate = null; }
   }
   function renderCompare() {
     const got = list.filter((c) => tracker[c.id] && tracker[c.id].status === 'quote' && Number(tracker[c.id].amount) > 0);
@@ -188,6 +188,7 @@ function create(ctx) {
   root.append(h('p', { class: 'faint cp-pad', role: 'status', id: 'cp-ca-loading' }, 'Loading carpenters…'));
   import('../../carpentry/carpenters.js').then((m) => { list = Carp.sortCarpentersByDistance(m.default || []); }).catch((e) => { loadError = 'The carpenter list could not be loaded.'; console.error(e); })
     .then(() => import('../../carpentry/pricebook.js').then((m) => { pricebook = m.default; }).catch(() => {}))
+    .then(() => import('../../carpentry/stones.js').then((m) => { stones = m.STONES; }).catch(() => {}))
     .then(() => {
       if (destroyed) return;
       const l = root.querySelector('#cp-ca-loading'); if (l) l.remove();

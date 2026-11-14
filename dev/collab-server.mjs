@@ -19,7 +19,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const port = Number(args.find((a) => /^\d+$/.test(a)) || process.env.PORT || 5180);
 const dataDir = args.includes('--data') ? path.resolve(args[args.indexOf('--data') + 1]) : fs.mkdtempSync(path.join(os.tmpdir(), 'e7-collab-'));
-const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.pdf': 'application/pdf', '.ico': 'image/x-icon' };
+const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.pdf': 'application/pdf', '.ico': 'image/x-icon', '.wasm': 'application/wasm' };
 const EMAIL = /^[^\s@<>"]{1,64}@[^\s@<>"]{1,190}$/;
 const ROLES = ['viewer', 'editor', 'owner'];
 

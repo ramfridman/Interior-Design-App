@@ -15,6 +15,7 @@
 import * as THREE from 'three';
 import { registerModel, getModel } from './registry.js';
 import * as K from './kit.js';
+import { stoneMaterial, stoneUV } from './stone-texture.js';
 import { geometryOf, unitsOf, levelOf, positions } from '../carpentry/layout.js';
 import { spanOfRun } from '../carpentry/walls.js';
 import { view } from '../carpentry/state.js';
@@ -23,7 +24,7 @@ import { MODULES } from '../carpentry/modules.js';
 const CM = 0.01;
 const FINISH = { black: '#232427', steel: '#b9bcc0', brass: '#c5a35a', white: '#f1f0ec', aluminium: '#c9cbcd', wood: '#9c7350' };
 const FRONT_ROUGH = { 'lacquer-gloss': 0.14, 'lacquer-matt': 0.5, fenix: 0.85, melamine: 0.62, laminate: 0.55, glass: 0.1 };
-const STONE = new Set(['quartz', 'porcelain', 'granite']);
+const STONE = new Set(['quartz', 'porcelain', 'granite', 'marble', 'marble-local', 'quartzite', 'travertine', 'onyx']);
 const DOORISH = new Set(['door', 'glass', 'mirror']);
 
 /** Run + geometry of a carpentry item, or null (no run / broken data). */
@@ -38,12 +39,15 @@ function materials(g) {
   const s = g.spec, fr = s.fronts, wt = s.worktop;
   const front = fr.material === 'veneer' || fr.material === 'solid-frame' ? K.wood(fr.colorHex || 'oak') : K.mat(fr.colorHex || '#f3f1ec', { roughness: FRONT_ROUGH[fr.material] ?? 0.55 });
   const carcass = K.mat(s.carcass.colorHex || '#f3f1ec', { roughness: 0.72 });
-  const worktop = wt.material === 'solid-wood' ? K.wood(wt.colorHex || 'oak', { roughness: 0.5 }) : wt.material === 'stainless' ? K.metal('#c6c9cd', { roughness: 0.3, metalness: 0.9 })
+  // a chosen slab (spec.worktop.stone): procedural stone look from its hex / pattern / vein colour, roughness from its finish
+  const worktop = wt.stone && wt.stone.id ? stoneMaterial({ ...wt.stone, hex: wt.colorHex || wt.stone.hex })
+    : wt.material === 'solid-wood' ? K.wood(wt.colorHex || 'oak', { roughness: 0.5 }) : wt.material === 'stainless' ? K.metal('#c6c9cd', { roughness: 0.3, metalness: 0.9 })
     : K.mat(wt.colorHex || '#e7e4de', { roughness: STONE.has(wt.material) ? 0.28 : 0.5 });
+  const sb = s.splashback, splash = sb && sb.material === 'stone' && sb.stone && sb.stone.id ? stoneMaterial(sb.stone) : null;
   const fin = s.handles.finish, handle = fin === 'white' || fin === 'wood' ? K.mat(FINISH[fin], { roughness: 0.5 }) : K.metal(FINISH[fin] || FINISH.black, { roughness: 0.38, metalness: 0.8 });
   const steel = K.metal('#c4c7cb', { roughness: 0.3, metalness: 0.9 });
   const plinth = s.plinth.finish === 'aluminium' ? K.metal('#b9bcc0', { roughness: 0.45, metalness: 0.7 }) : s.plinth.finish === 'carcass' ? carcass : front;
-  return { front, carcass, worktop, handle, steel, plinth, glass: K.glass('#d6e6ea', 0.3), mirror: K.mirrorMat(), dark: K.mat('#1b1c1f', { roughness: 0.22 }),
+  return { front, carcass, worktop, splash, handle, steel, plinth, glass: K.glass('#d6e6ea', 0.3), mirror: K.mirrorMat(), dark: K.mat('#1b1c1f', { roughness: 0.22 }),
     ceramic: K.ceramic('#f7f7f5'), chrome: K.chrome(), white: K.mat('#f2f2f0', { roughness: 0.4 }), fabric: K.fabric('#d9d2c4'), bin: K.mat('#5d6166', { roughness: 0.6 }) };
 }
 
@@ -61,6 +65,16 @@ function ubox(B, x0, x1, y0, y1, v0, v1, mat, parent = B.root) {
   if (x1 - x0 < 0.05 || y1 - y0 < 0.05 || v1 - v0 < 0.05) return null;
   const m = K.box((x1 - x0) * CM, (y1 - y0) * CM, (v1 - v0) * CM, mat, B.X((x0 + x1) / 2), B.Y((y0 + y1) / 2), B.Z((v0 + v1) / 2));
   parent.add(m);
+  return m;
+}
+/** ubox for a stone material: its own box geometry with UVs in the run frame (metres), so the veins run on across units. */
+function sbox(B, x0, x1, y0, y1, v0, v1, mat) {
+  if (!mat || !mat.userData || !mat.userData.stone) return ubox(B, x0, x1, y0, y1, v0, v1, mat);
+  if (x1 - x0 < 0.05 || y1 - y0 < 0.05 || v1 - v0 < 0.05) return null;
+  const geo = new THREE.BoxGeometry((x1 - x0) * CM, (y1 - y0) * CM, (v1 - v0) * CM).translate(B.X((x0 + x1) / 2), B.Y((y0 + y1) / 2), B.Z((v0 + v1) / 2));
+  stoneUV(geo, ((B.item.carp.at || 0) + B.w / 2) * CM, B.elev * CM, (B.d / 2) * CM);
+  const m = new THREE.Mesh(geo, mat);
+  B.root.add(m);
   return m;
 }
 /** Box in face coordinates (x from the viewer's left, y floor, z outward from the face's outer plane), cm. */
@@ -320,7 +334,7 @@ function worktop(B, ctx) {
       const mine = p.waterfall === 'left' ? first : last;
       if (!mine || mine.id !== item.id) continue;
       const x = p.waterfall === 'left' ? p.s - at : p.e - at;
-      ubox(B, p.waterfall === 'left' ? x : x - th, p.waterfall === 'left' ? x + th : x, 0, wtop - th, 0, p.depth, B.m.worktop);
+      sbox(B, p.waterfall === 'left' ? x : x - th, p.waterfall === 'left' ? x + th : x, 0, wtop - th, 0, p.depth, B.m.worktop);
       continue;
     }
     let a = Math.max(p.s, at), b = Math.min(p.e, at + B.w);
@@ -335,6 +349,7 @@ function worktop(B, ctx) {
     for (const c of cuts) shape.holes.push(new THREE.Path([[c.xa, c.va], [c.xa, c.vb], [c.xb, c.vb], [c.xb, c.va]].map(([x, vv]) => new THREE.Vector2(X(x), -Z(vv)))));
     const geo = new THREE.ExtrudeGeometry(shape, { depth: th * CM, bevelEnabled: false });
     geo.rotateX(-Math.PI / 2);
+    if (B.m.worktop.userData && B.m.worktop.userData.stone) stoneUV(geo, (at + B.w / 2) * CM, (wtop - th) * CM, (B.d / 2) * CM);
     const mesh = new THREE.Mesh(geo, B.m.worktop);
     mesh.position.y = B.Y(wtop - th);
     B.root.add(mesh);
@@ -348,7 +363,7 @@ function worktop(B, ctx) {
  * drawing exactly: from the worktop up to its height, stopped under the wall units above the piece, cut at windows whose
  * sill is below its top. The upstand is a strip of the worktop material standing on the worktop in front of it.
  */
-const SPLASH = { 'same-as-worktop': 1.2, glass: 0.6, tiles: 0.9 };
+const SPLASH = { 'same-as-worktop': 1.2, stone: 1.2, glass: 0.6, tiles: 0.9 };
 function backOfTop(B, ctx, p, a, b, at, wtop, th) {
   const { run, v } = ctx, S = run.spec, sb = S.splashback, up = Number(S.worktop.upstand) || 0;
   if (run.kind === 'island' || B.level === 'island') return;
@@ -367,13 +382,13 @@ function backOfTop(B, ctx, p, a, b, at, wtop, th) {
       const oa = o.from - span.runFrom, ob = o.to - span.runFrom;
       if (o.sill < y1) segs = segs.flatMap(([s, e]) => (ob <= s || oa >= e ? [[s, e]] : [[s, oa], [ob, e]].filter(([q, w]) => w - q > 1)));
     }
-    const mat = sb.material === 'same-as-worktop' ? B.m.worktop : sb.material === 'glass' ? K.mat('#eef0ee', { roughness: 0.06 }) : K.mat('#eeebe5', { roughness: 0.32 });
+    const mat = sb.material === 'same-as-worktop' ? B.m.worktop : sb.material === 'stone' && B.m.splash ? B.m.splash : sb.material === 'glass' ? K.mat('#eef0ee', { roughness: 0.06 }) : K.mat('#eeebe5', { roughness: 0.32 });
     if (y1 - wtop > 0.5) for (const [s, e] of segs) {
-      ubox(B, X(s), X(e), wtop, y1, 0, T, mat);
+      sbox(B, X(s), X(e), wtop, y1, 0, T, mat);
       if (sb.material === 'tiles') tileJoints(B, s, e, at, wtop, y1, T);
     }
   }
-  if (up > 0) ubox(B, X(a), X(b), wtop, wtop + up, T, T + th, B.m.worktop);
+  if (up > 0) sbox(B, X(a), X(b), wtop, wtop + up, T, T + th, B.m.worktop);
 }
 /** Metro tiles 15 × 7.5 cm, half-bond, set out from the run's left end (joints line up across units): thin grout joints. */
 function tileJoints(B, s, e, at, y0, y1, T) {

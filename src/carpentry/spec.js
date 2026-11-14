@@ -62,6 +62,19 @@ export const VOCAB = {
     quartz: L('Quartz (Caesarstone-type)', 'אבן קוורץ (בסגנון Caesarstone)'), porcelain: L('Sintered porcelain (Dekton-type)', 'פורצלן / אבן מסונטרת (בסגנון Dekton)'),
     granite: L('Granite', 'גרניט'), 'solid-wood': L('Solid wood', 'עץ מלא'), laminate: L('Laminate (post-formed)', 'משטח פורמייקה (למינציה)'),
     stainless: L('Stainless steel', 'נירוסטה'), none: L('No worktop', 'ללא משטח'),
+    // natural stone (stage "worktop stone"; Hebrew marked unverified in docs/HEBREW-TERMS.md)
+    marble: L('Natural marble (imported, e.g. Italian)', 'שיש טבעי (מיובא)'), 'marble-local': L('Local natural marble', 'שיש טבעי מקומי'),
+    quartzite: L('Natural quartzite', 'קוורציט טבעי'), travertine: L('Travertine', 'טרוורטין'), onyx: L('Onyx', 'אוניקס'),
+  },
+  /** Surface finish of a chosen stone slab (as the supplier names it; Cosentino / Caesarstone finish names stay in Latin). */
+  stoneFinish: {
+    polished: L('Polished', 'מבריק (פוליש)'), matte: L('Matte', 'מט'), brushed: L('Brushed', 'מוברש'), velvet: L('Velvet', 'גימור Velvet'),
+    lapato: L('Lapato (semi-polished)', 'Lapato (חצי מבריק)'), satin: L('Satin', 'גימור Satin'), stone: L('Stone', 'גימור Stone'),
+  },
+  /** Surface pattern of a stone slab (picker filters, 3D texture). */
+  stonePattern: {
+    plain: L('Plain', 'אחיד'), 'fine-grain': L('Fine grain', 'גרעיני'), veined: L('Veined', 'עורקי'), 'marble-look': L('Marble look', 'מראה שיש'),
+    concrete: L('Concrete look', 'מראה בטון'), terrazzo: L('Terrazzo', 'טראצו'),
   },
   worktopEdge: {
     eased: L('Square, eased arris', 'ישר, פינה מעוגלת קלות'), bevel: L('Bevelled', 'פאזה'), bullnose: L('Half bullnose', 'חצי עגול'),
@@ -70,6 +83,7 @@ export const VOCAB = {
   splashback: {
     'same-as-worktop': L('Same stone as the worktop', 'אבן כמו המשטח'), tiles: L('Wall tiles', 'אריחי חיפוי'),
     glass: L('Back-painted glass', 'זכוכית צבועה'), none: L('None', 'ללא'),
+    stone: L('Stone slab, chosen separately', 'לוח אבן (נבחר בנפרד)'),
   },
   plinthFinish: {
     'matching-fronts': L('To match the fronts', 'בגוון החזיתות'), aluminium: L('Aluminium plinth', 'צוקל אלומיניום'),
@@ -153,6 +167,11 @@ export function hwVariantLabel(kind, variant) {
   const g = kind === 'handle' ? VOCAB.handleType : kind === 'profile' ? VOCAB.frontStyle : VOCAB.hwVariant;
   return g[variant] || VOCAB.hwVariant[variant] || VOCAB.cornerInternal[variant] || L(String(variant), String(variant));
 }
+
+/** Natural (quarried) stone worktop materials: natural-stone cut-out rates, the sealing question, the suppliers' notes. */
+export const NATURAL_STONE = new Set(['granite', 'marble', 'marble-local', 'quartzite', 'travertine', 'onyx']);
+/** Design default thickness (mm) when the worktop material changes; a chosen slab's published thicknesses win. */
+export const WORKTOP_THICKNESS = { quartz: 20, porcelain: 12, granite: 20, marble: 20, 'marble-local': 20, quartzite: 20, travertine: 20, onyx: 20, laminate: 28, 'solid-wood': 40 };
 
 /** Recommended / limit values a professional designer works to (cm unless stated). */
 export const RULES = {

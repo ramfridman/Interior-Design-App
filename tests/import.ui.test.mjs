@@ -5,8 +5,11 @@
 //      a reload keeps the project and its underlay.
 //   2. a PNG rendering of the same page: the flow completes with the low-confidence banner and an underlay.
 //   3. a broken file and a password-protected PDF give plain messages; re-align is exercised with real clicks.
-//   3b. a DXF of the built-in house (Hebrew layers, code page 1255): DWG explained, binary DXF refused, layer panel
-//       pre-ticked, units read, project created with walls within 1 cm and a DXF rendering as the underlay.
+//   3b. a DXF of the built-in house (Hebrew layers, code page 1255): an unreadable DWG gets the short "save it as DXF"
+//       note, binary DXF refused, layer panel pre-ticked, units read, project created with walls within 1 cm and a DXF
+//       rendering as the underlay.
+//   3b2. a real DWG of the built-in house (tests/fixtures/dwg/house-cm-2018.dwg, read by LibreDWG in the worker): layer
+//       panel, units from the file, project created with walls within 1 cm and 23 openings.
 //   5. several floors (stage F8): the Duplex as two plans in one DXF — switch off: no floor list; ?levels=1: the second
 //      drawing added as a floor, reordered, Align floors (proposal, arrow keys, drag, Match two points), Review with the
 //      engine's stair, Create → 2 floors, the stair and its void, one underlay per floor (aligned, shown per floor), reload.
@@ -412,9 +415,11 @@ try {
     await page.waitForSelector('.importdlg');
     check('DXF: the file picker accepts .dxf and .dwg', await page.evaluate(() => /\.dxf/.test(document.querySelector('#import-sketch-file').accept) && /\.dwg/.test(document.querySelector('#import-sketch-file').accept)));
     await page.setInputFiles('#import-sketch-file', DWG);
-    await sleep(600);
+    st = await until((s) => !s.busy && s.error, 60000);
+    await sleep(300);
     const dwg = await page.locator('.idwg').textContent().catch(() => '');
-    check('DWG: explained (closed format, Save As → DXF, ODA File Converter), not parsed', /closed format/.test(dwg) && /Save As/.test(dwg) && /ODA File Converter/.test(dwg) && await nextBtn().isDisabled(), dwg.slice(0, 80));
+    // (DWG files are read since § 11.2; this one is only a header followed by zeros, so it cannot be)
+    check('an unreadable DWG: plain message and the short "save it as DXF" note, Next stays off', st && st.kind === 'dwg' && /could not be read/.test(st.error) && /save it as DXF/.test(dwg) && /Save As/.test(dwg) && await nextBtn().isDisabled(), `${st && st.error} | ${dwg.slice(0, 80)}`);
     await page.setInputFiles('#import-sketch-file', BIN);
     st = await until((s) => !s.busy && s.error, 20000);
     check('binary DXF: plain message', st && /binary DXF/.test(st.error), st && st.error);
@@ -476,6 +481,49 @@ try {
     });
     check('DXF underlay aligned with the walls (ink on both faces within 3 cm)', ink.length >= 2 && ink.every((s) => s.top != null && Math.abs(s.top - s.wy) <= 3 && Math.abs(s.bottom - (s.wy + s.wh)) <= 3), JSON.stringify(ink));
     if (shots) await page.screenshot({ path: path.join(shotDir, 'import-dxf-draft.png') });
+  }
+
+  // ─────────── 3b2. AutoCAD DWG (2018 format), read by LibreDWG in the worker: the same DXF path ───────────
+  {
+    const DWGF = path.join(root, 'tests/fixtures/dwg/house-cm-2018.dwg');
+    await page.locator('.projname--switch').click();
+    await page.getByRole('menuitem', { name: /Import a sketch/ }).click();
+    await page.waitForSelector('.importdlg');
+    const hint = await page.locator('.idrop__title').textContent();
+    check('DWG: the drop zone lists DWG among the file types', /DWG/.test(hint), hint);
+    await page.setInputFiles('#import-sketch-file', DWGF);
+    st = await until((s) => s.sheet && s.first && !s.busy, 90000);
+    const facts = await page.locator('.idrop__text').textContent();
+    check('DWG read in the worker and drawn like a DXF', st && st.kind === 'dxf' && !st.error && st.ranIn === 'worker' && /AutoCAD DWG \(2018 and later format\)/.test(facts) && /drawn in centimetres/.test(facts), `${JSON.stringify(st)} | ${facts}`);
+    check('DWG: no "save it as DXF" note when the file reads', await page.locator('.idwg').count() === 0);
+    const layers = await page.evaluate(() => [...document.querySelectorAll('.ilayers__row')].map((r) => ({ name: r.dataset.layer, role: r.querySelector('select').value })));
+    const role = (n) => (layers.find((l) => l.name === n) || {}).role;
+    check('DWG: layer panel with the proposal pre-ticked', role('A-WALL') === 'wall' && role('A-DOOR') === 'door' && role('A-GLAZ') === 'window' && role('I-FURN') === 'other', JSON.stringify(layers));
+    if (shots) await page.screenshot({ path: path.join(shotDir, 'import-dwg-layers.png') });
+    await nextBtn().click();
+    await page.waitForSelector('.iopts');
+    const first = (await page.locator('.iopt__title').first().textContent()).trim();
+    const firstText = await page.locator('.iopt').first().textContent();
+    check('DWG scale: the file\'s units, chosen', first === 'The file is drawn in centimetres (1 unit = 1 cm)' && /The DWG says so/.test(firstText), `${first} | ${firstText.slice(0, 120)}`);
+    await nextBtn().click();
+    await page.waitForSelector('.inorth');
+    await nextBtn().click();
+    st = await until((s) => s.step === 3 && s.result && !s.busy, 60000);
+    check('DWG review: walls and 23 openings', st && st.result && st.result.walls > 40 && st.result.openings === 23, JSON.stringify(st && st.result));
+    await nextBtn().click();
+    await page.waitForSelector('.icreate');
+    await page.getByLabel('Project name').fill('Imported DWG');
+    await nextBtn().click();
+    await page.waitForFunction(() => !document.querySelector('.importdlg') && window.app.projects.current().name === 'Imported DWG', null, { timeout: 30000 }).catch(() => {});
+    await sleep(600);
+    const dw = await page.evaluate(() => {
+      const a = window.app, u = a.store.underlay;
+      return { name: a.projects.current().name, walls: a.plan.walls.map(({ x, y, w, h }) => ({ x, y, w, h })), openings: a.plan.openings.length, rooms: a.plan.rooms.length, underlay: u ? { kind: u.source.kind, name: u.source.name } : null };
+    });
+    const cw2 = compareWalls(dw.walls, before.walls, 5), fu2 = cells(dw.walls), pu2 = cells(before.walls);
+    const symd2 = [...fu2].filter((k) => !pu2.has(k)).length + [...pu2].filter((k) => !fu2.has(k)).length;
+    check('DWG project: walls = the built-in house within 1 cm (identical wall area)', dw.name === 'Imported DWG' && cw2.within === cw2.plan && cw2.stickOut === 0 && symd2 === 0, JSON.stringify({ ...cw2, symDiffCells: symd2 }));
+    check('DWG project: 23 openings, 9 rooms, the drawing as the underlay', dw.openings === 23 && dw.rooms === 9 && dw.underlay && dw.underlay.name === 'house-cm-2018.dwg', JSON.stringify({ ...dw, walls: dw.walls.length }));
   }
 
   // ─────────── 3c. angled and curved walls (stage A6b): the Wedge and a quarter-circle wall as DXF, the Wedge as a PDF ───────────

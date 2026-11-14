@@ -15,6 +15,7 @@
 import { takeoff as doTakeoff } from './takeoff.js';
 import { marketEstimate, hasMarketKeys, MARKET_COMPONENTS } from './market.js';
 import { listFeatures } from './features.js';
+import { NATURAL_STONE } from './spec.js';
 
 const L = (en, he) => ({ en, he });
 const r0 = (v) => Math.round(v);
@@ -59,7 +60,7 @@ function runEstimate(rt, pb, tier, missing) {
     const qty = r && r.unit === 'm' ? (p.depth <= 65 ? p.length / 100 : p.areaM2 / 0.6) : p.areaM2;
     if (p.waterfall) { put('worktop', rate('worktop.waterfall', 1, 'unit')); put('worktop', rate(key, qty, 'm2')); continue; }
     put('worktop', rate(key, qty, 'm2'));
-    for (const c of p.cutouts) put('worktop', rate(`worktop.cutout.${c.kind}`, 1, 'unit'));
+    for (const c of p.cutouts) { const nat = `worktop.cutout.${c.kind}.natural-stone`; put('worktop', rate(NATURAL_STONE.has(p.material) && pb && pb.rates && pb.rates[nat] ? nat : `worktop.cutout.${c.kind}`, 1, 'unit')); }
     if (p.polishedM) put('worktop', rate('worktop.edge', p.polishedM, 'm'));
     if (p.upstandM) put('worktop', rate('worktop.upstand', p.upstandM, 'm'));
   }
@@ -100,7 +101,9 @@ function runEstimate(rt, pb, tier, missing) {
 }
 
 /**
- * Estimate. opts = { tier: 'basic'|'mid'|'premium' (default 'mid' or the price book's middle tier), pricebook (required), src }.
+ * Estimate. opts = { tier: 'basic'|'mid'|'premium' (default 'mid' or the price book's middle tier), pricebook (required), src,
+ * stones?, stoneSuppliers? } — `stones` (src/carpentry/stones.js STONES, passed in like the price book) lets a chosen slab's
+ * own published per-metre price be used for the worktop (market method); without it the material's book rate is used.
  * Returns { isEstimate: true, label, currency, vat, asOf, tier, runs: [{ runId, code, name, components: [{ key, label, low, typical,
  * high, rateKeys, lines: [{ rateKey, label, unit, qty, low, typical, high, source }] }], total, totalIncVat, rateKeys }],
  * total, totalIncVat, missingRates, notes, disclaimer }. All money in whole ILS, before VAT unless *IncVat.

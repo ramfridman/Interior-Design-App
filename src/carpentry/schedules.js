@@ -5,7 +5,8 @@
 import { view, ceilingOf, runLevel, planHasLevels } from './state.js';
 import { PLAN } from '../core/plan.js';
 import { levelName } from '../core/levels.js';
-import { VOCAB, vocab, specText, hwVariantLabel } from './spec.js';
+import { VOCAB, vocab, specText, hwVariantLabel, NATURAL_STONE } from './spec.js';
+import { stoneName, finishLabel } from './stone.js';
 import { takeoff } from './takeoff.js';
 import { MODULES } from './modules.js';
 import { geometryOf, unitsOf as unitsOfRun } from './layout.js';
@@ -14,6 +15,17 @@ import { listFeatures } from './features.js';
 const L = (en, he) => ({ en, he });
 const n0 = (v) => (Number.isInteger(Math.round(v * 10) / 10) ? String(Math.round(v)) : (Math.round(v * 10) / 10).toFixed(1));
 const join = (parts) => L(parts.map((p) => p.en).join(', '), parts.map((p) => p.he).join(', '));
+/** "Quartz (Caesarstone-type) — Caesarstone, ICON collection, 5131 Calacatta Nuvo" (+ ", polished" when `fin`). */
+function withStone(mat, st, fin = false) {
+  const n = stoneName(st), f = finishLabel(st.finish);
+  return L(`${mat.en} — ${n.en}${fin ? `, ${f.en.toLowerCase()}` : ''}`, `${mat.he} — ${n.he}${fin ? `, ${f.he}` : ''}`);
+}
+/** Finish column of a stone row: the slab's finish, the edge, and the supplier. */
+function stoneFinishCell(st, edge) {
+  const f = finishLabel(st.finish), sup = st.supplierName || st.supplierNameHe;
+  return L([st.finish ? `finish: ${f.en.toLowerCase()}` : f.en, edge && edge.en, sup && `supplier: ${st.supplierName || sup}`].filter(Boolean).join('; '),
+    [st.finish ? `גימור: ${f.he}` : f.he, edge && edge.he, sup && `ספק: ${st.supplierNameHe || sup}`].filter(Boolean).join('; '));
+}
 
 export const HEADERS = {
   units: [['ref', L('Code', 'קוד')], ['module', L('Unit', 'יחידה')], ['size', L('W × H × D (cm)', 'ר × ג × ע (ס״מ)')], ['fronts', L('Fronts', 'חזיתות')], ['internals', L('Internals', 'פנים')], ['hardware', L('Hardware', 'פרזול')], ['notes', L('Notes', 'הערות')]],
@@ -62,6 +74,11 @@ function questionsFor(run, rt, v) {
   const cut = rt.worktops.flatMap((p) => p.cutouts.map((c) => ({ ...c, piece: p.id })));
   for (const c of cut) add(T.wt, `${c.piece}: ${c.kind} cut-out drawn ${n0(c.w)} × ${n0(c.d)} cm — confirm against the ${c.kind === 'hob' ? 'hob installation sheet' : 'sink / basin template'} (${c.kind === 'sink' ? 'undermount or inset, tap hole' : 'gas or induction'}).`,
     `${c.piece}: חיתוך ל${{ sink: 'כיור', hob: 'כיריים', basin: 'כיור רחצה' }[c.kind]} שורטט ${n0(c.w)} × ${n0(c.d)} ס״מ — לאשר מול ${c.kind === 'hob' ? 'דף ההתקנה של הכיריים' : 'שבלונת הכיור'} (${c.kind === 'sink' ? 'שקוע מתחת / מונח, חור לברז' : 'גז או אינדוקציה'}).`);
+  if (rt.worktops.length && NATURAL_STONE.has(run.spec.worktop.material)) {
+    const st = run.spec.worktop.stone, nm = st ? stoneName(st) : vocab('worktopMaterial', run.spec.worktop.material);
+    add(L('Worktop stone', 'אבן המשטח'), `Natural stone (${nm.en}): does it need sealing — with which product, how often and by whom? Is the first sealing included in your price, and which care instructions come with it?`,
+      `אבן טבעית (${nm.he}): האם נדרש איטום — באיזה חומר, באיזו תדירות ועל ידי מי? האם האיטום הראשון כלול במחיר, ואילו הוראות תחזוקה מצורפות?`);
+  }
   if (rt.worktops.length) add(T.wt, 'The worktop is templated on site after the carcasses are installed and levelled; confirm edge profile, joints and upstand / splashback.', 'המשטח נמדד בשבלונה באתר לאחר התקנת הגופים ופילוסם; לאשר פרופיל קנט, תפרים והגבהה / חיפוי.');
   if (run.kind === 'kitchen' || run.kind === 'island') add(T.mep, 'Mark water, drain, gas / 32 A hob supply, oven, dishwasher, hood duct and socket positions on the elevation before production.', 'לסמן על החזית נקודות מים, ניקוז, גז / הזנת כיריים 32A, תנור, מדיח, יציאת קולט ושקעים לפני הייצור.');
   if (run.spec.lighting.underWall && rt.lighting.underWallM) add(T.mep, `LED under the wall units (${rt.lighting.underWallM} m): driver location and switching.`, `תאורת LED מתחת לארונות העליונים (${rt.lighting.underWallM} מ׳): מיקום שנאי והפעלה.`);
@@ -102,12 +119,20 @@ export function schedules(runId = 'all', src) {
     M(L('Fronts', 'חזיתות'), vocab('frontMaterial', S.fronts.material), `${S.fronts.thickness} mm`, S.fronts.color, join([vocab('frontStyle', S.fronts.style), vocab('edge', S.edge.fronts)]));
     M(L('Handles', 'ידיות'), vocab('handleType', S.handles.type), S.handles.type === 'bar' ? `${S.handles.length} cm` : '—', null, vocab('finish', S.handles.finish));
     if (rt.plinth.m) M(L('Plinth', 'צוקל'), vocab('plinthFinish', S.plinth.finish), `${S.plinth.height} cm`, null, L(`set back ${S.plinth.setback} cm`, `נסיגה ${S.plinth.setback} ס״מ`));
-    if (S.worktop.material !== 'none' && rt.worktops.length) M(L('Worktop', 'משטח עבודה'), vocab('worktopMaterial', S.worktop.material), `${S.worktop.thickness} mm`, S.worktop.color, vocab('worktopEdge', S.worktop.edge));
-    if (rt.splashback.m2) M(L('Splashback', 'חיפוי קיר'), vocab('splashback', S.splashback.material), `${S.splashback.height} cm high`, null, null);
+    if (S.worktop.material !== 'none' && rt.worktops.length) {
+      const st = S.worktop.stone;
+      if (st) M(L('Worktop', 'משטח עבודה'), withStone(vocab('worktopMaterial', S.worktop.material), st), `${S.worktop.thickness} mm`, S.worktop.color, stoneFinishCell(st, vocab('worktopEdge', S.worktop.edge)));
+      else M(L('Worktop', 'משטח עבודה'), vocab('worktopMaterial', S.worktop.material), `${S.worktop.thickness} mm`, S.worktop.color, vocab('worktopEdge', S.worktop.edge));
+    }
+    if (rt.splashback.m2) {
+      const st = rt.splashback.stone;
+      if (st) M(L('Splashback', 'חיפוי קיר'), withStone(vocab('splashback', S.splashback.material), st), `${S.splashback.height} cm high`, null, stoneFinishCell(st, null));
+      else M(L('Splashback', 'חיפוי קיר'), vocab('splashback', S.splashback.material), `${S.splashback.height} cm high`, null, null);
+    }
     M(L('Hardware grade', 'דרגת פרזול'), vocab('hardwareGrade', S.hardware.grade), '—', null, L(`${specText(S.hardware.hinge).en}; ${specText(S.hardware.drawers).en}`, `${specText(S.hardware.hinge).he}; ${specText(S.hardware.drawers).he}`));
     for (const p of rt.worktops) {
       const ends = (s) => ({ wall: L('wall', 'קיר'), polished: L('polished', 'מלוטש'), joint: L('joint', 'תפר'), butt: L('butt joint (corner)', 'תפר פינה'), tall: L('against tall unit', 'צמוד לארון גבוה'), waterfall: L('mitred to waterfall', 'מיטר לדופן נופלת'), mitre: L('mitre', 'מיטר'), floor: L('floor', 'רצפה') }[s] || L(s, s));
-      worktops.push({ runId: rt.runId, ref: `${rt.code}·${p.id}`, material: vocab('worktopMaterial', p.material), thickness: p.thickness, size: { length: p.length, depth: p.depth }, sizeText: `${n0(p.length)} × ${n0(p.depth)}`,
+      worktops.push({ runId: rt.runId, ref: `${rt.code}·${p.id}`, material: p.stone ? withStone(vocab('worktopMaterial', p.material), p.stone, true) : vocab('worktopMaterial', p.material), ...(p.stone ? { stone: p.stone } : {}), thickness: p.thickness, size: { length: p.length, depth: p.depth }, sizeText: `${n0(p.length)} × ${n0(p.depth)}`,
         cutouts: p.cutouts.length ? join(p.cutouts.map((c) => L(`${c.kind} ${n0(c.w)}×${n0(c.d)} @ ${n0(c.x)} from left, ${n0(c.fromFront)} from front`, `${{ sink: 'כיור', hob: 'כיריים', basin: 'כיור רחצה' }[c.kind]} ${n0(c.w)}×${n0(c.d)} ב-${n0(c.x)} משמאל, ${n0(c.fromFront)} מהחזית`))) : L('—', '—'),
         edges: L(`left: ${ends(p.ends.left).en}; right: ${ends(p.ends.right).en}; polished ${p.polishedM} m${p.upstandM ? `; upstand ${p.upstandM} m` : ''}`, `שמאל: ${ends(p.ends.left).he}; ימין: ${ends(p.ends.right).he}; קנט מלוטש ${p.polishedM} מ׳${p.upstandM ? `; הגבהה ${p.upstandM} מ׳` : ''}`),
         area: p.areaM2, waterfall: !!p.waterfall });

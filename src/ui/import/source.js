@@ -3,7 +3,7 @@
  * vector primitives, page / image pixels, and the compact underlay image stored with the project.
  * Every failure becomes a plain-language `ImportError` the dialog can show as is.
  */
-import { readPdf, renderPdfPage } from '../../import/index.js';
+import { readPdf, renderPdfPage, MAX_DWG_BYTES } from '../../import/index.js';
 import { openPdf } from '../../import/pdfjs-loader.js';
 
 export const MAX_PDF_BYTES = 80 * 1024 * 1024;
@@ -17,7 +17,7 @@ export class ImportError extends Error {
 }
 
 /** 'pdf' | 'image' | 'dxf' | 'dwg' from the bytes (magic numbers), falling back to the name / type. Throws ImportError
- *  otherwise. 'dwg' is only recognised so the dialog can explain how to get a DXF (DWG is not read). */
+ *  otherwise. A DWG is read by src/import/dwg-read.js (LibreDWG, WebAssembly) into the same structure as a DXF. */
 export async function sniff(file) {
   if (!file) throw new ImportError('No file was chosen.');
   const head = new Uint8Array(await file.slice(0, 256).arrayBuffer());
@@ -34,11 +34,12 @@ export async function sniff(file) {
   else if (/\.dxf$/i.test(file.name || '')) kind = 'dxf';
   else if (/\.dwg$/i.test(file.name || '')) kind = 'dwg';
   if (!kind) {
-    if (/\.(heic|heif|tiff?|gif|bmp|svg|webp)$/i.test(file.name || '')) throw new ImportError(`“${file.name}” is not a PDF, DXF, PNG or JPG. Save or export the drawing as one of those (a DXF or a PDF straight from the drawing program is best) and choose it again.`);
-    throw new ImportError(`“${file.name || 'This file'}” is not a PDF, DXF, PNG or JPG file.`);
+    if (/\.(heic|heif|tiff?|gif|bmp|svg|webp)$/i.test(file.name || '')) throw new ImportError(`“${file.name}” is not a PDF, DWG, DXF, PNG or JPG. Save or export the drawing as one of those (a DWG, DXF or a PDF straight from the drawing program is best) and choose it again.`);
+    throw new ImportError(`“${file.name || 'This file'}” is not a PDF, DWG, DXF, PNG or JPG file.`);
   }
   if (kind === 'pdf' && file.size > MAX_PDF_BYTES) throw new ImportError(`This PDF is ${mb(file.size)} — too large to read in the browser (up to ${mb(MAX_PDF_BYTES)}). Save just the plan page as its own PDF and import that.`);
   if (kind === 'dxf' && file.size > MAX_DXF_BYTES) throw new ImportError(`This DXF is ${mb(file.size)} — too large to read in the browser (up to ${mb(MAX_DXF_BYTES)}). In the CAD program, copy just the floor plan into a new drawing (WBLOCK) and save that as DXF.`);
+  if (kind === 'dwg' && file.size > MAX_DWG_BYTES) throw new ImportError(`This DWG is ${mb(file.size)} — too large to read in the browser (up to ${mb(MAX_DWG_BYTES)}). In the CAD program, copy just the floor plan into a new drawing (WBLOCK) and save that.`);
   if (kind === 'image' && file.size > MAX_IMAGE_BYTES) throw new ImportError(`This image is ${mb(file.size)} — too large (up to ${mb(MAX_IMAGE_BYTES)}). Save it smaller (about 3000 pixels across is plenty) and import that.`);
   return kind;
 }

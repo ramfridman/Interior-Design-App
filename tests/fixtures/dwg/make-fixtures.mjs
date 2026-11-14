@@ -2,7 +2,8 @@
 // run by hand when a fixture has to change (the .dwg files it writes are committed next to it):
 //
 //   mkdir /tmp/acad && cd /tmp/acad && npm i --no-save @node-projects/acad-ts@3.8.0
-//   node tests/fixtures/dwg/make-fixtures.mjs /tmp/acad/node_modules/@node-projects/acad-ts/dist/index.js
+//   node tests/fixtures/dwg/make-fixtures.mjs /tmp/acad/node_modules/@node-projects/acad-ts/dist/index.js [--skip-big]
+//   (the large file takes a few minutes; --skip-big leaves it as it is)
 //
 // The DWG writer is acad-ts 3.8.0 (MIT; a TypeScript port of ACadSharp): it reads each DXF (written by
 // tests/dxf-writer.mjs from the same data as the DXF tests) and writes it as DWG in the asked version. It is an
@@ -44,7 +45,9 @@ for (const [v, label] of [['AC1012', 'r13'], ['AC1014', 'r14'], ['AC1015', '2000
 write('house-mm-2018.dwg', docOf(houseDxf({ unit: 0.1, insunits: 4 }).bytes()), 'AC1032');
 const hebrew = { names: { wall: 'קירות', door: 'דלתות', window: 'חלונות', dim: 'מידות', furn: 'ריהוט' }, title: 'תכנית קומת קרקע' };
 write('house-hebrew-2000.dwg', docOf(houseDxf({ unit: 1, insunits: 5, version: 'AC1015', codepage: 'ANSI_1255', ...hebrew }).bytes()), 'AC1015');
-write('house-hebrew-2018.dwg', docOf(houseDxf({ unit: 1, insunits: 5, ...hebrew }).bytes()), 'AC1032');
+// (acad-ts decodes a DXF's strings with its $DWGCODEPAGE even in an R2007+ DXF, which is UTF-8 by definition: the 2018
+// file is therefore written from the code-page-1255 DXF; a 2007+ DWG stores its strings as UTF-16 either way)
+write('house-hebrew-2018.dwg', docOf(houseDxf({ unit: 1, insunits: 5, version: 'AC1015', codepage: 'ANSI_1255', ...hebrew }).bytes()), 'AC1032');
 // the Wedge (angled walls)
 {
   const d = wedgeDrawing();
@@ -55,26 +58,35 @@ write('duplex-sheet-2018.dwg', docOf(floorsDxf(duplexSheet()).bytes()), 'AC1032'
 write('duplex-ground-2013.dwg', docOf(floorsDxf([duplexFloor(0)]).bytes()), 'AC1027');
 write('duplex-first-2013.dwg', docOf(floorsDxf([mapFloor(duplexFloor(1), ([x, y]) => [800 - y, x])]).bytes()), 'AC1027');
 
-// a large drawing (R2007; acad-ts stores its pages uncompressed): the house plus enough LINEs on a furniture layer for
-// a 5.5 MB file. Committed gzipped (the test unpacks it in memory).
-{
+// a large drawing: the house plus 480 long polylines (1 000 vertices each, a contour-like pattern) on a furniture layer,
+// in the R2000 format (stored uncompressed): about 6 MB. Committed gzipped (the test unpacks it in memory).
+if (!process.argv.includes('--skip-big')) {
   const doc = docOf(houseDxf({ unit: 1, insunits: 5 }).bytes());
   const furn = doc.layers.get('I-FURN');
-  const add = (from, count) => {
-    for (let n = from; n < from + count; n++) {
-      const x = 10000 + (n % 400) * 7.5, y = 20000 + Math.floor(n / 400) * 3.25;
-      const l = new A.Line(); l.startPoint = new A.XYZ(x, y, 0); l.endPoint = new A.XYZ(x + 5.5, y + 1.25, 0); l.layer = furn;
-      doc.modelSpace.entities.add(l);
-    }
-  };
-  doc.header.version = A.ACadVersion.AC1021;
-  const base = A.DwgWriter.writeToBuffer(doc).length;
-  add(0, 10000);
-  const per = (A.DwgWriter.writeToBuffer(doc).length - base) / 10000;
-  const n = 10000 + Math.ceil((5.5 * 1048576 - base) / per) - 10000;
-  add(10000, n - 10000);
+  for (let k = 0; k < 480; k++) {
+    const pts = [];
+    for (let i = 0; i < 1000; i++) pts.push(new A.XY(9000 + i * 0.5, 20000 + k * 2 + (i % 8) * 0.25));
+    const p = new A.LwPolyline(pts); p.layer = furn;
+    doc.modelSpace.entities.add(p);
+  }
+  doc.header.version = A.ACadVersion.AC1015;
   const bytes = A.DwgWriter.writeToBuffer(doc);
-  fs.writeFileSync(path.join(here, 'big-2007.dwg.gz'), zlib.gzipSync(bytes, { level: 9 }));
-  console.log(`big-2007.dwg.gz  AC1021  ${bytes.length} bytes (${n} extra lines), gzipped ${fs.statSync(path.join(here, 'big-2007.dwg.gz')).size}`);
+  fs.writeFileSync(path.join(here, 'big-2000.dwg.gz'), zlib.gzipSync(bytes, { level: 9 }));
+  console.log(`big-2000.dwg.gz  AC1015  ${bytes.length} bytes, gzipped ${fs.statSync(path.join(here, 'big-2000.dwg.gz')).size}`);
+}
+// an R2000 file with ~4 100 objects (the house plus 3 990 short LINEs): LibreDWG's DWG -> DXF conversion traps on it
+// (see vendor/dwg/README.md); the test checks the plain error and that the next file still reads. Gzipped.
+if (!process.argv.includes('--skip-big')) {
+  const doc = docOf(houseDxf({ unit: 1, insunits: 5 }).bytes());
+  const furn = doc.layers.get('I-FURN');
+  for (let n = 0; n < 3990; n++) {
+    const x = 10000 + (n % 400) * 7.5, y = 20000 + Math.floor(n / 400) * 3.25;
+    const l = new A.Line(); l.startPoint = new A.XYZ(x, y, 0); l.endPoint = new A.XYZ(x + 5.5, y + 1.25, 0); l.layer = furn;
+    doc.modelSpace.entities.add(l);
+  }
+  doc.header.version = A.ACadVersion.AC1015;
+  const bytes = A.DwgWriter.writeToBuffer(doc);
+  fs.writeFileSync(path.join(here, 'many-objects-2000.dwg.gz'), zlib.gzipSync(bytes, { level: 9 }));
+  console.log(`many-objects-2000.dwg.gz  AC1015  ${bytes.length} bytes, gzipped ${fs.statSync(path.join(here, 'many-objects-2000.dwg.gz')).size}`);
 }
 if (notes.length) console.log(notes.slice(0, 20).join('\n'));

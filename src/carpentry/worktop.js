@@ -7,6 +7,8 @@ import { positions, levelOf } from './layout.js';
 import { RULES } from './spec.js';
 
 const r1 = (v) => Math.round(v * 10) / 10;
+/** A chosen slab rides on every piece (additive: no `stone` key when none is chosen, so older designs stay identical). */
+const stoneOf = (wt) => (wt.stone && wt.stone.id ? { stone: { ...wt.stone } } : {});
 
 /** Cut-out of a unit (cm), centred on the unit; null if the module has none. */
 export function cutoutOf(unit, depth, mod = MODULES[unit.carp.module]) {
@@ -94,12 +96,12 @@ export function computeWorktops(run, units, butts = []) {
       out.push({
         id: 'WT' + n, s: r1(a), e: r1(b), length: len, depth, thickness: wt.thickness, material: wt.material, color: wt.color, edge: wt.edge,
         ends: { left: lt, right: rt }, cutouts: pieceCuts, polishedM: r1(polished) / 100, upstandM: !island && wt.upstand > 0 ? len / 100 : 0,
-        areaM2: Math.round(len * depth) / 1e4, overSlab: len > max + 0.01, jointWarning: warn,
+        areaM2: Math.round(len * depth) / 1e4, overSlab: len > max + 0.01, jointWarning: warn, ...stoneOf(wt),
       });
     }
     if (island && wt.waterfall) {
       const hgt = (spec.heights.worktop - wt.thickness / 10);
-      for (const side of ['left', 'right']) { n++; out.push({ id: 'WT' + n, waterfall: side, s: side === 'left' ? r1(s) : r1(e), e: side === 'left' ? r1(s) : r1(e), length: hgt, depth, thickness: wt.thickness, material: wt.material, color: wt.color, edge: 'mitred', ends: { left: 'mitre', right: 'floor' }, cutouts: [], polishedM: r1(hgt * 2) / 100, upstandM: 0, areaM2: Math.round(hgt * depth) / 1e4 }); }
+      for (const side of ['left', 'right']) { n++; out.push({ id: 'WT' + n, waterfall: side, s: side === 'left' ? r1(s) : r1(e), e: side === 'left' ? r1(s) : r1(e), length: hgt, depth, thickness: wt.thickness, material: wt.material, color: wt.color, edge: 'mitred', ends: { left: 'mitre', right: 'floor' }, cutouts: [], polishedM: r1(hgt * 2) / 100, upstandM: 0, areaM2: Math.round(hgt * depth) / 1e4, ...stoneOf(wt) }); }
     }
   }
   return out;

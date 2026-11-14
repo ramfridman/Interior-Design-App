@@ -4,17 +4,20 @@
  * Where workers are unavailable (a sandbox that forbids them) the same code runs on the main thread after a frame,
  * so the progress state is painted first; cancelling then only discards the result.
  *
- *   const task = runTask('analyse', { prims, opts });   // or 'image' { image, opts }, 'dxf-read' { bytes }, 'dxf-analyse' { prims, opts },
+ *   const task = runTask('analyse', { prims, opts });   // or 'image' { image, opts }, 'dxf-read' { bytes }, 'dwg-read' { bytes }, 'dxf-analyse' { prims, opts },
  *                                                        // 'stair-check' { plan, stairs } (several floors; worker only, else null)
  *   task.promise.then(result => …);  task.cancel();     // a cancelled task rejects with { cancelled: true }
  */
 let workersBroken = false;
 
-/** The engine call behind each task type (shared by the worker and the main-thread fallback). */
+/** The engine call behind each task type (shared by the worker and the main-thread fallback). 'dwg-read' returns a
+ *  promise (the DWG reader is WebAssembly, loaded on first use); every other type returns its result directly. */
 export function runEngine(eng, type, p) {
   if (type === 'analyse') return eng.analysePrims(p.prims, p.opts || {});
   if (type === 'image') { const r = eng.readImage(p.image, p.opts || {}); if (r) r.prims = null; return r; }
   if (type === 'dxf-read') { const prims = eng.readDxf(p.bytes); return { prims, look: eng.firstLook(prims) }; }
+  // DWG (§ 11.2): LibreDWG turns it into DXF in memory, then the same as 'dxf-read'
+  if (type === 'dwg-read') return eng.readDwg(p.bytes).then((prims) => ({ prims, look: eng.firstLook(prims) }));
   if (type === 'dxf-analyse') return eng.analyseDxf(p.prims, p.opts || {});
   // several floors (F8): the stairs found on the drawings tried on the built plan by the plan engine itself. Only in a
   // worker (its own plan engine, `p.PE`); on the main thread it would replace the open project's plan → null (the dialog
@@ -37,7 +40,7 @@ export function runTask(type, payload) {
         try {
           const eng = await import('../../import/index.js');
           ranIn = 'main-thread';
-          const result = runEngine(eng, type, payload);
+          const result = await runEngine(eng, type, payload);
           if (!cancelled) resolve(result);
         } catch (err) { if (!cancelled) reject(err); }
       }, 30));

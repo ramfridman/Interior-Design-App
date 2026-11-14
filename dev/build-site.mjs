@@ -43,6 +43,8 @@ for (const f of walk('src/styles')) if (f.endsWith('.css')) files.add(f);
 for (const dir of ['vendor/pdf', 'vendor/fonts']) if (exists(dir)) for (const f of walk(dir)) if (/\.(js|mjs|ttf|otf|woff2?)$/i.test(f)) files.add(f);
 if (exists('api/health')) files.add('api/health');   // static answer to the collaboration probe: "no server here" (CONTRACT § 13)
 for (const f of ['vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js', 'vendor/pdfjs/LICENSE.txt']) if (exists(f)) files.add(f); // sketch importer (lazy)
+// DWG reader (lazy; its .js is found by the crawl): the WebAssembly module it fetches, the GPL text and the notice
+for (const f of ['vendor/dwg/libredwg-web.wasm', 'vendor/dwg/LICENSE-GPL-3.0.txt', 'vendor/dwg/README.md']) if (exists(f)) files.add(f);
 
 /* ───────── index.html ───────── */
 let html = read('index.html');
@@ -54,7 +56,8 @@ const importMapHash = `'sha256-${crypto.createHash('sha256').update(importMap, '
 /* ───────── headers ───────── */
 const CSP = [
   "default-src 'self'",
-  `script-src 'self' ${importMapHash}`,          // the only inline script is the import map
+  `script-src 'self' 'wasm-unsafe-eval' ${importMapHash}`,   // the only inline script is the import map; WebAssembly
+                                                             // (the DWG reader) may compile — no JS eval
   "style-src 'self' 'unsafe-inline'",            // the UI positions things with inline styles
   "img-src 'self' data: blob:",                  // thumbnails and exports are generated in the browser
   "font-src 'self'",
@@ -99,7 +102,7 @@ if (missing.length) console.log('missing (ignored):', missing.join(', '));
 const serveAt = process.argv.indexOf('--serve');
 if (serveAt >= 0) {
   const port = Number(process.argv[serveAt + 1]) || 5300;
-  const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.txt': 'text/plain; charset=utf-8' };
+  const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.wasm': 'application/wasm' };
   const match = (pattern, url) => (pattern.endsWith('*') ? url.startsWith(pattern.slice(0, -1)) : url === pattern);
   http.createServer((req, res) => {
     let url = decodeURIComponent(req.url.split('?')[0]);

@@ -8,7 +8,8 @@ import { view } from './state.js';
 import { MODULES } from './modules.js';
 import { unitsOf, positions, geometryOf, levelOf } from './layout.js';
 import { runTakeoff } from './takeoff.js';
-import { VOCAB } from './spec.js';
+import { VOCAB, vocab } from './spec.js';
+import { worktopRateKey, cutoutRateKey, stoneRecord, hasSlabPrice, slabPriceLine, stoneName } from './stone.js';
 
 const L = (en, he) => ({ en, he });
 const r0 = (v) => Math.round(v);
@@ -58,7 +59,8 @@ function rater(pb, missing) {
       return { rateKey: key, rateKeys: [key], label, unit: extra.unit || 'unit', qty: r2(qty), low: 0, typical: 0, high: 0, noRate: true, sources: [], note: extra.note || null };
     }
     return { rateKey: key, rateKeys: [key], label: extra.label || r.label || L(key, key), unit: r.unit, qty: r2(qty), low: qty * r.low, typical: qty * r.typical, high: qty * r.high,
-      sources: sourcesOf(r), confidence: r.confidence || null, includes: r.includes || null, note: extra.note || null };
+      sources: sourcesOf(r), confidence: r.confidence || null, includes: r.includes || null, note: extra.note || null,
+      ...(r.vatStatus ? { vatStatus: r.vatStatus } : {}), ...(r.fromPrice ? { fromPrice: true } : {}) };
   };
   /** Tiered key `${base}.${tier}`; mid missing → mean of basic + premium (derived). */
   const tiered = (base, tier, qty, extra = {}) => {
@@ -206,15 +208,30 @@ function runMarket(run, v, tier, R, ctx) {
   }
 
   // ── worktop ──
+  // a chosen slab with its own published per-metre price → that price (with its conditions); otherwise the material's book rate
+  const slab = stoneRecord(S.worktop && S.worktop.stone, ctx.stones), supplierOf = (id) => (ctx.stoneSuppliers || []).find((x) => x.id === id) || null;
   for (const p of rt.worktops) {
-    const natural = ['granite', 'marble-local'].includes(p.material);
-    const key = `worktop.${p.material}.per-m`;
+    const key = worktopRateKey(p.material);
     const qty = p.waterfall ? (p.length / 100) * (p.depth / 60) : (p.length / 100) * (p.depth > 65 ? p.depth / 60 : 1);
-    push('worktop', R.line(key, qty, { note: L(`${p.waterfall ? 'waterfall ' : ''}${p.id} ${p.length} × ${p.depth} cm${p.depth > 65 ? ` (pro-rata ${r2(p.depth / 60)} × depth)` : ''}`, `${p.waterfall ? 'דופן נופלת ' : ''}${p.id} ${p.length} × ${p.depth} ס״מ${p.depth > 65 ? ` (יחסי לעומק ×${r2(p.depth / 60)})` : ''}`) }));
-    for (const c of p.cutouts) {
-      const k = `worktop.cutout.${c.kind === 'hob' ? 'hob' : 'sink'}${natural ? '.natural-stone' : ''}`;
-      push('worktop', R.line(k, 1));
+    const note = L(`${p.waterfall ? 'waterfall ' : ''}${p.id} ${p.length} × ${p.depth} cm${p.depth > 65 ? ` (pro-rata ${r2(p.depth / 60)} × depth)` : ''}`, `${p.waterfall ? 'דופן נופלת ' : ''}${p.id} ${p.length} × ${p.depth} ס״מ${p.depth > 65 ? ` (יחסי לעומק ×${r2(p.depth / 60)})` : ''}`);
+    if (p.stone && slab && slab.material === p.material && hasSlabPrice(slab)) push('worktop', slabPriceLine(slab, qty, { vat: ctx.vat, materialRate: R.rates[key] || null, materialKey: key, supplier: supplierOf(slab.supplierId), note }));
+    else {
+      const l = R.line(key, qty, { note });
+      if (p.stone) {
+        const n = stoneName(p.stone);
+        l.basis = 'material';
+        l.why = R.rates[key]
+          ? L(`${n.en}: no price of this slab is published${slab ? '' : ' (slab not in the stone list supplied)'}, so the price book's rate for the material — ${vocab('worktopMaterial', p.material).en} (${key}) — is used.`, `${n.he}: לא פורסם מחיר ללוח זה, ולכן נעשה שימוש במחיר החומר מהמחירון — ${vocab('worktopMaterial', p.material).he}.`)
+          : L(`${n.en}: no price of this slab and no price-book rate for ${vocab('worktopMaterial', p.material).en} (${key}) are published — ask the stone fabricator.`, `${n.he}: לא פורסם מחיר ללוח ולא לחומר — לשאול את מפעל השיש.`);
+      }
+      push('worktop', l);
     }
+    for (const c of p.cutouts) push('worktop', R.line(cutoutRateKey(c.kind, p.material), 1));
+  }
+  // a stone splashback (the worktop's slab or its own): no published per-m² stone rate — listed, never a silent zero
+  if (rt.splashback.stone && rt.splashback.m2 > 0) {
+    const n = stoneName(rt.splashback.stone);
+    push('other', R.line('splashback.stone.per-m2', rt.splashback.m2, { unit: 'm2', label: L(`Stone splashback ${rt.splashback.m2} m² (${n.en}) — no published rate, ask the stone fabricator`, `חיפוי אבן ${rt.splashback.m2} מ״ר (${n.he}) — אין מחיר מפורסם, לשאול את מפעל השיש`) }));
   }
   if (rt.worktops.length) basis.worktop = L('Worktop per running metre (≤ 65 cm deep; deeper pieces pro-rata by depth / 60) + cut-outs; usually incl. template and installation', 'משטח למטר רץ (עד עומק 65 ס״מ; עמוק יותר — יחסית לעומק / 60) + חיתוכים; לרוב כולל מדידה והתקנה');
 
@@ -243,7 +260,7 @@ function runMarket(run, v, tier, R, ctx) {
 /** Market estimate for the given runs (see estimate() in estimate.js for the result shape). */
 export function marketEstimate(runId, opts = {}) {
   const pb = opts.pricebook, v = view(opts.src), missing = [];
-  const R = rater(pb, missing), ctx = {};
+  const R = rater(pb, missing), ctx = { stones: opts.stones || null, stoneSuppliers: opts.stoneSuppliers || null, vat: pb && typeof pb.vat === 'number' ? pb.vat : 0.18 };
   const runs = (runId === 'all' ? v.runs() : [v.run(runId)].filter(Boolean))
     .sort((a, b) => (a.kind === 'kitchen' ? 0 : 1) - (b.kind === 'kitchen' ? 0 : 1) || b.length - a.length);
   const tiers = (pb && pb.tiers) || ['basic', 'mid', 'premium'];

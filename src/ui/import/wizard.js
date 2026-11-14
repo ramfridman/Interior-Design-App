@@ -1,10 +1,11 @@
 /**
- * "Import a sketch…" — the guided flow that turns a drawing (vector PDF, AutoCAD DXF, scanned PDF, PNG / JPG) into a new DRAFT
+ * "Import a sketch…" — the guided flow that turns a drawing (vector PDF, AutoCAD DXF or DWG, scanned PDF, PNG / JPG) into a new DRAFT
  * project with the drawing kept as a tracing underlay. Five steps in one large dialog; nothing is created before the
  * last one. See docs/CONTRACT.md § 12.
  *
  *   1 Drawing      file picker / drag-and-drop (read locally), page thumbnails, which drawing on the sheet;
- *                  DXF: the layer list (walls / doors / windows / other, proposed, with a highlight); DWG: how to get a DXF
+ *                  DXF and DWG: the layer list (walls / doors / windows / other, proposed, with a highlight); a DWG is read
+ *                  through the DXF path (src/import/dwg-read.js); one that cannot be read gets a short "save it as DXF" note
  *   2 Scale        measure a known length (loupe, snaps to line ends) · stated scale · 1 : N · the engine's guess
  *   3 Orientation  rotate / mirror, north, location, ceiling height
  *   4 Review       walls / doors / windows / unsupported pieces over the page, counts, warnings
@@ -61,7 +62,7 @@ const baseName = (name) => String(name || '').replace(/\.[a-z0-9]+$/i, '').repla
 export function openImportWizard(app, opts = {}) {
   const S = {
     step: 0, busy: null, error: '', gen: 0,      // gen: bumped by Cancel / a new file — stale async work stops
-    file: null, fileName: '', kind: null,           // kind: 'pdf' (vector page) | 'dxf' | 'image' (picture or scanned page) | 'dwg' (explained only)
+    file: null, fileName: '', kind: null,           // kind: 'pdf' (vector page) | 'dxf' (a DXF, or a DWG read as one) | 'image' (picture or scanned page) | 'dwg' (a DWG that could not be read)
     dxf: null,                                      // { layers (proposal), candidates, roles (user overrides), highlight, unit }
     bytes: null, pdf: null, page: 1,                // pdf: { pageCount, pages: [{ page, w, h }] }
     thumbs: new Map(),
@@ -269,8 +270,8 @@ export function openImportWizard(app, opts = {}) {
       onKeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } } }, icon('open', { size: 16 }), h('span', { class: 'btn__label' }, S.file ? 'Choose another file' : 'Choose a file'));
     const drop = h('div', { class: `idrop${S.sheet ? ' idrop--compact' : ''}` },
       h('div', { class: 'idrop__icon' }, icon('plan', { size: 28 })),
-      h('p', { class: 'idrop__title display', dir: 'auto' }, S.file ? S.fileName : 'Drop a DXF, PDF, PNG or JPG here'),
-      h('p', { class: 'idrop__text' }, S.file ? fileFacts() : 'A DXF or a PDF straight from the architect’s drawing program gives exact walls (a DXF also knows its units and layers). A scan or a photo works too — as a starting point to trace over.'),
+      h('p', { class: 'idrop__title display', dir: 'auto' }, S.file ? S.fileName : 'Drop a DWG, DXF, PDF, PNG or JPG here'),
+      h('p', { class: 'idrop__text' }, S.file ? fileFacts() : 'A DWG or DXF from AutoCAD, or a PDF straight from the architect’s drawing program, gives exact walls (a DWG or DXF also knows its units and layers). A scan or a photo works too — as a starting point to trace over.'),
       pick, fileInput,
       h('p', { class: 'idrop__private' }, icon('lock', { size: 14 }), 'Your drawing stays on this device: it is read in this browser and never uploaded.'));
     const kids = [drop];
@@ -296,7 +297,7 @@ export function openImportWizard(app, opts = {}) {
     if (S.sheet) requestAnimationFrame(() => sheet.resize());
   }
   // ── the floor list (several floors, F8) ──
-  const floorFileInput = h('input', { type: 'file', accept: '.pdf,application/pdf,.dxf,image/vnd.dxf,application/dxf,.png,image/png,.jpg,.jpeg,image/jpeg', class: 'sr-only', id: 'import-floor-file',
+  const floorFileInput = h('input', { type: 'file', accept: '.pdf,application/pdf,.dxf,image/vnd.dxf,application/dxf,.dwg,.png,image/png,.jpg,.jpeg,image/jpeg', class: 'sr-only', id: 'import-floor-file',
     onChange: () => { const f = floorFileInput.files && floorFileInput.files[0]; floorFileInput.value = ''; if (f) chooseFile(f, { asFloor: true }); } });
   /** The floor (index) that reads drawing k of the sheet shown, or −1. */
   function drawingFloor(k) {
@@ -358,7 +359,7 @@ export function openImportWizard(app, opts = {}) {
     return h('div', { class: 'ifloorsbox' },
       h('p', { class: 'iside__title' }, icon('levels', { size: 16 }), n > 1 ? `Floors (${n}), bottom-up` : 'Floors'),
       h('p', { class: 'iside__text' }, n > 1 ? 'Each floor is read with its own scale and orientation, then lined up over the floor below. Click a floor to see its drawing.'
-        : 'A house with several floors? Add each floor’s drawing — another page, another drawing on this sheet or another file (PDF, DXF or picture).'),
+        : 'A house with several floors? Add each floor’s drawing — another page, another drawing on this sheet or another file (PDF, DWG, DXF or picture).'),
       h('ol', { class: 'ifloors', 'aria-label': 'Floors of the house, ground floor first' }, items),
       h('div', { class: 'ifloors__add' }, adds));
   }
@@ -418,10 +419,10 @@ export function openImportWizard(app, opts = {}) {
     render();
   }
   function fileFacts() {
-    if (S.kind === 'dwg') return 'AutoCAD DWG — not readable here (see below)';
+    if (S.kind === 'dwg') return 'AutoCAD DWG — this file could not be read (see below)';
     if (S.kind === 'dxf' && S.prims) {
-      const u = S.prims.dxf.units;
-      return ['AutoCAD DXF', u.cmPerUnit ? `drawn in ${u.name}` : 'units not stated', `${S.prims.layers.length} layer${S.prims.layers.length === 1 ? '' : 's'}`,
+      const u = S.prims.dxf.units, dwg = S.prims.source && S.prims.source.format === 'dwg';
+      return [dwg ? `AutoCAD DWG (${S.prims.source.release} format)` : 'AutoCAD DXF', u.cmPerUnit ? `drawn in ${u.name}` : 'units not stated', `${S.prims.layers.length} layer${S.prims.layers.length === 1 ? '' : 's'}`,
         S.prims.layouts && S.prims.layouts.length ? `model space read (${S.prims.layouts.length} paper layout${S.prims.layouts.length === 1 ? '' : 's'} not used)` : null].filter(Boolean).join(' · ');
     }
     const parts = [S.kind === 'pdf' ? 'Vector PDF' : S.sheet && S.sheet.fromPdf ? 'Scanned PDF page' : 'Picture'];
@@ -462,8 +463,7 @@ export function openImportWizard(app, opts = {}) {
     await work('Opening the file…', async () => {
       const kind = await sniff(f);
       if (gen !== S.gen) throw { cancelled: true };
-      if (kind === 'dwg') { S.kind = 'dwg'; return; }
-      if (kind === 'dxf') { await loadDxf(f, gen); return; }
+      if (kind === 'dxf' || kind === 'dwg') { await loadDxf(f, gen, kind); return; }
       if (kind === 'pdf') {
         S.bytes = new Uint8Array(await f.arrayBuffer());
         S.pdf = await pdfInfo(S.bytes);
@@ -528,13 +528,19 @@ export function openImportWizard(app, opts = {}) {
     const text = (res.scaleCandidates || []).find((c) => c.source === 'text' || c.source === 'dimensions');
     if (text && text.confidence >= 0.6) S.scale = { method: 'text', cmPerUnit: text.cmPerUnit, label: text.label };
   }
-  // ── DXF ──
-  /** Read the DXF in the worker, draw it, and run the first analysis (units, layer roles, drawings). */
-  async function loadDxf(f, gen) {
+  // ── DXF (and DWG, read as DXF: CONTRACT § 11.2) ──
+  /** Read the DXF / DWG in the worker, draw it, and run the first analysis (units, layer roles, drawings). */
+  async function loadDxf(f, gen, kind = 'dxf') {
     const live = (v) => { if (gen !== S.gen) throw { cancelled: true }; return v; };
-    setBusy('Reading the DXF…');
+    setBusy(kind === 'dwg' ? 'Reading the DWG…' : 'Reading the DXF…');
     const bytes = new Uint8Array(await f.arrayBuffer());
-    const read = live(await engine('dxf-read', { bytes }));
+    let read;
+    if (kind === 'dwg') {
+      try { read = live(await engine('dwg-read', { bytes })); } catch (err) {
+        if (!(err && err.cancelled)) S.kind = 'dwg';      // this DWG cannot be read: the short "save it as DXF" note shows
+        throw err;
+      }
+    } else read = live(await engine('dxf-read', { bytes }));
     S.kind = 'dxf';
     S.prims = read.prims;
     S.dxf = { layers: read.look.layers, candidates: read.look.candidates, roles: {}, highlight: null, unit: null };
@@ -544,6 +550,8 @@ export function openImportWizard(app, opts = {}) {
     const best = S.dxf.candidates[0];
     if (best && (best.source === 'units' || best.source === 'dimensions') && best.confidence >= 0.6) S.scale = { method: 'text', cmPerUnit: best.cmPerUnit, label: best.label };
   }
+  /** 'DWG' when the drawing came from a DWG file, else 'DXF' (wording only). */
+  function cadName() { return S.prims && S.prims.source && S.prims.source.format === 'dwg' ? 'DWG' : 'DXF'; }
   function dxfHidden() { return new Set(S.prims.layers.filter((L) => !L.visible).map((L) => L.name)); }
   function drawDxfSheet() {
     const long = Math.max(S.prims.pageBox.w, S.prims.pageBox.h) || 1000;
@@ -604,15 +612,11 @@ export function openImportWizard(app, opts = {}) {
       list,
       lay.length ? h('p', { class: 'iside__text faint' }, `Paper-space layouts (not read): ${lay.join(', ')}.`) : null);
   }
+  /** Shown only when a particular DWG could not be read (the reason is in the error line above). */
   function dwgHelp() {
     return h('div', { class: 'callout idwg' }, icon('info', { size: 16 }), h('div', null,
-      h('p', { class: 'callout__title' }, 'DWG files cannot be read here — please send a DXF'),
-      h('p', { class: 'callout__text' }, 'DWG is AutoCAD’s own closed format. Getting a DXF takes a minute:'),
-      h('ul', { class: 'idwg__list' },
-        h('li', null, h('b', null, 'AutoCAD, BricsCAD, ArchiCAD, Revit, DraftSight and most CAD programs: '), 'open the drawing, choose File → Save As (or Export), pick “DXF” as the file type (AutoCAD 2018 DXF or any version is fine) and save.'),
-        h('li', null, h('b', null, 'No CAD program? '), 'The free ODA File Converter (from the Open Design Alliance) turns DWG files into DXF: choose the folder, output “DXF”, and run it.'),
-        h('li', null, 'Or ask the architect to send the plan as DXF — or as a PDF printed from the CAD program.')),
-      h('p', { class: 'callout__text' }, 'Then choose the DXF file here.')));
+      h('p', { class: 'callout__title' }, 'This DWG cannot be read here — save it as DXF'),
+      h('p', { class: 'callout__text' }, 'Open it in your CAD program, choose File → Save As (or Export) and pick “DXF” as the file type, then choose that file here. Or ask the architect for the plan as DXF, or as a PDF printed from the CAD program.')));
   }
   function pickDrawing(i) {
     if (!S.first || !S.first.drawings || i === S.drawing) return;
@@ -728,12 +732,12 @@ export function openImportWizard(app, opts = {}) {
     const unitSel = S.kind === 'dxf' ? h('select', { class: 'iunit', 'aria-label': 'Drawing unit', onChange: () => { S.dxf.unit = unitSel.value; syncScaleInfo(); } },
       h('option', { value: '' }, 'Choose…'), DXF_UNITS.map(([name, short]) => h('option', { value: name, selected: S.dxf.unit === name }, `1 unit = 1 ${short} (${name})`))) : null;
     const dxfText = text && S.kind === 'dxf' ? (text.source === 'units'
-      ? [`The file is drawn in ${text.unit} (${text.label})`, `The DXF says so ($INSUNITS)${text.evidence && text.evidence.dimensions && text.evidence.dimensions.agree ? `, and ${text.evidence.dimensions.agree} of its ${text.evidence.dimensions.of} dimensions agree` : ''}.`]
+      ? [`The file is drawn in ${text.unit} (${text.label})`, `The ${cadName()} says so ($INSUNITS)${text.evidence && text.evidence.dimensions && text.evidence.dimensions.agree ? `, and ${text.evidence.dimensions.agree} of its ${text.evidence.dimensions.of} dimensions agree` : ''}.`]
       : [`The drawing is in ${text.unit} (${text.label})`, `The file does not say; its ${text.evidence.dimensions ? text.evidence.dimensions.of : ''} dimension figures and the wall sizes fit ${text.unit} — ${confWords(text.confidence)}.`]) : null;
     const opts = S.kind === 'dxf' ? [
       text ? opt('text', dxfText[0], dxfText[1]) : null,
       opt('measure', 'Measure a known length', 'Click both ends of something whose real length you know, then type it.', measureExtra),
-      opt('unit', 'Choose the drawing unit', null, h('div', { class: 'iopt__rows' }, field('Unit', unitSel), h('p', { class: 'iopt__text' }, 'A DXF has no paper scale: every length is in its drawing unit.'))),
+      opt('unit', 'Choose the drawing unit', null, h('div', { class: 'iopt__rows' }, field('Unit', unitSel), h('p', { class: 'iopt__text' }, `A ${cadName()} has no paper scale: every length is in its drawing unit.`))),
       guess ? opt('guess', `Best guess: ${guess.label} (${guess.unit})`, `A guess from the drawing’s proportions (wall thickness, doors, size) — ${confWords(guess.confidence)}. Check the size below before using it.`) : null,
     ] : [
       opt('measure', 'Measure a known length', 'Most reliable: click both ends of something whose real length you know, then type it.', measureExtra),

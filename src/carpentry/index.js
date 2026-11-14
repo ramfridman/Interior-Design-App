@@ -21,6 +21,8 @@ export { suggestTier, hasMarketKeys } from './market.js';
 export { drawings, OP_KEY, textBox, textWidthMm, LW, TEXT, FILL, fmt } from './drawings.js';
 export { schedules, HEADERS } from './schedules.js';
 export { sortCarpentersByDistance, haversineKm } from './distance.js';
+export { NATURAL_STONE, WORKTOP_THICKNESS } from './spec.js';
+export { isNaturalStone, worktopRateKey, cutoutRateKey, splashStone, stoneName, finishLabel, stoneText, stoneRef, pickThickness, stonePatch, colourFamilies, COLOUR_FAMILIES, stoneBrands, filterStones, suppliersForStone, worksBrand, stoneRecord, hasSlabPrice, slabPriceLine } from './stone.js';
 
 import { view as _view } from './state.js';
 import { unitsOf as _unitsOf } from './layout.js';

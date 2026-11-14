@@ -16,6 +16,7 @@ const LOADERS = {
   takeoff: () => import('./takeoff-tab.js'),
   quotation: () => import('./quotation.js'),
   carpenters: () => import('./carpenters.js'),
+  stoneSuppliers: () => import('./stone-suppliers.js'),
 };
 const cache = new Map();
 

@@ -18,6 +18,7 @@ import { view, ceilingOf, planOf, runLevel, planHasLevels } from './state.js';
 import { levelName } from '../core/levels.js';
 import { islandBays } from './modules.js';
 import { VOCAB } from './spec.js';
+import { splashStone, stoneText, stoneName, finishLabel } from './stone.js';
 import { layoutGrid } from './bespoke.js';
 import { listFeatures } from './features.js';
 import { unitCodes as codesOf, unitsOf as unitsOfRun } from './layout.js';
@@ -169,14 +170,24 @@ function opSymbol(D, op, x, y, w, h, hinge) {
   else if (op === 'lift-up' || op === 'drop-down') { const top = op === 'lift-up'; D.poly([[x, top ? y : y + h], [x + w / 2, top ? y + h : y], [x + w, top ? y : y + h]], false, LW.hair, d); }
 }
 /** Legend of the operations drawn (metadata + text ops below the drawing, role 'legend'). */
-function addLegend(D) {
+function addLegend(D, run = null) {
   const used = [...(D.opsUsed || [])].filter((op) => VOCAB.doorOperation[op]);
-  if (!used.length) return [];
   const legend = used.map((op) => ({ op, key: OP_KEY[op], label: VOCAB.doorOperation[op] }));
+  const stones = run ? stoneLegend(run) : [];             // a chosen worktop / splashback stone is named in the legend
+  if (!legend.length && !stones.length) return [];
   const b = bboxOf(D.ops, D.scale), k = D.k;
-  D.text(b.x + 2 * k, b.y - 2 * k, L('Door operation:', 'אופן פתיחה:'), TEXT.small, { anchor: 'start', role: 'legend', weight: 'bold' });
+  if (legend.length) D.text(b.x + 2 * k, b.y - 2 * k, L('Door operation:', 'אופן פתיחה:'), TEXT.small, { anchor: 'start', role: 'legend', weight: 'bold' });
   legend.forEach((e, i) => D.text(b.x + 2 * k, b.y - (6 + 4 * i) * k, { en: `${e.key}  ${e.label.en}`, he: `${e.key}  ${e.label.he}` }, TEXT.small, { anchor: 'start', role: 'legend', op: e.op }));
-  return legend;
+  stones.forEach((e, j) => D.text(b.x + 2 * k, b.y - ((legend.length ? 6 : 2) + 4 * (legend.length + j)) * k, { en: `${e.key}  ${e.label.en}`, he: `${e.key}  ${e.label.he}` }, TEXT.small, { anchor: 'start', role: 'legend', stone: e.stone }));
+  return [...legend, ...stones];
+}
+/** Legend entries naming the run's chosen stones: WT = worktop, SB = splashback (only when one is chosen). */
+function stoneLegend(run) {
+  const S = run.spec || {}, out = [], wt = S.worktop && S.worktop.material !== 'none' ? S.worktop.stone : null, sb = splashStone(S);
+  if (wt) { const t = stoneText(wt, { thickness: S.worktop.thickness }); out.push({ key: 'WT', stone: wt.id, label: L(`Worktop: ${t.en}`, `משטח: ${t.he}`) }); }
+  if (sb && run.kind !== 'island' && (!wt || sb.id !== wt.id || S.splashback.material === 'stone')) { const t = stoneText(sb); out.push({ key: 'SB', stone: sb.id, label: L(`Splashback: ${t.en}`, `חיפוי: ${t.he}`) }); }
+  else if (sb && run.kind !== 'island') out.push({ key: 'SB', stone: sb.id, label: L('Splashback: the worktop stone', 'חיפוי: אבן המשטח') });
+  return out;
 }
 /** Numbered balloons for special requirements (role 'callout'). pos(feature) → [x, y] anchor, or null. */
 function addCallouts(D, feats, pos) {
@@ -329,7 +340,7 @@ function elevation(run, G, v, opts = {}) {
     D.chain('ceiling', 'y', [0, ceiling], xr + 2 * k, Lr, +1);
   }
   const title = run.kind === 'island' ? L(`${run.code} — elevation from the working side`, `${run.code} — חזית מצד העבודה`) : internal ? L(`${run.code} — internal elevation`, `${run.code} — חתך פנימי (ללא חזיתות)`) : L(`${run.code} — front elevation`, `${run.code} — חזית`);
-  const legend = addLegend(D);
+  const legend = addLegend(D, internal ? null : run);
   const res = { id: `${run.id}:${internal ? 'internal' : 'elevation'}`, kind: internal ? 'internal' : 'elevation', runId: run.id, title, scale, yUp: true, ops: D.ops, dims: D.dims, legend, bounds: bboxOf(D.ops, scale) };
   return run.kind === 'island' ? mirrorX(res, Lr) : res;
 }
@@ -478,7 +489,7 @@ function plan(run, G, v) {
     const x = G.list.find((y) => y.id === f.unitId);
     return x ? [x.at + x.w * 0.75, -Math.min(x.g.d, 60)] : null;
   });
-  const planLegend = addLegend(D);
+  const planLegend = addLegend(D, run);
   // dims
   const floor = G.list.filter((x) => isFloorLevel(x.level)), fpts = [0, run.length, ...floor.flatMap((x) => [x.at, x.end])];
   if (run.kind === 'island') {
@@ -562,6 +573,7 @@ function worktopDrawing(run, G) {
   D.chain('overall', 'x', [Math.min(...pieces.map((p) => p.s)), Math.max(...pieces.map((p) => p.e))], yb - 1 * k, -depth, -1);
   D.chain('depth', 'y', [-depth, 0], Math.max(...pieces.map((p) => p.e)) + 10 * k, Math.max(...pieces.map((p) => p.e)), +1);
   D.text(run.length / 2, run.kind === 'island' ? 12 * k : 10 * k, L(`Heavy line = polished edge (${run.spec.worktop.edge}); ${run.spec.worktop.thickness} mm ${run.spec.worktop.material}; max slab ${run.spec.worktop.maxSlab} cm`, `קו עבה = קנט מלוטש; ${run.spec.worktop.thickness} מ״מ; לוח מקסימלי ${run.spec.worktop.maxSlab} ס״מ`), TEXT.small, { role: 'note' });
+  if (run.spec.worktop.stone) { const n = stoneName(run.spec.worktop.stone), f = finishLabel(run.spec.worktop.stone.finish); D.text(run.length / 2, (run.kind === 'island' ? 16 : 14) * k, L(`Stone: ${n.en}, ${f.en.toLowerCase()}`, `אבן: ${n.he}, ${f.he}`), TEXT.small, { role: 'note', stone: run.spec.worktop.stone.id }); }
   return { id: `${run.id}:worktop`, kind: 'worktop', runId: run.id, title: L(`${run.code} — worktop`, `${run.code} — משטח עבודה`), scale, yUp: true, ops: D.ops, dims: D.dims, bounds: bboxOf(D.ops, scale) };
 }
 

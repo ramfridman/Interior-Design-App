@@ -75,6 +75,10 @@ export const S = {
   // spec rows
   carcass: L('Carcass', 'גוף'), backs: L('Back panels', 'גבות'), frontsRow: L('Fronts', 'חזיתות'), frontStyle: L('Front style', 'סגנון חזית'),
   edges: L('Edge banding', 'קנטים'), handles: L('Handles', 'ידיות'), plinth: L('Plinth', 'צוקל'), hardwareGrade: L('Hardware', 'פרזול'),
+  stoneSupplier: L('Stone supplier', 'ספק האבן'),
+  stoneSupplierNote: L('The supplier the chosen slab was listed by, with its contact as published on its own page or in a directory listing. The stone fabricator who templates, fabricates and installs the worktop may be a different business — confirm by phone.', 'הספק שאצלו הופיע הלוח שנבחר, עם פרטי הקשר כפי שפורסמו באתרו או במדריך עסקים. מפעל השיש שמודד, מייצר ומתקין את המשטח עשוי להיות עסק אחר — יש לוודא בטלפון.'),
+  stoneSupplierName: L('Supplier', 'ספק'), stoneSupplierFor: L('Stone', 'אבן'), website: L('Website', 'אתר'), source: L('Source', 'מקור'),
+  checked: L('checked', 'נבדק'), listingOnly: L('directory listing only', 'רישום במדריך בלבד'), notPublished: L('not published', 'לא פורסם'),
   worktopRow: L('Worktop', 'משטח עבודה'), splashback: L('Splashback', 'חיפוי קיר'), lighting: L('Lighting', 'תאורה'), heights: L('Heights', 'גבהים'),
   aboveTop: L('Above the units', 'מעל הארונות'), except: L('Except', 'למעט'), notApplicable: L('not applicable', 'לא רלוונטי'),
   underWallLed: L('LED strip under the wall units', 'פס LED מתחת לארונות העליונים'), inCabinetLed: L('LED inside the cabinets', 'תאורת LED בתוך הארונות'), noLighting: L('None', 'ללא'),

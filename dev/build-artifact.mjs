@@ -55,6 +55,9 @@ for (const dir of ['vendor/pdf', 'vendor/fonts']) {
 }
 // pdf.js for the sketch importer (loaded lazily through a computed URL): the library, its worker and licence only.
 for (const f of ['vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js']) if (exists(f)) seen.add(f);
+// The DWG reader (loaded lazily; its .js is found by the crawl): the WebAssembly module it fetches (binary side file,
+// content type application/wasm), the GPL-3.0 text and the notice that go with it.
+for (const f of ['vendor/dwg/libredwg-web.wasm', 'vendor/dwg/LICENSE-GPL-3.0.txt', 'vendor/dwg/README.md']) if (exists(f)) seen.add(f);
 
 // index.html → page fragment
 const html = read('index.html');
