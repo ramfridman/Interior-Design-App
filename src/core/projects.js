@@ -152,7 +152,8 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
   /** A full record of the open project as it is now. */
   function snapshot() {
     const design = store.serialize();
-    const rec = { ...current, name: store.project.name || current.name, updatedAt: now(), phase: planPhase(), builtin: isBuiltinBase(), basePlan: clone(BASE_PLAN), design };
+    const { online: _o, role: _r, ...open } = current || online;   // an online project can be exported / duplicated as a local copy too
+    const rec = { ...open, name: store.project.name || open.name, updatedAt: now(), phase: planPhase(), builtin: isBuiltinBase(), basePlan: clone(BASE_PLAN), design };
     if (store.underlay) rec.underlay = store.underlay;   // immutable once set (setUnderlay replaces the object): no copy needed
     return rec;
   }
@@ -277,7 +278,10 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
     async rename(id, name) {
       const n = String(name || '').trim();
       if (!n) return { ok: false, reason: 'A project needs a name.' };
-      if (current && id === current.id) {
+      if (online && id === online.id) {               // online: the name is part of the shared design
+        store.setProject({ name: n });
+        online = { ...online, name: n };
+      } else if (current && id === current.id) {
         store.setProject({ name: n }, { transient: true });
         current = { ...current, name: n };
         await save();
@@ -295,7 +299,7 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
     /** Copy a project (not opened). */
     async duplicate(id, { open = false } = {}) {
       if (current && id === current.id) await flush();
-      const src = current && id === current.id ? snapshot() : await adapter.get(id);
+      const src = (current || online) && id === (current || online).id ? snapshot() : await adapter.get(id);
       if (!src) return { ok: false, reason: 'No such project.' };
       const name = `${src.name} (copy)`;
       const rec = { ...clone(src), id: newId(), name, createdAt: now(), updatedAt: now() };
@@ -324,7 +328,7 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
     /** One file with everything: { filename, text } (JSON). */
     async exportFile(id = current && current.id) {
       if (current && id === current.id) await flush();
-      const rec = current && id === current.id ? snapshot() : await adapter.get(id);
+      const rec = (current || online) && id === (current || online).id ? snapshot() : await adapter.get(id);
       if (!rec) return { ok: false, reason: 'No such project.' };
       const file = { app: PROJECT_FILE_APP, kind: PROJECT_FILE_KIND, version: 1, exportedAt: now(), project: rec };
       return { ok: true, filename: `${slug(rec.name)}.e7project.json`, text: JSON.stringify(file) };

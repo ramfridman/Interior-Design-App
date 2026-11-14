@@ -1276,9 +1276,12 @@ ones are kept). Restoring sends the difference to the saved doc as ONE group by 
 (and undoable by them like any of their groups).
 
 ### Room (`src/collab/room.js`, pure JS: runs in Node and a Durable Object unchanged)
-`createRoom({ id, storage, now, limits })` → `await room.load()`, `room.join(conn)` with
-`conn = { id, email, name, role, send(text) }`, `await room.receive(connId, text)`, `room.leave(connId)`,
-`room.setRole(email, role)`, `room.record()` (project record, § 10 shape), `room.putUnderlay(asset)`.
+`createRoom({ id, storage, now, limits, record })` (`record` seeds an empty storage) → `await room.load()`,
+`room.join(conn)` with `conn = { id, email, name?, role, send(text), close?() }`, `await room.receive(connId, text)`
+(call it for one message at a time per room — the dev server chains them), `room.leave(connId)`,
+`room.setRole(email, role | null)` (null = removed: the connection is told and closed), `room.record()` (project
+record, § 10 shape, + `seq`), `await room.putUnderlay({ type, data, meta }, { email, cid })` → asset id (announced as an
+op group), `await room.getUnderlay()` → `{ id, type, data }`, `room.listVersions()`, `room.peers()`, `room.flush()`.
 `storage` = async key–value `{ get(key), put(key, value), delete(key) }` (JSON values): `head`, `snap`, `log:<seq>`,
 `versions`, `version:<id>`, `asset:underlay`. No timers: everything happens on a message. The log keeps the last 500
 groups; a client further behind gets the doc.
@@ -1288,3 +1291,23 @@ groups; a client further behind gets the doc.
 `POST /api/projects` `{ record }` → `{ id }` (creator = owner) · `GET /api/projects/:id` → record ·
 `DELETE /api/projects/:id` (owner) · `GET|PUT /api/projects/:id/members` `{ [email]: role }` (owner) ·
 `GET|PUT /api/projects/:id/underlay` (picture, ≤ 4 MB; PUT = editor) · WebSocket `GET /api/rooms/:id`.
+
+### Files and hooks
+* `src/collab/ops.js` — doc, ops, validation, the room's rules (pure). `room.js` — the room. `client.js` — the client
+  (adapter-based: works on the store through `bridge.js`, on a plain doc in tests). `bridge.js` — store adapter
+  (`@z` drawing order, remote apply with the store's events, plan-engine intents, soft locks, `openDoc(doc)`).
+  `online.js` — backend probe, `projects.openOnline(id)` / `projects.putOnline()`, `?online=<id>` in the address opens a room.
+  `presence.js` — presence and the collaboration UI (status bar cell, people in the top bar, 2D pointers / selections /
+  locks, 3D selection boxes, temporary "Put online" button). `api/health` — static `{ ok: false }` so the probe never
+  fails on a static host (copied by `dev/build-site.mjs`).
+* Store (additive): `store.collab = { undo, redo, historyState, batchEnded, planIntent } | null` — set by the bridge;
+  `commit()` / `cancel()` call `batchEnded()`; `undo()` / `redo()` / `historyState()` delegate while it is set.
+  `normalizeItem` is exported. Plan engine: `bindPlanHost({ …, intent(name, args) })` — each successful top-level
+  mutation (`addWall` … `resetPlan`) is reported, so a rejected plan edit can be re-run on the newer plan.
+* Projects (additive): `projects.detachForOnline(summary)` (local saving stops; emits `'closing'`),
+  `projects.onlineOpened(summary)`, `'closing'` is also emitted before a local project replaces the store (the session
+  lets go first). `current()` returns the online summary (`online: true`) while one is open; rename / export / duplicate
+  work on it (export / duplicate = a local copy).
+* Events: remote changes emit the usual store events; `'plan'` and `'carpentry'` carry `reason: 'remote'` (or `'phase'`).
+* Tests: `node tests/collab.test.mjs` (Node; real-store replicas in worker threads), `node tests/collab.browser.test.mjs`
+  (two browsers + a viewer on `dev/collab-server.mjs`).

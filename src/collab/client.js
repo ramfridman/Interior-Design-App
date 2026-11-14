@@ -103,7 +103,12 @@ export function createClient({ adapter, connect = null, cid = newCid(), now = ()
       if (after === undefined) mirror.delete(k); else mirror.set(k, after);
     }
     const intent = adapter.takeIntent ? adapter.takeIntent() : null;
-    if (txActive) endTx();
+    if (txActive) {
+      // a drag ended: with a group, the others drop the transient values when it arrives (no jump back first);
+      // without one (cancelled), tell them to drop them now
+      if (ops.length && role !== 'viewer') { txActive = false; if (txTimer) { unschedule(txTimer); txTimer = null; } txPending = new Map(); }
+      else endTx();
+    }
     if (!ops.length) { releaseHeld(); return null; }
     if (role === 'viewer') {                       // never sent: roll the local change back
       reconcile(keysOf(ops));

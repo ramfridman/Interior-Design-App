@@ -273,14 +273,15 @@ await scenario(async ({ room, net, rep }) => {
 
 // ================================================================== 3. randomized convergence: 3 replicas, shuffled delivery, disconnects
 {
-  const rand = rng(20261114);
-  const room = createRoom({ id: 'rnd', storage: memStorage(), now: () => 1e12, limits: { logSize: 40, snapEvery: 10, rate: { ops: [1e6, 1e6] } } });
+  const rand = rng(Number(process.env.COLLAB_SEED) || 20261114);
+  const room = createRoom({ id: 'rnd', storage: memStorage(), now: () => 1e12, limits: { logSize: 12, snapEvery: 4, rate: { ops: [1e6, 1e6] } } });
   await room.load();
   const net = network(room, rand);
   const reps = ['A', 'B', 'C'].map((n) => makeReplica(net, n, n.toLowerCase() + '@example.com'));
   await net.settle();
   const pick = (arr) => arr[Math.floor(rand() * arr.length)];
-  let rounds = 0, actions = 0, resyncs = 0, drops = 0;
+  let rounds = 0, actions = 0, resyncs = 0, drops = 0, rejects = 0, reruns = 0;
+  for (const r of reps) { r.client.on('rejected', () => rejects++); r.client.on('welcome', (w) => { if (w.resync) resyncs++; }); }
   const ids = () => [...new Set(reps.flatMap((r) => Object.keys(r.e).filter((k) => keyType(k) === 'item').map(keyId)))];
   for (rounds = 0; rounds < 300; rounds++) {
     for (const r of reps) {
@@ -331,7 +332,8 @@ await scenario(async ({ room, net, rep }) => {
   if (!converged) for (const r of reps) for (const k of new Set([...Object.keys(r.e), ...Object.keys(E)])) if (!same(r.e[k], E[k])) { console.log('   diff', r.name, k, JSON.stringify(r.e[k]), JSON.stringify(E[k])); break; }
   const inv = invariants(E);
   ok(inv.length === 0, 'the converged state is valid (no opening without its wall, runs ⇄ units consistent)' + (inv.length ? ': ' + inv.slice(0, 3).join('; ') : ''));
-  void resyncs;
+  reruns = reps.reduce((n, r) => n + r.toast.filter((t) => /could not be applied|at the same time/.test(t)).length, 0);
+  console.log(`  randomized: ${rounds} rounds, ${actions} actions, ${drops} disconnects, ${resyncs} resyncs from the doc, ${rejects} guard conflicts (${reruns} dropped and told), final seq ${room.seq}`);
 }
 function sortKeys(e) { const o = {}; for (const k of Object.keys(e).sort()) o[k] = e[k]; return o; }
 

@@ -89,11 +89,12 @@ async function main() {
   await B.page.waitForFunction(({ id, x }) => window.app.store.getItem(id).x === x, { id: sofa.id, x: finalA }, { timeout: 5000 });
   const seen = await B.page.evaluate(() => window.__seen);
   const firstMove = seen.find((s) => s.transient);
-  const lastFinal = seen.filter((s) => !s.transient).pop();
+  const lastFinal = seen.find((s) => s.x === finalA);     // the last transient value or the committed group, whichever came first
   const dragMs = Date.now() - tStart;
   check(`B sees the sofa move during the drag (${midB} transient updates)`, midB >= 5, firstMove ? `first after ${firstMove.at - tStart} ms` : 'none');
   const tUp = await A.page.evaluate(() => window.__commitAt);
-  check(`B has the final position within 500 ms of the mouse-up (${lastFinal ? lastFinal.at - tUp : '?'} ms)`, lastFinal && lastFinal.at - tUp <= 500 && finalA !== sofa.x);
+  check(`B has the final position within 500 ms of the mouse-up (${lastFinal ? Math.max(0, lastFinal.at - tUp) : '?'} ms)`, lastFinal && lastFinal.at - tUp <= 500 && finalA !== sofa.x);
+  check('the committed drag reaches the room (same design on both sides)', await B.page.waitForFunction(() => window.app.collab.session().client.debug.seq() > 0, null, { timeout: 3000 }).then(() => true, () => false));
   check('while A drags, B sees "being edited" (soft lock) and cannot grab it', lockSeen === 'item:' + sofa.id && lockedForB, String(lockSeen));
   await sleep(400);
   check('the soft lock is released after the drag', await B.page.evaluate((id) => window.app.store.getItem(id).locked !== true && !window.app.collab.session().client.peers()[0].p.lock, sofa.id));

@@ -229,7 +229,7 @@ export function initCollabUI(app, ctl) {
     ctx.restore();
   }
   function tag(ctx, x, y, text, col, dpr, centred) {
-    ctx.font = `600 ${11 * dpr}px system-ui, sans-serif`;
+    ctx.font = `600 ${11 * dpr}px system-ui, sans-serif`; ctx.textAlign = 'left';
     const w = ctx.measureText(text).width + 10 * dpr, h = 17 * dpr, x0 = centred ? x - w / 2 : x;
     ctx.fillStyle = col; ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(x0, y - h + 3 * dpr, w, h, 4 * dpr); else ctx.rect(x0, y - h + 3 * dpr, w, h);

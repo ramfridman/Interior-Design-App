@@ -270,6 +270,9 @@ export function createStoreBridge(store, { fetchUnderlay = async () => null, upl
     attach(c) {
       client = c;
       off = store.on('*', onEvent);
+      const offHistory = c.on('history', () => store.emit('history', store.historyState()));
+      const offRole = c.on('role', () => store.emit('history', store.historyState()));
+      off = ((o) => () => { o(); offHistory(); offRole(); })(off);
       store.collab = { undo: () => c.undo(), redo: () => c.redo(), historyState: () => c.historyState(), batchEnded: () => c.batchEnded(), planIntent: (name, args) => { intents.push({ name, args }); } };
       store.emit('history', store.historyState());
     },
