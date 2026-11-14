@@ -62,7 +62,8 @@ export function validateProduct(p) {
   if (!p || typeof p !== 'object') return 'not an object';
   if (!p.id || !p.name) return 'missing id/name';
   if (!MODEL_TYPES[p.type]) return `unknown type "${p.type}"`;
-  if (typeof p.price !== 'number' || !(p.price > 0)) return 'missing price';
+  // A product may be listed without a price only when the supplier publishes none: it must say so explicitly.
+  if (!(p.price === null && p.priceOnRequest === true) && (typeof p.price !== 'number' || !(p.price > 0))) return 'missing price';
   if (!p.url || !/^https:\/\//.test(p.url)) return 'missing https url';
   if (!p.retailer) return 'missing retailer';
   const isFinish = p.type === 'floor-finish' || p.type === 'wall-finish';

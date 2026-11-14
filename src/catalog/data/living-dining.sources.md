@@ -81,3 +81,7 @@ Ids are prefixed by supplier (`habitat-`, `kare-`, `knob-`, `kado-`, `design4you
 ## Second pass (14 Nov 2026)
 New blocks marked `>>> <supplier>-2 (second pass 2026-11-14)` in living-dining.js. Per-supplier evidence, ratings (none checked, no `top-rated`), exclusions and the lists of suppliers with no public price / blocked / still skipped are in docs/CATALOG-RESEARCH.md section "Second pass (14 Nov 2026)". Summary for this file: Zaga 20, Ubject 28, Kaza 40, Items Gallery 15, Moka Home 5, Tollman's (tollmans.co.il) 15 = 123 products.
 Data origin: prices from each shop's own page (WooCommerce/Shopify store API values that equal the displayed price, Zaga/Daniel Light/Tollman's from the page text); sizes from labelled blocks on the page, or, for Kaza, from the size triple labelled depth x height x width by the site's own script; Ubject only where the unlabeled order does not matter.
+
+## Removed on the owner's decision (14 Nov 2026)
+
+Two Items Gallery pieces that the shop itself describes as replicas of designer pieces (a Saarinen-style Tulip side table and a Perriand-style straw coffee table) were removed from the catalogue. Replicas are not to be added.
