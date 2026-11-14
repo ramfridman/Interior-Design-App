@@ -72,7 +72,10 @@ group('buildPlan: bad input never throws');
   const text = res.warnings.map((w) => w.text).join(' | ');
   check('returns a plan', !!res.plan && Array.isArray(res.plan.walls));
   check('not ok', res.ok === false);
-  check('diagonal wall explained as orthogonal-only', /diagonal.*orthogonal/i.test(text));
+  check('diagonal wall explained as orthogonal-only (angled walls switched off, no option)', /diagonal.*orthogonal/i.test(text) && !('slants' in res.plan));
+  // stage A1: with the `slants` option (or FEATURES.angledWalls on) the same diagonal centre line is an angled wall
+  const angled = buildPlan({ walls: [{ x1: 0, y1: 0, x2: 300, y2: 400 }] }, { slants: true });
+  check('…accepted as an angled wall with { slants: true }', angled.ok && angled.plan.slants.length === 1 && angled.plan.slants[0].t === 10 && !angled.warnings.some((w) => /diagonal/i.test(w.text)), JSON.stringify(angled.warnings));
   check('other floors explained', /one floor/i.test(text));
   check('stray opening left out', /not in any wall/.test(text) && res.plan.openings.length === 0);
   check('nonsense input', buildPlan(null).plan && buildPlan({ walls: 'x' }).ok === false);

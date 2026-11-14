@@ -652,7 +652,7 @@ function rectSegment(m, c, spaceOf, openings) {
 function deriveMixed(solids, openings, prevRooms, prevWalls, slants) {
   const rectSolids = solids.filter((r) => !isAngledOpening(r)), rOpenings = rectOpenings(openings), aOpenings = openings.filter(isAngledOpening);
   const L = slantLevel(slants, rectSolids);
-  const { polys, quads } = slantSolids(L, aOpenings);
+  const { polys, quads, cuts } = slantSolids(L, aOpenings);
   const extraX = [], extraY = [];
   for (const p of [...polys, ...quads]) for (const [x, y] of p) { extraX.push(x); extraY.push(y); }
   const m = buildModel(rectSolids, rOpenings, extraX, extraY);
@@ -709,7 +709,7 @@ function deriveMixed(solids, openings, prevRooms, prevWalls, slants) {
   });
   for (const g of L.list) segments.push(slantSegment(g, locate, spaceAtFace, nextOpenings));
 
-  const wallOutline = outlineEdges([...rectSolids, ...polys], [...rOpenings, ...quads]);
+  const wallOutline = outlineEdges([...rectSolids, ...polys], [...rOpenings, ...cuts]);
   return { walls: buildWalls(m, prevWalls), openings: nextOpenings, rooms, wallOutline, segments, problems, narrow: narrowArea(m), m, slantLevel: L };
 }
 const boxOfRing = (ring) => {

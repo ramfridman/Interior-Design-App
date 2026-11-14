@@ -246,9 +246,17 @@ export function outlineEdges(solids, cuts) {
   return out.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3] - b[3]);
 }
 
-/** The solids of the slants of a level: their joined footprints plus the gap quads of their openings (cuts). */
+/**
+ * The solids of the slants of a level: their joined footprints, the gap quads of their openings, and the same gaps
+ * 0.01 cm deeper on each face (`cuts`, to cut the gaps out of the wall material without leaving a hairline sliver
+ * along a face where the quad and the footprint meet after rounding).
+ */
 export function slantSolids(level, openings) {
-  const polys = level.list.map((g) => g.poly), quads = [];
-  for (const o of openings) { if (!isAngledOpening(o)) continue; const g = level.byId.get(o.wall); if (g && o.width > 0 && Number.isFinite(o.at)) quads.push(openingQuad(g.s, o.at, o.width)); }
-  return { polys, quads };
+  const polys = level.list.map((g) => g.poly), quads = [], cuts = [];
+  for (const o of openings) {
+    if (!isAngledOpening(o)) continue;
+    const g = level.byId.get(o.wall);
+    if (g && o.width > 0 && Number.isFinite(o.at)) { quads.push(openingQuad(g.s, o.at, o.width)); cuts.push(openingQuad({ ...g.s, t: g.s.t + 0.02 }, o.at, o.width)); }
+  }
+  return { polys, quads, cuts };
 }
