@@ -12,7 +12,12 @@ import { getPref, setPref } from './prefs.js';
 import { createSunControl } from './sun.js';
 import { viewPlan } from './levels.js';
 import { levelPlan } from '../core/plan-edit.js';
-import { levelIds } from '../core/levels.js';
+import { levelIds, levelName, hasLevels, levelElevation } from '../core/levels.js';
+import { stairGeometry } from '../core/stairs.js';
+
+// the plan's 2D stair symbol (stage F4b) for the walk mini-map, when that module is there (else a simple outline)
+let stairs2d = null;
+const stairs2dReady = import('../view2d/stairs.js').then((m) => { stairs2d = m && typeof m.drawStairSymbol === 'function' ? m : null; }, () => {});
 
 export const DND_TYPE = 'application/x-e7-product';
 /** Extra drag type set with a finish product, so a pane can tell a floor from a wall finish while it is dragged. */
@@ -268,12 +273,14 @@ export function initViewport(app) {
 
   /* ───────── Walk HUD ───────── */
   const walkRoom = h('span', { class: 'walk__room display' }, '');
+  // several floors: which floor the walker is on (stage F5 — it changes on the stairs)
+  const walkFloor = h('span', { class: 'walk__floor', hidden: true, style: 'color:var(--ink-2);font-size:var(--fs-12);white-space:nowrap' }, '');
   const mini = h('canvas', { class: 'minimap__canvas', width: 320, height: 320, role: 'img', 'aria-label': 'Mini-map of the house showing where you are' });
   const hint = h('div', { class: 'ovl walk__hint' },
     h('span', null, kbd('W', 'A', 'S', 'D'), ' move'), h('span', null, kbd('Mouse'), ' look'), h('span', null, kbd('Shift'), ' run'), h('span', null, kbd('Esc'), ' exit'));
   const walkHud = h('div', { class: 'ov__layer', hidden: true },
     h('div', { class: 'walk__top' },
-      h('div', { class: 'ovl walk__where' }, icon('pin', { size: 16 }), walkRoom),
+      h('div', { class: 'ovl walk__where' }, icon('pin', { size: 16 }), walkRoom, walkFloor),
       hint,
       btn('Exit walk', { icon: 'close', small: true, onClick: () => actions.setMode('3d') })),
     h('div', { class: 'ov__br' }, h('div', { class: 'ovl minimap' }, mini)));
@@ -288,13 +295,21 @@ export function initViewport(app) {
     const lv = lastPos.level || 'L0';
     return lv === 'L0' ? plan : levelPlan(plan, lv) || plan;
   };
-  const drawMini = rafThrottle(() => drawMinimap(mini, walkPlan(), lastPos));
+  const walkLevel = () => (store.ui.mode === 'walk' && lastPos ? lastPos.level || 'L0' : store.ui.level || 'L0');
+  const drawMini = rafThrottle(() => drawMinimap(mini, walkPlan(), lastPos, { root: plan, level: walkLevel() }));
+  stairs2dReady.then(() => drawMini());
+  const syncFloor = () => {
+    const multi = hasLevels(plan), text = multi ? levelName(plan, walkLevel()) || '' : '';
+    walkFloor.hidden = !text;
+    if (walkFloor.textContent !== `· ${text}`) walkFloor.textContent = `· ${text}`;
+  };
   listen(view3d, 'walk-position', (pos) => {
     if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number') return;
     lastPos = pos;
     const space = spaceAt(pos.x, pos.y, walkPlan());
     const label = space ? space.name : 'Outside the lot';
     if (walkRoom.textContent !== label) walkRoom.textContent = label;
+    syncFloor();
     drawMini();
   });
 
@@ -303,7 +318,7 @@ export function initViewport(app) {
     if (e.keys.includes('mode')) { if (store.ui.mode !== 'walk') lastPos = null; applyMode(); }
     if (e.keys.includes('showRoof')) roofBtn.setPressed(store.ui.showRoof);
     if (e.keys.includes('wallsCutaway')) cutBtn.setPressed(store.ui.wallsCutaway);
-    if (e.keys.includes('level')) drawMini();
+    if (e.keys.includes('level')) { syncFloor(); drawMini(); }
   });
   if (typeof matchMedia === 'function') matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', drawMini);
 
@@ -331,8 +346,53 @@ function compassSvg(northDeg) {
   return svg;
 }
 
-/** Draw the plan outline and the walker's position / heading. */
-function drawMinimap(canvas, plan, pos) {
+/**
+ * The stairs of one floor in the mini-map (stage F5): those starting on it (the plan's stair symbol when
+ * view2d/stairs.js is there, else treads and an arrow) and, on the floor above, the ones arriving through its voids.
+ */
+function drawMiniStairs(g, root, level, s, ox, oy, colors) {
+  const ids = levelIds(root), list = [];
+  ids.forEach((id, i) => {
+    const lv = id === 'L0' ? root : (root.levels || []).find((l) => l.id === id);
+    for (const st of (lv && lv.stairs) || []) {
+      if (!st || typeof st.id !== 'string') continue;
+      const to = st.to && ids.includes(st.to) ? st.to : (st.to ? null : ids[i + 1]);
+      if (!to || (id !== level && to !== level)) continue;
+      const geo = stairGeometry(st, { rise: levelElevation(root, to) - levelElevation(root, id) });
+      if (geo && geo.footprint.length >= 3) list.push({ geo, top: to === level });
+    }
+  });
+  if (!list.length) return;
+  const X = (x) => ox + x * s, Y = (y) => oy + y * s;
+  const ring = (pts) => { g.beginPath(); pts.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y)))); g.closePath(); };
+  for (const { geo, top } of list) {
+    if (!top && stairs2d) {
+      try {
+        const G = { ctx: g, dpr: 1.4, scale: s, X, Y, text() {}, visible: () => true };
+        stairs2d.drawStairSymbol(G, { ink: colors.ink, inkSoft: colors.ink, paper: colors.paper, dark: false }, geo, { color: colors.ink, cut: false, label: false });
+        continue;
+      } catch (e) { /* fall back to the outline below */ }
+    }
+    g.save();
+    g.globalAlpha = top ? 0.55 : 1;
+    g.strokeStyle = colors.ink; g.lineWidth = 1.2;
+    ring(geo.footprint); g.stroke();
+    g.lineWidth = 0.8; g.beginPath();
+    for (const f of geo.flights) for (const t of f.treads) { g.moveTo(X(t.poly[0][0]), Y(t.poly[0][1])); g.lineTo(X(t.poly[1][0]), Y(t.poly[1][1])); }
+    g.stroke();
+    // walking line with an arrow up (on the floor above: down, from the arrival)
+    const wl = top ? geo.walkingLine.slice().reverse() : geo.walkingLine;
+    g.lineWidth = 1.2; g.beginPath(); wl.forEach((p, i) => (i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1])))); g.stroke();
+    const a = wl.at(-1), b = wl.at(-2) || wl[0], L = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, ux = (a[0] - b[0]) / L, uy = (a[1] - b[1]) / L, k = 7;
+    g.fillStyle = colors.ink; g.beginPath();
+    g.moveTo(X(a[0]), Y(a[1])); g.lineTo(X(a[0]) - ux * k - uy * k * 0.6, Y(a[1]) - uy * k + ux * k * 0.6); g.lineTo(X(a[0]) - ux * k + uy * k * 0.6, Y(a[1]) - uy * k - ux * k * 0.6);
+    g.closePath(); g.fill();
+    g.restore();
+  }
+}
+
+/** Draw the plan outline and the walker's position / heading (several floors: the walker's floor, with its stairs). */
+function drawMinimap(canvas, plan, pos, { root = null, level = 'L0' } = {}) {
   const g = canvas.getContext('2d');
   if (!g) return;
   const css = getComputedStyle(canvas);
@@ -353,6 +413,13 @@ function drawMinimap(canvas, plan, pos) {
   }
   g.fillStyle = ink;
   for (const w of plan.walls) g.fillRect(ox + w.x * s, oy + w.y * s, Math.max(1.5, w.w * s), Math.max(1.5, w.h * s));
+  if (root && hasLevels(root)) {
+    // voids in the floor (dashed), then the stairs of this floor
+    g.save(); g.setLineDash([4, 3]); g.strokeStyle = ink; g.globalAlpha = 0.6; g.lineWidth = 1;
+    for (const v of plan.voids || []) { if (!Array.isArray(v.polygon) || v.polygon.length < 3) continue; g.beginPath(); v.polygon.forEach(([x, y], i) => (i ? g.lineTo(ox + x * s, oy + y * s) : g.moveTo(ox + x * s, oy + y * s))); g.closePath(); g.stroke(); }
+    g.restore();
+    drawMiniStairs(g, root, level, s, ox, oy, { ink, paper: css.getPropertyValue('--surface').trim() || '#ffffff' });
+  }
   if (!pos) return;
   const px = clamp(ox + pos.x * s, 8, size - 8), py = clamp(oy + pos.y * s, 8, size - 8);
   // Heading: degrees clockwise from plan north (up). A unit vector { dx, dy } wins when the view provides one.
