@@ -103,9 +103,9 @@ export function drawOverlay(G, V) {
   if (ui.showItems && !structure) {
     const moving = st.gesture && (st.gesture.type === 'move' || st.gesture.type === 'resize' || st.gesture.type === 'rotate');
     const hover = st.hoverId && !moving && !store.selection.includes(st.hoverId) ? store.getItem(st.hoverId) : null;
-    if (hover && !hover.hidden) outline(G, hover, css(pal.accent, 0.65), G.px(1.25));
+    if (hover && (env.shown ? env.shown(hover) : !hover.hidden)) outline(G, hover, css(pal.accent, 0.65), G.px(1.25));
 
-    const selected = store.getSelected().filter((it) => !it.hidden);
+    const selected = store.getSelected().filter((it) => (env.shown ? env.shown(it) : !it.hidden));
     for (const it of selected) {
       const bad = moving && fb && fb.problems && fb.problems.any && st.live.has(it.id);
       outline(G, it, bad ? pal.danger : pal.accent, G.px(1.5), bad ? css(pal.danger, 0.18) : css(pal.accent, moving ? 0 : 0.05));

@@ -6,7 +6,7 @@
  * through core/plan-edit.js (remove, nudge, reset — with the confirmations the owner asked for) and the toasts for
  * what the plan view reports about its own gestures (`view2d.on('structure', …)`).
  */
-import { wallSegments, openingPolicy, removeWallSegment, removeOpening, moveWallSegment, resizeWallSegment, updateOpening, resetPlan, planDiff, isPlanModified, isBuiltinBase } from '../core/plan-edit.js';
+import { wallSegments, openingPolicy, removeWallSegment, removeOpening, moveWallSegment, resizeWallSegment, updateOpening, resetPlan, planDiff, isPlanModified, isBuiltinBase, levelPlan } from '../core/plan-edit.js';
 import { h, call, listen } from './dom.js';
 import { icon } from './icons.js';
 import { confirmDialog, toast } from './dialogs.js';
@@ -95,7 +95,9 @@ export function lengthAnchor(seg) {
 }
 
 export function createStructure(app) {
-  const { store, plan, view2d } = app;
+  const { store, view2d } = app;
+  // the floor shown in the plan: walls, openings and room names are looked up on it (PLAN itself on the ground floor)
+  const view = () => { const id = store.ui.level || 'L0'; return id === 'L0' ? app.plan : levelPlan(app.plan, id) || app.plan; };
   const root = document.getElementById('app');
   const planShown = () => store.ui.mode === '2d' || store.ui.mode === 'split';
   const undo = { label: 'Undo', fn: () => store.undo() };
@@ -147,7 +149,7 @@ export function createStructure(app) {
         const seg = wallSegments().find((s) => s.id === sel.id);
         return seg ? { type: 'segment', id: seg.id, seg } : null;
       }
-      const opening = sel.type === 'opening' ? plan.openings.find((o) => o.id === sel.id) : null;
+      const opening = sel.type === 'opening' ? view().openings.find((o) => o.id === sel.id) : null;
       if (!opening) return null;
       return { type: 'opening', id: opening.id, opening, seg: wallSegments().find((s) => s.openingIds.includes(opening.id)) || null, policy: openingPolicy(opening.id) };
     },
@@ -181,7 +183,7 @@ export function createStructure(app) {
         const ok = await confirmDialog({
           title: `Remove this ${seg.thickness} cm wall?`, confirmLabel: 'Remove wall', danger: true,
           body: [levelBanner('warn', reason),
-            h('p', { class: 'dialog__text dialog__text--after' }, a === b ? 'The wall is taken out of the plan' : `${spaceName(a, plan)} and ${spaceName(b, plan)} will merge into one room`,
+            h('p', { class: 'dialog__text dialog__text--after' }, a === b ? 'The wall is taken out of the plan' : `${spaceName(a, view())} and ${spaceName(b, view())} will merge into one room`,
               seg.openingIds.length ? ', and the doors in this wall go with it.' : '.', ' You can undo this.')],
         });
         if (!ok) return { ok: false, cancelled: true };
@@ -283,11 +285,13 @@ export function createStructure(app) {
     /** Show one entry of planDiff() on the plan; in Structure mode also select what it refers to, if it still exists. */
     focusChange(item) {
       if (!item) return;
+      // several floors: every entry names its floor — show that floor first (a removed floor has nothing to show)
+      if (item.levelId && item.levelId !== (store.ui.level || 'L0') && app.levels && item.kind !== 'level-removed') app.levels.set(item.levelId);
       api.focusPoint(item.at);
       if (!api.isActive() || !item.ref) return;
       app.selectingFromPanel = true;
       if (wallSegments().some((s) => s.id === item.ref)) api.select('segment', item.ref);
-      else if (plan.openings.some((o) => o.id === item.ref)) api.select('opening', item.ref);
+      else if (view().openings.some((o) => o.id === item.ref)) api.select('opening', item.ref);
       app.selectingFromPanel = false;
     },
   };

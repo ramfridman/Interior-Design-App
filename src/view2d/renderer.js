@@ -19,6 +19,7 @@ import { drawItems, drawItem } from './items.js';
 import { drawRoomLabels, drawExteriorDims, drawInteriorDims, dimBandRect } from './annotations.js';
 import { isStructureTool, drawRemovedWalls, drawChangeMarkers } from './structure.js';
 import { drawUnderlay } from './underlay.js';
+import { drawGhostBelow, drawLotReference } from './levels.js';
 
 const MARGIN = 192;   // device px of slack around the view in the caches
 const ITEMS_DIMMED = 0.35;
@@ -51,11 +52,14 @@ export function paintUnder(G, env, skip = null, furniture = null) {
   G.deviceSpace();
   ctx.globalAlpha = 1;
   ctx.fillStyle = pal.paper; ctx.fillRect(0, 0, G.width, G.height);
-  if (ui.showSite) step('siteGround', () => drawSiteGround(G, env));
+  // the site (street, garden, parking, lot lines) belongs to the ground floor; an upper floor keeps a faint lot line
+  const ground = !env.level || env.level === 'L0';
+  if (ui.showSite && ground) step('siteGround', () => drawSiteGround(G, env));
   step('floors', () => { drawOutdoorAreas(G, env); drawRoomFloors(G, env); });
   if (ui.showGrid && !env.exporting) step('grid', () => drawGrid(G, env));
   step('underlay', () => drawUnderlay(G, env));       // imported sketch to trace over (never exported)
-  if (ui.showSite) step('siteLines', () => drawSiteLines(G, env));
+  if (ui.showSite) step('siteLines', () => (ground ? drawSiteLines(G, env) : drawLotReference(G, env)));
+  if (!ground) step('ghost', () => drawGhostBelow(G, env));   // the floor below, faint and never pickable
   if (isStructureTool(ui.tool) && !env.exporting) {
     // the furniture steps back: dimmed, not pickable, and under the walls and door swings being edited
     if (ui.showItems) step('items', () => { if (furniture) { G.deviceSpace(); ctx.drawImage(furniture, 0, 0); } else paintFurniture(G, env, skip); });
@@ -77,7 +81,7 @@ export function paintOver(G, env) {
   const step = profiler(G, env);
   G.deviceSpace();
   const boxes = createBoxes();
-  if (ui.showSite) drawSiteLabels(G, env, boxes);
+  if (ui.showSite && (!env.level || env.level === 'L0')) drawSiteLabels(G, env, boxes);
   if (ui.showDimensions) step('extDims', () => drawExteriorDims(G, env, boxes));
   if (ui.showRoomLabels) step('labels', () => drawRoomLabels(G, env, boxes));
   if (ui.showDimensions) step('intDims', () => drawInteriorDims(G, env, boxes));
@@ -161,7 +165,7 @@ export function createRenderer(canvas, env) {
       const W = canvas.width, H = canvas.height;
       const ox = Math.round(cam.tx * dpr), oy = Math.round(cam.ty * dpr);
       const G = gfx(ctx, cam, dpr, ox, oy, W, H);
-      const liveItems = live && live.size ? env.store.items.filter((it) => live.has(it.id) && !it.hidden) : [];
+      const liveItems = live && live.size ? env.store.items.filter((it) => live.has(it.id) && (env.shown ? env.shown(it) : !it.hidden)) : [];
 
       if (frame.direct) {
         // zoom frame: straight from vectors (always crisp); the caches are rebuilt once the zoom settles

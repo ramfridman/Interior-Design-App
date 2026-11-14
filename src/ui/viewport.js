@@ -10,6 +10,7 @@ import { btn, iconBtn, kbd } from './components.js';
 import { openMenu, toast } from './dialogs.js';
 import { getPref, setPref } from './prefs.js';
 import { createSunControl } from './sun.js';
+import { viewPlan } from './levels.js';
 
 export const DND_TYPE = 'application/x-e7-product';
 /** Extra drag type set with a finish product, so a pane can tell a floor from a wall finish while it is dragged. */
@@ -120,7 +121,7 @@ export function initViewport(app) {
   function finishSpaceAt(is2d, clientX, clientY) {
     if (is2d) {
       const pt = call(view2d, 'screenToPlan', clientX, clientY);
-      const s = pt ? spaceAt(pt.x, pt.y, plan) : null;
+      const s = pt ? spaceAt(pt.x, pt.y, viewPlan(app)) : null;   // the floor shown in the plan
       return s && (s.kind === 'room' || s.kind === 'outdoor-area') ? { kind: s.kind, id: s.id } : null;
     }
     const t = call(view3d, 'finishTargetAt', clientX, clientY);
@@ -128,7 +129,7 @@ export function initViewport(app) {
   }
   let hl2d = null;    // { spaceId, kind } highlighted in the plan
   call(view2d, 'addOverlay', (G, pal) => {
-    const space = hl2d && [...plan.rooms, ...plan.outdoorAreas].find((s) => s.id === hl2d.spaceId);
+    const v = viewPlan(app), space = hl2d && [...v.rooms, ...(v.outdoorAreas || [])].find((s) => s.id === hl2d.spaceId);
     if (!space || !space.polygon || space.polygon.length < 3) return;
     const { ctx } = G, accent = (pal && pal.accent) || '#2f7cf6';
     ctx.save();
@@ -269,7 +270,7 @@ export function initViewport(app) {
   ov3d.append(orbitHud, walkHud, h('div', { class: 'ov__bc sunhost' }, sun.el));
 
   let lastPos = null;
-  const drawMini = rafThrottle(() => drawMinimap(mini, plan, lastPos));
+  const drawMini = rafThrottle(() => drawMinimap(mini, viewPlan(app), lastPos));   // the floor shown
   listen(view3d, 'walk-position', (pos) => {
     if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number') return;
     lastPos = pos;
@@ -284,6 +285,7 @@ export function initViewport(app) {
     if (e.keys.includes('mode')) applyMode();
     if (e.keys.includes('showRoof')) roofBtn.setPressed(store.ui.showRoof);
     if (e.keys.includes('wallsCutaway')) cutBtn.setPressed(store.ui.wallsCutaway);
+    if (e.keys.includes('level')) drawMini();
   });
   if (typeof matchMedia === 'function') matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', drawMini);
 

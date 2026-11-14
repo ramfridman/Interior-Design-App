@@ -9,13 +9,15 @@ import { paintUnder, paintOver } from './renderer.js';
 import { houseEnvelope, dimensionMargin } from './annotations.js';
 import { streetPolygon } from './site.js';
 import { drawScaleBar, drawNorthArrow } from './hud.js';
+import { levelName } from '../core/levels.js';
 
 const SHEET = { w: 2100, h: 1485 };          // A3 landscape, 50 CSS px per paper centimetre
 const MARGIN = 30, TITLE_H = 104;
 const SCALES = [50, 100, 200, 500];
 
 /**
- * @param env    { store, plan, catalog, models, font }
+ * @param env    { store, plan, catalog, models, font } — plan = the level to draw (a levelPlan view); with several floors
+ *               also { rootPlan, level, shown, exportGhost } (the 2D view passes them)
  * @param opts   { scale = 2 } pixel density of the sheet (2 → 4200 × 2970 px)
  * @returns {Promise<Blob>}
  */
@@ -78,7 +80,8 @@ export function exportPNG(env, { scale = 2 } = {}) {
   L(store.project.name || meta.name || 'Plan', fx + pad, ty + 52 * dpr, { size: 22, weight: 600 });
   const where = [meta.location, plan.site.lot != null ? `Lot ${plan.site.lot}` : null].filter(Boolean).join('  ·  ');
   L(where, fx + pad, ty + 74 * dpr, { size: 11.5, color: pal.inkSoft });
-  L(ui.showSite ? 'Ground floor & site plan — furniture and garden layout' : 'Ground floor plan — furniture layout', fx + pad, ty + 91 * dpr, { size: 11.5, color: pal.inkSoft });
+  const upper = env.level && env.level !== 'L0' && env.rootPlan ? levelName(env.rootPlan, env.level) : null;
+  L(upper ? `${upper} plan — furniture layout` : ui.showSite ? 'Ground floor & site plan — furniture and garden layout' : 'Ground floor plan — furniture layout', fx + pad, ty + 91 * dpr, { size: 11.5, color: pal.inkSoft });
 
   const date = new Date().toISOString().slice(0, 10);
   const rows = [['DATE', date], ['SCALE', `1:${denom} when printed on A3 (420 × 297 mm)`],

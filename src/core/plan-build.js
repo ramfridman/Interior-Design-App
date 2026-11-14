@@ -44,6 +44,7 @@ import { FEATURES } from './features.js';
 import { isLevelId, recomputeElevations } from './levels.js';
 import { optionalKeysProblem, optionalPart, normalizeOptionalKeys, setOptionalKeys } from './plan-schema.js';
 import { polygonArea } from './geometry.js';
+import { slantFrame, freePoly, slantJoins } from './slant-geom.js';
 
 const DEFAULT_MARGIN = 300;               // cm of garden around the house on a default lot
 const MAX_WALL = 30;                      // cm — thickest wall the engine understands (thicker = a solid block)
@@ -71,38 +72,50 @@ export const DEFAULT_HEIGHTS = Object.freeze({ ...BUILTIN_PLAN.heights });
  * Build a complete plan from walls and openings. See the file header for the shapes.
  * @returns {{ ok: boolean, plan: object, warnings: Array<{ level: 'error'|'warning'|'info', text: string, ref?: string }> }}
  */
-export function buildPlan(input = {}, { passThrough = false, levels: levelsOption } = {}) {
+export function buildPlan(input = {}, { passThrough = false, levels: levelsOption, slants: slantsOption } = {}) {
   const warnings = [];
   const say = (level, text, ref) => warnings.push(ref == null ? { level, text } : { level, text, ref });
   try {
     const src = input && typeof input === 'object' ? input : {};
     const firstClass = (levelsOption === true || (levelsOption !== false && FEATURES.levels)) && Array.isArray(src.levels) && src.levels.length > 0;
-    let extra = passThrough ? readOptional(firstClass ? { ...src, levels: undefined } : src, say) : null;
+    // angled walls (stage A1): non-orthogonal centre lines in `walls` and the reader's `slants` become derived slants
+    const angled = slantsOption === true || (slantsOption !== false && FEATURES.angledWalls);
+    let extra = passThrough ? readOptional({ ...src, ...(firstClass ? { levels: undefined } : {}), ...(angled ? { slants: undefined } : {}) }, say) : null;
     const meta = readMeta(src.meta, say, firstClass ? 1 + src.levels.length : extra ? 1 + (extra.levels ? extra.levels.length : 0) : 1);
     const heights = readHeights(src.heights, say);
-    const ups = firstClass ? readLevelInputs(src.levels, heights, say) : null;
-    let walls = readWalls(src.walls, say);
+    const ups = firstClass ? readLevelInputs(src.levels, heights, say, angled) : null;
+    const rawSlants = angled ? [] : null;
+    let walls = readWalls(src.walls, say, rawSlants);
+    const sl = angled ? readSlants([...rawSlants, ...(Array.isArray(src.slants) ? src.slants : [])], say) : null;
+    if (sl) walls.push(...sl.rects);
     const openingIds = new Set();
-    let openings = readOpenings(src.openings, heights, say, openingIds);
-    if (ups) for (const u of ups) u.openings = readOpenings(u.rawOpenings, u.heightsAll, u.say, openingIds);
+    let openings = readOpenings(src.openings, heights, say, openingIds, sl);
+    if (ups) for (const u of ups) u.openings = readOpenings(u.rawOpenings, u.heightsAll, u.say, openingIds, u.sl);
+    if (sl) openings = joinEnds(sl.slants, [...walls, ...openings.filter((o) => o.axis !== 'a')], openings);
+    if (ups) for (const u of ups) if (u.sl) u.openings = joinEnds(u.sl.slants, [...u.walls, ...u.openings.filter((o) => o.axis !== 'a')], u.openings);
 
-    // origin = outer north-west corner of the house (of every level)
-    const box = wallBounds(ups ? [...walls, ...ups.flatMap((u) => u.walls)] : walls);
+    // origin = outer north-west corner of the house (of every level; angled walls included, on whole centimetres)
+    const box = wallBounds([...walls, ...slantBoxes(sl), ...(ups ? ups.flatMap((u) => [...u.walls, ...slantBoxes(u.sl)]) : [])]);
     let shift = { x: 0, y: 0 };
     if (box && (box.x !== 0 || box.y !== 0)) {
       shift = { x: -box.x, y: -box.y };
       walls = walls.map((w) => ({ ...w, x: w.x + shift.x, y: w.y + shift.y }));
-      openings = openings.map((o) => ({ ...o, x: o.x + shift.x, y: o.y + shift.y }));
-      if (ups) for (const u of ups) { u.walls = u.walls.map((w) => ({ ...w, x: w.x + shift.x, y: w.y + shift.y })); u.openings = u.openings.map((o) => ({ ...o, x: o.x + shift.x, y: o.y + shift.y })); Object.assign(u.extra, shiftOptional(u.extra, shift)); }
+      openings = openings.map((o) => (o.axis === 'a' ? o : { ...o, x: o.x + shift.x, y: o.y + shift.y }));
+      if (sl) sl.slants = shiftSlants(sl.slants, shift);
+      if (ups) for (const u of ups) {
+        u.walls = u.walls.map((w) => ({ ...w, x: w.x + shift.x, y: w.y + shift.y })); u.openings = u.openings.map((o) => (o.axis === 'a' ? o : { ...o, x: o.x + shift.x, y: o.y + shift.y })); Object.assign(u.extra, shiftOptional(u.extra, shift));
+        if (u.sl) u.sl.slants = shiftSlants(u.sl.slants, shift);
+      }
       if (extra) extra = shiftOptional(extra, shift);
       say('info', `The plan was moved by ${-shift.x} cm east–west and ${-shift.y} cm north–south so that the house's north-west corner is the origin.`);
     }
     const outdoorAreas = readOutdoorAreas(src.outdoorAreas, shift, say);
 
     // openings must sit in a wall: those that touch no wall at all are left out
-    openings = openingsInWalls(walls, openings, say);
+    openings = openingsInWalls(walls, openings, say, sl);
 
-    let derived = analyseWalls(walls, openings, { outdoorAreas });
+    const slantsNow = sl && sl.slants.length ? sl.slants : null;
+    let derived = analyseWalls(walls, openings, { outdoorAreas, slants: slantsNow });
     const bad = new Map(derived.problems.map((p) => [p.id, p.type]));
     if (bad.size) {
       for (const [id, type] of bad) {
@@ -111,15 +124,20 @@ export function buildPlan(input = {}, { passThrough = false, levels: levelsOptio
         say('error', `The ${o ? word(o) : 'opening'} ${id} ${text} — it was left out.`, id);
       }
       openings = openings.filter((o) => !bad.has(o.id));
-      derived = analyseWalls(walls, openings, { outdoorAreas });
+      derived = analyseWalls(walls, openings, { outdoorAreas, slants: slantsNow });
     }
 
     const rooms = nameRooms(derived.rooms, say);
     const finalOpenings = derived.openings.map(finalOpening);
-    const levels = ups ? buildLevels(ups, rooms, heights) : null;
-    const bounds = (levels ? wallBounds([...derived.walls, ...levels.flatMap((l) => l.walls)], [...finalOpenings, ...levels.flatMap((l) => l.openings)]) : wallBounds(derived.walls, finalOpenings)) || { x: 0, y: 0, w: 0, h: 0 };
+    const finalSlants = slantsNow ? slantKinds(slantsNow, derived.segments) : null;
+    const upSegs = [];
+    const levels = ups ? buildLevels(ups, rooms, heights, upSegs) : null;
+    const boxesOf = (ws, os, segs) => [...ws, ...os.filter((o) => o.axis !== 'a'), ...segs.filter((g) => g.axis === 'a')];
+    const bounds = (levels ? wallBounds(boxesOf([...derived.walls, ...levels.flatMap((l) => l.walls)], [...finalOpenings, ...levels.flatMap((l) => l.openings)], [...derived.segments, ...upSegs]))
+      : wallBounds(boxesOf(derived.walls, finalOpenings, derived.segments))) || { x: 0, y: 0, w: 0, h: 0 };
     const site = readSite(src.site, bounds, shift, say);
-    if (!walls.length) say('info', 'There are no walls yet — draw the house with the Structure tools.');
+    if (finalSlants) for (const k of ['x', 'y', 'w', 'h']) bounds[k] += 0;          // no -0 from the polygon kernel
+    if (!walls.length && !finalSlants) say('info', 'There are no walls yet — draw the house with the Structure tools.');
     else if (!rooms.length) say('warning', 'No enclosed room was found: walls must meet (or cross) to close a room, and door / window gaps must be inside walls.');
 
     const plan = {
@@ -134,7 +152,7 @@ export function buildPlan(input = {}, { passThrough = false, levels: levelsOptio
       site,
       assumptions: assumptionsFor(src, meta, heights),
     };
-    if (levels) setOptionalKeys(plan, optionalPart(normalizeOptionalKeys({ ...(extra || {}), levels })));
+    if (levels || finalSlants) setOptionalKeys(plan, optionalPart(normalizeOptionalKeys({ ...(extra || {}), ...(finalSlants ? { slants: finalSlants } : {}), ...(levels ? { levels } : {}) })));
     else if (extra) setOptionalKeys(plan, extra);
     return { ok: !warnings.some((w) => w.level === 'error'), plan, warnings };
   } catch (err) {
@@ -157,9 +175,14 @@ function finalOpening(o) {
   return next;
 }
 
-/** Openings that touch no wall of their level are left out (an error each). */
-function openingsInWalls(walls, openings, say) {
+/** Openings that touch no wall of their level are left out (an error each). An opening in a slant needs that slant. */
+function openingsInWalls(walls, openings, say, sl) {
   return openings.filter((o) => {
+    if (o.axis === 'a') {
+      const there = !!sl && sl.slants.some((s) => s.id === o.wall);
+      if (!there) say('error', `The ${word(o)} ${o.id} is not in any wall — it was left out.`, o.id);
+      return there;
+    }
     const hit = walls.some((w) => w.x < o.x + o.w && o.x < w.x + w.w && w.y < o.y + o.h && o.y < w.y + w.h);
     const near = hit || walls.some((w) => (w.x === o.x + o.w || o.x === w.x + w.w) && w.y < o.y + o.h && o.y < w.y + w.h)
       || walls.some((w) => (w.y === o.y + o.h || o.y === w.y + w.h) && w.x < o.x + o.w && o.x < w.x + w.w);
@@ -191,7 +214,7 @@ function shiftOptional(data, shift) {
 }
 
 /** First-class upper levels: read (walls; openings are read later with the global id set), heights, ids, names. */
-function readLevelInputs(raw, heights, say) {
+function readLevelInputs(raw, heights, say, angled = false) {
   const out = [], ids = new Set();
   raw.forEach((l0, i) => {
     const l = l0 && typeof l0 === 'object' ? l0 : {};
@@ -207,21 +230,25 @@ function readLevelInputs(raw, heights, say) {
       if (num(v) && v >= lo && v <= hi) h[k] = Math.round(v); else lsay('warning', `Height "${k}" is not ${lo}–${hi} cm — ${h[k]} cm was used.`);
     }
     const extra = {};
-    for (const k of ['voids', 'stairs', 'slants']) if (Array.isArray(l[k]) && l[k].length) extra[k] = clone(l[k]);
+    for (const k of ['voids', 'stairs', ...(angled ? [] : ['slants'])]) if (Array.isArray(l[k]) && l[k].length) extra[k] = clone(l[k]);
+    const raw = angled ? [] : null;
+    const walls = readWalls(Array.isArray(l.walls) ? l.walls.map((w) => (w && typeof w === 'object' && !Array.isArray(w) && w.floor != null ? { ...w, floor: undefined } : w)) : l.walls, lsay, raw);
+    const sl = angled ? readSlants([...raw, ...(Array.isArray(l.slants) ? l.slants : [])], lsay) : null;
+    if (sl) walls.push(...sl.rects);
     out.push({ id, name: typeof l.name === 'string' && l.name.trim() ? l.name.trim() : null, nameHe: typeof l.nameHe === 'string' && l.nameHe.trim() ? l.nameHe.trim() : null,
       givenElevation: num(toNum(l.elevation)) ? toNum(l.elevation) : null, heights: h, heightsAll: { ...heights, ...h }, say: lsay,
-      walls: readWalls(Array.isArray(l.walls) ? l.walls.map((w) => (w && typeof w === 'object' && !Array.isArray(w) && w.floor != null ? { ...w, floor: undefined } : w)) : l.walls, lsay),
-      rawOpenings: l.openings, extra });
+      walls, sl, rawOpenings: l.openings, extra });
   });
   return out;
 }
 
 /** Derive every upper level like L0 (rooms named, ids global), elevations from the heights. */
-function buildLevels(ups, groundRooms, heights) {
+function buildLevels(ups, groundRooms, heights, segOut = null) {
   const taken = new Set(groundRooms.map((r) => r.id));
   const built = ups.map((u) => {
-    let openings = openingsInWalls(u.walls, u.openings, u.say);
-    let derived = analyseWalls(u.walls, openings, { level: u.id, reservedRoomIds: taken });
+    let openings = openingsInWalls(u.walls, u.openings, u.say, u.sl);
+    const slants = u.sl && u.sl.slants.length ? u.sl.slants : null;
+    let derived = analyseWalls(u.walls, openings, { level: u.id, reservedRoomIds: taken, slants });
     const bad = new Map(derived.problems.map((p) => [p.id, p.type]));
     if (bad.size) {
       for (const [id, type] of bad) {
@@ -230,7 +257,7 @@ function buildLevels(ups, groundRooms, heights) {
         u.say('error', `The ${o ? word(o) : 'opening'} ${id} ${text} — it was left out.`, id);
       }
       openings = openings.filter((o) => !bad.has(o.id));
-      derived = analyseWalls(u.walls, openings, { level: u.id, reservedRoomIds: taken });
+      derived = analyseWalls(u.walls, openings, { level: u.id, reservedRoomIds: taken, slants });
     }
     if (!u.walls.length) u.say('info', 'There are no walls on this floor yet.');
     const rooms = nameRooms(derived.rooms, u.say);
@@ -239,6 +266,8 @@ function buildLevels(ups, groundRooms, heights) {
     if (u.name) lv.name = u.name;
     if (u.nameHe) lv.nameHe = u.nameHe;
     Object.assign(lv, { elevation: 0, heights: u.heights, walls: derived.walls.map(({ cls, ...w }) => w), wallOutline: derived.wallOutline, openings: derived.openings.map(finalOpening), rooms }, u.extra);
+    if (slants) lv.slants = slantKinds(slants, derived.segments);
+    if (segOut) segOut.push(...derived.segments.filter((g) => g.axis === 'a'));                 // for the plan bounds
     return lv;
   });
   const levels = recomputeElevations(built, heights);
@@ -288,7 +317,8 @@ function readHeights(raw, say) {
   return h;
 }
 
-function readWalls(raw, say) {
+/** `angled` (an array, angled walls on): diagonal centre lines are pushed there instead of being an error. */
+function readWalls(raw, say, angled = null) {
   const out = [];
   if (raw != null && !Array.isArray(raw)) { say('error', 'Walls must be a list.'); return out; }
   (raw || []).forEach((w0, i) => {
@@ -301,6 +331,7 @@ function readWalls(raw, say) {
     let rect;
     if (['x1', 'y1', 'x2', 'y2'].every((k) => num(toNum(w[k])))) {
       const x1 = toNum(w.x1), y1 = toNum(w.y1), x2 = toNum(w.x2), y2 = toNum(w.y2), t = num(toNum(w.thickness)) ? toNum(w.thickness) : 10;
+      if (x1 !== x2 && y1 !== y2 && angled) { angled.push({ id: typeof w.id === 'string' && w.id ? w.id : null, x1, y1, x2, y2, t, kind: w.kind, n }); return; }
       if (x1 !== x2 && y1 !== y2) { say('error', `Wall ${n} runs diagonally. Only walls running east–west or north–south can be modelled (the plan engine is orthogonal) — it was left out.`, w.id); return; }
       rect = x1 === x2 ? { x: x1 - t / 2, y: Math.min(y1, y2), w: t, h: Math.abs(y2 - y1) } : { x: Math.min(x1, x2), y: y1 - t / 2, w: Math.abs(x2 - x1), h: t };
     } else rect = { x: toNum(w.x), y: toNum(w.y), w: toNum(w.w), h: toNum(w.h) };
@@ -313,15 +344,21 @@ function readWalls(raw, say) {
   return out;
 }
 
-function readOpenings(raw, heights, say, ids = new Set()) {
+function readOpenings(raw, heights, say, ids = new Set(), sl = null) {
   const out = [];
   if (raw != null && !Array.isArray(raw)) { say('error', 'Openings must be a list.'); return out; }
   const counters = { door: 0, window: 0, 'sliding-door': 0, opening: 0 };
-  (raw || []).forEach((o, i) => {
+  (raw || []).forEach((o0, i) => {
     const n = i + 1;
+    let o = o0;
     if (!o || typeof o !== 'object') { say('error', `Opening ${n} is not readable — it was left out.`); return; }
     const kind = OPENING_DEFAULTS[o.kind] ? o.kind : null;
     if (!kind) { say('error', `Opening ${n} has an unknown kind "${o.kind}" (door, window, sliding-door or opening) — it was left out.`, o.id); return; }
+    if (sl && o.axis === 'a') {
+      const conv = sl.toRect.get(o.wall);
+      if (conv) o = rectOpeningOf(o, conv);           // its wall was within 0.5° of an axis: a rect wall now
+      else { const a = readAngledOpening(o, kind, heights, say, ids, sl, counters, n); if (a) out.push(a); return; }
+    }
     const x = toNum(o.x), y = toNum(o.y), w = toNum(o.w), h = toNum(o.h);
     if (![x, y, w, h].every(num) || w <= 0 || h <= 0) { say('error', `The ${kind} ${o.id || n} has no usable rectangle (x, y, w, h in cm) — it was left out.`, o.id); return; }
     const axis = o.axis === 'h' || o.axis === 'v' ? o.axis : w >= h ? 'h' : 'v';
@@ -342,6 +379,155 @@ function readOpenings(raw, heights, say, ids = new Set()) {
   });
   return out;
 }
+
+// ---------------------------------------------------------------- angled walls (stage A1, option `slants` / FEATURES.angledWalls)
+const SLANT_AXIS_TOL = 0.5;               // degrees: an angled wall this close to an axis becomes a rect wall
+const r01 = (v) => Math.round(v * 10) / 10;
+const SLANT_KIND = { exterior: 'exterior', mamad: 'mamad', thick: 'interior', partition: 'interior' };
+
+/**
+ * Angled walls (centre line + thickness: diagonal `walls` entries and the reader's `slants`) → { slants (ids s01…, in
+ * input order, centre lines on 0.1 cm), rects (the ones within 0.5° of an axis, as rect walls), ids: old id → new id,
+ * toRect: old id → { rect, s } }. Unusable entries are errors and left out.
+ */
+function readSlants(list, say) {
+  const slants = [], rects = [], ids = new Map(), toRect = new Map();
+  list.forEach((s0, i) => {
+    const s = s0 && typeof s0 === 'object' ? s0 : {};
+    const name = s.n ? `Wall ${s.n}` : `Angled wall ${s.id || i + 1}`;
+    const x1 = toNum(s.x1), y1 = toNum(s.y1), x2 = toNum(s.x2), y2 = toNum(s.y2), t = toNum(s.t != null ? s.t : s.thickness);
+    if (![x1, y1, x2, y2, t].every(num) || t <= 0) { say('error', `${name} has no usable centre line and thickness (x1, y1, x2, y2, t in cm) — it was left out.`, s.id); return; }
+    const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
+    if (len < 1) { say('error', `${name} has no length — it was left out.`, s.id); return; }
+    const kind = ['exterior', 'interior', 'mamad'].includes(s.kind) ? s.kind : 'interior';
+    const off = (Math.atan2(Math.abs(dy), Math.abs(dx)) * 180) / Math.PI;
+    if (off <= SLANT_AXIS_TOL || off >= 90 - SLANT_AXIS_TOL) {
+      const h = off <= SLANT_AXIS_TOL, c = h ? (y1 + y2) / 2 : (x1 + x2) / 2;
+      const rect = h ? { x: r1(Math.min(x1, x2)), y: r1(c - t / 2), w: Math.max(1, r1(Math.abs(dx))), h: Math.max(1, r1(t)) } : { x: r1(c - t / 2), y: r1(Math.min(y1, y2)), w: Math.max(1, r1(t)), h: Math.max(1, r1(Math.abs(dy))) };
+      rects.push({ id: typeof s.id === 'string' && s.id ? s.id : `w-a${i + 1}`, ...rect, kind });
+      if (s.id != null && !toRect.has(s.id)) toRect.set(s.id, { rect, s: { x1, y1, x2, y2, t } });
+      return;
+    }
+    const out = { id: '', x1: r01(x1), y1: r01(y1), x2: r01(x2), y2: r01(y2), t: r01(t), kind };
+    if (typeof s.chain === 'string' && s.chain) out.chain = s.chain;
+    if (s.id != null && !ids.has(s.id)) ids.set(s.id, slants.length);
+    slants.push(out);
+  });
+  slants.forEach((s, k) => { s.id = 's' + String(k + 1).padStart(2, '0'); });
+  for (const [old, k] of ids) ids.set(old, slants[k].id);
+  return { slants, rects, ids, toRect };
+}
+
+/** An opening of a slant that became a rect wall, as a rect opening (hinge / swing / outside letters turned to compass). */
+function rectOpeningOf(o, { rect, s }) {
+  const f = slantFrame(s), h = Math.abs(f.ux) >= Math.abs(f.uy), at = toNum(o.at), width = toNum(o.width);
+  if (!num(at) || !num(width)) return { ...o, axis: undefined };
+  const c = h ? s.x1 + f.ux * at : s.y1 + f.uy * at;
+  const r = h ? { x: r1(c - width / 2), y: rect.y, w: r1(width), h: rect.h } : { x: rect.x, y: r1(c - width / 2), w: rect.w, h: r1(width) };
+  // 'r' = the right-hand normal (−uy, ux); jamb 'a' = the one nearer (x1, y1)
+  const right = h ? (f.ux > 0 ? 's' : 'n') : (f.uy > 0 ? 'w' : 'e'), left = { n: 's', s: 'n', e: 'w', w: 'e' }[right];
+  const ja = h ? (f.ux > 0 ? 'w' : 'e') : (f.uy > 0 ? 'n' : 's'), jb = { n: 's', s: 'n', e: 'w', w: 'e' }[ja];
+  const { wall, at: _a, ...rest } = o;
+  return { ...rest, axis: h ? 'h' : 'v', ...r, ...(o.hinge != null ? { hinge: o.hinge === 'b' ? jb : ja } : {}), ...(o.swing != null ? { swing: o.swing === 'l' ? left : right } : {}) };
+}
+
+/** An opening in a slant: { id, kind, style, axis: 'a', wall, at, width, height, sill, hinge?, swing?, label, assumed? }. */
+function readAngledOpening(o, kind, heights, say, ids, sl, counters, n) {
+  const wall = sl.ids.get(o.wall);
+  if (!wall) { say('error', `The ${word({ kind })} ${o.id || n} is not in any wall — it was left out.`, o.id); return null; }
+  const at = toNum(o.at), width = toNum(o.width);
+  if (!num(at) || !num(width) || width <= 0) { say('error', `The ${word({ kind })} ${o.id || n} has no usable position (at, width in cm) along its wall — it was left out.`, o.id); return null; }
+  const d = OPENING_DEFAULTS[kind];
+  const height = num(toNum(o.height)) ? r1(toNum(o.height)) : kind === 'window' ? d.height : heights.doorDefault || d.height;
+  const sill = kind === 'window' ? (num(toNum(o.sill)) ? r1(toNum(o.sill)) : d.sill) : 0;
+  let id = typeof o.id === 'string' && o.id && !ids.has(o.id) ? o.id : null;
+  if (!id) { const pre = kind === 'window' ? 'win' : kind === 'opening' ? 'pass' : 'door'; do id = `${pre}-${++counters[kind]}`; while (ids.has(id)); }
+  ids.add(id);
+  const next = { id, kind, style: typeof o.style === 'string' && o.style ? o.style : d.style, axis: 'a', wall, at: r01(at), width: r01(width), height, sill };
+  next.styleGiven = !!o.style;
+  if (kind === 'door') { next.hinge = o.hinge === 'b' ? 'b' : 'a'; next.swing = o.swing === 'l' ? 'l' : 'r'; }
+  if (sill + height > heights.ceiling - 20) say('warning', `The ${word(next)} ${id} reaches ${sill + height} cm — less than 20 cm below the ${heights.ceiling} cm ceiling.`, id);
+  next.label = `${next.width} / ${height}` + (sill ? `(+${sill})` : '');
+  if (o.assumed) next.assumed = clone(o.assumed);
+  return next;
+}
+
+/**
+ * Join the free ends of the slants (in place): ends of different slants within 1.5 t of each other meet at their mean
+ * point; another free end is extended along its centre line to the nearest wall face (rect or slant) within 1.5 t.
+ * Ends already joined (slant-geom: junction, T, rect) are left alone. The openings keep their place: their `at` is
+ * re-measured from the new start (returns the openings, new objects where `at` changed).
+ */
+function joinEnds(slants, rects, openings) {
+  if (!slants.length) return openings;
+  const before = new Map(slants.map((s) => [s.id, { ...s }]));
+  const joins = slantJoins(slants, rects);
+  const free = [];
+  slants.forEach((s, i) => joins[i].ends.forEach((e, k) => { if (e.type === 'free') free.push({ s, k }); }));
+  const at = (e) => (e.k ? [e.s.x2, e.s.y2] : [e.s.x1, e.s.y1]);
+  const set = (e, p) => { if (e.k) { e.s.x2 = p[0]; e.s.y2 = p[1]; } else { e.s.x1 = p[0]; e.s.y1 = p[1]; } };
+  // 1. free ends near each other → one junction point
+  const parent = free.map((e, i) => i), find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  for (let i = 0; i < free.length; i++) for (let j = i + 1; j < free.length; j++) {
+    if (free[i].s === free[j].s) continue;
+    const [a, b] = [at(free[i]), at(free[j])];
+    if (Math.hypot(a[0] - b[0], a[1] - b[1]) <= 1.5 * Math.max(free[i].s.t, free[j].s.t)) parent[find(i)] = find(j);
+  }
+  const groups = new Map();
+  free.forEach((e, i) => { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(e); });
+  const done = new Set();
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    const p = [r01(g.reduce((a, e) => a + at(e)[0], 0) / g.length), r01(g.reduce((a, e) => a + at(e)[1], 0) / g.length)];
+    for (const e of g) { set(e, p); done.add(e); }
+  }
+  // 2. other free ends → the nearest wall face ahead within 1.5 t
+  for (const e of free) {
+    if (done.has(e)) continue;
+    const s = e.s, f = slantFrame(s), [px, py] = at(e), dx = e.k ? f.ux : -f.ux, dy = e.k ? f.uy : -f.uy, reach = 1.5 * s.t;
+    let best = Infinity;
+    for (const r of rects) { const h = rayRect(px, py, dx, dy, r); if (h > 1e-9 && h < best) best = h; }
+    for (const o of slants) if (o !== s) { const h = rayPoly(px, py, dx, dy, freePoly(o)); if (h > 1e-9 && h < best) best = h; }
+    if (best <= reach) set(e, [r01(px + dx * best), r01(py + dy * best)]);
+  }
+  return openings.map((o) => {
+    if (o.axis !== 'a') return o;
+    const s = slants.find((x) => x.id === o.wall), b = s && before.get(s.id);
+    if (!s || (b.x1 === s.x1 && b.y1 === s.y1 && b.x2 === s.x2 && b.y2 === s.y2)) return o;
+    const fb = slantFrame(b), f = slantFrame(s), cx = b.x1 + fb.ux * o.at, cy = b.y1 + fb.uy * o.at;
+    return { ...o, at: r01((cx - s.x1) * f.ux + (cy - s.y1) * f.uy) };
+  });
+}
+/** Distance along the ray (px, py) + h·(dx, dy) to where it enters rect r (Infinity if it does not; 0 if it starts inside). */
+function rayRect(px, py, dx, dy, r) {
+  let t0 = -Infinity, t1 = Infinity;
+  for (const [p, d, lo, hi] of [[px, dx, r.x, r.x + r.w], [py, dy, r.y, r.y + r.h]]) {
+    if (Math.abs(d) < 1e-12) { if (p < lo || p > hi) return Infinity; continue; }
+    let a = (lo - p) / d, b = (hi - p) / d;
+    if (a > b) [a, b] = [b, a];
+    t0 = Math.max(t0, a); t1 = Math.min(t1, b);
+  }
+  return t1 < Math.max(t0, 0) ? Infinity : Math.max(t0, 0);
+}
+/** Distance along the ray to the first crossing of a polygon edge (Infinity if none). */
+function rayPoly(px, py, dx, dy, poly) {
+  let best = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const [ax, ay] = poly[i], [bx, by] = poly[(i + 1) % poly.length], ex = bx - ax, ey = by - ay, den = dx * ey - dy * ex;
+    if (Math.abs(den) < 1e-12) continue;
+    const h = ((ax - px) * ey - (ay - py) * ex) / den, u = ((ax - px) * dy - (ay - py) * dx) / den;
+    if (h >= 0 && u >= 0 && u <= 1 && h < best) best = h;
+  }
+  return best;
+}
+/** Bounding boxes (whole cm, outwards) of the free footprints of some slants — for the origin. */
+const slantBoxes = (sl) => (sl ? sl.slants.map((s) => {
+  const p = freePoly(s), xs = p.map((q) => q[0]), ys = p.map((q) => q[1]), x0 = Math.floor(Math.min(...xs)), y0 = Math.floor(Math.min(...ys));
+  return { x: x0, y: y0, w: Math.ceil(Math.max(...xs)) - x0, h: Math.ceil(Math.max(...ys)) - y0 };
+}) : []);
+const shiftSlants = (list, shift) => list.map((s) => ({ ...s, x1: r01(s.x1 + shift.x), y1: r01(s.y1 + shift.y), x2: r01(s.x2 + shift.x), y2: r01(s.y2 + shift.y) }));
+/** Slants with their kind from the derived class (exterior / mamad / interior). */
+const slantKinds = (slants, segments) => slants.map((s) => { const g = segments.find((x) => x.axis === 'a' && x.slantId === s.id); return g ? { ...s, kind: SLANT_KIND[g.cls] || 'interior' } : s; });
 
 function readOutdoorAreas(raw, shift, say) {
   if (!Array.isArray(raw)) return [];

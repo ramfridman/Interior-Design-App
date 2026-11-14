@@ -10,6 +10,7 @@ import { itemHandles } from './overlay.js';
 import { isBelowWalls } from './items.js';
 import { isStructureTool } from './structure.js';
 import { createStructureTools } from './structure-tools.js';
+import { levelPatch } from './levels.js';
 
 const DRAG_SLOP = 3;           // px before a press becomes a drag
 const DOUBLE_MS = 350;
@@ -22,7 +23,7 @@ const editable = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT
 
 export function attachInteraction(V) {
   const { canvas, cam, env, state: st, snapper } = V;
-  const { store, plan } = env;
+  const { store } = env;   // env.plan = the level shown (read it at use: switching floors changes it)
   const pointers = new Map();
   let pinch = null;
   let lastClick = { t: 0, x: 0, y: 0, id: null };
@@ -47,7 +48,7 @@ export function attachInteraction(V) {
     if (!store.ui.showItems) return null;
     for (let i = store.items.length - 1; i >= 0; i--) {
       const it = store.items[i];
-      if (!it.carp || it.hidden) continue;
+      if (!it.carp || !env.shown(it)) continue;
       const [lx, ly] = planToItemLocal(it, pp.x, pp.y);
       if (Math.abs(lx) <= it.w / 2 && Math.abs(ly) <= it.d / 2) return it;
     }
@@ -60,7 +61,7 @@ export function attachInteraction(V) {
     if (!store.ui.showItems) return null;
     const tol = 5 / cam.scale;
     const test = (it) => {
-      if (it.hidden) return false;
+      if (!env.shown(it)) return false;   // hidden, or on another floor
       const [lx, ly] = planToItemLocal(it, pp.x, pp.y);
       const tx = it.w * cam.scale < 12 ? tol : 0, ty = it.d * cam.scale < 12 ? tol : 0;
       return Math.abs(lx) <= it.w / 2 + tx && Math.abs(ly) <= it.d / 2 + ty;
@@ -76,7 +77,7 @@ export function attachInteraction(V) {
   function hitHandle(p) {
     if (tool() !== 'select' || store.selection.length !== 1 || !store.ui.showItems) return null;
     const it = store.getItem(store.selection[0]);
-    if (!it || it.hidden || it.carp) return null;
+    if (!it || !env.shown(it) || it.carp) return null;
     let best = null;
     for (const h of itemHandles(it, cam)) {
       const dist = Math.hypot(h.x - p.x, h.y - p.y);
@@ -115,7 +116,7 @@ export function attachInteraction(V) {
     cursorTimer = setTimeout(() => {
       cursorTimer = 0;
       const q = cursorPending;
-      const s = spaceAt(q.x, q.y, plan);
+      const s = spaceAt(q.x, q.y, env.plan);
       V.emit('cursor', { x: q.x, y: q.y, space: s ? { id: s.id, name: s.name, kind: s.kind } : null });
     }, 30);
   }
@@ -160,7 +161,7 @@ export function attachInteraction(V) {
 
   function beginMove(g) {
     const clicked = store.getItem(g.itemId);
-    let items = store.getSelected().filter((it) => !it.locked && !it.hidden && !it.carp);
+    let items = store.getSelected().filter((it) => !it.locked && env.shown(it) && !it.carp);
     if (clicked && clicked.carp) { g.type = 'noop'; V.emit('carpentry-locked', { itemId: clicked.id, op: g.alt ? 'duplicate' : 'move' }); return false; }
     if (!clicked || clicked.locked || !items.length) { g.type = 'noop'; return false; }
     V.selfWrite = true;
@@ -255,7 +256,7 @@ export function attachInteraction(V) {
     if (!m) return;
     const a = cam.toPlan(Math.min(m.x0, m.x1), Math.min(m.y0, m.y1)), b = cam.toPlan(Math.max(m.x0, m.x1), Math.max(m.y0, m.y1));
     const ids = store.ui.showItems ? store.items.filter((it) => {
-      if (it.hidden) return false;
+      if (!env.shown(it)) return false;
       const bb = itemAABB(it);
       return bb.x < b.x && bb.x + bb.w > a.x && bb.y < b.y && bb.y + bb.h > a.y;
     }).map((it) => it.id) : [];
@@ -283,8 +284,10 @@ export function attachInteraction(V) {
   function addFromPose(partial, pose) {
     const rest = clone(partial);
     delete rest.id;
+    delete rest.level;
+    // a new item stands on the floor shown (no `level` key on the ground floor)
     return store.addItem({ ...rest, x: r1(pose.x), y: r1(pose.y), rot: pose.rot,
-      zone: isIndoors(pose.x, pose.y, plan) ? 'indoor' : 'outdoor', elev: partial.elev ?? 0 });
+      zone: isIndoors(pose.x, pose.y, env.plan) ? 'indoor' : 'outdoor', elev: partial.elev ?? 0, ...levelPatch(env.level) });
   }
   function endPlacing(item) {
     const pl = st.placing;
@@ -356,6 +359,17 @@ export function attachInteraction(V) {
         structure.cancel(); endGesture();
       }
       structure.planChanged(e, own);
+    },
+    /**
+     * The floor shown changed (store.ui.level): whatever was in progress belongs to the other floor — a drag is
+     * rolled back, a placement and a measurement are dropped, a wall being drawn is cancelled. The camera stays.
+     */
+    levelChanged() {
+      cancelGesture();
+      if (st.placing) endPlacing(null);
+      st.measures = []; st.measureDraft = null; st.hoverId = null;
+      structure.toolChanged();
+      setCursor(null); redraw();
     },
     /** `store.ui.structureSel` was set (by this view or by the inspector). */
     structureSelChanged() { structure.remember(); },
@@ -503,7 +517,7 @@ export function attachInteraction(V) {
       else if (store.selection.length > 1) store.select([item.id]);
       return;
     }
-    const space = spaceAt(pp.x, pp.y, plan);
+    const space = spaceAt(pp.x, pp.y, env.plan);
     if (dbl) {
       const poly = space && space.polygon;
       if (poly) V.fit(polygonBounds(poly), { animate: true, padding: 56 });

@@ -170,6 +170,45 @@ export function getThumbnail(productOrItem, size = 176) → Promise<string>   //
 ```
 Both views show the same store state live (move in 2D → moves in 3D, and vice-versa).
 
+#### Several floors in 3D (stage F3, additive; plans without `levels` render exactly as before)
+* **Stacking** (`view3d/house.js`): every level is built by the one-storey grid builder on `levelPlan(PLAN, id)` and placed
+  at Y = elevation / 100 (group `level:<id>`, `userData.levelId`). Walls of a level under another one stop at that
+  level's slab; the slab under level k ≥ 1 (mesh `slab`) = its footprint minus its voids, `heights.slab` thick; the roof
+  of each level = its footprint minus the footprint of the level above (top level: all of it), parapet + coping on the
+  open edges only — a smaller upper level leaves a terrace roof below. Voids cut the upper floor finish and the
+  ceiling below and get a guard rail (mesh `railing`, 1.05 m, posts + top / mid / bottom rail, 5 cm onto the floor;
+  the edge a `void.stair`'s walking direction (`stair.up` 'n'|'s'|'e'|'w', else `rot`) arrives at stays open; no stair
+  → all round). Plinth / ground contact: L0 only. Upper-level wall ids contain `|` — mesh names use room ids only.
+* **House API** (internal, additive): `rebuildPlan(e?)` (L0 on its own edits, an upper level when its arrays / heights /
+  voids changed or `e.levelId` names it, a level's roof alone when only the footprint above moved; no `e` = all),
+  `setLevel(id)`, `setWholeHouse(bool)`, `viewLevel()`, `levels()` → `[{ id, y, wallTop, top, visible }]` (m),
+  `levelOfObject(obj)`. The daylight hooks (`setDaylight`, `forEachInterior`, `setFakeShading`) act on L0 only.
+* **View** (`createView3D`): follows `store.ui.level` — levels above it are hidden with their items (with the sun study on,
+  shadow-only stand-ins of them keep blocking the sun), the shown level follows the roof / cut-away controls, levels
+  below are complete. `view3d.setWholeHouse(bool)` / `getWholeHouse()` (event `'whole-house' { on }`): every level, the
+  top one following roof / cut-away; turning it on also turns the roof on. A pill at the top centre of the 3D view
+  ("First floor · Show whole house") appears only for plans with levels (orbit mode). Walk mode shows every level.
+  `debug.levels()` → `{ list, shown, view, whole, walk }`.
+* **Items**: `Y += elevation` of `item.level` (a carpentry unit without `level`: its run's `level`); picking, drag and
+  drop land on the floor of the level under the pointer (empty space → the shown level's floor), a dragged item stays
+  on its level, a new item gets `level` (absent for L0) and an upper level's ceiling for ceiling placement; the
+  project's ceiling height (L0's) no longer moves ceiling items of upper levels. Carpentry: section-cut walls and the
+  hidden corridor come from the run's level.
+* **Walk**: starts on the shown level (`walk.start({ level })`; an upper level: the middle of its largest room) and
+  stays there — floor height = the level's elevation (eye 1.65 m above it), walls and furniture of that level only.
+  `'walk-position'` carries `level` when it is not L0. Stairs: stage F5.
+* **Lighting of upper levels in this stage** (the solver is L0-only until F6): while an upper level is shown (not the
+  whole house) or walked, the daylight display is suppressed (`suppress`), i.e. the standard "realistic daylight off"
+  lighting: sun with shadows, sky fill, the interior fill lights of the walker's / camera's level (environment anchors
+  per level), and the baked contact-shading strips, which upper levels always keep. Furniture above the ground-floor
+  ceiling never reads the L0 probe field (`dlFieldBox.w` = the top of the solve; 0 = no limit, one-level plans), lamps
+  up there are lit by the real-time lamp pool, and upper-level items are not solver occluders. An edit on an upper level
+  does not re-solve the ground floor. Shadow box and sun-study casters cover the full height.
+* Camera presets and the target clamp use the total height; a room preset of an upper level frames that floor.
+* Tests: `node tests/levels-3d.test.mjs` (headless: Duplex stacking, slab / void / roof / terrace / railing, items,
+  walk, rebuild rules, disposal, House 98 mesh hashes vs `tests/fixtures/house98-mesh-hashes.json`, performance);
+  `node tests/levels-3d.e2e.mjs [--shots]` (browser, `?levels=1`).
+
 #### 3D lighting: sky, lamps, furniture (additive)
 * `store.ui.daylightSky: 'clear' | 'overcast'` — read by `environment.js` (`env.setSky(type)`: overcast = no direct sun, grey
   dome, sky fill scaled by the overcast / clear diffuse ratio, +0.7 EV) and by the daylight solver (CIE overcast sky, no sun).
@@ -427,6 +466,34 @@ updateLevel(id, { name, nameHe, heights: { ceiling, slab, parapet } })   // not 
   re-run restores the person's own active level.
 * `meta.floors` is not kept in step by the editing calls (meta is not part of the plan state) — count `levelIds(PLAN)`.
 * Tests: `node tests/levels.test.mjs`; the collaboration case is in `tests/collab.test.mjs`.
+
+### Levels in the 2D plan and the UI (stage F2, additive; entry points only while `FEATURES.levels` is on — `?levels=1`)
+* **The 2D view shows one level, `store.ui.level`.** Inside `src/view2d/` `env.plan` is a getter = `levelPlan(PLAN, ui.level)`
+  (PLAN itself on L0) — never keep it, read it at use. Every layer, snapping, hit-testing, structure tools and overlay,
+  measuring, dimensions, room labels, "fit house" and `exportPNG()` (the level shown; `exportPNG({ ghost: true })` adds the
+  ghost) work on it. `env.level`, `env.rootPlan` (= PLAN), `env.shown(item)` (not hidden and on the level shown).
+* **Items** are drawn, picked, snapped to, box-selected and "select all"-ed only on their level (`item.level`, absent = L0).
+  A new item placed in the plan (click, catalogue drop, `actions.place` fallback) gets `level: ui.level` — no key on L0.
+  Duplicates keep their level. `src/view2d/levels.js` (pure): `itemLevel`, `isOnLevel`, `itemsOnLevel`, `isShownOn`,
+  `levelPatch`, `levelBelow`, `levelAbove`, `ghostOf(plan, id)`, `selectionOnLevel`, `structureSelOn`, `showsGhost`.
+* **Site** (street, garden, parking, lot lines, labels) is drawn on L0 only; an upper level keeps a faint dashed lot line.
+  **Ghost** (`ui.ghostBelow`, default true): on an upper level the walls / outline / openings of the level below at
+  25 %, under the level shown, never pickable, not exported unless asked. Toggle: "Floor below, faintly" in the
+  plan-display toggles / menu.
+* **Switching** (`store.setUI({ level })`): the view cancels a gesture / placement / measurement / wall being drawn and
+  keeps the camera; `src/ui/levels.js` (`app.levels`) drops selections, `structureSel` and `activeSpace` that are not on
+  the new level. PageUp / PageDown = floor above / below. `actions.undo / redo` go to the floor an undo changed
+  (`historySignature` + `changedLevels`, pure, exported). Junction test: `seg.id.includes('seg:j:')` (ids are prefixed
+  on upper levels).
+* **UI.** `app.levels`: `current()`, `ids()`, `set(id)`, `step(±1)`, `name(id)`, `menuItems()`, `switcher()` (top bar,
+  beside the view switch; in the mode menu on phones ≤ 429 px), `openAdd()`, `openRename(id)`, `openHeights(id)`,
+  `remove(id)` (in-app dialog: move the items to the floor below / delete them with the floor / cancel — one undo step),
+  `moveItemsTo(ids, id)` / `openMoveMenu(anchor, ids)` (Inspector "Move to floor…"), `statusText()`, `onChange(fn)`.
+  `viewPlan(app)` = the level shown. The changes list groups `planDiff()` entries by `levelId`; the Rooms tab lists
+  the rooms of the floor shown ("All floors" for every floor).
+* **Presence** gains `level` (absent = L0); other people's pointers, selections and soft-lock tags are drawn only on
+  the floor they are on.
+* Tests: `node tests/levels-2d.test.mjs`, `node tests/e2e.levels.mjs [--shots]`.
 
 ### Notes for the view / UI teams
 * New opening kind `'opening'` (style `'open'`): draw it as a clear gap with jambs — no leaf, no swing arc; it is
@@ -1392,7 +1459,8 @@ Identity (`email`, `role`) comes from the server (Cloudflare Access header `Cf-A
 sent by a client is ignored.
 
 ### Presence (never stored, ≤ 15 messages / s per person, the client sends at most every 67 ms)
-`p = { pointer: { x, y } | null, sel: itemIds, mode, room, lock: entityKey | null }`. Shown: initials + colour in the
+`p = { pointer: { x, y } | null, sel: itemIds, mode, room, lock: entityKey | null, level? }` (`level`: the floor the person
+is looking at, absent = the ground floor — stage F2). Shown: initials + colour in the
 top bar (list on click), named pointers in the 2D plan, others' selections outlined in their colour (2D, 3D), their
 mode / room. **Soft lock**: while someone drags an item or edits a wall their presence holds `lock`; the others see
 "being edited by …" and cannot grab it until it is released or 5 s pass without a presence message from them.

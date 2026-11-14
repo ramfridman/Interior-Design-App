@@ -4,11 +4,13 @@
  * owner changed in the architect's plan. Rooms are re-read on every 'plan' event: a new wall can add a room (which
  * gets a name field and a type select), removing one merges two.
  */
-import { BASE_PLAN, updateRoom, isBuiltinBase } from '../core/plan-edit.js';
+import { BASE_PLAN, updateRoom, isBuiltinBase, levelPlan } from '../core/plan-edit.js';
+import { FEATURES } from '../core/features.js';
+import { GROUND, levelIds, levelName, upperLevels } from '../core/levels.js';
 import { floorAreaM2, wallAreaM2, resolveFinish } from '../core/finishes.js';
 import { h, setKids, debounce } from './dom.js';
 import { icon } from './icons.js';
-import { iconBtn, section, swatch } from './components.js';
+import { iconBtn, section, swatch, segmented } from './components.js';
 import { openPopover } from './dialogs.js';
 import { fmtArea, fmtPrice } from './format.js';
 import { drawFinishSwatch } from './thumbs.js';
@@ -18,12 +20,25 @@ const WALL_PAINTS = ['#ffffff', '#f4f1ea', '#ece7dc', '#e3e6e1', '#d9dedb', '#e8
 /** What a room the owner created can be. `wet` rooms get tiled walls by default. */
 const ROOM_TYPES = [['bedroom', 'Bedroom'], ['living', 'Living space'], ['bathroom', 'Bathroom'], ['wc', 'WC'], ['service', 'Service room'], ['office', 'Office'], ['kitchen', 'Kitchen'], ['mamad', 'Safe room (mamad)']];
 const WET_TYPES = ['bathroom', 'wc', 'service'];
-const baseRoom = (id) => BASE_PLAN.rooms.find((r) => r.id === id) || null;
+/** The room of the base plan with this id, on any floor (room ids are unique across floors). */
+const baseRoom = (id) => {
+  const r = BASE_PLAN.rooms.find((x) => x.id === id);
+  if (r || !upperLevels(BASE_PLAN).length) return r || null;
+  for (const lid of levelIds(BASE_PLAN).slice(1)) { const v = levelPlan(BASE_PLAN, lid); const hit = v && v.rooms.find((x) => x.id === id); if (hit) return hit; }
+  return null;
+};
 
 /** @param {HTMLElement} root  @param {object} app */
 export function initRooms(root, app) {
-  const { store, plan, catalog, actions } = app;
+  const { store, catalog, actions } = app;
+  const plan0 = app.plan;
   let active = false, dirty = true, activeChanged = true, inStructure = app.structure.isActive();
+  // several floors: the rooms of the floor shown, or of every floor
+  let allFloors = false;
+  const viewOf = (id) => (!id || id === GROUND ? plan0 : levelPlan(plan0, id) || plan0);
+  const multi = () => FEATURES.levels && upperLevels(plan0).length > 0;
+  const floorPick = segmented({ options: [{ value: 'one', label: 'This floor' }, { value: 'all', label: 'All floors' }], value: 'one', label: 'Rooms of', cls: 'seg--mini',
+    onChange: (v) => { allFloors = v === 'all'; render(); } });
 
   const list = h('div', { class: 'rooms' });
   const paint = h('div', { class: 'swatches' });
@@ -37,7 +52,7 @@ export function initRooms(root, app) {
     return c;
   }
 
-  function finishButton(space, kind) {
+  function finishButton(space, kind, plan = plan0) {
     const type = kind === 'floor' ? 'floor-finish' : 'wall-finish';
     let resolved = { params: {}, product: null };
     try { resolved = resolveFinish(space.id, kind, store, catalog); } catch (err) { /* keep the default */ }
@@ -84,7 +99,10 @@ export function initRooms(root, app) {
     return { name, type, error };
   }
 
-  function card(space, indoor) {
+  function card(space, indoor, levelId = GROUND) {
+    const plan = viewOf(levelId);
+    // a room on another floor than the one shown: show that floor first
+    const onFloor = (fn) => () => { if (levelId !== (store.ui.level || GROUND) && app.levels) app.levels.set(levelId); fn(); };
     const isActive = store.ui.activeSpace === space.id;
     const area = floorAreaM2(space);
     const base = indoor ? baseRoom(space.id) : null;
@@ -103,9 +121,9 @@ export function initRooms(root, app) {
       edit ? h('div', { class: 'room__newrow' }, isNew ? h('span', { class: 'tag tag--new' }, 'New room') : null, edit.type,
         isActive ? null : h('button', { type: 'button', class: 'room__activate', onClick: () => store.setUI({ activeSpace: space.id }) }, 'Make active')) : null,
       edit ? edit.error : null,
-      h('div', { class: 'room__finishes' }, finishButton(space, 'floor'), indoor ? finishButton(space, 'wall') : null),
+      h('div', { class: 'room__finishes' }, finishButton(space, 'floor', plan), indoor ? finishButton(space, 'wall', plan) : null),
       h('div', { class: 'room__actions' },
-        iconBtn('plan', 'Show in plan', { onClick: () => actions.focusSpace(space.id, { view: '2d' }) }),
+        iconBtn('plan', 'Show in plan', { onClick: onFloor(() => actions.focusSpace(space.id, { view: '2d' })) }),
         iconBtn('cube', 'Look in 3D', { onClick: () => actions.focusSpace(space.id, { view: '3d' }) }),
         iconBtn('walk', 'Walk here', { onClick: () => actions.walkTo(space.id) })));
   }
@@ -118,7 +136,17 @@ export function initRooms(root, app) {
     const current = (store.project.wallColor || '').toLowerCase();
     const custom = h('input', { type: 'color', class: 'swatch swatch--custom', value: /^#[0-9a-f]{6}$/i.test(current) ? current : '#f4f1ea', 'aria-label': 'Custom wall colour', 'data-tip': 'Custom colour', onChange: () => store.setProject({ wallColor: custom.value }) });
     setKids(paint, WALL_PAINTS.map((c) => swatch(c, { selected: current === c, onClick: () => store.setProject({ wallColor: c }) })), custom);
-    setKids(list,
+    const plan = plan0;
+    if (multi()) {
+      // one section per floor: the floor shown, or every floor (top floor last, like the switcher's list reversed)
+      const cur = store.ui.level || GROUND, floors = allFloors ? levelIds(plan0) : [cur];
+      floorPick.set(allFloors ? 'all' : 'one');
+      setKids(list,
+        h('div', { class: 'rooms__floors' }, h('span', { class: 'sec__note' }, allFloors ? 'Every floor' : levelName(plan0, cur)), floorPick),
+        floors.map((id) => { const v = viewOf(id); return section(`Rooms · ${levelName(plan0, id)}`, { aside: h('span', { class: 'sec__note num' }, fmtArea(v.rooms.reduce((s, r) => s + floorAreaM2(r), 0))) },
+          v.rooms.length ? v.rooms.map((r) => card(r, true, id)) : h('p', { class: 'sec__empty' }, 'No rooms yet: draw walls on this floor with the Structure tools.')); }),
+        floors.includes(GROUND) && (plan.outdoorAreas || []).length ? section('Outdoor areas', plan.outdoorAreas.map((r) => card(r, false))) : null);
+    } else setKids(list,
       section('Rooms', { aside: h('span', { class: 'sec__note num' }, fmtArea(plan.rooms.reduce((s, r) => s + floorAreaM2(r), 0))) }, plan.rooms.map((r) => card(r, true))),
       (plan.outdoorAreas || []).length ? section('Outdoor areas', plan.outdoorAreas.map((r) => card(r, false))) : null);
     if (key) { root.querySelector(`[data-fk="${key}"]`)?.focus({ preventScroll: true }); return; }
@@ -132,6 +160,7 @@ export function initRooms(root, app) {
   store.on('project', invalidate);
   store.on('ui', (e) => {
     if (e.keys.includes('activeSpace')) { activeChanged = true; invalidate(); }
+    else if (e.keys.includes('level')) invalidate();
     else if (e.keys.includes('tool') && app.structure.isActive() !== inStructure) { inStructure = !inStructure; invalidate(); }   // the changes section offers "Change walls" only outside Structure
   });
   store.on('plan', (e) => { if (!e || !e.transient) invalidate(); });

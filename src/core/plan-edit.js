@@ -27,6 +27,8 @@ import { PLAN } from './plan.js';
 import { pointInPolygon, polygonArea, invalidatePlanCaches } from './geometry.js';
 import { OPTIONAL_KEYS, optionalKeysProblem, optionalPart, setOptionalKeys, normalizeOptionalKeys } from './plan-schema.js';
 import { GROUND, upperLevels, levelOf, levelIndex, nextLevelId, recomputeElevations, levelName, footprintOf } from './levels.js';
+import { faces as polyFaces, intersectArea, netArea, union as polyUnion, slitJoin } from './polykernel.js';
+import { isAngledOpening, hasSlants, slantLevel, checkAngledOpenings, spaceLocator, labelCells, outlineEdges, slantSolids, quadOfOpening, denoiseFaces } from './slants.js';
 
 /** Plan keys written only when needed (schema 2: angled walls, several levels — see plan-schema.js). Never on House 98. */
 export { OPTIONAL_KEYS };
@@ -49,6 +51,8 @@ export const REASONS = Object.freeze({
   permit: 'Changing an exterior opening requires a building-permit amendment.',
   thick: (t) => `This ${t} cm wall may be structural — confirm with your structural engineer before changing it.`,
   level: 'Adding or removing a floor, or changing its height, changes the building — it requires a building permit.',
+  angledWalls: 'This floor has angled walls: its walls cannot be drawn, moved or removed here yet. Doors and windows in its straight walls, and room names, can be changed.',
+  angledOpening: 'Doors and windows in angled walls cannot be added, moved or re-hung here yet — they can be removed.',
 });
 
 const OPENING_KINDS = {
@@ -118,17 +122,32 @@ const isJunction = (s) => s.id.includes('seg:j:');
  */
 function makeEnv(base, ph) {
   const draft = ph === 'draft';
-  return { draft, solids: [...base.walls, ...base.openings], mamad: draft ? NO_MAMAD : mamadOf(base), outdoorAreas: base.outdoorAreas || [], baseWalls: base.walls };
+  const env = { draft, solids: [...base.walls, ...rectOpenings(base.openings)], mamad: draft ? NO_MAMAD : mamadOf(base), outdoorAreas: base.outdoorAreas || [], baseWalls: base.walls };
+  if (!draft && hasSlants(base)) env.slantSolids = baseSlantSolids(base.slants, env.solids, base.openings);
+  return env;
+}
+/** Rect openings of a list (openings in slants, axis 'a', have no gap rectangle). */
+function rectOpenings(list) { for (const o of list) if (o.axis === 'a') return list.filter((x) => x.axis !== 'a'); return list; }
+/** Footprints of a base level's slants and their openings' gaps (for "is this angled wall new?"). */
+function baseSlantSolids(slants, rects, openings) {
+  const lv = slantLevel(slants, rects), { polys, quads } = slantSolids(lv, openings);
+  return [...polys, ...quads];
 }
 let phase = 'fixed';
 let ENV = makeEnv(BASE_PLAN, phase);
 const inMamad = (r) => ENV.mamad.rects.some((s) => overlapArea(r, s) > 0);
+/** Is an opening (rect, or in a slant: its gap quad) inside the safe-room shell? */
+function inMamadOpening(o) {
+  if (!isAngledOpening(o)) return inMamad(o);
+  const q = ENV.mamad.rects.length ? quadOfOpening(o) : null;
+  return !!q && intersectArea(q, ENV.mamad.rects) > 1;
+}
 
 const outdoorAt = (x, y) => { for (const o of ENV.outdoorAreas) if (pointInPolygon(x, y, o.polygon)) return o.id; return 'outside'; };
 const isOutdoorId = (id) => id === 'outside' || ENV.outdoorAreas.some((o) => o.id === id);
 
 // ---------------------------------------------------------------- grid model
-const FREE = 0, WALL = 1, GAP = 2;        // cell states
+const FREE = 0, WALL = 1, GAP = 2, SLANT = 3;   // cell states (SLANT: under an angled wall — mixed derive only)
 const T_H = 1, T_V = 2, T_J = 3;          // bar orientation of a solid cell
 
 function buildModel(solids, openings, extraX = [], extraY = []) {
@@ -199,7 +218,7 @@ function computeCores(m) {
   const claim = (c) => { for (let j = c.j0; j < c.j1; j++) for (let i = c.i0; i < c.i1; i++) core0[j * nx + i] = cores.length; cores.push(c); };
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
     const k = j * nx + i;
-    if (core0[k] >= 0 || !cell[k] || type[k] === T_J) continue;
+    if (core0[k] >= 0 || !cell[k] || type[k] === T_J || !type[k]) continue;   // !type: a SLANT cell (never a bar)
     if (type[k] === T_V) {
       let i0 = hA[k], i1 = hB[k], whole = true;
       for (let t = i0; t < i1; t++) if (type[j * nx + t] !== T_V || core0[j * nx + t] >= 0) whole = false;
@@ -399,6 +418,9 @@ function roomPolygon(m, comp, cid, cells) {
   return poly;
 }
 
+/** Distance from (x, y) to a polygon (0 inside). */
+const polyDist = (x, y, poly) => Math.max(0, -distToPolygon(x, y, poly));
+
 function distToPolygon(x, y, poly) {
   let best = Infinity;
   for (let i = 0; i < poly.length; i++) {
@@ -449,11 +471,7 @@ function buildRooms(m, prevRooms) {
     }
     comps.push({ cells, overlap: new Map(), area: 0 });
   }
-  const prev = prevRooms.map((r) => {
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const [x, y] of r.polygon) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
-    return { room: r, x0, y0, x1, y1, best: -1, bestArea: 0 };
-  });
+  const prev = prevBoxes(prevRooms);
   for (const c of comps) for (const k of c.cells) { const i = k % nx, j = (k - i) / nx; c.area += (xs[i + 1] - xs[i]) * (ys[j + 1] - ys[j]); }
   // overlap of every component with every previous room, exact for rectilinear rooms: each grid row is cut into bands at
   // the room's own vertex heights, and each band's cross-section is intersected with the cells (a coarse grid — few
@@ -483,6 +501,23 @@ function buildRooms(m, prevRooms) {
       }
     }
   }
+  const { rooms, roomOf } = matchRooms(comps, prev, prevRooms, (cid, c) => roomPolygon(m, comp, cid, c.cells));
+  return { rooms, comp, roomOf };
+}
+
+/** Bounds of the previous rooms (matching state per room). */
+const prevBoxes = (prevRooms) => prevRooms.map((r) => {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of r.polygon) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  return { room: r, x0, y0, x1, y1, best: -1, bestArea: 0 };
+});
+
+/**
+ * Rooms for the found components (grid components or polygon faces): `comps[cid].overlap` = Map(previous room index →
+ * overlap area); ids / names / labels / zones follow the previous rooms (ties → the room listed first; a split leaves
+ * the id on the larger overlap; new rooms 'room-<n>', ids global across levels). `polygonOf(cid, comp)` → its polygon.
+ */
+function matchRooms(comps, prev, prevRooms, polygonOf) {
   comps.forEach((c, cid) => { for (const [p, a] of c.overlap) if (a > prev[p].bestArea) { prev[p].bestArea = a; prev[p].best = cid; } });
   const zones = prevRooms.flatMap((r) => r.zones || []);
   const taken = new Set(prevRooms.map((r) => r.id));
@@ -498,7 +533,7 @@ function buildRooms(m, prevRooms) {
       if (prev[p].best === cid && (winner < 0 || a > c.overlap.get(winner))) winner = p;
     }
     let src = winner >= 0 ? prev[winner].room : null;
-    let polygon = roomPolygon(m, comp, cid, c.cells);
+    let polygon = polygonOf(cid, c);
     if (src && reserved && reserved.has(src.id)) {                      // its id is another level's: same room, new id
       room = { ...src, id: null, polygon, label: interiorPoint(polygon) };
       fresh.push(room); roomOf[cid] = room;
@@ -522,68 +557,218 @@ function buildRooms(m, prevRooms) {
   });
   fresh.sort((a, b) => a.polygon[0][1] - b.polygon[0][1] || a.polygon[0][0] - b.polygon[0][0]);
   for (const r of fresh) { let n = 1; while (taken.has('room-' + n)) n++; r.id = 'room-' + n; taken.add(r.id); }
-  return { rooms: [...kept.filter(Boolean), ...fresh], comp, roomOf };
+  return { rooms: [...kept.filter(Boolean), ...fresh], roomOf };
 }
 
 // ---------------------------------------------------------------- derive: everything that follows from walls + openings
 /**
- * @param solids   rectangles of wall material INCLUDING the openings in them
+ * @param solids   rectangles of wall material INCLUDING the (rect) openings in them
  * @param openings opening objects (stamped on top of the solids)
+ * @param slants   the level's angled walls (none / empty: the grid engine alone — today's code path, byte for byte)
  * @returns {{ walls, openings, rooms, wallOutline, segments, problems, narrow, m }}
  */
-function derive(solids, openings, prevRooms, prevWalls) {
+function derive(solids, openings, prevRooms, prevWalls, slants) {
+  if ((slants && slants.length) || openings.some(isAngledOpening)) return deriveMixed(solids, openings, prevRooms, prevWalls, slants || []);
   const m = buildModel(solids, openings);
   floodOutdoor(m); computeTypes(m); computeCores(m);
-  const { nx, cell, out, xs, ys, cores, core0, type } = m;
+  const { nx, cell, out, xs, ys, cores } = m;
   const { rooms, comp, roomOf } = buildRooms(m, prevRooms);
   const spaceOf = (i, j) => { const k = j * nx + i; if (cell[k]) return null; return out[k] ? outdoorAt((xs[i] + xs[i + 1]) / 2, (ys[j] + ys[j + 1]) / 2) : roomOf[comp[k]].id; };
-
   const problems = m.overlaps.map((id) => ({ id, type: 'overlap' }));
-  const nextOpenings = openings.map((o) => {
-    const [i0, i1, j0, j1] = span(m, o), horizontal = o.axis === 'h';
-    const c = cores[core0[j0 * nx + i0]];
-    let ok = !!c && !c.junction && c.axis === o.axis && (horizontal ? j0 === c.j0 && j1 === c.j1 : i0 === c.i0 && i1 === c.i1);
-    for (let j = j0; ok && j < j1; j++) for (let i = i0; i < i1; i++) if (type[j * nx + i] === T_J || cores[core0[j * nx + i]] !== c) ok = false;
-    if (ok) {
-      // MIN_JAMB of solid wall of the same core on both sides
-      const wallAt = (a) => { for (let t = horizontal ? j0 : i0; t < (horizontal ? j1 : i1); t++) { const k = horizontal ? t * nx + a : a * nx + t; if (cell[k] !== WALL || cores[core0[k]] !== c) return false; } return true; };
-      const A = horizontal ? xs : ys, s = horizontal ? i0 : j0, e = horizontal ? i1 : j1;
-      let a = s; while (a > 0 && wallAt(a - 1) && A[s] - A[a] < MIN_JAMB) a--;
-      let b = e; while (b < A.length - 1 && wallAt(b) && A[b] - A[e] < MIN_JAMB) b++;
-      if (A[s] - A[a] < MIN_JAMB || A[b] - A[e] < MIN_JAMB) ok = false;
-    }
-    if (!ok) { problems.push({ id: o.id, type: 'jamb' }); return o; }
-    const im = (i0 + i1) >> 1, jm = (j0 + j1) >> 1;
-    const lo = horizontal ? spaceOf(im, j0 - 1) : spaceOf(i0 - 1, jm), hi = horizontal ? spaceOf(im, j1) : spaceOf(i1, jm);
-    if (lo == null || hi == null) { problems.push({ id: o.id, type: 'blocked' }); return o; }
-    const loOut = isOutdoorId(lo), hiOut = isOutdoorId(hi), exterior = loOut || hiOut;
-    const outside = exterior ? (horizontal ? (loOut ? 'n' : 's') : (loOut ? 'w' : 'e')) : undefined;
-    const pair = loOut && !hiOut ? [hi, lo] : [lo, hi];
-    const norm = (list) => (list || []).map((id) => (isOutdoorId(id) ? '~' : id)).sort().join('|');
-    const sameRooms = norm(o.rooms) === norm(pair) && (o.rooms || []).length === 2;
-    if (sameRooms && !!o.exterior === exterior && o.outside === outside) return o;
-    const next = { ...o, rooms: sameRooms ? o.rooms : pair };
-    if (exterior) { next.exterior = true; next.outside = outside; } else { delete next.exterior; delete next.outside; }
-    return next;
-  });
-
-  const segments = cores.map((c) => {
-    const tile = cellRect(m, c.t.i0, c.t.i1, c.t.j0, c.t.j1), v = c.axis === 'v';
-    const jm = (c.j0 + c.j1) >> 1, im = (c.i0 + c.i1) >> 1;
-    return {
-      id: (ENV.pre || '') + (c.junction ? `seg:j:${c.x}:${c.y}` : v ? `seg:v:${c.x}:${c.y}:${c.y + c.h}` : `seg:h:${c.y}:${c.x}:${c.x + c.w}`),
-      axis: c.axis, ...tile, thickness: c.thickness, length: v ? tile.h : tile.w, cls: c.cls,
-      policy: ENV.draft ? { level: 'free', reason: '' } : c.cls === 'mamad' ? { level: 'locked', reason: REASONS.mamad } : c.cls === 'exterior' ? { level: 'locked', reason: REASONS.exteriorWall }
-        : c.cls === 'thick' ? { level: 'warn', reason: REASONS.thick(c.thickness) } : { level: 'free', reason: '' },
-      openingIds: nextOpenings.filter((o) => overlapArea(o, tile) > 0).map((o) => o.id),
-      isNew: c.isNew,
-      core: { x: c.x, y: c.y, w: c.w, h: c.h },
-      between: v ? [spaceOf(c.i0 - 1, jm), spaceOf(c.i1, jm)] : [spaceOf(im, c.j0 - 1), spaceOf(im, c.j1)],
-      freeEnds: [c.freeA, c.freeB],
-    };
-  });
+  const nextOpenings = openings.map((o) => rectOpeningSides(m, o, spaceOf, problems));
+  const segments = cores.map((c) => rectSegment(m, c, spaceOf, nextOpenings));
   return { walls: buildWalls(m, prevWalls), openings: nextOpenings, rooms, wallOutline: buildOutline(m), segments, problems, narrow: narrowArea(m), m };
 }
+
+/** An opening in a rect wall checked against the grid (jambs, one core) and given its rooms / exterior / outside. */
+function rectOpeningSides(m, o, spaceOf, problems) {
+  const { nx, cell, xs, ys, cores, core0, type } = m;
+  const [i0, i1, j0, j1] = span(m, o), horizontal = o.axis === 'h';
+  const c = cores[core0[j0 * nx + i0]];
+  let ok = !!c && !c.junction && c.axis === o.axis && (horizontal ? j0 === c.j0 && j1 === c.j1 : i0 === c.i0 && i1 === c.i1);
+  for (let j = j0; ok && j < j1; j++) for (let i = i0; i < i1; i++) if (type[j * nx + i] === T_J || cores[core0[j * nx + i]] !== c) ok = false;
+  if (ok) {
+    // MIN_JAMB of solid wall of the same core on both sides
+    const wallAt = (a) => { for (let t = horizontal ? j0 : i0; t < (horizontal ? j1 : i1); t++) { const k = horizontal ? t * nx + a : a * nx + t; if (cell[k] !== WALL || cores[core0[k]] !== c) return false; } return true; };
+    const A = horizontal ? xs : ys, s = horizontal ? i0 : j0, e = horizontal ? i1 : j1;
+    let a = s; while (a > 0 && wallAt(a - 1) && A[s] - A[a] < MIN_JAMB) a--;
+    let b = e; while (b < A.length - 1 && wallAt(b) && A[b] - A[e] < MIN_JAMB) b++;
+    if (A[s] - A[a] < MIN_JAMB || A[b] - A[e] < MIN_JAMB) ok = false;
+  }
+  if (!ok) { problems.push({ id: o.id, type: 'jamb' }); return o; }
+  const im = (i0 + i1) >> 1, jm = (j0 + j1) >> 1;
+  const lo = horizontal ? spaceOf(im, j0 - 1) : spaceOf(i0 - 1, jm), hi = horizontal ? spaceOf(im, j1) : spaceOf(i1, jm);
+  if (lo == null || hi == null) { problems.push({ id: o.id, type: 'blocked' }); return o; }
+  const outside = sidesOut(lo, hi) ? (horizontal ? (isOutdoorId(lo) ? 'n' : 's') : (isOutdoorId(lo) ? 'w' : 'e')) : undefined;
+  return withSides(o, lo, hi, outside);
+}
+const sidesOut = (lo, hi) => isOutdoorId(lo) || isOutdoorId(hi);
+/** `o` with rooms [indoor side first] / exterior / outside (the same object when nothing changed). `extra` = derived fields. */
+function withSides(o, lo, hi, outside, extra) {
+  const loOut = isOutdoorId(lo), hiOut = isOutdoorId(hi), exterior = loOut || hiOut;
+  const pair = loOut && !hiOut ? [hi, lo] : [lo, hi];
+  const norm = (list) => (list || []).map((id) => (isOutdoorId(id) ? '~' : id)).sort().join('|');
+  const sameRooms = norm(o.rooms) === norm(pair) && (o.rooms || []).length === 2;
+  const sameExtra = !extra || Object.keys(extra).every((k) => o[k] === extra[k]);
+  if (sameRooms && !!o.exterior === exterior && o.outside === outside && sameExtra) return o;
+  const next = { ...o, ...(extra || {}), rooms: sameRooms ? o.rooms : pair };
+  if (exterior) { next.exterior = true; next.outside = outside; } else { delete next.exterior; delete next.outside; }
+  return next;
+}
+
+/** Policy of a wall of class `cls` and thickness `t` (see CONTRACT § 7 "Classification and policy"). */
+const wallPolicy = (cls, t) => (ENV.draft ? { level: 'free', reason: '' } : cls === 'mamad' ? { level: 'locked', reason: REASONS.mamad } : cls === 'exterior' ? { level: 'locked', reason: REASONS.exteriorWall }
+  : cls === 'thick' ? { level: 'warn', reason: REASONS.thick(t) } : { level: 'free', reason: '' });
+
+/** The selectable segment of a grid core. */
+function rectSegment(m, c, spaceOf, openings) {
+  const tile = cellRect(m, c.t.i0, c.t.i1, c.t.j0, c.t.j1), v = c.axis === 'v';
+  const jm = (c.j0 + c.j1) >> 1, im = (c.i0 + c.i1) >> 1;
+  return {
+    id: (ENV.pre || '') + (c.junction ? `seg:j:${c.x}:${c.y}` : v ? `seg:v:${c.x}:${c.y}:${c.y + c.h}` : `seg:h:${c.y}:${c.x}:${c.x + c.w}`),
+    axis: c.axis, ...tile, thickness: c.thickness, length: v ? tile.h : tile.w, cls: c.cls,
+    policy: wallPolicy(c.cls, c.thickness),
+    openingIds: openings.filter((o) => overlapArea(o, tile) > 0).map((o) => o.id),
+    isNew: c.isNew,
+    core: { x: c.x, y: c.y, w: c.w, h: c.h },
+    between: v ? [spaceOf(c.i0 - 1, jm), spaceOf(c.i1, jm)] : [spaceOf(im, c.j0 - 1), spaceOf(im, c.j1)],
+    freeEnds: [c.freeA, c.freeB],
+  };
+}
+
+// ---------------------------------------------------------------- mixed derive: a level with angled walls (stage A1)
+/*
+ * Taken only when the level has at least one slant (or an opening in one). The polygons are exact (polykernel):
+ *   solids  = wall rects ∪ rect openings ∪ joined slant footprints ∪ the gap quads of slant openings;
+ *   faces   of the complement inside the grid frame (bbox + 100 cm): the face touching the frame is outdoors, every
+ *           bounded face a room (openings are solid, so they separate rooms) — exact polygons and areas, matched to
+ *           the previous rooms by overlap area with the grid engine's rules (matchRooms);
+ *   rect walls keep the grid (cores, classes, jambs, ids); slant footprint vertices add grid lines and the free cells
+ *           under a slant become SLANT (neither free nor bar); outdoors / spaces of the cells come from the faces;
+ *   slants  one segment each ('seg:a:<id>'); classed from their faces (exterior if a face borders an outdoor face,
+ *           mamad if the footprint enters the safe-room shell, else thick / partition by t and "new");
+ *   outline = boundary of the wall material (union minus the openings' gaps), diagonal entries allowed.
+ */
+function deriveMixed(solids, openings, prevRooms, prevWalls, slants) {
+  const rectSolids = solids.filter((r) => !isAngledOpening(r)), rOpenings = rectOpenings(openings), aOpenings = openings.filter(isAngledOpening);
+  const L = slantLevel(slants, rectSolids);
+  const { polys, quads } = slantSolids(L, aOpenings);
+  const extraX = [], extraY = [];
+  for (const p of [...polys, ...quads]) for (const [x, y] of p) { extraX.push(x); extraY.push(y); }
+  const m = buildModel(rectSolids, rOpenings, extraX, extraY);
+  const { nx, ny, xs, ys } = m, n = nx * ny;
+  const F = denoiseFaces(polyFaces([...rectSolids, ...polys, ...quads], { x: xs[0], y: ys[0], w: xs[nx] - xs[0], h: ys[ny] - ys[0] }));
+  const locate = spaceLocator(F), label = labelCells(xs, ys, locate);
+  const out = new Uint8Array(n), flat = m.cell.slice();
+  for (let k = 0; k < n; k++) {
+    if (m.cell[k] !== FREE) continue;
+    if (label[k] === -2) { m.cell[k] = SLANT; continue; }      // the cell's centre is under an angled wall
+    if (label[k] === -1) out[k] = 1;
+  }
+  m.out = out;
+  { const cell = m.cell; m.cell = flat; computeTypes(m); m.cell = cell; }   // SLANT cells break bars like free cells …
+  computeCores(m);                                                           // … but are not free (joined wall ends)
+  const { cell, cores } = m;
+
+  // rooms: the bounded faces, matched to the previous rooms by exact overlap area
+  const prev = prevBoxes(prevRooms);
+  const comps = F.rooms.map((face) => {
+    const overlap = new Map(), b = boxOfRing(face.outer), polygon = slitJoin(face.outer, face.holes);
+    const same = prev.findIndex((q) => cyclicEqual(polygon, q.room.polygon));   // an unchanged room (rooms are disjoint)
+    if (same >= 0) overlap.set(same, face.area);
+    else prev.forEach((q, p) => {
+      if (q.x0 >= b.x + b.w || b.x >= q.x1 || q.y0 >= b.y + b.h || b.y >= q.y1) return;
+      const a = intersectArea([face], { polygon: q.room.polygon });
+      if (a > 0) overlap.set(p, a);
+    });
+    return { overlap, area: face.area, face, polygon };
+  });
+  const { rooms, roomOf } = matchRooms(comps, prev, prevRooms, (cid, c) => c.polygon);
+  const spaceAtFace = (id, x, y) => (id == null ? null : id === -1 ? outdoorAt(x, y) : roomOf[id].id);
+  const spaceOf = (i, j) => { const k = j * nx + i; if (cell[k]) return null; return spaceAtFace(label[k], (xs[i] + xs[i + 1]) / 2, (ys[j] + ys[j + 1]) / 2); };
+
+  const problems = m.overlaps.map((id) => ({ id, type: 'overlap' }));
+  const checks = checkAngledOpenings(aOpenings, L, MIN_JAMB);
+  const nextOpenings = openings.map((o) => {
+    if (!isAngledOpening(o)) return rectOpeningSides(m, o, spaceOf, problems);
+    const r = checks.get(o.id);
+    if (!r.ok) { problems.push({ id: o.id, type: r.type }); return o; }
+    const { g, geo } = r, f = g.f, d = f.hw + 1;
+    const side = (sg) => { for (const k of [0, -0.25, 0.25, -0.45, 0.45]) { const a = o.at + k * o.width, x = g.s.x1 + f.ux * a + sg * f.nx * d, y = g.s.y1 + f.uy * a + sg * f.ny * d, s = spaceAtFace(locate(x, y), x, y); if (s != null) return s; } return null; };
+    const lo = side(-1), hi = side(1);                       // 'l' face, 'r' face
+    if (lo == null || hi == null) { problems.push({ id: o.id, type: 'blocked' }); return o; }
+    const extra = { cx: geo.cx, cy: geo.cy, angle: geo.angle, t: geo.t, x: geo.x, y: geo.y, w: geo.w, h: geo.h };
+    return withSides(o, lo, hi, sidesOut(lo, hi) ? (isOutdoorId(lo) ? 'l' : 'r') : undefined, extra);
+  });
+
+  const rectOps = rectOpenings(nextOpenings);
+  const segments = cores.map((c) => {
+    const seg = rectSegment(m, c, spaceOf, rectOps);
+    if (seg.between[0] == null || seg.between[1] == null) seg.between = rectBetween(m, c, spaceOf, seg.between);
+    return seg;
+  });
+  for (const g of L.list) segments.push(slantSegment(g, locate, spaceAtFace, nextOpenings));
+
+  const wallOutline = outlineEdges([...rectSolids, ...polys], [...rOpenings, ...quads]);
+  return { walls: buildWalls(m, prevWalls), openings: nextOpenings, rooms, wallOutline, segments, problems, narrow: narrowArea(m), m, slantLevel: L };
+}
+const boxOfRing = (ring) => {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of ring) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+};
+/** Spaces on the two faces of a grid core whose middle neighbour is under a slant: the first free neighbour along it. */
+function rectBetween(m, c, spaceOf, was) {
+  const v = c.axis === 'v', res = was.slice();
+  for (let side = 0; side < 2; side++) {
+    if (res[side] != null) continue;
+    if (v) { const i = side ? c.i1 : c.i0 - 1; for (let j = c.j0; j < c.j1 && res[side] == null; j++) res[side] = spaceOf(i, j); } else { const j = side ? c.j1 : c.j0 - 1; for (let i = c.i0; i < c.i1 && res[side] == null; i++) res[side] = spaceOf(i, j); }
+  }
+  return res;
+}
+
+/** The segment of one slant: sides sampled along the free stretches of its faces (every ≤ 20 cm), classed, policy. */
+function slantSegment(g, locate, spaceAtFace, openings) {
+  const { s, f, poly, box } = g, d = f.hw + 1, between = [null, null];
+  let ext = false;
+  [['l', -1], ['r', 1]].forEach(([side, sg], k) => {
+    const count = new Map();
+    for (const [a0, a1] of g.faces[side]) {
+      const steps = Math.max(2, Math.ceil((a1 - a0) / 20));
+      for (let q = 0; q < steps; q++) {
+        const a = a0 + ((a1 - a0) * (q + 0.5)) / steps, x = s.x1 + f.ux * a + sg * f.nx * d, y = s.y1 + f.uy * a + sg * f.ny * d;
+        const id = locate(x, y);
+        if (id == null) continue;
+        if (id === -1) ext = true;
+        const sp = spaceAtFace(id, x, y);
+        count.set(sp, (count.get(sp) || 0) + 1);
+      }
+    }
+    let best = null, bn = 0;
+    for (const [sp, c] of count) if (c > bn) { best = sp; bn = c; }
+    between[k] = best;
+  });
+  const isNew = !ENV.draft && (() => {
+    const near = [...ENV.solids, ...(ENV.slantSolids || [])].filter((r) => (Array.isArray(r) ? overlapsBox(boxOfRing(r), box) : overlapArea(r, box) > 0));
+    return !near.length || intersectArea(poly, near) < 0.5 * netArea([poly]);
+  })();
+  const mamad = ENV.mamad.rects.length > 0 && intersectArea(poly, ENV.mamad.rects) > 1;
+  const cls = mamad ? 'mamad' : ext ? 'exterior' : f.t >= THICK && !isNew ? 'thick' : 'partition';
+  return {
+    id: (ENV.pre || '') + 'seg:a:' + s.id,
+    axis: 'a', slantId: s.id, x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, t: f.t, angle: f.angle,
+    x: box.x, y: box.y, w: box.w, h: box.h, poly,
+    thickness: f.t, length: f.len, cls, kind: KIND_OF[cls],
+    policy: wallPolicy(cls, f.t),
+    openingIds: openings.filter((o) => isAngledOpening(o) && o.wall === s.id).map((o) => o.id),
+    isNew,
+    core: { x: box.x, y: box.y, w: box.w, h: box.h },
+    between,
+    freeEnds: g.freeEnds.slice(),
+    faces: { l: g.faces.l.map((iv) => iv.slice()), r: g.faces.r.map((iv) => iv.slice()) },
+  };
+}
+const overlapsBox = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 // ---------------------------------------------------------------- live state
 let host = { record() {}, changed() {}, intent() {}, content() { return null; } };
@@ -612,14 +797,19 @@ function tracked(name, impl, args) {
   } finally { intentDepth--; }
 }
 
-const solidsOf = (plan) => [...plan.walls, ...plan.openings];
-const current = () => analysis || (analysis = derive(solidsOf(PLAN), PLAN.openings, PLAN.rooms, PLAN.walls));
+const solidsOf = (plan) => [...plan.walls, ...rectOpenings(plan.openings)];
+/** The angled walls of the level being edited (L0's, or the swapped-in level's). */
+const liveSlants = () => (swap ? swap.lv.slants : PLAN.slants);
+const current = () => analysis || (analysis = derive(solidsOf(PLAN), PLAN.openings, PLAN.rooms, PLAN.walls, liveSlants()));
 const analysisOf = (plan) => {
   if (plan === PLAN) return current();
   const lv = viewLevel.get(plan);
   if (lv) return levelState(lv).d;                                 // a level view (levelPlan): that level's policy
-  if (!foreign.has(plan.walls)) foreign.set(plan.walls, derive(solidsOf(plan), plan.openings, plan.rooms, plan.walls));
-  return foreign.get(plan.walls);
+  const hit = foreign.get(plan.walls);
+  if (hit && hit.slants === plan.slants) return hit.d;
+  const d = derive(solidsOf(plan), plan.openings, plan.rooms, plan.walls, plan.slants);
+  foreign.set(plan.walls, { slants: plan.slants, d });
+  return d;
 };
 
 // ---------------------------------------------------------------- levels (stage F1): per-level views, the active level
@@ -642,9 +832,9 @@ const viewHeights = new WeakMap(); // view → the plan heights its merged heigh
 function resetLevelCaches() { levelEnvs = new Map(); levelData = new WeakMap(); }
 
 /** derive() under another policy environment. */
-function deriveIn(env, solids, openings, prevRooms, prevWalls) {
+function deriveIn(env, solids, openings, prevRooms, prevWalls, slants) {
   const saved = ENV; ENV = env;
-  try { return derive(solids, openings, prevRooms, prevWalls); } finally { ENV = saved; }
+  try { return derive(solids, openings, prevRooms, prevWalls, slants); } finally { ENV = saved; }
 }
 /** L0's live arrays, also while a level is swapped in. */
 const liveL0 = () => (swap ? swap.saved : PLAN);
@@ -681,9 +871,10 @@ function levelEnv(id) {
   const draftEnv = { draft: true, solids: [], mamad: NO_MAMAD, outdoorAreas: [], baseWalls: [], level: id, pre };
   if (!base) env = draftEnv;
   else {
-    const bd = base.rooms && base.wallOutline ? base : deriveIn(draftEnv, [...base.walls, ...base.openings], base.openings, base.rooms || [], base.walls);
+    const bd = base.rooms && base.wallOutline ? base : deriveIn(draftEnv, [...base.walls, ...base.openings], base.openings, base.rooms || [], base.walls, base.slants);
     const draft = phase === 'draft';
-    env = { draft, solids: [...bd.walls, ...bd.openings], mamad: draft ? NO_MAMAD : mamadOf(bd), outdoorAreas: base.outdoorAreas || [], baseWalls: bd.walls, level: id, pre };
+    env = { draft, solids: [...bd.walls, ...rectOpenings(bd.openings)], mamad: draft ? NO_MAMAD : mamadOf(bd), outdoorAreas: base.outdoorAreas || [], baseWalls: bd.walls, level: id, pre };
+    if (!draft && hasSlants(base)) env.slantSolids = baseSlantSolids(base.slants, env.solids, bd.openings);
   }
   levelEnvs.set(id, env);
   return env;
@@ -693,7 +884,7 @@ function levelEnv(id) {
 function levelState(lv) {
   let st = levelData.get(lv);
   if (st) return st;
-  const d = deriveIn(levelEnv(lv.id), [...lv.walls, ...lv.openings], lv.openings, Array.isArray(lv.rooms) ? lv.rooms : [], lv.walls);
+  const d = deriveIn(levelEnv(lv.id), [...lv.walls, ...lv.openings], lv.openings, Array.isArray(lv.rooms) ? lv.rooms : [], lv.walls, lv.slants);
   st = { arrays: Array.isArray(lv.rooms) && Array.isArray(lv.wallOutline) ? lv : d, d };
   levelData.set(lv, st);
   return st;
@@ -787,6 +978,11 @@ function allOpeningIds() {
 const GEOMETRY_KEYS = ['kind', 'axis', 'x', 'y', 'w', 'h', 'width', 'height', 'sill'];
 const LOOK_KEYS = ['style', 'hinge', 'swing'];
 const sameOpening = (a, b, keys) => keys.every((k) => a[k] === b[k]);
+/** Openings in slants: their geometry is the wall + position along it (x, y, w, h are derived bounds). */
+const ANGLED_GEOMETRY_KEYS = ['kind', 'axis', 'wall', 'at', 'width', 'height', 'sill'];
+const sameGeometry = (a, b) => sameOpening(a, b, a.axis === 'a' || b.axis === 'a' ? ANGLED_GEOMETRY_KEYS : GEOMETRY_KEYS);
+/** Same centre line and thickness (a slant of a saved state vs a base slant). */
+const sameSlant = (a, b) => !!a && !!b && a.id === b.id && a.x1 === b.x1 && a.y1 === b.y1 && a.x2 === b.x2 && a.y2 === b.y2 && a.t === b.t;
 
 /** Do two wall lists cover exactly the same area? */
 function sameSolid(a, b) {
@@ -804,7 +1000,7 @@ function isArchitectPlan(d, opt = optionalPart(PLAN)) {
 /** Do derived walls / openings / rooms equal a base level's (same solids, openings, room names)? */
 function sameAsBase(d, base) {
   if (d.openings.length !== base.openings.length || d.rooms.length !== base.rooms.length) return false;
-  for (const b of base.openings) { const o = d.openings.find((x) => x.id === b.id); if (!o || !sameOpening(o, b, GEOMETRY_KEYS) || !sameOpening(o, b, LOOK_KEYS)) return false; }
+  for (const b of base.openings) { const o = d.openings.find((x) => x.id === b.id); if (!o || !sameGeometry(o, b) || !sameOpening(o, b, LOOK_KEYS)) return false; }
   for (const b of base.rooms) { const r = d.rooms.find((x) => x.id === b.id); if (!r || r.name !== b.name || r.type !== b.type || !!r.wet !== !!b.wet) return false; }
   return sameSolid(d.walls, base.walls);
 }
@@ -823,11 +1019,21 @@ export function wallBounds(walls, openings = []) {
   for (const r of [...walls, ...openings]) { x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y); x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h); }
   return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
 }
+/** Bounds of the rect walls / openings and the (free) footprints of the slants of some levels. */
+function angledBounds(levels) {
+  const boxes = [];
+  for (const l of levels) {
+    boxes.push(...l.walls, ...rectOpenings(l.openings));
+    for (const s of l.slants || []) { const hw = s.t / 2; boxes.push({ x: Math.min(s.x1, s.x2) - hw, y: Math.min(s.y1, s.y2) - hw, w: Math.abs(s.x2 - s.x1) + s.t, h: Math.abs(s.y2 - s.y1) + s.t }); }
+  }
+  return wallBounds(boxes);
+}
 /** While drafting, the house grows with the walls (of every level): PLAN.bounds follows them (a fixed plan keeps its base bounds). */
 function syncBounds() {
   if (!ENV.draft) { if (JSON.stringify(PLAN.bounds) !== JSON.stringify(BASE_PLAN.bounds)) PLAN.bounds = clone(BASE_PLAN.bounds); return; }
   const ups = upperLevels(PLAN);
-  const b = (ups.length ? wallBounds([...PLAN.walls, ...ups.flatMap((l) => l.walls)], [...PLAN.openings, ...ups.flatMap((l) => l.openings.filter((o) => o.axis !== 'a'))])
+  const angled = hasSlants(PLAN) || ups.some(hasSlants);
+  const b = (angled ? angledBounds([PLAN, ...ups]) : ups.length ? wallBounds([...PLAN.walls, ...ups.flatMap((l) => l.walls)], [...PLAN.openings, ...ups.flatMap((l) => l.openings.filter((o) => o.axis !== 'a'))])
     : wallBounds(PLAN.walls, PLAN.openings)) || BASE_PLAN.bounds;
   if (JSON.stringify(b) !== JSON.stringify(PLAN.bounds)) PLAN.bounds = clone(b);
 }
@@ -920,7 +1126,8 @@ export function planState() { return modified ? { walls: PLAN.walls, openings: P
 export function planStateKey() { return stateKey || (stateKey = JSON.stringify(planState())); }
 
 const validRect = (r) => r && num(r.x) && num(r.y) && num(r.w) && num(r.h) && r.w > 0 && r.h > 0;
-const validRoom = (r) => r && typeof r.id === 'string' && Array.isArray(r.polygon) && r.polygon.length >= 4 && r.polygon.every((p) => Array.isArray(p) && num(p[0]) && num(p[1])) && Array.isArray(r.label);
+const validOpening = (o) => !!o && typeof o.id === 'string' && (o.axis === 'a' ? typeof o.wall === 'string' && num(o.at) && num(o.width) && o.width > 0 : validRect(o) && (o.axis === 'h' || o.axis === 'v'));
+const validRoom = (r) => r && typeof r.id === 'string' && Array.isArray(r.polygon) && r.polygon.length >= 3 && r.polygon.every((p) => Array.isArray(p) && num(p[0]) && num(p[1])) && Array.isArray(r.label);
 
 /**
  * Replace the live plan with a saved state (null → the architect's plan). Used by store undo / redo / load.
@@ -943,17 +1150,10 @@ export function applyPlanState(state) {
     if (optionalKeysProblem(s)) return toBase('The saved plan edits are not readable — the architect\'s plan was restored.');
     const opt = optionalPart(normalizeOptionalKeys(s));
     if (!Array.isArray(s.walls) || !Array.isArray(s.openings) || !s.walls.every(validRect)
-      || !s.openings.every((o) => validRect(o) && typeof o.id === 'string' && (o.axis === 'h' || o.axis === 'v'))) return toBase('The saved plan edits are not readable — the architect\'s plan was restored.');
+      || !s.openings.every(validOpening)) return toBase('The saved plan edits are not readable — the architect\'s plan was restored.');
     const prevRooms = Array.isArray(s.rooms) && s.rooms.length && s.rooms.every(validRoom) ? s.rooms : clone(BASE_PLAN.rooms);
-    const d = derive([...s.walls, ...s.openings], s.openings, prevRooms, s.walls);
-    const locked = analysisOf(BASE_PLAN).segments.filter((g) => g.policy.level === 'locked');
-    const solids = [...d.walls, ...d.openings];
-    const footprint = (walls, openings, rooms) => [...walls, ...openings].reduce((a, r) => a + r.w * r.h, 0) + rooms.reduce((a, r) => a + polygonArea(r.polygon), 0);
-    const intact = d.problems.length === 0 && (ENV.draft || (d.rooms.length > 0
-      && locked.every((g) => coverage(g, solids) > 0.999)
-      && Math.abs(footprint(d.walls, d.openings, d.rooms) - footprint(BASE_PLAN.walls, BASE_PLAN.openings, BASE_PLAN.rooms)) < 1
-      && BASE_PLAN.openings.filter(inMamad).every((b) => { const o = d.openings.find((x) => x.id === b.id); return o && JSON.stringify(o) === JSON.stringify(b); })
-      && levelsIntact(opt.levels)));
+    const d = derive([...s.walls, ...s.openings], s.openings, prevRooms, s.walls, opt.slants);
+    const intact = d.problems.length === 0 && (ENV.draft || (d.rooms.length > 0 && keepsBase(d, opt) && levelsIntact(opt.levels)));
     if (!intact) return toBase('The saved plan edits do not fit this house — the architect\'s plan was restored.');
     // keep the saved rectangles (ids included) when they describe the same walls, so undo / redo is exact
     const area = (list) => list.reduce((a, r) => a + r.w * r.h, 0);
@@ -964,13 +1164,39 @@ export function applyPlanState(state) {
   }
 }
 
+/**
+ * Does a derived L0 (`d`, with the optional keys `opt` of its state) keep what a fixed base plan locks: every locked wall
+ * (a locked slant: the same centre line and thickness), the built footprint (walls + openings + rooms) and the safe
+ * room's openings? Plans without slants: exactly the checks the grid engine always made.
+ */
+function keepsBase(d, opt) {
+  const locked = analysisOf(BASE_PLAN).segments.filter((g) => g.policy.level === 'locked');
+  if (!hasSlants(BASE_PLAN) && !hasSlants(opt) && !d.openings.some(isAngledOpening)) {
+    const solids = [...d.walls, ...d.openings];
+    const footprint = (walls, openings, rooms) => [...walls, ...openings].reduce((a, r) => a + r.w * r.h, 0) + rooms.reduce((a, r) => a + polygonArea(r.polygon), 0);
+    return locked.every((g) => coverage(g, solids) > 0.999)
+      && Math.abs(footprint(d.walls, d.openings, d.rooms) - footprint(BASE_PLAN.walls, BASE_PLAN.openings, BASE_PLAN.rooms)) < 1
+      && BASE_PLAN.openings.filter(inMamad).every((b) => { const o = d.openings.find((x) => x.id === b.id); return o && JSON.stringify(o) === JSON.stringify(b); });
+  }
+  const solids = [...d.walls, ...rectOpenings(d.openings)];
+  return locked.every((g) => (g.axis === 'a' ? (opt.slants || []).some((x) => sameSlant(x, { ...g, id: g.slantId })) : coverage(g, solids) > 0.999))
+    && Math.abs(builtArea(d) - builtArea(analysisOf(BASE_PLAN))) < 2
+    && BASE_PLAN.openings.filter(inMamadOpening).every((b) => { const o = d.openings.find((x) => x.id === b.id); return o && (isAngledOpening(b) ? sameGeometry(o, b) && sameOpening(o, b, LOOK_KEYS) : JSON.stringify(o) === JSON.stringify(b)); });
+}
+/** Built footprint of a derived level: area of the union of its wall material and openings, plus its rooms (cm²). */
+function builtArea(d) {
+  const L = d.slantLevel, { polys, quads } = L ? slantSolids(L, d.openings) : { polys: [], quads: [] };
+  return netArea(polyUnion([...d.walls, ...rectOpenings(d.openings), ...polys, ...quads])) + d.rooms.reduce((a, r) => a + polygonArea(r.polygon), 0);
+}
+
 /** Saved upper levels keep the locked walls of the base plan's levels (a removed level is a whole-level change, allowed). */
 function levelsIntact(levels) {
   for (const b of upperLevels(BASE_PLAN)) {
     const l = (levels || []).find((x) => x.id === b.id);
     if (!l) continue;
-    const solids = [...l.walls, ...l.openings.filter((o) => o.axis !== 'a')];
-    if (!analysisOf(levelPlan(BASE_PLAN, b.id)).segments.every((g) => g.policy.level !== 'locked' || coverage(g, solids) > 0.999)) return false;
+    const solids = [...l.walls, ...rectOpenings(l.openings)];
+    const keeps = (g) => g.policy.level !== 'locked' || (g.axis === 'a' ? (l.slants || []).some((x) => sameSlant(x, { ...g, id: g.slantId })) : coverage(g, solids) > 0.999);
+    if (!analysisOf(levelPlan(BASE_PLAN, b.id)).segments.every(keeps)) return false;
   }
   return true;
 }
@@ -986,15 +1212,23 @@ export function wallSegments(plan) { return analysisOf(plan === undefined ? (swa
 /** Segment under / nearest to a plan point (within `tol` cm) on the active level, or null. */
 export function segmentAt(...a) { return onLevel(activeLevel(), () => segmentAtImpl(...a), null); }
 function segmentAtImpl(x, y, tol = 6) {
-  let best = null, bd = Infinity;
-  for (const s of current().segments) { const d = rectDist(x, y, s); if (d < bd) { bd = d; best = s; } }
+  let best = null, bd = Infinity, slanted = null;
+  for (const s of current().segments) {
+    if (s.axis === 'a') { (slanted || (slanted = [])).push(s); continue; }
+    const d = rectDist(x, y, s); if (d < bd) { bd = d; best = s; }
+  }
+  if (slanted && bd > 0) {
+    // angled walls: inside a footprint, else the nearest footprint edge (rect segments first: a point inside one wins)
+    for (const s of slanted) if (pointInPolygon(x, y, s.poly)) return s;
+    for (const s of slanted) { const d = polyDist(x, y, s.poly); if (d < bd) { bd = d; best = s; } }
+  }
   return best && bd <= tol ? best : null;
 }
 
 const segmentOfOpening = (o) => current().segments.find((s) => s.openingIds.includes(o.id)) || null;
 function policyOfOpening(o) {
   if (ENV.draft) return { level: 'free', reason: '' };
-  if (inMamad(o) || o.style === 'mamad') return { level: 'locked', reason: REASONS.mamad };
+  if (inMamadOpening(o) || o.style === 'mamad') return { level: 'locked', reason: REASONS.mamad };
   if (o.exterior) return { level: 'permit', reason: REASONS.permit };
   return { level: 'free', reason: '' };
 }
@@ -1111,7 +1345,11 @@ function fitWall(E, c0, c1, a, b) {
   return { ok: true, rect, ka, kb, u0, u1 };
 }
 
+/** Does the level being edited have angled walls (then its walls cannot be edited until stage A2)? */
+const angledHere = () => { const sl = liveSlants(); return (Array.isArray(sl) && sl.length > 0) || PLAN.openings.some(isAngledOpening); };
+
 function planAddWall(input) {
+  if (angledHere()) return fail(REASONS.angledWalls);
   const p = input || {};
   if (![p.x1, p.y1, p.x2, p.y2].every(num)) return fail('A wall needs two points.');
   const t = Math.round(p.thickness == null ? NEW_WALL.def : p.thickness), max = ENV.draft ? NEW_WALL.draftMax : NEW_WALL.max;
@@ -1125,7 +1363,7 @@ function planAddWall(input) {
   const fit = fitWall(E, c0, c1, a, b);
   if (!fit.ok) return fit;
   paint(E.m, fit.rect, WALL);
-  const d = derive([...wallRects(E.m), ...PLAN.openings], PLAN.openings, PLAN.rooms, PLAN.walls);
+  const d = derive([...wallRects(E.m), ...PLAN.openings], PLAN.openings, PLAN.rooms, PLAN.walls, liveSlants());
   const bad = fitChecks(d, fit.rect, axis);
   if (bad) return fail(bad);
   return { ok: true, rect: fit.rect, level: 'free', axis, d };
@@ -1159,17 +1397,18 @@ function editableSegment(id) {
   return { ok: true, s };
 }
 const coreSpan = (s) => (s.axis === 'h' ? { c0: s.core.y, c1: s.core.y + s.core.h, a0: s.core.x, a1: s.core.x + s.core.w } : { c0: s.core.x, c1: s.core.x + s.core.w, a0: s.core.y, a1: s.core.y + s.core.h });
-const inCore = (s) => (o) => overlapArea(o, s.core) > 0;
+const inCore = (s) => (o) => o.axis !== 'a' && overlapArea(o, s.core) > 0;
 
 /** Remove a wall segment and the openings in it. Junction squares stay with the walls that meet there. */
 export function removeWallSegment(...args) { return tracked('removeWallSegment', onActive(removeWallSegmentImpl), args); }
 function removeWallSegmentImpl(segmentId, opts) {
+  if (angledHere()) return fail(REASONS.angledWalls);
   const q = editableSegment(segmentId);
   if (!q.ok) return q;
   const { s } = q, E = editModel(s.axis, [], []);
   paint(E.m, s.core, FREE);
   const openings = PLAN.openings.filter((o) => !inCore(s)(o));
-  const d = derive([...wallRects(E.m), ...openings], openings, PLAN.rooms, PLAN.walls);
+  const d = derive([...wallRects(E.m), ...openings], openings, PLAN.rooms, PLAN.walls, liveSlants());
   if (d.problems.length) return fail(problemText(d));
   return commit(d, 'remove-wall', { level: s.policy.level, reason: s.policy.reason, ids: [segmentId] }, opts);
 }
@@ -1180,6 +1419,7 @@ function removeWallSegmentImpl(segmentId, opts) {
  */
 export function moveWallSegment(...args) { return tracked('moveWallSegment', onActive(moveWallSegmentImpl), args); }
 function moveWallSegmentImpl(segmentId, delta, opts) {
+  if (angledHere()) return fail(REASONS.angledWalls);
   const q = editableSegment(segmentId);
   if (!q.ok) return q;
   const d0 = snap(num(delta) ? delta : 0), { s } = q;
@@ -1231,7 +1471,7 @@ function cornerOpenings(s, d0) {
 function withOpenings(moves, s, d0) {
   const saved = { walls: PLAN.walls, openings: PLAN.openings, rooms: PLAN.rooms, wallOutline: PLAN.wallOutline, analysis };
   const riding = new Set(moves.map((m) => m.from));
-  const t = derive(solidsOf(PLAN), PLAN.openings.filter((o) => !riding.has(o)), PLAN.rooms, PLAN.walls);
+  const t = derive(solidsOf(PLAN), PLAN.openings.filter((o) => !riding.has(o)), PLAN.rooms, PLAN.walls, liveSlants());
   let r;
   PLAN.walls = t.walls; PLAN.openings = t.openings; PLAN.rooms = t.rooms; PLAN.wallOutline = t.wallOutline; analysis = t;
   try { r = planMoveWall(s, d0); } finally {
@@ -1245,7 +1485,7 @@ function withOpenings(moves, s, d0) {
   // back in their original order, so ids / drawing order do not shuffle
   const order = new Map(PLAN.openings.map((o, i) => [o.id, i]));
   const openings = [...r.d.openings, ...moves.map((m) => m.to)].sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9));
-  const d = derive([...r.d.walls, ...r.d.openings], openings, PLAN.rooms, PLAN.walls);
+  const d = derive([...r.d.walls, ...r.d.openings], openings, PLAN.rooms, PLAN.walls, liveSlants());
   const bad = fitChecks(d, r.target, s.axis);
   if (bad) return fail(bad === 'A wall cannot run along or on top of another wall.' ? 'That would cross another wall.' : bad);
   return { ok: true, d, target: r.target };
@@ -1297,7 +1537,7 @@ function planMoveWall(s, d0) {
   const moved = inCore(s), shift = s.axis === 'h' ? { y: d0 } : { x: d0 };
   const openings = PLAN.openings.map((o) => (moved(o) ? { ...o, x: o.x + (shift.x || 0), y: o.y + (shift.y || 0) } : o));
   const target = E.rect(n0, n1, a0, a1);
-  const d = derive([...wallRects(m), ...openings], openings, PLAN.rooms, PLAN.walls);
+  const d = derive([...wallRects(m), ...openings], openings, PLAN.rooms, PLAN.walls, liveSlants());
   const bad = fitChecks(d, target, s.axis);
   if (bad) return fail(bad === 'A wall cannot run along or on top of another wall.' ? cross : bad);
   return { ok: true, d, target };
@@ -1309,6 +1549,7 @@ function planMoveWall(s, d0) {
  */
 export function resizeWallSegment(...args) { return tracked('resizeWallSegment', onActive(resizeWallSegmentImpl), args); }
 function resizeWallSegmentImpl(segmentId, range, opts) {
+  if (angledHere()) return fail(REASONS.angledWalls);
   const q = editableSegment(segmentId);
   if (!q.ok) return q;
   const { s } = q, { c0, c1, a0, a1 } = coreSpan(s), r = range || {};
@@ -1321,7 +1562,7 @@ function resizeWallSegmentImpl(segmentId, range, opts) {
   if (!fit.ok) return fit;
   paint(E.m, fit.rect, WALL);
   if (PLAN.openings.some((o) => inCore(s)(o) && overlapArea(o, fit.rect) < o.w * o.h)) return fail('Remove the door in this part of the wall first.');
-  const d = derive([...wallRects(E.m), ...PLAN.openings], PLAN.openings, PLAN.rooms, PLAN.walls);
+  const d = derive([...wallRects(E.m), ...PLAN.openings], PLAN.openings, PLAN.rooms, PLAN.walls, liveSlants());
   const bad = fitChecks(d, fit.rect, s.axis);
   if (bad) return fail(bad);
   return commit(d, 'resize-wall', { level: s.policy.level, reason: s.policy.reason, ids: idsIn(d, fit.rect, s.axis) }, opts);
@@ -1365,7 +1606,12 @@ function planAddOpening(input) {
   if (!num(p.x) || !num(p.y)) return fail('An opening needs a position.');
   const width = snap(num(p.width) ? p.width : K.width);
   let s = null, sd = Infinity;
-  for (const g of current().segments) { if (isJunction(g)) continue; const dist = rectDist(p.x, p.y, g.core); if (dist < sd) { sd = dist; s = g; } }
+  let slanted = Infinity;
+  for (const g of current().segments) {
+    if (g.axis === 'a') { slanted = Math.min(slanted, polyDist(p.x, p.y, g.poly)); continue; }
+    if (isJunction(g)) continue; const dist = rectDist(p.x, p.y, g.core); if (dist < sd) { sd = dist; s = g; }
+  }
+  if (slanted <= REACH && slanted < sd) return fail(REASONS.angledOpening);
   if (!s || sd > REACH) return fail('There is no wall here.');
   if (s.cls === 'mamad') return fail(REASONS.mamad);
   const exterior = s.cls === 'exterior';
@@ -1420,7 +1666,7 @@ function addOpeningImpl(input, opts) {
   o.rooms = [];
   o.label = labelOf(o);
   const openings = [...PLAN.openings, o];
-  const d = derive(solidsOf(PLAN), openings, PLAN.rooms, PLAN.walls);
+  const d = derive(solidsOf(PLAN), openings, PLAN.rooms, PLAN.walls, liveSlants());
   if (d.problems.length) return fail(problemText(d));
   return commit(d, 'add-opening', { level: r.level, ids: [o.id] }, opts);
 }
@@ -1435,6 +1681,7 @@ function updateOpeningImpl(id, patch, opts) {
   if (!o) return fail('No such opening.');
   const policy = policyOfOpening(o);
   if (policy.level === 'locked') return fail(policy.reason);
+  if (isAngledOpening(o)) return fail(REASONS.angledOpening);
   const s = segmentOfOpening(o), K = OPENING_KINDS[o.kind];
   if (!s || !K) return fail('This opening cannot be edited.');
   const next = { ...o };
@@ -1461,7 +1708,7 @@ function updateOpeningImpl(id, patch, opts) {
     if (o.assumed) { const left = o.assumed.filter((k) => next[k] === o[k]); if (left.length) next.assumed = left; else delete next.assumed; }
   }
   const openings = PLAN.openings.map((x) => (x === o ? next : x));
-  const d = derive(solidsOf(PLAN), openings, PLAN.rooms, PLAN.walls);
+  const d = derive(solidsOf(PLAN), openings, PLAN.rooms, PLAN.walls, liveSlants());
   if (d.problems.length) return fail(problemText(d));
   return commit(d, 'update-opening', { level: geometry && policy.level === 'permit' ? 'permit' : 'free', ids: [id] }, opts);
 }
@@ -1474,7 +1721,7 @@ function removeOpeningImpl(id, opts) {
   const policy = policyOfOpening(o);
   if (policy.level === 'locked') return fail(policy.reason);
   const openings = PLAN.openings.filter((x) => x !== o);
-  const d = derive(solidsOf(PLAN), openings, PLAN.rooms, PLAN.walls);
+  const d = derive(solidsOf(PLAN), openings, PLAN.rooms, PLAN.walls, liveSlants());
   if (d.problems.length) return fail(problemText(d));
   return commit(d, 'remove-opening', { level: policy.level, ids: [id] }, opts);
 }
@@ -1485,6 +1732,7 @@ function flipDoorImpl(id, how, opts) {
   const o = PLAN.openings.find((x) => x.id === id);
   if (!o) return fail('No such opening.');
   if (o.kind !== 'door' || (how !== 'hinge' && how !== 'swing')) return fail('Only hinged doors can be flipped (hinge or swing).');
+  if (isAngledOpening(o)) return fail(REASONS.angledOpening);
   const pair = (how === 'hinge' ? HINGES : SWINGS)[o.axis];
   return updateOpening(id, { [how]: o[how] === pair[0] ? pair[1] : pair[0] }, opts);
 }
@@ -1552,14 +1800,17 @@ function addLevelImpl(input, opts) {
   const belowId = levels.length ? levels[levels.length - 1].id : GROUND, bh = levelPlan(PLAN, belowId).heights;
   const hr = readLevelHeights(p.heights || {}, { ceiling: bh.ceiling, slab: num(bh.slab) ? bh.slab : 20, parapet: num(bh.parapet) ? bh.parapet : 40 });
   if (hr.reason) return fail(hr.reason);
-  let walls = [], openings = [];
+  let walls = [], openings = [], slants = [];
   if (p.copyExterior !== false) {
     const taken = allOpeningIds();
     onLevel(belowId, () => {
       const envelope = current().segments.filter((g) => g.cls === 'exterior' || g.between.some((b) => b != null && isOutdoorId(b)));
-      walls = envelope.map((g) => ({ x: g.x, y: g.y, w: g.w, h: g.h, kind: 'exterior' }));
-      openings = PLAN.openings.filter((o) => o.kind === 'window' && o.exterior && o.axis !== 'a' && envelope.some((g) => g.openingIds.includes(o.id))).map((o) => {
+      walls = envelope.filter((g) => g.axis !== 'a').map((g) => ({ x: g.x, y: g.y, w: g.w, h: g.h, kind: 'exterior' }));
+      // angled envelope walls go up as the same slants (centre line, thickness), with their windows
+      slants = envelope.filter((g) => g.axis === 'a').map((g) => ({ id: g.slantId, x1: g.x1, y1: g.y1, x2: g.x2, y2: g.y2, t: g.t, kind: 'exterior' }));
+      openings = PLAN.openings.filter((o) => o.kind === 'window' && o.exterior && envelope.some((g) => g.openingIds.includes(o.id))).map((o) => {
         const { rooms, exterior, outside, ...rest } = o;
+        if (isAngledOpening(o)) for (const k of ['cx', 'cy', 'angle', 't', 'x', 'y', 'w', 'h']) delete rest[k];
         const nid = newOpeningId('window', taken); taken.add(nid);
         return { ...rest, id: nid, rooms: [] };
       });
@@ -1567,12 +1818,13 @@ function addLevelImpl(input, opts) {
   }
   for (const o of openings) if (o.sill + o.height > hr.heights.ceiling - HEAD_ROOM) return fail(`The windows copied up do not fit under a ${hr.heights.ceiling} cm ceiling.`);
   const env = levelEnv(id);
-  let d = deriveIn(env, [...walls, ...openings], openings, [], []);
-  if (d.problems.length) { const bad = new Set(d.problems.map((x) => x.id)); openings = openings.filter((o) => !bad.has(o.id)); d = deriveIn(env, [...walls, ...openings], openings, [], []); }
+  let d = deriveIn(env, [...walls, ...openings], openings, [], [], slants);
+  if (d.problems.length) { const bad = new Set(d.problems.map((x) => x.id)); openings = openings.filter((o) => !bad.has(o.id)); d = deriveIn(env, [...walls, ...openings], openings, [], [], slants); }
   const lv = { id };
   if (typeof p.name === 'string' && p.name.trim()) lv.name = p.name.trim();
   if (typeof p.nameHe === 'string' && p.nameHe.trim()) lv.nameHe = p.nameHe.trim();
   Object.assign(lv, { elevation: 0, heights: hr.heights, walls: d.walls, wallOutline: d.wallOutline, openings: d.openings, rooms: d.rooms });
+  if (slants.length) lv.slants = slants;
   const next = recomputeElevations([...levels, lv], PLAN.heights);
   levelData.set(next[next.length - 1], { arrays: next[next.length - 1], d });
   commitLevels(next, 'add-level', id, opts);
@@ -1668,7 +1920,8 @@ export function planDiff() {
     else if (!now) items.push({ kind: 'level-removed', level: 'permit', text: `Removed a floor: ${levelName(BASE_PLAN, id)}`, at: at(BASE_PLAN), ref: id, levelId: id });
     else {
       if (JSON.stringify(was.heights) !== JSON.stringify(now.heights)) items.push({ kind: 'level-changed', level: 'permit', text: `${levelName(PLAN, id)}: heights changed`, at: at(PLAN), ref: id, levelId: id });
-      if (now === was || JSON.stringify(now.walls) === JSON.stringify(was.walls) && JSON.stringify(now.openings) === JSON.stringify(was.openings) && JSON.stringify(now.rooms) === JSON.stringify(was.rooms)) continue;
+      if (now === was || JSON.stringify(now.walls) === JSON.stringify(was.walls) && JSON.stringify(now.openings) === JSON.stringify(was.openings) && JSON.stringify(now.rooms) === JSON.stringify(was.rooms)
+        && JSON.stringify(now.slants) === JSON.stringify(was.slants)) continue;
       const baseView = levelPlan(BASE_PLAN, id);
       onLevel(id, () => {
         diffBase = baseView;
@@ -1683,10 +1936,10 @@ export function planDiff() {
 function diffItems(base) {
   const items = [];
   const baseAn = analysisOf(base), cur = current(), solids = solidsOf(PLAN), coreLen = (s) => (s.axis === 'h' ? s.core.w : s.core.h);
-  const gone = baseAn.segments.filter((s) => coverage(s.core, solids) < 0.5), carried = [];
+  const gone = baseAn.segments.filter((s) => s.axis !== 'a' && coverage(s.core, solids) < 0.5), carried = [];
   // a short new piece in line with an existing wall is that wall stretched to follow a move, not a new wall
   const stretch = (n) => { const a = coreSpan(n); return cur.segments.some((g) => { const b = coreSpan(g); return !g.isNew && g.axis === n.axis && a.c0 === b.c0 && a.c1 === b.c1 && Math.min(Math.abs(b.a0 - a.a1), Math.abs(a.a0 - b.a1)) <= TMAX; }); };
-  const added = cur.segments.filter((s) => s.isNew && !isJunction(s) && !stretch(s));
+  const added = cur.segments.filter((s) => s.axis !== 'a' && s.isNew && !isJunction(s) && !stretch(s));
   for (const g of gone) {
     const pos = (s) => (s.axis === 'h' ? s.core.y : s.core.x), a = coreSpan(g);
     const twin = added.find((n) => { const b = coreSpan(n); return n.axis === g.axis && n.thickness === g.thickness && Math.abs(pos(n) - pos(g)) <= 200 && overlapLen(a.a0, a.a1, b.a0, b.a1) >= 0.5 * Math.min(coreLen(g), coreLen(n)); });
@@ -1698,31 +1951,70 @@ function diffItems(base) {
     } else items.push({ kind: 'wall-removed', level: g.policy.level, text: `Removed the ${wallName(g)} ${sides(g)} (${metres(coreLen(g))})`, at: centreOf(g.core), ref: g.id });
   }
   for (const n of added) items.push({ kind: 'wall-added', level: 'free', text: `New ${n.thickness} cm partition ${sides(n)} (${metres(coreLen(n))})`, at: centreOf(n.core), ref: n.id });
-  if (!items.length && !sameSolid(PLAN.walls.concat(PLAN.openings), ENV.solids)) {
-    const a = cur.segments.find((s) => coverage(s.core, ENV.solids) < 0.999) || baseAn.segments.find((s) => coverage(s.core, solids) < 0.999);
+  const slantItems = diffSlants(base, baseAn, cur);
+  if (!items.length && !sameSolid(PLAN.walls.concat(rectOpenings(PLAN.openings)), ENV.solids)) {
+    const a = cur.segments.find((s) => s.axis !== 'a' && coverage(s.core, ENV.solids) < 0.999) || baseAn.segments.find((s) => s.axis !== 'a' && coverage(s.core, solids) < 0.999);
     if (a) items.push({ kind: 'wall-moved', level: a.policy.level === 'locked' ? 'free' : a.policy.level, text: `Changed the length of the ${wallName(a)} ${sides(a)}`, at: centreOf(a.core), ref: a.id });
   }
+  items.push(...slantItems);
+  const liveIds = new Set((liveSlants() || []).map((x) => x.id));
   for (const b of base.openings) {
     const o = PLAN.openings.find((x) => x.id === b.id), level = b.exterior ? 'permit' : 'free';
-    if (!o) { if (coverage(b, solids) >= 0.5) items.push({ kind: 'opening-removed', level, text: `Closed the ${openingName(b)} (${b.width} cm) — ${whereOpening(b)}`, at: centreOf(b), ref: b.id }); continue; }
+    if (!o) {
+      const closed = isAngledOpening(b) ? liveIds.has(b.wall) : coverage(b, solids) >= 0.5;   // not when its wall went
+      if (closed) items.push({ kind: 'opening-removed', level, text: `Closed the ${openingName(b)} (${b.width} cm) — ${whereOpening(b)}`, at: openingAt(b), ref: b.id });
+      continue;
+    }
     const what = [];
-    const rode = carried.some((c) => overlapArea(o, c.core) > 0 && o.x - b.x === c.dx && o.y - b.y === c.dy);   // travelled with its wall
-    if ((o.x !== b.x || o.y !== b.y) && !rode) what.push(`moved ${Math.abs(o.x - b.x) + Math.abs(o.y - b.y)} cm`);
+    if (isAngledOpening(o) || isAngledOpening(b)) {
+      if (o.wall !== b.wall || o.axis !== b.axis) what.push('moved to another wall');
+      else if (o.at !== b.at) what.push(`moved ${Math.round(Math.abs(o.at - b.at))} cm`);
+    } else {
+      const rode = carried.some((c) => overlapArea(o, c.core) > 0 && o.x - b.x === c.dx && o.y - b.y === c.dy);   // travelled with its wall
+      if ((o.x !== b.x || o.y !== b.y) && !rode) what.push(`moved ${Math.abs(o.x - b.x) + Math.abs(o.y - b.y)} cm`);
+    }
     if (o.width !== b.width) what.push(`width ${b.width} → ${o.width} cm`);
     if (o.height !== b.height) what.push(`height ${b.height} → ${o.height} cm`);
     if (o.sill !== b.sill) what.push(`sill ${b.sill} → ${o.sill} cm`);
     const geometry = what.length > 0;
     if (o.style !== b.style) what.push(`style ${o.style}`);
     if (o.hinge !== b.hinge || o.swing !== b.swing) what.push('re-hung');
-    if (what.length) items.push({ kind: 'opening-changed', level: geometry ? level : 'free', text: `${openingName(o)[0].toUpperCase() + openingName(o).slice(1)} — ${whereOpening(o)}: ${what.join(', ')}`, at: centreOf(o), ref: o.id });
+    if (what.length) items.push({ kind: 'opening-changed', level: geometry ? level : 'free', text: `${openingName(o)[0].toUpperCase() + openingName(o).slice(1)} — ${whereOpening(o)}: ${what.join(', ')}`, at: openingAt(o), ref: o.id });
   }
-  for (const o of PLAN.openings) if (!base.openings.some((b) => b.id === o.id)) items.push({ kind: 'opening-added', level: o.exterior ? 'permit' : 'free', text: `New ${openingName(o)} ${labelOf(o)} — ${whereOpening(o)}`, at: centreOf(o), ref: o.id });
+  for (const o of PLAN.openings) if (!base.openings.some((b) => b.id === o.id)) items.push({ kind: 'opening-added', level: o.exterior ? 'permit' : 'free', text: `New ${openingName(o)} ${labelOf(o)} — ${whereOpening(o)}`, at: openingAt(o), ref: o.id });
+  return items;
+}
+/** Plan point of an opening for the changes list (its centre). */
+const openingAt = (o) => (isAngledOpening(o) ? (num(o.cx) && num(o.cy) ? { x: o.cx, y: o.cy } : num(o.x) ? centreOf(o) : { x: 0, y: 0 }) : centreOf(o));
+const slantText = (g) => `${g.thickness} cm angled ${g.cls === 'partition' ? 'partition' : 'wall'}`;
+const slantMid = (s) => ({ x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2 });
+/**
+ * Angled walls added / removed / changed (by slant id) against the base level: entries `slant-added` (level 'free'),
+ * `slant-removed` and `slant-changed` (the base wall's policy level; 'locked' never happens on a fixed plan), ref =
+ * the segment id ('seg:a:<id>', prefixed on upper levels).
+ */
+function diffSlants(base, baseAn, cur) {
+  const was = base.slants || [], now = liveSlants() || [], items = [];
+  if (!was.length && !now.length) return items;
+  const segOf = (an, id) => an.segments.find((g) => g.axis === 'a' && g.slantId === id);
+  for (const b of was) {
+    const n = now.find((x) => x.id === b.id), g = segOf(baseAn, b.id);
+    if (!g) continue;
+    const level = g.policy.level === 'locked' ? 'permit' : g.policy.level;
+    if (!n) items.push({ kind: 'slant-removed', level, text: `Removed the ${slantText(g)} ${sides(g)} (${metres(g.length)})`, at: slantMid(b), ref: g.id });
+    else if (!sameSlant(n, b)) { const c = segOf(cur, n.id) || g; items.push({ kind: 'slant-changed', level, text: `Changed the ${slantText(g)} ${sides(c)} (${metres(g.length)} → ${metres(c.length)})`, at: slantMid(n), ref: c.id }); }
+  }
+  for (const n of now) {
+    if (was.some((b) => b.id === n.id)) continue;
+    const c = segOf(cur, n.id);
+    if (c) items.push({ kind: 'slant-added', level: 'free', text: `New ${slantText(c)} ${sides(c)} (${metres(c.length)})`, at: slantMid(n), ref: c.id });
+  }
   return items;
 }
 
 /** Test / tooling hook: everything derived from a plan's walls + openings (the same function used on load and after every edit). */
 export function recomputePlan(plan = PLAN) {
-  const d = derive(solidsOf(plan), plan.openings, plan.rooms, plan.walls);
+  const d = derive(solidsOf(plan), plan.openings, plan.rooms, plan.walls, plan.slants);
   return { walls: d.walls, openings: d.openings, rooms: d.rooms, wallOutline: d.wallOutline, problems: d.problems };
 }
 
@@ -1790,15 +2082,16 @@ export function currentPlanData() {
  * rectangles, wall outline, rooms (enclosed indoor regions between walls, matched to `prevRooms` by overlap; new ones are
  * `{ id: 'room-<n>', name: 'New room' }`), openings with their rooms / exterior / outside sides, and problems
  * (`{ id, type: 'overlap' | 'jamb' | 'blocked' }` for openings that do not sit cleanly in a wall).
+ * `slants`: the angled walls of that level (mixed derive; `segments` then include one `axis: 'a'` segment per slant).
  * Runs as a draft (nothing locked, no safe-room shell). Used by `plan-build.js`.
  */
-export function analyseWalls(walls, openings, { prevRooms = [], outdoorAreas = [], level = null, reservedRoomIds = null } = {}) {
+export function analyseWalls(walls, openings, { prevRooms = [], outdoorAreas = [], level = null, reservedRoomIds = null, slants = null } = {}) {
   const saved = ENV;
   // `level` ('L1'…): ids for an upper level (prefixed wall / segment ids); `reservedRoomIds`: ids new rooms must avoid
   ENV = { draft: true, solids: [], mamad: NO_MAMAD, outdoorAreas, baseWalls: [], reserved: reservedRoomIds && reservedRoomIds.size ? reservedRoomIds : null,
     ...(level && level !== GROUND ? { level, pre: level + '|' } : {}) };
   try {
-    const d = derive([...walls, ...openings], openings, prevRooms, []);
+    const d = derive([...walls, ...openings], openings, prevRooms, [], slants);
     return { walls: d.walls, openings: d.openings, rooms: d.rooms, wallOutline: d.wallOutline, problems: d.problems, segments: d.segments };
   } finally { ENV = saved; }
 }

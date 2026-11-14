@@ -4,6 +4,7 @@
  */
 import { isTyping, isMac, call } from './dom.js';
 import { closeTopmost, hasOpenLayer } from './dialogs.js';
+import { FEATURES } from '../core/features.js';
 
 const MOD = isMac() ? '⌘' : 'Ctrl';
 
@@ -19,6 +20,7 @@ export const SHORTCUTS = [
   ] },
   { group: 'View', rows: [
     [['1'], 'Plan'], [['2'], '3D'], [['3'], 'Walk through'], [['4'], 'Split'], [['F'], 'Fit to the house or selection'], [['G'], 'Grid on / off'],
+    ...(FEATURES.levels ? [[['PgUp', 'PgDn'], 'Floor above / below']] : []),
   ] },
   { group: 'Tools and files', rows: [
     [['V'], 'Select'], [['H'], 'Pan'], [['M'], 'Measure'], [[MOD, 'S'], 'Save design file'], [['?'], 'This list'],
@@ -87,6 +89,12 @@ export function initKeyboard(app) {
       if (key === 'h' || key === 'm' || key === 'r' || key === '®') return;   // furnishing tools
     }
 
+    // floors: PageUp / PageDown show the floor above / below (only while the levels feature is on)
+    if ((key === 'PageUp' || key === 'PageDown') && FEATURES.levels && app.levels && !e.altKey) {
+      e.preventDefault();
+      app.levels.step(key === 'PageUp' ? 1 : -1);
+      return;
+    }
     const step = e.shiftKey ? 10 : 1;
     switch (key) {
       case 'Delete': case 'Backspace': if (store.selection.length) { e.preventDefault(); actions.deleteSelection(); } break;

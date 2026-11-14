@@ -7,6 +7,7 @@
  * → only the numbers change), so nothing jumps and a focused field keeps its focus.
  */
 import { flipDoor, updateOpening, openingPolicy } from '../core/plan-edit.js';
+import { viewPlan } from './levels.js';
 import { h } from './dom.js';
 import { icon } from './icons.js';
 import { btn, iconBtn, numField, section, emptyState } from './components.js';
@@ -23,7 +24,8 @@ const dims = (o) => `${o.width} × ${o.height} cm`;
 
 /** @param {object} app  @returns {{ render(): Node[], sync(): boolean }} */
 export function createStructureInspector(app) {
-  const { store, plan, structure } = app;
+  const { store, structure } = app;
+  const plan = () => viewPlan(app);   // the floor shown
   let shape = '';        // what the rendered DOM can show without a rebuild
   let patch = null;      // (cur) => void — updates the live values of the rendered DOM
 
@@ -89,13 +91,13 @@ export function createStructureInspector(app) {
       : `The ${anchor.fixedName} end (nearer the house’s north-west corner) stays; the ${anchor.movingName} end moves. Steps of ${STEP} cm.`;
     const nudge = (dir) => iconBtn(vertical ? (dir < 0 ? 'chevron-left' : 'chevron-right') : (dir < 0 ? 'chevron-up' : 'chevron-down'),
       `Move ${STEP} cm ${vertical ? (dir < 0 ? 'west' : 'east') : (dir < 0 ? 'north' : 'south')}`, { variant: 'outlined', disabled: locked, kbd: vertical ? (dir < 0 ? '←' : '→') : (dir < 0 ? '↑' : '↓'), onClick: () => move(dir * STEP) });
-    const openings = seg.openingIds.map((id) => plan.openings.find((o) => o.id === id)).filter(Boolean);
+    const openings = seg.openingIds.map((id) => plan().openings.find((o) => o.id === id)).filter(Boolean);
 
     patch = (cur) => {
       const s = cur.seg;
       meta.textContent = `${fmtLen(s.length, units())} long, ${s.thickness} cm thick`;
       length.textContent = fmtLen(s.length, units());
-      sides.textContent = segmentSides(s, plan);
+      sides.textContent = segmentSides(s, plan());
       force(field, toUnit(pos(s), units()), unitDigits(units()));
       force(lengthField, toUnit(s.length, units()), unitDigits(units()));
     };
@@ -160,12 +162,12 @@ export function createStructureInspector(app) {
     const into = (now) => {
       const side = now.opening.swing;
       const [a, b] = now.seg ? now.seg.between : now.opening.rooms || [];
-      return spaceName(side === 'n' || side === 'w' ? a : b, plan);
+      return spaceName(side === 'n' || side === 'w' ? a : b, plan());
     };
 
     patch = (now) => {
       const x = now.opening;
-      meta.textContent = now.seg ? segmentSides(now.seg, plan) : x.rooms && x.rooms.length === 2 ? `Between ${spaceName(x.rooms[0], plan)} and ${spaceName(x.rooms[1], plan)}` : dims(x);
+      meta.textContent = now.seg ? segmentSides(now.seg, plan()) : x.rooms && x.rooms.length === 2 ? `Between ${spaceName(x.rooms[0], plan())} and ${spaceName(x.rooms[1], plan())}` : dims(x);
       force(fields.width, x.width); force(fields.height, x.height);
       if (fields.sill) force(fields.sill, x.sill);
       force(fields.offset, openingOffset(x, now.seg));

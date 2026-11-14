@@ -66,10 +66,13 @@ export function buildRuns(plan) {
 
 const boxOf = (b) => ({ lo: [b.x, b.y], hi: [b.x + b.w, b.y + b.h] });
 
-export function createSnapper({ plan, store }) {
+export function createSnapper({ plan: planOrGetter, store, shown = null }) {
+  // `plan` may be a function returning the plan (level view) to snap to now — the 2D view shows one level at a time
+  const cur = typeof planOrGetter === 'function' ? planOrGetter : () => planOrGetter;
   let runs = [], solids = [], corners = [], rev = null;
   /** Rebuild the snap targets if the plan was edited since they were built. */
   function sync() {
+    const plan = cur();
     if (rev && rev.walls === plan.walls && rev.openings === plan.openings && rev.outline === plan.wallOutline) return;
     rev = { walls: plan.walls, openings: plan.openings, outline: plan.wallOutline };
     runs = buildRuns(plan);
@@ -78,7 +81,7 @@ export function createSnapper({ plan, store }) {
   }
   const threshold = (scale, px = 12) => clamp(px / scale, 1.5, 40);
 
-  const others = (exclude) => store.items.filter((it) => !it.hidden && !(exclude && exclude.has(it.id)));
+  const others = (exclude) => store.items.filter((it) => (shown ? shown(it) : !it.hidden) && !(exclude && exclude.has(it.id)));
 
   /** Candidates for moving `box` along axis i (0 = x, 1 = y). */
   function axisCandidates(i, box, thr, opts) {
@@ -321,7 +324,7 @@ export function createSnapper({ plan, store }) {
   function clearances(b, maxDist = 900) {
     sync();
     const cx = b.x + b.w / 2, cy = b.y + b.h / 2, out = [];
-    const boundary = plan.site.boundary;
+    const boundary = cur().site.boundary;
     const cast = (i, dir) => {
       // i = axis of the ray (0 = x), dir = ±1
       const j = 1 - i, from = dir > 0 ? (i === 0 ? b.x + b.w : b.y + b.h) : (i === 0 ? b.x : b.y), at = i === 0 ? cy : cx;
@@ -352,6 +355,7 @@ export function createSnapper({ plan, store }) {
   /** Placement problems (never blocking): footprint through a wall, or outside the lot. */
   function problems(it) {
     const floating = it.placement === 'wall' || it.placement === 'ceiling';
+    const plan = cur();
     const wall = !floating && wallsHitByItem(it, plan).length > 0;
     const outside = itemCorners(it).some(([x, y]) => !pointInPolygon(x, y, plan.site.boundary));
     return { wall, outside, any: wall || outside, hint: outside ? 'Outside the lot' : wall ? 'Overlaps a wall' : '' };
@@ -384,8 +388,8 @@ export function createSnapper({ plan, store }) {
       const g = line(r.c, Math.min(lo, r.a0), Math.max(hi, r.a1), 'align');
       offer(r.c + t / 2, g); offer(r.c - t / 2, g);
     }
-    for (const sg of wallSegments(plan)) {
-      if (sg.axis !== axis || sg.id.startsWith('seg:j')) continue;
+    for (const sg of wallSegments(cur())) {
+      if (sg.axis !== axis || sg.id.includes('seg:j:')) continue;
       const b0 = horiz ? sg.core.x : sg.core.y, b1 = b0 + (horiz ? sg.core.w : sg.core.h);
       const gap = gapBetween(lo, hi, b0, b1);
       if (gap < -1 || gap > 400) continue;

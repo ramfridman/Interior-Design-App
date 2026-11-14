@@ -37,7 +37,7 @@ function centreFor(face, t) {
  */
 export function createStructureTools(V, io) {
   const { cam, env, state: st, snapper } = V;
-  const { store, plan } = env;
+  const { store } = env;   // env.plan = the level shown (read it at use: switching floors changes it)
   /** Live state read by the overlay. */
   const S = st.struct = { hover: null, hoverHandle: null, pointer: null, draft: null, ghost: null, tip: null, live: null, marker: null };
   let anchor = null;            // where the selected segment / opening was, to find it again after a plan change
@@ -48,7 +48,7 @@ export function createStructureTools(V, io) {
     const at = e || lastEvent;
     V.emit('structure', { type, op, level: level || 'free', text: text || '', clientX: at.clientX, clientY: at.clientY });
   };
-  const data = () => structureOf(plan);
+  const data = () => structureOf(env.plan);
   const selected = () => store.ui.structureSel || null;
   const thickness = () => { const t = Number(store.ui.wallThickness); return Number.isFinite(t) && t > 0 ? Math.round(t) : 10; };
 
@@ -68,7 +68,7 @@ export function createStructureTools(V, io) {
       const s = d.byId.get(sel.id);
       if (s) anchor = { type: 'segment', id: s.id, axis: s.axis, thickness: s.thickness, core: { ...s.core } };
     } else {
-      const o = plan.openings.find((q) => q.id === sel.id);
+      const o = env.plan.openings.find((q) => q.id === sel.id);
       if (o) anchor = { type: 'opening', id: o.id, x: o.x + o.w / 2, y: o.y + o.h / 2 };
     }
   }
@@ -83,12 +83,12 @@ export function createStructureTools(V, io) {
   function resolveSelection(reason) {
     const sel = selected(), d = data();
     if (!sel) { anchor = null; return; }
-    const exists = sel.type === 'segment' ? d.byId.has(sel.id) : plan.openings.some((o) => o.id === sel.id);
+    const exists = sel.type === 'segment' ? d.byId.has(sel.id) : env.plan.openings.some((o) => o.id === sel.id);
     if (exists) { remember(); return; }
     let next = null;
     if (anchor && anchor.type === sel.type && anchor.id === sel.id) {
       if (sel.type === 'opening') {
-        const o = plan.openings.find((q) => pointInRect(anchor.x, anchor.y, q));
+        const o = env.plan.openings.find((q) => pointInRect(anchor.x, anchor.y, q));
         if (o) next = { type: 'opening', id: o.id };
       } else {
         const a = spanOf(anchor.core, anchor.axis), cx = anchor.core.x + anchor.core.w / 2, cy = anchor.core.y + anchor.core.h / 2;
@@ -109,14 +109,14 @@ export function createStructureTools(V, io) {
     remember();
   }
 
-  const exists = (t) => (t.type === 'segment' ? data().byId.has(t.id) : plan.openings.some((o) => o.id === t.id));
+  const exists = (t) => (t.type === 'segment' ? data().byId.has(t.id) : env.plan.openings.some((o) => o.id === t.id));
 
   // ───────────── hit testing ─────────────
   function hitTarget(pp) {
     const d = data();
     let best = null;
     const tolO = Math.max(3, 5 / cam.scale);
-    for (const o of plan.openings) {
+    for (const o of env.plan.openings) {
       const dist = rectDist(pp.x, pp.y, o);
       if (dist <= tolO && (!best || dist < best.dist)) best = { type: 'opening', id: o.id, dist };
     }
@@ -128,12 +128,12 @@ export function createStructureTools(V, io) {
       }
     }
     if (!best) return null;
-    const policy = policyOfTarget(plan, best);
+    const policy = policyOfTarget(env.plan, best);
     return { type: best.type, id: best.id, level: policy.level, reason: policy.reason };
   }
   function hitHandle(p) {
     let best = null;
-    for (const h of selectionHandles(plan, selected(), cam)) {
+    for (const h of selectionHandles(env.plan, selected(), cam)) {
       const dist = Math.hypot(h.x - p.x, h.y - p.y);
       if (dist <= HANDLE_REACH && (!best || dist < best.dist)) best = { ...h, dist };
     }
@@ -307,7 +307,7 @@ export function createStructureTools(V, io) {
   }
 
   function beginDrag(g, p, e) {
-    const policy = policyOfTarget(plan, g.target), d = data();
+    const policy = policyOfTarget(env.plan, g.target), d = data();
     if (policy.level === 'locked') {
       g.type = 's-locked';
       emit('locked', g.target.type === 'segment' ? 'move-wall' : 'update-opening', 'locked', policy.reason, e);
@@ -327,7 +327,7 @@ export function createStructureTools(V, io) {
         g.grabAlong = (q.a0 + q.a1) / 2; g.from = g.end ? q.a1 : q.a0;
       } else { g.type = 's-move-wall'; g.op = 'move-wall'; g.applied = 0; }
     } else {
-      const o = plan.openings.find((q) => q.id === g.target.id);
+      const o = env.plan.openings.find((q) => q.id === g.target.id);
       if (!o) { g.type = 'noop'; return; }
       g.id = o.id; g.axis = o.axis; g.op = 'update-opening';
       const q = spanOf(o, o.axis), along = o.axis === 'h' ? g.startPlan.x : g.startPlan.y;
@@ -337,7 +337,7 @@ export function createStructureTools(V, io) {
         const seg = d.segOfOpening.get(o.id), core = seg ? spanOf(seg.core, seg.axis) : q;
         let lo = core.a0 + MIN_JAMB, hi = core.a1 - MIN_JAMB;
         for (const id of seg ? seg.openingIds : []) {
-          const other = id === o.id ? null : plan.openings.find((x) => x.id === id);
+          const other = id === o.id ? null : env.plan.openings.find((x) => x.id === id);
           if (!other) continue;
           const b = spanOf(other, o.axis);
           if (b.a1 <= q.a0) lo = Math.max(lo, b.a1 + MIN_JAMB); else if (b.a0 >= q.a1) hi = Math.min(hi, b.a0 - MIN_JAMB);
@@ -388,7 +388,7 @@ export function createStructureTools(V, io) {
     if (res.ok) { accepted(g, res, e); setTip(null); remember(); } else blocked(g, res.reason, e);
   }
   function dragWidth(g, p, e) {
-    const o = plan.openings.find((q) => q.id === g.id), seg = data().segOfOpening.get(g.id);
+    const o = env.plan.openings.find((q) => q.id === g.id), seg = data().segOfOpening.get(g.id);
     if (!o || !seg) return;
     const pp = io.toPlan(p), [minW, maxW] = WIDTHS[g.kind] || [40, 400];
     const wantJamb = snapTo(g.axis === 'h' ? pp.x : pp.y, GRID);
@@ -402,7 +402,7 @@ export function createStructureTools(V, io) {
       if (!res.ok) why = res.reason;
       else {
         // the engine may have slid the opening to make it fit — the opposite jamb must stay where it is
-        const now = plan.openings.find((x) => x.id === g.id), n = now ? spanOf(now, now.axis) : null;
+        const now = env.plan.openings.find((x) => x.id === g.id), n = now ? spanOf(now, now.axis) : null;
         if (n && (g.side ? n.a0 : n.a1) !== g.fixed) {
           call(updateOpening, g.id, { offset: q.a0 - a0, width: q.a1 - q.a0 }, TRANSIENT);
           why = 'There is not enough free wall on that side.';
@@ -475,14 +475,14 @@ export function createStructureTools(V, io) {
     switch (g.type) {
       case 's-press': {
         // a plain click: the selection was made on press; a locked target explains itself
-        const policy = policyOfTarget(plan, g.target);
+        const policy = policyOfTarget(env.plan, g.target);
         if (policy.level === 'locked') { emit('locked', 'select', 'locked', policy.reason, e); setTip(policy.reason, 'locked'); }
         break;
       }
       case 's-locked': setTip(S.tip ? S.tip.text : null, 'locked'); break;
       case 's-move-wall': case 's-resize-wall': case 's-slide': case 's-width': endDrag(g, e); break;
       case 's-empty': {
-        const pp = io.toPlan(p), space = spaceAt(pp.x, pp.y, plan);
+        const pp = io.toPlan(p), space = spaceAt(pp.x, pp.y, env.plan);
         select(null);
         store.setUI({ activeSpace: space ? space.id : null });
         break;
@@ -520,7 +520,7 @@ export function createStructureTools(V, io) {
   function planChanged(e, own) {
     if (own) return;
     resolveSelection(e && e.reason);
-    if (S.hover && !(S.hover.type === 'segment' ? data().byId.has(S.hover.id) : plan.openings.some((o) => o.id === S.hover.id))) S.hover = null;
+    if (S.hover && !(S.hover.type === 'segment' ? data().byId.has(S.hover.id) : env.plan.openings.some((o) => o.id === S.hover.id))) S.hover = null;
     S.hoverHandle = null; S.ghost = null;
     if (S.draft && S.draft.input) { const chk = canAddWall(S.draft.input); S.draft.ok = chk.ok; S.draft.reason = chk.ok ? '' : chk.reason; if (chk.ok) S.draft.rect = chk.rect; }
   }

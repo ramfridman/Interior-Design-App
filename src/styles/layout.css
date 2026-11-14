@@ -182,6 +182,29 @@
 .sb__val { color: var(--ink); min-width: 5ch; text-align: right; }
 .sb__saved.is-warn { color: var(--warn); }
 
+/* ───────── Floors (levels; only while the levels feature is on) ───────── */
+.topbar__center--levels { gap: var(--s-2); align-items: center; }
+.lvlswitch {
+  flex: 0 1 auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 170px;
+  height: var(--ctl); padding: 0 var(--s-2); border: 1px solid var(--line); border-radius: var(--r-1);
+  background: var(--raised); color: var(--ink); font-size: var(--fs-13); white-space: nowrap;
+  transition: border-color var(--t-fast) var(--ease);
+}
+.lvlswitch:hover { border-color: var(--line-strong); }
+.lvlswitch > .icon { flex: none; color: var(--ink-3); }
+.lvlswitch:not([data-level='L0']) > .icon:first-child { color: var(--accent); }
+.lvlswitch__label { min-width: 0; }
+.topbar.fit5 .lvlswitch__label { display: none; }
+.sb__cell--level { flex: none; max-width: 220px; color: var(--ink); }
+.sb__cell--level > .icon { flex: none; color: var(--ink-3); }
+.lvlcontent { margin: var(--s-2) 0 0; padding-left: 1.2em; color: var(--ink-2); font-size: var(--fs-13); display: grid; gap: 4px; }
+.lvldlg .lvlbanner { margin-top: 0; }
+.changes__floor { margin: var(--s-3) 0 var(--s-1); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-3); }
+.changes__floor:first-child { margin-top: 0; }
+.guide__floor { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: var(--s-2) 0; color: var(--ink-2); font-size: var(--fs-12); }
+.guide__floor > .icon { color: var(--accent); }
+.rooms__floors { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); margin-bottom: var(--s-2); }
+
 .mobnav { display: none; }
 .modebtn--menu { display: none; }
 .only-compact { display: none; }
@@ -231,5 +254,6 @@
 /* Narrow phones: the Structure and Carpentry buttons merge into one mode button with a menu. */
 @media (max-width: 429px) {
   .topbar .modebtn--menu { display: inline-grid; }
+  .topbar .lvlswitch { display: none; }   /* the floors are in the mode menu */
   .topbar .modebtn.only-compact { display: none; }
 }

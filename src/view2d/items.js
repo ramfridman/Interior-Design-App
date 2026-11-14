@@ -81,7 +81,7 @@ export function drawItem(G, env, it, opts = {}) {
 export function drawItems(G, env, pass, skip, alpha = 1) {
   const opts = alpha < 1 ? { alpha } : undefined;
   for (const it of env.store.items) {
-    if (it.hidden || isBelowWalls(it) !== (pass === 'below')) continue;
+    if ((env.shown ? !env.shown(it) : it.hidden) || isBelowWalls(it) !== (pass === 'below')) continue;
     if (skip && skip.has(it.id)) continue;
     drawItem(G, env, it, opts);
   }

@@ -16,6 +16,7 @@ import { applyTheme, getPref, setPref } from './prefs.js';
 import { createThumbs } from './thumbs.js';
 import { createActions } from './actions.js';
 import { createStructure } from './structure.js';
+import { createLevels } from './levels.js';
 import { initStructureGuide } from './structure-panels.js';
 import { createCarpentry } from './carpentry/index.js';
 import { setCarpentryBudget } from './shopping.js';
@@ -71,6 +72,7 @@ export function initUI(ctx) {
     openSettings: () => openSettings(app),
   };
   app.thumbs = createThumbs(app);
+  app.levels = createLevels(app);           // floors: UI entry points only while FEATURES.levels is on
   app.structure = createStructure(app);
   app.carpentry = createCarpentry(app);
   app.actions = createActions(app);

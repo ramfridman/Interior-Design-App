@@ -11,6 +11,8 @@
  *            level's slab (`heights.slab` = the slab under this level's floor) — see recomputeElevations().
  */
 import { union, netArea } from './polykernel.js';
+import { openingQuad } from './slant-geom.js';
+import { joinLevelSlants } from './slants.js';
 
 export const GROUND = 'L0';
 const LEVEL_ID = /^L[1-9][0-9]*$/;
@@ -70,11 +72,19 @@ const footprints = new WeakMap();
 export function footprintOf(level) {
   if (!level || !Array.isArray(level.walls)) return { polygons: [], area: 0 };
   const hit = footprints.get(level.walls);
-  if (hit && hit.openings === level.openings && hit.rooms === level.rooms) return hit.value;
-  const shapes = [...level.walls, ...(level.openings || []).filter((o) => o.axis !== 'a'), ...(level.rooms || []).map((r) => ({ polygon: r.polygon })),
-    ...(level.slants || []).filter((s) => s.poly).map((s) => ({ poly: s.poly }))];
+  if (hit && hit.openings === level.openings && hit.rooms === level.rooms && hit.slants === level.slants) return hit.value;
+  const rects = [...level.walls, ...(level.openings || []).filter((o) => o.axis !== 'a')];
+  const shapes = [...rects, ...(level.rooms || []).map((r) => ({ polygon: r.polygon })), ...slantShapes(level, rects)];
   const polygons = shapes.length ? union(shapes) : [];
   const value = { polygons, area: netArea(polygons) };
-  footprints.set(level.walls, { openings: level.openings, rooms: level.rooms, value });
+  footprints.set(level.walls, { openings: level.openings, rooms: level.rooms, slants: level.slants, value });
   return value;
+}
+/** Angled walls of a level as solids: their joined footprints (recomputed — a saved `poly` is not trusted) + gap quads. */
+function slantShapes(level, rects) {
+  const sl = Array.isArray(level.slants) ? level.slants : [];
+  if (!sl.length) return [];
+  const joined = joinLevelSlants(sl, rects).joined, byId = new Map(sl.map((s) => [s.id, s]));
+  const quads = (level.openings || []).filter((o) => o.axis === 'a' && byId.has(o.wall) && Number.isFinite(o.at) && o.width > 0).map((o) => openingQuad(byId.get(o.wall), o.at, o.width));
+  return [...joined.map((s) => ({ poly: s.poly })), ...quads];
 }

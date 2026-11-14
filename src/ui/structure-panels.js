@@ -9,7 +9,9 @@ import { openPopover } from './dialogs.js';
 import { LEVELS, LEVEL_ORDER, levelTag, basePlanName } from './structure.js';
 import { phaseCard } from './projects.js';
 import { underlayCard } from './import/underlay-panel.js';
-import { planPhase } from '../core/plan-edit.js';
+import { planPhase, BASE_PLAN } from '../core/plan-edit.js';
+import { levelName } from '../core/levels.js';
+import { FEATURES } from '../core/features.js';
 
 /** Structure tools: value = store.ui.tool. Shared by the top bar and the guide so the two can never drift apart. */
 export const STRUCTURE_TOOL_LIST = [
@@ -37,6 +39,12 @@ function attention(items) {
 export function initStructureGuide(root, app) {
   const { store, structure } = app;
   const toolRows = new Map();
+  // several floors: which floor the tools work on (only while the levels feature is on)
+  const floorNote = FEATURES.levels && app.levels ? h('p', { class: 'guide__floor' }) : null;
+  if (floorNote) {
+    const paint = () => setKids(floorNote, icon('levels', { size: 14 }), h('span', null, `Editing ${app.levels.name(app.levels.current())}. `), kbd('PgUp'), ' ', kbd('PgDn'), h('span', null, ' switch floors.'));
+    app.levels.onChange(paint); paint();
+  }
   const legend = h('ul', { class: 'guide__levels', 'aria-label': 'What may be changed' }, LEVEL_ORDER.map((id) => h('li', { class: `glevel glevel--${id}` },
     h('span', { class: 'glevel__icon' }, icon(LEVELS[id].icon, { size: 16 })),
     h('div', { class: 'glevel__body' }, h('p', { class: 'glevel__label' }, LEVELS[id].label), h('p', { class: 'glevel__what' }, LEVELS[id].what), h('p', { class: 'glevel__text' }, LEVELS[id].text)))));
@@ -55,6 +63,7 @@ export function initStructureGuide(root, app) {
       app.projects ? phaseCard(app) : null,
       underlayCard(app),
       h('p', { class: 'guide__lead' }, 'Change the walls, doors and windows of your house, within what is allowed. Every wall and opening is one of four levels.'),
+      floorNote,
       legend,
       section('Tools', tools),
       h('ul', { class: 'guide__notes' },
@@ -69,12 +78,23 @@ export function initStructureGuide(root, app) {
   return el;
 }
 
-/** The rows of the changes list (level badge + sentence); a click shows the change on the plan. */
+/**
+ * The rows of the changes list (level badge + sentence); a click shows the change on the plan (on its floor). On a
+ * plan with several floors every entry carries `levelId`: the list is grouped by floor, ground floor first.
+ */
 function changeRows(app, items, onPick) {
-  return h('ul', { class: 'changes' }, items.map((it) => h('li', null,
+  const row = (it) => h('li', null,
     h('button', { type: 'button', class: `change change--${it.level}`, 'data-tip': 'Show on the plan', 'data-tip-side': 'left',
       onClick: () => { onPick && onPick(); app.structure.focusChange(it); } },
-    h('span', { class: 'change__text' }, it.text), levelTag(it.level)))));
+    h('span', { class: 'change__text' }, it.text), levelTag(it.level)));
+  if (!items.some((it) => it.levelId)) return h('ul', { class: 'changes' }, items.map(row));
+  const groups = new Map();
+  for (const it of items) { const k = it.levelId || 'L0'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(it); }
+  const rank = (id) => parseInt(String(id).slice(1), 10) || 0;
+  const floorName = (id) => levelName(app.plan, id) || levelName(BASE_PLAN, id) || id;
+  return h('div', { class: 'changes__floors' }, [...groups.keys()].sort((a, b) => rank(a) - rank(b)).map((id) => [
+    h('p', { class: 'changes__floor' }, floorName(id)),
+    h('ul', { class: 'changes', 'aria-label': `Changes on ${floorName(id)}` }, groups.get(id).map(row))]));
 }
 
 /**

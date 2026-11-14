@@ -14,6 +14,7 @@ import { WALL_THICKNESSES } from './structure.js';
 import { STRUCTURE_TOOL_LIST, planChip } from './structure-panels.js';
 import { projectSwitcher, openProjectMenu } from './projects.js';
 import { isBuiltinBase, planPhase } from '../core/plan-edit.js';
+import { FEATURES } from '../core/features.js';
 
 const MOD = isMac() ? '⌘' : 'Ctrl';
 
@@ -40,6 +41,8 @@ const TOGGLES = [
   { key: 'showRoomLabels', label: 'Room labels', icon: 'labels' },
   { key: 'showSite', label: 'Lot and setbacks', icon: 'site' },
 ];
+/** Several floors (FEATURES.levels): the floor below, drawn faintly under an upper floor. */
+const GHOST_TOGGLE = { key: 'ghostBelow', label: 'Floor below, faintly', icon: 'ghost' };
 
 /** @param {HTMLElement} root  @param {object} app */
 export function initTopbar(root, app) {
@@ -65,11 +68,14 @@ export function initTopbar(root, app) {
   editBtn.append(editBadge);
   const carpBtn = iconBtn('carpentry', 'Carpentry: made-to-measure kitchen, wardrobes and vanities', { kbd: 'C', pressed: carpentry.isActive(), class: 'only-compact modebtn modebtn--carp', onClick: () => carpentry.toggle() });
   // Narrow phones: one button for the three modes (its icon shows the current one), so Carpentry is never hidden in a menu.
+  const levelsOn = FEATURES.levels && !!app.levels;
   const modeMenuBtn = iconBtn('sofa', 'Mode: Furnish, Structure or Carpentry', { pressed: false, class: 'modebtn modebtn--menu', onClick: () => openMenu(modeMenuBtn, [
     { heading: 'Mode' },
     { label: 'Furnish: products and furniture', icon: 'sofa', checked: !structure.isActive() && !carpentry.isActive(), onSelect: () => { structure.exit(); carpentry.exit(); } },
     { label: 'Structure: walls, doors, windows', icon: 'wall', checked: structure.isActive(), onSelect: () => structure.enter() },
     { label: 'Carpentry: kitchen, wardrobes, vanities', icon: 'carpentry', checked: carpentry.isActive(), onSelect: () => carpentry.enter() },
+    // narrow phones: the floor switcher lives here (the top bar has no room for it)
+    ...(levelsOn ? [{ separator: true }, ...app.levels.menuItems()] : []),
   ]) });
   const modeBadge = h('span', { class: 'badge', hidden: true });
   let modeIcon = 'sofa';
@@ -103,15 +109,17 @@ export function initTopbar(root, app) {
 
   const chip = planChip(app);
   const views = segmented({ options: VIEW_MODES, value: store.ui.mode, label: 'View', cls: 'seg--views', onChange: (mode) => actions.setMode(mode) });
+  const floorSwitch = levelsOn ? app.levels.switcher() : null;
 
   /* Display toggles (inline on wide screens, in a menu on narrow ones) */
-  const toggleBtns = TOGGLES.map((t) => {
+  const toggles = levelsOn ? [...TOGGLES, GHOST_TOGGLE] : TOGGLES;
+  const toggleBtns = toggles.map((t) => {
     const b = iconBtn(t.icon, t.label, { kbd: t.kbd, pressed: !!store.ui[t.key], onClick: () => store.setUI({ [t.key]: !store.ui[t.key] }) });
     b.dataset.key = t.key;
     return b;
   });
   const togglesMenuBtn = iconBtn('site', 'Plan display', { class: 'only-compact toggles-menu', onClick: () => openMenu(togglesMenuBtn, [
-    ...TOGGLES.map((t) => ({ label: t.label, checked: !!store.ui[t.key], kbd: t.kbd, onSelect: () => store.setUI({ [t.key]: !store.ui[t.key] }) })),
+    ...toggles.map((t) => ({ label: t.label, checked: !!store.ui[t.key], kbd: t.kbd, onSelect: () => store.setUI({ [t.key]: !store.ui[t.key] }) })),
     { separator: true },
     { label: 'Changes to the architect’s plan', checked: !!store.ui.showPlanChanges, onSelect: () => store.setUI({ showPlanChanges: !store.ui.showPlanChanges }) },
   ], { placement: 'bottom-end' }) });
@@ -168,7 +176,7 @@ export function initTopbar(root, app) {
     ];
   }
 
-  const center = h('div', { class: 'topbar__center' }, views);
+  const center = h('div', { class: `topbar__center${floorSwitch ? ' topbar__center--levels' : ''}` }, views, floorSwitch);
   root.append(
     h('div', { class: 'topbar__group topbar__brand' }, mark, name),
     h('div', { class: 'topbar__group', role: 'group', 'aria-label': 'History' }, undo, redo),

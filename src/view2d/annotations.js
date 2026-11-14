@@ -23,7 +23,7 @@ function itemObstacles(G, env) {
   if (!env.ui.showItems) return [];
   const out = [];
   for (const it of env.store.items) {
-    if (it.hidden || isBelowWalls(it) || isFloating(it)) continue;
+    if ((env.shown ? !env.shown(it) : it.hidden) || isBelowWalls(it) || isFloating(it)) continue;
     const b = itemAABB(it);
     out.push({ x0: G.X(b.x), y0: G.Y(b.y), x1: G.X(b.x + b.w), y1: G.Y(b.y + b.h) });
   }

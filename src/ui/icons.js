@@ -19,6 +19,9 @@ const ICONS = {
   dimensions: P('M4 6v12M20 6v12M4 12h16') + P('M7 9.5 4.5 12 7 14.5M17 9.5 19.5 12 17 14.5'),
   labels: P('M4 5.5A1.5 1.5 0 0 1 5.5 4h6.2c.4 0 .8.16 1.06.44l7 7a1.5 1.5 0 0 1 0 2.12l-6.2 6.2a1.5 1.5 0 0 1-2.12 0l-7-7A1.5 1.5 0 0 1 4 11.7z') + P('M8.5 8.5h.01'),
   site: '<rect x="3.5" y="3.5" width="17" height="17" rx="1" stroke-dasharray="3 2.6"/>' + P('M8.5 15.5v-5L12 8l3.5 2.5v5z'),
+  // ── floors (levels): stacked storeys; the ghost of the floor below ──
+  levels: P('M12 3.5 3.5 8 12 12.5 20.5 8z') + P('M3.5 12 12 16.5 20.5 12') + P('M3.5 16 12 20.5 20.5 16'),
+  ghost: P('M12 3.5 3.5 8 12 12.5 20.5 8z') + '<path d="M3.5 14 12 18.5 20.5 14" stroke-dasharray="2.2 2.2"/>',
 
   // ── structure: walls and openings as drawn on a plan ──
   wall: '<rect x="2.500" y="8.500" width="19" height="7" rx="0.500"/>' + P('M6 15.500l4-7M11 15.500l4-7M16 15.500l4-7'),

@@ -2,6 +2,8 @@
  * Shared 2D geometry helpers (plan space: cm, +x east, +y south). Pure functions, no DOM, no THREE.
  */
 import { PLAN } from './plan.js';
+import { slantFrame } from './slant-geom.js';
+import { joinLevelSlants } from './slants.js';
 
 export const DEG = Math.PI / 180;
 
@@ -120,9 +122,22 @@ const OPENING_AXES = {
   h: { frame: (o) => ({ cx: o.x + o.w / 2, cy: o.y + o.h / 2, ux: 1, uy: 0, nx: 0, ny: 1, L: o.w, T: o.h, angle: 0, x0: o.x, y0: o.y }), faces: ['n', 's'], jambs: ['w', 'e'] },
   // wall runs north–south: gap along +y, thickness along x; the +normal face is the east one
   v: { frame: (o) => ({ cx: o.x + o.w / 2, cy: o.y + o.h / 2, ux: 0, uy: 1, nx: 1, ny: 0, L: o.h, T: o.w, angle: 90, x0: o.x, y0: o.y }), faces: ['w', 'e'], jambs: ['n', 's'] },
-  // 'a' (an opening in a slant, later stage): frame from the slant's centre line and `o.at` (needs `plan`),
-  // faces ['l', 'r'] relative to x1 → x2, jambs ['a', 'b'].
+  // 'a' (an opening in a slant, stage A1): gap along the slant's direction x1 → x2, thickness across; the +normal face is
+  // the right-hand one ('r', normal (−uy, ux) on screen); jamb 'a' is the one nearer (x1, y1). From the opening's derived
+  // cx, cy, angle, t (plan-edit.js derive) — or, when those are missing, from its slant `o.wall` in `plan.slants`.
+  a: { frame: angledFrame, faces: ['l', 'r'], jambs: ['a', 'b'] },
 };
+function angledFrame(o, plan) {
+  let cx = o.cx, cy = o.cy, ux, uy, T = o.t, angle = o.angle;
+  if ([cx, cy, angle, T].every(Number.isFinite)) { const a = angle * DEG; ux = Math.cos(a); uy = Math.sin(a); } else {
+    const s = ((plan && plan.slants) || []).find((x) => x.id === o.wall);
+    if (!s) return { cx: 0, cy: 0, ux: 1, uy: 0, nx: 0, ny: 1, L: o.width || 0, T: 0, angle: 0, x0: 0, y0: 0 };
+    const f = slantFrame(s);
+    ({ ux, uy, t: T, angle } = f); cx = s.x1 + ux * o.at; cy = s.y1 + uy * o.at;
+  }
+  const nx = -uy + 0, ny = ux + 0, L = o.width;
+  return { cx, cy, ux, uy, nx, ny, L, T, angle, x0: cx - (ux * L) / 2 - (nx * T) / 2, y0: cy - (uy * L) / 2 - (ny * T) / 2 };
+}
 /** Anything but 'h' is treated as 'v', as the consumers always did. */
 const axisOf = (o) => OPENING_AXES[o.axis] || OPENING_AXES.v;
 
@@ -168,15 +183,44 @@ export function openingHinge(o, hinge = o.hinge, swing = o.swing) {
   return { x, y, open: [fs * F.nx + 0, fs * F.ny + 0], closed: [-js * F.ux + 0, -js * F.uy + 0] };
 }
 
-/** Footprint polygon of an opening's gap (corners as rectPoly). */
-export const openingPoly = (o) => rectPoly(o);
+/** Footprint polygon of an opening's gap (corners as rectPoly; an opening in a slant: its gap quad, same corner order). */
+export const openingPoly = (o, plan = PLAN) => {
+  if (o.axis !== 'a') return rectPoly(o);
+  const F = openingFrame(o, plan);
+  return [openingPoint(F, 0, 0), openingPoint(F, F.L, 0), openingPoint(F, F.L, F.T), openingPoint(F, 0, F.T)];
+};
+
+// ───────────────────────── angled walls (slants, stage A1) ─────────────────────────
+let _slantPolys = new WeakMap();
+const rectOpeningsOf = (plan) => plan.openings.filter((o) => o.axis !== 'a');
+/**
+ * Joined footprint of every slant of a plan / level view (slant-geom joinSlants with the plan's rect walls and rect
+ * openings — the same polygons as the `poly` of its 'seg:a:' segments; a saved `poly` is never trusted), in
+ * `plan.slants` order, each carrying the slant's `id`. [] for a plan without slants. Cached per slants array.
+ */
+export function slantPolys(plan = PLAN) {
+  const sl = plan && plan.slants;
+  if (!Array.isArray(sl) || !sl.length) return [];
+  const hit = _slantPolys.get(sl);
+  if (hit && hit.walls === plan.walls && hit.openings === plan.openings) return hit.polys;
+  const polys = joinLevelSlants(sl, [...plan.walls, ...rectOpeningsOf(plan)]).joined.map((s) => { const p = s.poly.map((q) => q.slice()); p.id = s.id; return p; });
+  _slantPolys.set(sl, { walls: plan.walls, openings: plan.openings, polys });
+  return polys;
+}
+const hasAngled = (plan) => Array.isArray(plan.slants) && plan.slants.length > 0;
+const inSlant = (x, y, plan) => slantPolys(plan).some((p) => pointInPolygon(x, y, p));
+const inAngledGap = (x, y, plan) => plan.openings.some((o) => o.axis === 'a' && pointInPolygon(x, y, openingPoly(o, plan)));
 
 let _wallPolys = new WeakMap();
-/** One polygon ([[x, y], …], carrying the wall's `id`) per wall, same order as `plan.walls`. Cached per walls array. */
+/**
+ * One polygon ([[x, y], …], carrying the wall's `id`) per wall, same order as `plan.walls` — followed, on a plan with
+ * angled walls, by the joined footprint of each slant (id = the slant's id). Cached per walls array.
+ */
 export function wallPolys(plan = PLAN) {
   let polys = _wallPolys.get(plan.walls);
   if (!polys) {
     polys = plan.walls.map((w) => { const p = rectPoly(w); p.id = w.id; return p; });
+    if (hasAngled(plan)) polys.push(...slantPolys(plan));            // slants after the rects (indexes of plan.walls kept)
     _wallPolys.set(plan.walls, polys);
   }
   return polys;
@@ -190,10 +234,11 @@ export function rectExtent(r, dx, dy) {
   return [r.x * dx + r.y * dy + Math.min(0, dx * r.w) + Math.min(0, dy * r.h), Math.abs(dx) * r.w + Math.abs(dy) * r.h];
 }
 
-/** Is the point inside (or on the edge of) a solid wall? */
-export const inWall = (x, y, plan = PLAN) => plan.walls.some((w) => pointInRect(x, y, w));
+/** Is the point inside (or on the edge of) a solid wall (an angled wall: its footprint outside its openings' gaps)? */
+export const inWall = (x, y, plan = PLAN) => plan.walls.some((w) => pointInRect(x, y, w)) || (hasAngled(plan) && inSlant(x, y, plan) && !inAngledGap(x, y, plan));
 /** Is the point inside (or on the edge of) a solid wall or an opening's gap? */
-export const inWallOrOpening = (x, y, plan = PLAN) => inWall(x, y, plan) || plan.openings.some((o) => pointInRect(x, y, o));
+export const inWallOrOpening = (x, y, plan = PLAN) => plan.walls.some((w) => pointInRect(x, y, w)) || plan.openings.some((o) => o.axis !== 'a' && pointInRect(x, y, o))
+  || (hasAngled(plan) && inSlant(x, y, plan));
 
 /**
  * Unit normal of the edge (x1, y1) → (x2, y2) in a fixed orientation: the one with nx + ny > 0 (nx > 0 on a tie), so
@@ -227,7 +272,7 @@ export function itemsOverlap(a, b) {
  */
 let _faces = new WeakMap();
 /** Drop everything cached from PLAN. Called by core/plan-edit.js whenever walls / openings / rooms change. */
-export function invalidatePlanCaches() { _faces = new WeakMap(); _wallPolys = new WeakMap(); }
+export function invalidatePlanCaches() { _faces = new WeakMap(); _wallPolys = new WeakMap(); _slantPolys = new WeakMap(); }
 export function wallFaces(plan = PLAN) {
   const hit = _faces.get(plan.walls);
   if (hit && hit.openings === plan.openings && hit.outline === plan.wallOutline) return hit.faces;
@@ -248,7 +293,7 @@ export function wallFaces(plan = PLAN) {
  * Doors and the sliding terrace door are passable. Axis-aligned bounding boxes; see walkBoxes() for the exact shapes.
  */
 export function walkBlockers(plan = PLAN) {
-  return [...plan.walls, ...plan.openings.filter((o) => o.kind === 'window')].map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h }));
+  return [...plan.walls, ...plan.openings.filter((o) => o.kind === 'window' && o.axis !== 'a')].map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h }));
 }
 
 /**
@@ -256,7 +301,29 @@ export function walkBlockers(plan = PLAN) {
  * axes and the rotation of its first axis. Rect walls and 'h' / 'v' openings are unrotated (cos 1, sin 0).
  */
 export function walkBoxes(plan = PLAN) {
-  return walkBlockers(plan).map((r) => ({ cx: r.x + r.w / 2, cy: r.y + r.h / 2, hw: r.w / 2, hh: r.h / 2, cos: 1, sin: 0 }));
+  const boxes = walkBlockers(plan).map((r) => ({ cx: r.x + r.w / 2, cy: r.y + r.h / 2, hw: r.w / 2, hh: r.h / 2, cos: 1, sin: 0 }));
+  if (hasAngled(plan)) boxes.push(...slantBoxes(plan));
+  return boxes;
+}
+/**
+ * Angled walls as rotated boxes along their centre lines (u = direction x1 → x2, half thickness across), cut at their
+ * doors and passages (windows stay blocking), then one box per window in a slant — after the rect walls and windows.
+ */
+function slantBoxes(plan) {
+  const out = [], windows = [];
+  for (const s of plan.slants) {
+    const f = slantFrame(s);
+    if (!(f.len > 0)) continue;
+    const gaps = plan.openings.filter((o) => o.axis === 'a' && o.wall === s.id && Number.isFinite(o.at) && o.width > 0)
+      .map((o) => { if (o.kind === 'window') windows.push(o); return o.kind === 'window' ? null : [o.at - o.width / 2, o.at + o.width / 2]; })
+      .filter(Boolean).sort((p, q) => p[0] - q[0]);
+    let a = 0;
+    const piece = (a0, a1) => { if (a1 - a0 <= 0) return; const m = (a0 + a1) / 2; out.push({ cx: s.x1 + f.ux * m, cy: s.y1 + f.uy * m, hw: (a1 - a0) / 2, hh: f.hw, cos: f.ux, sin: f.uy }); };
+    for (const [g0, g1] of gaps) { piece(a, Math.min(g0, f.len)); a = Math.max(a, g1); }
+    piece(a, f.len);
+  }
+  for (const o of windows) { const F = openingFrame(o, plan); out.push({ cx: F.cx, cy: F.cy, hw: F.L / 2, hh: F.T / 2, cos: F.ux, sin: F.uy }); }
+  return out;
 }
 
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));

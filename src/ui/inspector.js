@@ -12,6 +12,8 @@ import { btn, iconBtn, numField, section, swatch, extLink, emptyState } from './
 import { fmtPrice, fmtDims, fmtArea, fmtUnitPrice, toUnit, fromUnit, unitDigits, RESIZABLE_TYPES } from './format.js';
 import { shoppingTotal } from './shopping.js';
 import { createStructureInspector } from './structure-inspector.js';
+import { FEATURES } from '../core/features.js';
+import { viewPlan } from './levels.js';
 
 const PALETTE = ['#f3f1ec', '#d9d2c5', '#b9b2a6', '#3a3d42', '#c8a476', '#8a5a3b', '#5c6b5a', '#3e5c76', '#b4543a'];
 const STRUCTURAL = ['productId', 'type', 'generic', 'placement', 'locked', 'hidden', 'params', 'price', 'url', 'retailer', 'priceUnit'];
@@ -50,14 +52,14 @@ export function initInspector(root, app) {
 
   /* ───────── Nothing selected ───────── */
   function renderNothing() {
-    const space = getSpace(store.ui.activeSpace, plan);
+    const space = getSpace(store.ui.activeSpace, viewPlan(app));   // the floor shown
     const t = shoppingTotal(app);
     const roomCard = space
       ? h('div', { class: 'card' },
         h('div', { class: 'card__head' }, h('h3', { class: 'card__title display' }, space.name), h('span', { class: 'card__aside num' }, fmtArea(floorAreaM2(space)))),
         h('dl', { class: 'facts' },
           h('dt', null, 'Floor'), h('dd', null, finishName(space.id, 'floor')),
-          plan.rooms.includes(space) ? [h('dt', null, 'Walls'), h('dd', null, finishName(space.id, 'wall'))] : null,
+          viewPlan(app).rooms.includes(space) ? [h('dt', null, 'Walls'), h('dd', null, finishName(space.id, 'wall'))] : null,
           h('dt', null, 'Items'), h('dd', { class: 'num' }, String(store.items.filter((it) => spaceId(it) === space.id).length))),
         h('div', { class: 'card__actions' },
           btn('Change finishes', { small: true, icon: 'paint', onClick: () => app.openPanel('rooms') }),
@@ -178,6 +180,7 @@ export function initInspector(root, app) {
       iconBtn('front', 'Bring to front', { variant: 'outlined', onClick: () => store.bringToFront([item.id]) }),
       iconBtn('back', 'Send to back', { variant: 'outlined', onClick: () => store.sendToBack([item.id]) }),
       iconBtn('target', 'Find in the view', { variant: 'outlined', onClick: () => actions.focusItems([item.id]) }),
+      moveToFloorBtn([item.id], item.carp),
       iconBtn('trash', 'Remove', { kbd: 'Delete', variant: 'danger', onClick: () => actions.deleteSelection() }));
 
     const note = h('textarea', { class: 'textarea', rows: '2', placeholder: 'Fabric to confirm, delivery date, measurements to check…', 'aria-label': 'Note',
@@ -205,6 +208,14 @@ export function initInspector(root, app) {
         : h('p', { class: 'sec__empty' }, `No ${typeLabel(item).toLowerCase()} products in the catalogue yet. Browse the catalogue on the left for something close.`));
   }
 
+  /** Several floors: "Move to floor…" (a menu of the other floors). Nothing while the levels feature is off. */
+  function moveToFloorBtn(ids, carpentry) {
+    if (!FEATURES.levels || !app.levels) return null;
+    const b = iconBtn('levels', 'Move to floor…', { variant: 'outlined', disabled: !!carpentry, onClick: () => app.levels.openMoveMenu(b, ids) });
+    b.setAttribute('aria-haspopup', 'menu');
+    return b;
+  }
+
   /* ───────── Several items ───────── */
   function renderMany(items) {
     const ids = items.map((it) => it.id);
@@ -229,6 +240,7 @@ export function initInspector(root, app) {
         iconBtn(allHidden ? 'eye-off' : 'eye', allHidden ? 'Show all' : 'Hide all', { variant: 'outlined', pressed: allHidden, onClick: () => store.updateItems(ids, { hidden: !allHidden }) }),
         iconBtn('duplicate', 'Duplicate', { variant: 'outlined', onClick: () => actions.duplicateSelection() }),
         iconBtn('front', 'Bring to front', { variant: 'outlined', onClick: () => store.bringToFront(ids) }),
+        moveToFloorBtn(ids, items.every((it) => it.carp)),
         iconBtn('trash', 'Remove', { variant: 'danger', onClick: () => actions.deleteSelection() }))),
       section('Selected', h('ul', { class: 'sellist' }, items.slice(0, 40).map((it) => h('li', null,
         h('button', { type: 'button', class: 'sellist__row', onClick: () => actions.focusItems([it.id]) },

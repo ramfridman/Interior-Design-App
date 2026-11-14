@@ -7,7 +7,7 @@
  * Everything is recomputed lazily when the engine hands out a new `wallSegments()` array — nothing is kept
  * across plan revisions.
  */
-import { wallSegments, openingPolicy, planDiff, isPlanModified, BASE_PLAN } from '../core/plan-edit.js';
+import { wallSegments, openingPolicy, planDiff, isPlanModified, BASE_PLAN, levelPlan } from '../core/plan-edit.js';
 import { polygonBounds } from '../core/geometry.js';
 import { css } from './color.js';
 import { chainSignatures } from './annotations.js';
@@ -18,7 +18,7 @@ export const isStructureTool = (tool) => STRUCTURE_TOOLS.includes(tool);
 /** Engine opening kind placed by each opening tool. */
 export const OPENING_TOOL_KIND = { door: 'door', window: 'window', passage: 'opening' };
 /** Junction squares where two walls cross belong to neither wall — they are not selectable. */
-export const isJunction = (seg) => seg.id.startsWith('seg:j');
+export const isJunction = (seg) => seg.id.includes('seg:j:');   // upper levels prefix the id ('L1|seg:j:…')
 
 /** Distance from a point to a rectangle { x, y, w, h } (0 inside). */
 export function rectDist(px, py, r) {
@@ -120,7 +120,10 @@ export function selectionHandles(plan, sel, cam) {
 function removedWalls(plan, d) {
   if (d.removed) return d.removed;
   const solids = [...plan.walls, ...plan.openings], out = [];
-  for (const b of wallSegments(BASE_PLAN)) {
+  // an upper level is compared with the same level of the base plan (none: a new floor, nothing was removed)
+  const base = plan.levelId && plan.levelId !== 'L0' ? levelPlan(BASE_PLAN, plan.levelId) : BASE_PLAN;
+  if (!base) { d.removed = out; return out; }
+  for (const b of wallSegments(base)) {
     const { a0, a1, c0, c1 } = spanOf(b, b.axis);
     const cover = [];
     for (const r of solids) {
@@ -198,7 +201,9 @@ export function drawChangeMarkers(G, env) {
   if (!showsChanges(env)) return;
   const { plan, pal } = env, { ctx } = G, dpr = G.dpr;
   const d = structureOf(plan);
-  if (!d.diff) d.diff = planDiff().items.filter((it) => it.kind in MARK);
+  // on a plan with several levels every entry names its level: only this level's markers
+  const lid = plan.levelId || 'L0';
+  if (!d.diff) d.diff = planDiff().items.filter((it) => it.kind in MARK && (it.levelId === undefined || it.levelId === lid));
   const r = 6.5 * dpr;
   for (const it of d.diff) {
     const m = 12 / G.scale;

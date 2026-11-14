@@ -8,10 +8,13 @@ import { segmented } from './components.js';
 import { fmtPrice, fmtLen, toUnit, unitDigits } from './format.js';
 import { LEVELS, segmentTitle, openingTitle } from './structure.js';
 import { storageAvailable } from './prefs.js';
+import { icon } from './icons.js';
+import { FEATURES } from '../core/features.js';
+import { viewPlan } from './levels.js';
 
 /** @param {HTMLElement} root  @param {object} app */
 export function initStatusbar(root, app) {
-  const { store, plan, catalog, view2d } = app;
+  const { store, catalog, view2d } = app;
   const x = h('span', { class: 'sb__val num' }, '—');
   const y = h('span', { class: 'sb__val num' }, '—');
   const room = h('span', { class: 'sb__room truncate' }, '');
@@ -21,6 +24,11 @@ export function initStatusbar(root, app) {
   const units = segmented({ options: [{ value: 'm', label: 'm' }, { value: 'cm', label: 'cm' }], value: store.ui.units, label: 'Units', cls: 'seg--mini', onChange: (v) => store.setUI({ units: v }) });
   const saved = h('span', { class: 'sb__saved' }, '');
 
+  // several floors: the floor shown (only while the levels feature is on)
+  const levelText = h('span', { class: 'truncate' }, '');
+  const levelCell = FEATURES.levels && app.levels ? h('div', { class: 'sb__cell sb__cell--level', role: 'status', 'aria-live': 'polite', 'data-tip': 'Floor shown in the plan (PgUp / PgDn)', 'data-tip-side': 'top' }, icon('levels', { size: 14 }), levelText) : null;
+  if (levelCell) { const paintLevel = () => { levelText.textContent = app.levels.statusText(); }; app.levels.onChange(paintLevel); paintLevel(); }
+  if (levelCell) root.append(levelCell);
   root.append(
     h('div', { class: 'sb__cell sb__coords hide-phone', 'aria-hidden': 'true' }, h('span', { class: 'sb__key' }, 'X'), x, h('span', { class: 'sb__key' }, 'Y'), y),
     h('div', { class: 'sb__cell sb__cell--room hide-phone' }, room),
@@ -38,7 +46,7 @@ export function initStatusbar(root, app) {
     const u = store.ui.units, d = unitDigits(u);
     x.textContent = toUnit(last.x, u).toFixed(d);
     y.textContent = toUnit(last.y, u).toFixed(d);
-    const space = last.space || spaceAt(last.x, last.y, plan);
+    const space = last.space || spaceAt(last.x, last.y, viewPlan(app));
     const name = space ? space.name : 'Outside the lot';
     if (room.textContent !== name) room.textContent = name;
   });

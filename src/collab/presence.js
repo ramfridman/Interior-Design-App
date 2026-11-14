@@ -41,6 +41,10 @@ const CSS = `
 
 const MODE_LABEL = { '2d': 'Plan', '3d': '3D', walk: 'Walk-through', split: 'Plan + 3D' };
 const modeOf = (ui) => (ui.tool === 'carpentry' ? 'Carpentry' : ['structure', 'wall', 'door', 'window', 'passage'].includes(ui.tool) ? 'Structure' : MODE_LABEL[ui.mode] || ui.mode);
+// Several floors: presence carries the floor the person is looking at (`level`, absent = the ground floor 'L0'); other
+// people's pointers and selections are drawn only on the floor they are on.
+const levelOfUI = (ui) => (ui && typeof ui.level === 'string' && ui.level ? ui.level : 'L0');
+const levelOfItem = (it) => (it && typeof it.level === 'string' && it.level ? it.level : 'L0');
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
 /** @param {{ store, view2d, view3d, ui, projects }} app  @param {object} ctl  the controller from online.js */
@@ -149,6 +153,8 @@ export function initCollabUI(app, ctl) {
     stop();
     const { client, bridge } = session;
     const me = { pointer: null, sel: [...store.selection], mode: modeOf(store.ui), room: null, lock: null };
+    const syncLevel = () => { const l = levelOfUI(store.ui); if (l === 'L0') delete me.level; else me.level = l; };
+    syncLevel();
     S = { client, bridge, offs: [], me, timer: 0, lastBeat: 0 };
     const push = () => client.setPresence({ ...me });
     const on = (target, ev, fn) => { const off = target && typeof target.on === 'function' ? target.on(ev, fn) : null; if (typeof off === 'function') S.offs.push(off); };
@@ -162,7 +168,7 @@ export function initCollabUI(app, ctl) {
       push();
     });
     on(store, 'selection', () => { me.sel = [...store.selection]; push(); });
-    on(store, 'ui', (e) => { if (e.keys.includes('mode') || e.keys.includes('tool')) { me.mode = modeOf(store.ui); if (store.ui.mode !== '2d' && store.ui.mode !== 'split') me.pointer = null; push(); } });
+    on(store, 'ui', (e) => { if (e.keys.includes('level')) { syncLevel(); me.pointer = null; push(); redraw(); } if (e.keys.includes('mode') || e.keys.includes('tool')) { me.mode = modeOf(store.ui); if (store.ui.mode !== '2d' && store.ui.mode !== 'split') me.pointer = null; push(); } });
     on(store, 'items', (e) => { if (e.transient && !e.collabLocal && store._batch && e.ids && e.ids.length) { const k = 'item:' + e.ids[0]; if (me.lock !== k) { me.lock = k; push(); } } });
     on(store, 'plan', (e) => { if (e.transient && store._batch && store.ui.structureSel) { const k = 'seg:' + store.ui.structureSel.id; if (me.lock !== k) { me.lock = k; push(); } } });
     // a lock lasts while the gesture does; heartbeat so others can tell a held lock from a vanished person
@@ -210,27 +216,28 @@ export function initCollabUI(app, ctl) {
     if (!S) return;
     const { ctx, dpr } = G;
     ctx.save();
+    const here = levelOfUI(store.ui);
     for (const p of S.client.peers()) {
       if (!p.p) continue;
-      const col = p.color || '#888';
+      const col = p.color || '#888', sameFloor = levelOfUI(p.p) === here;
       // selection outlines (dashed) and soft locks (solid + label)
       for (const id of p.p.sel || []) {
-        const it = store.getItem(id); if (!it) continue;
+        const it = store.getItem(id); if (!it || levelOfItem(it) !== here) continue;
         const pts = itemCorners(it);
         ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(G.X(x), G.Y(y)) : ctx.moveTo(G.X(x), G.Y(y)))); ctx.closePath();
         ctx.strokeStyle = col; ctx.lineWidth = 2 * dpr; ctx.setLineDash([5 * dpr, 3 * dpr]); ctx.stroke(); ctx.setLineDash([]);
       }
       if (p.p.lock && fresh(p)) {
         let at = null;
-        if (p.p.lock.startsWith('item:')) { const it = store.getItem(p.p.lock.slice(5)); if (it) at = { x: it.x, y: it.y - it.d / 2 }; }
-        else if (p.p.lock.startsWith('seg:')) {
+        if (p.p.lock.startsWith('item:')) { const it = store.getItem(p.p.lock.slice(5)); if (it && levelOfItem(it) === here) at = { x: it.x, y: it.y - it.d / 2 }; }
+        else if (p.p.lock.startsWith('seg:') && sameFloor) {
           const s = wallSegments().find((g) => g.id === p.p.lock.slice(4));
           if (s) { ctx.strokeStyle = col; ctx.lineWidth = 3 * dpr; ctx.strokeRect(G.X(s.x), G.Y(s.y), s.w * G.k, s.h * G.k); at = { x: s.x + s.w / 2, y: s.y }; }
         }
         if (at) tag(ctx, G.X(at.x), G.Y(at.y) - 6 * dpr, `Being edited by ${p.name}`, col, dpr, true);
       }
       // pointer
-      if (p.p.pointer && (p.p.mode === 'Plan' || p.p.mode === 'Plan + 3D' || p.p.mode === 'Structure' || p.p.mode === 'Carpentry')) {
+      if (p.p.pointer && sameFloor && (p.p.mode === 'Plan' || p.p.mode === 'Plan + 3D' || p.p.mode === 'Structure' || p.p.mode === 'Carpentry')) {
         const x = G.X(p.p.pointer.x), y = G.Y(p.p.pointer.y), s = dpr;
         ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 3 * s, y + 15 * s); ctx.lineTo(x + 6.5 * s, y + 10 * s); ctx.lineTo(x + 12 * s, y + 9.5 * s); ctx.closePath();
         ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2 * s; ctx.stroke();

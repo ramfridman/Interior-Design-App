@@ -11,12 +11,17 @@ import { openDialog, confirmDialog, toast, openMenu } from './dialogs.js';
 import { saveFile, canPrint, printPage, copyText } from './exporter.js';
 import { shoppingCSV, shoppingText } from './shopping.js';
 import { getPref } from './prefs.js';
+import { viewPlan } from './levels.js';
+import { isOnLevel } from '../view2d/levels.js';
 
 const slug = (name) => (String(name || 'design').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'design');
 
 /** @param {object} app  UI context: { store, plan, catalog, view2d, view3d, … } */
 export function createActions(app) {
-  const { store, plan, catalog } = app;
+  const { store, catalog } = app;
+  /** The floor shown in the plan (PLAN itself on the ground floor): rooms, spaces and finishes are looked up there. */
+  const plan0 = app.plan;
+  const vp = () => viewPlan(app);
   /** Carpentry units are made to measure: the furniture tools leave them to Carpentry mode (docs/CONTRACT.md § 8). */
   const isCarp = (it) => !!(it && it.carp);
   const carpRefusal = (ids) => { const it = ids.map((id) => store.getItem(id)).find(isCarp); if (it && app.carpentry) app.carpentry.lockedToast(it); return !!it; };
@@ -31,8 +36,9 @@ export function createActions(app) {
     activeView() { return show2d() ? app.view2d : app.view3d; },
 
     /* ── history ── */
-    undo() { if (store.historyState().canUndo) store.undo(); },
-    redo() { if (store.historyState().canRedo) store.redo(); },
+    // an undo / redo that changed another floor shows that floor (app.levels; a plain undo with one floor)
+    undo() { if (store.historyState().canUndo) (app.levels ? app.levels.followHistory(() => store.undo()) : store.undo()); },
+    redo() { if (store.historyState().canRedo) (app.levels ? app.levels.followHistory(() => store.redo()) : store.redo()); },
 
     /* ── selection ── */
     deleteSelection() {
@@ -61,7 +67,8 @@ export function createActions(app) {
     },
     selectAll() {
       const spaceId = store.ui.activeSpace;
-      const ids = store.items.filter((it) => !it.hidden && (!spaceId || safeSpaceId(it) === spaceId)).map((it) => it.id);
+      const level = store.ui.level || 'L0';
+      const ids = store.items.filter((it) => !it.hidden && isOnLevel(it, level) && (!spaceId || safeSpaceId(it) === spaceId)).map((it) => it.id);
       store.select(ids);
     },
     /** Esc. `event` (the key press) lets Structure mode tell whether the plan view already acted on it. */
@@ -112,7 +119,7 @@ export function createActions(app) {
     },
     /** Make a room / outdoor area the active space and frame it. */
     focusSpace(spaceId, { view } = {}) {
-      const space = getSpace(spaceId, plan);
+      const space = getSpace(spaceId, vp());
       store.setUI({ activeSpace: spaceId });
       if (!space) return;
       if (view === '2d' && !show2d()) store.setUI({ mode: '2d' });
@@ -122,7 +129,7 @@ export function createActions(app) {
       if (show3d() && store.ui.mode !== 'walk' && view !== '2d') call(app.view3d, 'setCameraPreset', spaceId, { animate: true });
     },
     walkTo(spaceId) {
-      const space = getSpace(spaceId, plan);
+      const space = getSpace(spaceId, plan0);
       const at = space && space.label ? { x: space.label[0], y: space.label[1], heading: 0 } : undefined;
       app.pendingWalk = at || null;
       if (store.ui.mode === 'walk') { call(app.view3d, 'enterWalk', at); app.pendingWalk = null; }
@@ -150,15 +157,17 @@ export function createActions(app) {
         } catch (err) { console.error('[ui] startPlacing failed', err); }
       }
       // No placing tool available: drop it in the middle of the active room so nothing is lost.
+      const plan = vp(), level = store.ui.level || 'L0';
       const space = getSpace(store.ui.activeSpace, plan) || plan.rooms.find((r) => r.type === 'living') || plan.rooms[0];
       const at = space && space.label ? { x: space.label[0], y: space.label[1] } : { x: plan.bounds.w / 2, y: plan.bounds.h / 2 };
-      store.addItem({ ...partial, ...at });
+      store.addItem({ ...partial, ...at, ...(level !== 'L0' ? { level } : {}) });
       toast(`Placed in ${space ? space.name : 'the house'}`);
     },
     /** Apply a floor / wall finish product to a space (asks which room when none is active). */
     applyFinish(product, spaceId, anchor) {
       const kind = product.type === 'wall-finish' ? 'wall' : 'floor';
       const target = spaceId || store.ui.activeSpace;
+      const plan = vp();
       const candidates = kind === 'wall' ? plan.rooms : allSpaces(plan);
       const apply = (id) => {
         const space = getSpace(id, plan);
