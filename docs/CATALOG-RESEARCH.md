@@ -193,3 +193,14 @@ Each site answers with a Cloudflare "Just a moment / security verification" page
 
 ### Schema notes
 Sizes of extending tables are the closed size (open size in the description). Round tables use diameter as w and d. Pendant `h` follows the earlier shade + 60 cm convention. `boutique` is used only where a quoted own-page line says so (Ubject, Daniel Light Design, Tollman's); Kaza and Zaga are chains/manufacturers and are not tagged. No code was changed.
+
+## Shop discovery (14 Nov 2026, low-cost pass)
+
+Four shops the earlier passes could not reach. Discovery only; nothing was added to the catalogue.
+
+| Shop | Official site | Reachable | Prices in ₪ | Sizes | Outcome |
+|---|---|---|---|---|---|
+| Karney Tchelet (lighting; distributor of FLOS, Moooi, Vibia and others) | karney.co.il (shop under /shop/) | yes | no — not shown on any page checked | some pages: shade height and diameter | cannot be added while every catalogue product must have a price; candidate for "price on request" if the owner wants such items |
+| Kastiel | none found | — | — | — | a 2017 press article reports the high-end operation closing; current status unconfirmed |
+| KualaStyle | none found | — | — | — | only an unverified promotional page; existence unverified |
+| Million Chairs | million-kisot.co.il (from a directory listing, not confirmed by the shop) | no — HTTP 403 twice, stopped | — | — | blocks automated reading; add by hand with "Add your own product" |
