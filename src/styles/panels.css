@@ -442,6 +442,8 @@
 /* ───────── Touch: 40 px targets ───────── */
 @media (pointer: coarse) {
   .rail__btn { width: 40px; height: 40px; }
+  /* phones: the category row is a strip of labelled chips, so the width follows the label */
+  @media (max-width: 699px) { .rail__btn { width: auto; height: 40px; padding: 0 12px; } }
   .search__clear { width: 36px; height: 36px; margin-top: -18px; }
   .fpick { min-height: 44px; }
   .fopt, .altrow { min-height: 48px; }
