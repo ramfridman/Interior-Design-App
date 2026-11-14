@@ -15,7 +15,7 @@ import { findGaps, outsideMask, outsideSide } from './gaps.js';
 const DEFAULTS = { slidingDoorMin: 200, maxPassage: 250, doorHeight: 210, windowHeight: 120, windowSill: 90 };
 
 /** Arcs and thin straight segments (everything not drawn with a wall pen), in the drawing frame (cm). */
-export function symbolContext(prims, frame, wallPens = []) {
+export function symbolContext(prims, frame, wallPens = [], opt = null) {
   const M = frame.matrix, k = frame.cmPerUnit;
   const ex = new Set(wallPens);
   const arcs = arcsOf(prims, { excludePens: ex }).map((a) => {
@@ -25,6 +25,7 @@ export function symbolContext(prims, frame, wallPens = []) {
       mid: affApply(M, p[2 * m], p[2 * m + 1]), p0: affApply(M, p[0], p[1]), p1: affApply(M, p[2 * n - 2], p[2 * n - 1]) };
   });
   const segs = [];
+  const asegs = opt && opt.angled ? [] : null;   // slants option: thin angled lines too (window glass in angled walls)
   for (const s of segmentsOf(prims)) {
     if (ex.has(s.pen) || s.curved) continue;
     const [ax, ay] = affApply(M, s.x1, s.y1), [bx, by] = affApply(M, s.x2, s.y2);
@@ -32,8 +33,9 @@ export function symbolContext(prims, frame, wallPens = []) {
     if (len < 5) continue;
     if (dy <= len * Math.tan(1 * DEG)) segs.push({ o: 'h', k: (ay + by) / 2, a: Math.min(ax, bx), b: Math.max(ax, bx), pen: s.pen, len });
     else if (dx <= len * Math.tan(1 * DEG)) segs.push({ o: 'v', k: (ax + bx) / 2, a: Math.min(ay, by), b: Math.max(ay, by), pen: s.pen, len });
+    else if (asegs) { let th = Math.atan2(by - ay, bx - ax); if (th < 0) th += Math.PI; if (th >= Math.PI) th -= Math.PI; asegs.push({ x1: ax, y1: ay, x2: bx, y2: by, th, pen: s.pen, len }); }
   }
-  return { arcs, segs };
+  return asegs ? { arcs, segs, asegs } : { arcs, segs };
 }
 
 /** Classify wall gaps. Returns openings in the drawing frame (no exterior / outside yet). */
@@ -104,7 +106,7 @@ export function detectOpenings(prims, walls, scale, opts = {}) {
     if (uniq.some((u) => u.axis === f.axis && ov(u, f) >= 0.5 * Math.min(u.w * u.h, f.w * f.h))) continue;
     uniq.push(f);
   }
-  const outside = outsideMask(list, uniq, o);
+  const outside = walls.slants ? outsideMask(list, uniq, o, walls.slants) : outsideMask(list, uniq, o);
   const counters = {};
   const openings = uniq.sort((a, b) => a.y - b.y || a.x - b.x).map((f) => {
     const side = outsideSide(f, outside);
@@ -125,6 +127,28 @@ export function detectOpenings(prims, walls, scale, opts = {}) {
     op.evidence = f.evidence;
     return op;
   });
+  // slants option: openings in angled walls (found by detectWalls between collinear slant pieces), PLAN shape
+  // "opening in a slant": { wall: <slant id>, axis: 'a', at (cm from x1, y1 to the centre), hinge 'a'|'b', swing / outside 'l'|'r' }
+  for (const f of walls.slantOpenings || []) {
+    const kind = f.kind;
+    const n = (counters[kind] = (counters[kind] || 0) + 1);
+    const id = { door: 'door', window: 'win', 'sliding-door': 'slide', opening: 'open' }[kind] + '-' + n;
+    const exterior = !!f.outside;
+    const op = { id, kind, style: null, width: f.width, height: 0, sill: 0, wall: f.wall, axis: 'a', at: f.at };
+    if (kind === 'door') {
+      Object.assign(op, { style: exterior ? (f.width >= 100 ? 'entry' : 'service') : 'interior', height: o.doorHeight, sill: 0, hinge: f.hinge, swing: f.swing });
+      if (f.leaves) op.leaves = f.leaves;
+      if (f.innerDoor) op.innerDoor = { style: 'interior', width: f.innerDoor.width, height: o.doorHeight, hinge: f.innerDoor.hinge, swing: f.innerDoor.swing };
+    } else if (kind === 'sliding-door') Object.assign(op, { style: 'glass-sliding', height: o.doorHeight, sill: 0 });
+    else if (kind === 'window') Object.assign(op, { style: f.width <= 90 ? 'tilt' : 'sliding', height: o.windowHeight, sill: o.windowSill });
+    else Object.assign(op, { style: 'open', height: o.doorHeight, sill: 0 });
+    if (exterior) op.outside = f.outside;
+    op.exterior = exterior;
+    op.assumed = kind === 'door' ? ['height', 'style'] : kind === 'sliding-door' ? ['height', 'kind'] : kind === 'window' ? ['height', 'sill', 'style'] : ['height'];
+    op.confidence = f.confidence;
+    op.evidence = f.evidence;
+    openings.push(op);
+  }
   return { openings, warnings, stats: { gaps: gaps.length, arcs: ctx.arcs.length, doors: openings.filter((x) => x.kind === 'door').length,
     windows: openings.filter((x) => x.kind === 'window').length, other: openings.filter((x) => x.kind !== 'door' && x.kind !== 'window').length } };
 }

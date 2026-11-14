@@ -54,10 +54,10 @@ Order of work:
 - [x] C. Hosted backend and sharing (pushed 14 Nov; shows only where there is a backend): Cloudflare Worker with one Durable Object per project in `server/`, sign-in through Cloudflare Access, roles (owner / can edit / can view), Share and History dialogs, online project list, view-only mode. Runs locally under `wrangler dev` (125 checks); **not yet deployed or tested on a real Cloudflare account** — the owner's steps are in `docs/HOSTING-PLAN.md`. Limits: one owner per project (no transfer), projects are exported one at a time.
 - [ ] D + E. Angled walls and several floors — design in `docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md` (about 18 work sessions; House 98 stays on the current engine, pinned by golden tests; both features stay behind internal switches until complete). Stage status:
   - [x] G1 geometry seams (golden test `tests/geometry.test.mjs`)
-  - [ ] G2 schema / persistence seams [running]
-  - [ ] A0 polygon kernel and wall joins [running]
+  - [x] G2 schema / persistence seams (golden test `tests/schema.test.mjs`)
+  - [x] A0 polygon kernel and wall joins (`tests/polykernel.test.mjs`; Clipper 6.4.2 vendored)
   - [ ] A6a import of angled and curved walls, engine side, off by default [running]
-  - [ ] F1 levels in the engine · F2 2D per level · F3 3D stacking · F4 stairs · F5 walk across floors · F6 daylight per level · F7 regulations / carpentry per level · F8 import per floor
+  - [ ] F1 levels in the engine [running] · F2 2D per level · F3 3D stacking · F4 stairs · F5 walk across floors · F6 daylight per level · F7 regulations / carpentry per level · F8 import per floor
   - [ ] A1 mixed derive · A2 editing angled walls · A3 2D tools · A4 3D shell · A5 regulations / carpentry / walk · A6b import dialog · A7 exact daylight on angled faces
   - Will still not be supported afterwards: true curves (short straight pieces within 2 cm), sloped roofs / attics, basements, split levels, spiral stairs.
 

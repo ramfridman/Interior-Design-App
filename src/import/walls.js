@@ -20,6 +20,7 @@
 import { segmentsOf, penStats, dominantAngle, DEG, wMedian, penKey, affApply } from './prep.js';
 import { findGaps, outsideMask, classifyKinds } from './gaps.js';
 import { symbolContext, classifyGaps } from './openings.js';
+import { findBands, fillBand, closeAtBands, buildUnits, extendEnds, unitSegments, piecesBox, finishUnits } from './slants.js';
 
 const DEFAULTS = { snap: 5, minThickness: 7, maxThickness: 40, maxOpening: 400, minOpening: 25, mergeTol: 0.6, maxPassage: 120 };
 
@@ -65,7 +66,16 @@ function wallFills(prims, toFrame, o) {
       const dx = Math.abs(pts[i][0] - pts[i - 1][0]), dy = Math.abs(pts[i][1] - pts[i - 1][1]);
       if (Math.min(dx, dy) > 0.02 * Math.max(dx, dy) + 0.3) { rect = false; break; }
     }
-    if (!rect) continue;
+    if (!rect) {
+      // slants option: a thin filled parallelogram is an angled wall band
+      const b = o.slants ? fillBand(pts, o) : null;
+      if (b) {
+        let g = byColor.get(p.fillColor);
+        if (!g) byColor.set(p.fillColor, g = { n: 0, ok: 0, polys: [], area: 0 });
+        g.n++; g.ok++; (g.bands || (g.bands = [])).push(b);
+      }
+      continue;
+    }
     const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
     const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
     const t = Math.min(w, h);
@@ -75,7 +85,7 @@ function wallFills(prims, toFrame, o) {
     if (t >= o.minThickness * 0.9 && t <= o.maxThickness * 1.1 && Math.max(w, h) >= 2 * t) { g.ok++; g.polys.push({ pts, evenOdd: p.evenOdd }); g.area += w * h; }
   }
   const out = [];
-  for (const [color, g] of byColor) if (g.ok >= 4 && g.ok >= 0.6 * g.n) out.push({ color, polys: g.polys });
+  for (const [color, g] of byColor) if (g.ok >= 4 && g.ok >= 0.6 * g.n) out.push(g.bands ? { color, polys: g.polys, bands: g.bands } : { color, polys: g.polys });
   return out;
 }
 
@@ -108,6 +118,8 @@ export function detectWalls(prims, scale, options = {}) {
   const clip = o.clip;
   const inClip = (x, y) => !clip || (x >= clip.x && x <= clip.x + clip.w && y >= clip.y && y <= clip.y + clip.h);
   if (clip) for (const f of fills) f.polys = f.polys.filter((p) => p.pts.every((q) => inClip(q[0], q[1])));
+  // slants option: angled / curved pieces are collected for slant detection instead of being reported right away
+  const odd = o.slants ? [] : null;
   for (const s of wallSegs) {
     const [ax, ay] = affApply(toFrame, s.x1, s.y1), [bx, by] = affApply(toFrame, s.x2, s.y2);
     if (!inClip(ax, ay) || !inClip(bx, by)) continue;
@@ -115,7 +127,16 @@ export function detectWalls(prims, scale, options = {}) {
     if (len < 0.2) continue;
     if (!s.curved && dy <= Math.max(0.3, len * Math.tan(1 * DEG))) H.push({ k: (ay + by) / 2, a: Math.min(ax, bx), b: Math.max(ax, bx) });
     else if (!s.curved && dx <= Math.max(0.3, len * Math.tan(1 * DEG))) V.push({ k: (ax + bx) / 2, a: Math.min(ay, by), b: Math.max(ay, by) });
+    else if (odd) odd.push({ x1: ax, y1: ay, x2: bx, y2: by, len, path: s.path, curved: !!s.curved });
     else unsupported.push({ type: s.curved ? 'curved' : 'angled', path: s.path, x1: ax, y1: ay, x2: bx, y2: by, len });
+  }
+  let SL = null;
+  if (odd) {
+    const fb = [];
+    for (const f of fills) if (f.bands) { if (clip) f.bands = f.bands.filter((b) => [b.s0, b.s1].every((s) => inClip(b.ux * s + b.nx * b.kc, b.uy * s + b.ny * b.kc))); fb.push(...f.bands); }
+    SL = findBands(odd, fb, o);
+    H.push(...SL.ortho.H); V.push(...SL.ortho.V);
+    unsupported.push(...SL.unsupported);
   }
   const pieces = groupUnsupported(unsupported);
   for (const p of pieces) {
@@ -125,7 +146,12 @@ export function detectWalls(prims, scale, options = {}) {
   }
 
   // ---- merge collinear overlapping lines (duplicates would cancel each other's parity) ----
-  const mH = mergeCollinear(H, o.mergeTol), mV = mergeCollinear(V, o.mergeTol);
+  let mH = mergeCollinear(H, o.mergeTol), mV = mergeCollinear(V, o.mergeTol);
+  if (SL && SL.bands.length) {
+    // orthogonal outlines that end on an angled / curved band are closed without it (see slants.js)
+    const c = closeAtBands(mH, mV, SL.bands, o);
+    mH = mergeCollinear(c.H, o.mergeTol); mV = mergeCollinear(c.V, o.mergeTol);
+  }
 
   // ---- compressed grid ----
   const xsRaw = [], ysRaw = [];
@@ -233,14 +259,31 @@ export function detectWalls(prims, scale, options = {}) {
   // (an open porch side) must let the outside in
   const gaps = findGaps(walls, o);
   const frame0 = { matrix: toFrame, angle, cmPerUnit: k };
-  const closing = classifyGaps(gaps, symbolContext(prims, frame0, pens.map((p) => p.pen)), o);
-  const outside = outsideMask(walls, closing, o);
-  classifyKinds(walls, outside);
+  const ctx = symbolContext(prims, frame0, pens.map((p) => p.pen), SL ? { angled: true } : undefined);
+  const closing = classifyGaps(gaps, ctx, o);
+  let slantRes = null;
+  if (SL) {
+    // slants: collinear pieces joined over their openings, curves as chains, ends extended, kinds from the same flood
+    let units = buildUnits(SL.bands, ctx, SL.lines, o);
+    if (drawings.length) units = units.filter((u) => { const b = piecesBox(unitSegments([u])); return inBox({ x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0 }, drawings[chosen].bbox, o.maxOpening); });
+    extendEnds(units, walls);
+    const outside = outsideMask(walls, closing, o, unitSegments(units));
+    classifyKinds(walls, outside);
+    slantRes = finishUnits(units, outside, o);
+    for (const ch of slantRes.chains) {
+      const dev = Math.round(ch.maxDev * 10) / 10;
+      warnings.push({ code: 'curved-wall-pieces', severity: 'info', text: `Curved wall drawn as ${ch.pieces} straight pieces, within ${Math.max(2, dev)} cm (largest deviation ${dev} cm).`,
+        where: { x: ch.box.x0, y: ch.box.y0, w: ch.box.x1 - ch.box.x0, h: ch.box.y1 - ch.box.y0, frame: 'drawing-cm' } });
+    }
+  } else {
+    const outside = outsideMask(walls, closing, o);
+    classifyKinds(walls, outside);
+  }
   walls.sort((a, b) => a.y - b.y || a.x - b.x);
   walls.forEach((w, i) => { w.id = 'w' + String(i + 1).padStart(2, '0'); });
 
   const conf = pens.length ? Math.min(1, pens[0].pairFrac + 0.1) * (disagree > 0 ? 0.9 : 1) * (pieces.length ? 0.9 : 1) : 0.6;
-  return {
+  const res = {
     walls, gaps, frame: { matrix: toFrame, angle, cmPerUnit: k, origin: [ox, oy], snap: o.snap },
     pens: pens.map((p) => ({ pen: p.pen, lw: p.lw, color: p.color, score: +p.score.toFixed(3), thickness: p.thickness, pairFrac: +p.pairFrac.toFixed(3) })),
     fills: fills.map((f) => ({ color: f.color, n: f.polys.length })),
@@ -250,6 +293,19 @@ export function detectWalls(prims, scale, options = {}) {
     confidence: +conf.toFixed(2),
     options: o,
   };
+  if (slantRes) {
+    // frame cm (not snapped); ids s01… (chains c1…) by their north-west-most point; openings refer to them by id
+    res.slants = slantRes.slants;
+    res.slantOpenings = slantRes.openings;
+    res.chains = slantRes.chains;
+    if (slantRes.slants.length) {
+      res.stats.slants = slantRes.slants.length;
+      res.stats.chains = slantRes.chains.length;
+      res.stats.slantOpenings = slantRes.openings.length;
+      if (slantRes.chains.length) res.stats.curveMaxDev = Math.round(Math.max(...slantRes.chains.map((c) => c.maxDev)) * 100) / 100;
+    }
+  }
+  return res;
 }
 
 /**

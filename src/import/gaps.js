@@ -2,12 +2,19 @@
  * Wall-gap geometry shared by detectWalls and detectOpenings (drawing frame, cm): occupancy grid, gap finding,
  * outside flood fill.
  */
+import { piecesBox, rasteriseSlants } from './slants.js';
+
 const DEFAULTS = { snap: 5, maxThickness: 40, maxOpening: 400, minOpening: 25 };
 
 /** Occupancy grid at `snap` resolution over the walls' bounding box plus a margin. */
-export function occupancy(walls, snap, margin = 2) {
-  const x0 = Math.min(...walls.map((w) => w.x)) - margin * snap, y0 = Math.min(...walls.map((w) => w.y)) - margin * snap;
-  const x1 = Math.max(...walls.map((w) => w.x + w.w)) + margin * snap, y1 = Math.max(...walls.map((w) => w.y + w.h)) + margin * snap;
+export function occupancy(walls, snap, margin = 2, extra = null) {
+  let x0 = Math.min(...walls.map((w) => w.x)) - margin * snap, y0 = Math.min(...walls.map((w) => w.y)) - margin * snap;
+  let x1 = Math.max(...walls.map((w) => w.x + w.w)) + margin * snap, y1 = Math.max(...walls.map((w) => w.y + w.h)) + margin * snap;
+  if (extra) {
+    // grow by whole cells (the grid stays aligned with the rectangles) to hold extra geometry (slants)
+    x0 -= Math.ceil(Math.max(0, x0 + margin * snap - extra.x0) / snap) * snap; y0 -= Math.ceil(Math.max(0, y0 + margin * snap - extra.y0) / snap) * snap;
+    x1 += Math.ceil(Math.max(0, extra.x1 - (x1 - margin * snap)) / snap) * snap; y1 += Math.ceil(Math.max(0, extra.y1 - (y1 - margin * snap)) / snap) * snap;
+  }
   const nx = Math.round((x1 - x0) / snap), ny = Math.round((y1 - y0) / snap);
   const g = new Uint8Array(nx * ny);
   const cx = (x) => Math.round((x - x0) / snap), cy = (y) => Math.round((y - y0) / snap);
@@ -83,12 +90,14 @@ export function findGaps(walls, opts = {}) {
   return gaps;
 }
 
-/** Outside cells: flood fill from the border over free cells, with the gaps closed. */
-export function outsideMask(walls, gaps, opts = {}) {
+/** Outside cells: flood fill from the border over free cells, with the gaps closed. `slants` (optional, slants
+ *  option): [{ x1, y1, x2, y2, t }] wall pieces rasterised as solid too. */
+export function outsideMask(walls, gaps, opts = {}, slants = null) {
   const o = { ...DEFAULTS, ...opts };
   if (!walls.length) return null;
-  const occ = occupancy(walls, o.snap, 3);
+  const occ = slants && slants.length ? occupancy(walls, o.snap, 3, piecesBox(slants)) : occupancy(walls, o.snap, 3);
   gaps.forEach((g) => occ.fill(g, 1));
+  if (slants && slants.length) rasteriseSlants(occ, slants);
   const { g, nx, ny } = occ;
   const out = new Uint8Array(nx * ny);
   const st = [];
