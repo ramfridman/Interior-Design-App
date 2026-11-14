@@ -29,6 +29,9 @@
  *                                              and design all replaced, history cleared. Emitted LAST, after 'plan' / 'load' /
  *                                              … — views that captured the site or the sun at creation are rebuilt on it.
  *   'underlay'   { reason, transient }       – the tracing underlay (store.underlay) was set, changed or removed
+ *   'products'   { type: 'add' | 'update' | 'remove' | 'reset', ids }
+ *                                            – the project's own products (store.customProducts, CONTRACT § 16) changed.
+ *                                              The catalogue (setOwnProducts) is already up to date when it is emitted.
  *   '*'          (eventName, payload)        – everything
  *
  * PERSISTENCE
@@ -45,6 +48,8 @@ import { PLAN } from './plan.js';
 import { spaceAt } from './geometry.js';
 import { bindPlanHost, planState, planStateKey, applyPlanState, setBasePlan, setPlanPhase as setEnginePhase, levelPlan, setActiveLevel, activeLevel } from './plan-edit.js';
 import { GROUND, upperLevels, levelOf } from './levels.js';
+import { setOwnProducts } from '../catalog/index.js';
+import { normalizeOwnProduct, ownOrder, itemPatchFromProduct, ownItemFix, GENERIC_PATCH } from '../catalog/own.js';
 
 const STORAGE_KEY = 'e7-interior-design/v1';
 const HISTORY_LIMIT = 200;
@@ -163,6 +168,12 @@ class Store {
      * part of the design, the undo history or exports. Change it with setUnderlay().
      */
     this.underlay = null;
+    /**
+     * The project's own products ("Add your own product", CONTRACT § 16): catalogue-shaped products with ids 'own-…',
+     * kept in canonical order (createdAt, id). Part of the design (saved only when there is at least one) and of the
+     * undo history; registered with the catalogue on every change. Change them with add / update / removeCustomProduct.
+     */
+    this.customProducts = [];
     this._listeners = new Map();
     this._undo = [];
     this._redo = [];
@@ -216,7 +227,7 @@ class Store {
   }
 
   // ---------- history ----------
-  _snapshot() { return `{"items":${JSON.stringify(this.items)},"finishes":${JSON.stringify(this.finishes)},"project":${JSON.stringify(this.project)},"plan":${planStateKey()},"carpentry":${JSON.stringify(this.carpentry)}}`; }
+  _snapshot() { return `{"items":${JSON.stringify(this.items)},"finishes":${JSON.stringify(this.finishes)},"project":${JSON.stringify(this.project)},"plan":${planStateKey()},"carpentry":${JSON.stringify(this.carpentry)}${this.customProducts.length ? `,"customProducts":${JSON.stringify(this.customProducts)}` : ''}}`; }
   _pushUndo(snap) {
     this._undo.push(snap);
     if (this._undo.length > HISTORY_LIMIT) this._undo.shift();
@@ -252,10 +263,12 @@ class Store {
     const carp = readCarpentry(s.carpentry), carpChanged = JSON.stringify(carp) !== JSON.stringify(this.carpentry);
     this.items = s.items; this.finishes = s.finishes || {}; this.project = { ...defaultProject(), ...s.project };
     this.carpentry = carp;
+    const prodChanged = this._setCustomProducts(s.customProducts || []);
     this.selection = this.selection.filter((id) => this.getItem(id));
     this._syncLevel();
     if (planChanged(plan.changed)) this.emit('plan', { reason: 'history', changed: plan.changed });
     if (carpChanged) this.emit('carpentry', { reason: 'history', runIds: Object.keys(carp.runs) });
+    if (prodChanged) this.emit('products', { type: 'reset', ids: this.customProducts.map((p) => p.id) });
     this.emit('items', { type: 'reset', ids: this.items.map((i) => i.id) });
     this.emit('finishes', { ids: Object.keys(this.finishes) });
     this.emit('project', { keys: Object.keys(this.project) });
@@ -435,13 +448,104 @@ class Store {
     return added;
   }
 
+  // ---------- own products (CONTRACT § 16) ----------
+  /**
+   * Replace the own products (sanitised, canonical order) and register them with the catalogue. No event, no history.
+   * Returns true when the list changed.
+   */
+  _setCustomProducts(list) {
+    const seen = new Set();
+    const next = (Array.isArray(list) ? list : []).map(normalizeOwnProduct).filter((p) => p && !seen.has(p.id) && seen.add(p.id)).sort(ownOrder);
+    const changed = JSON.stringify(next) !== JSON.stringify(this.customProducts);
+    this.customProducts = next;
+    setOwnProducts(next);
+    return changed;
+  }
+  getCustomProduct(id) { return this.customProducts.find((p) => p.id === id) || null; }
+  /** Items placed from an own product (ids). */
+  itemsOfProduct(id) { return this.items.filter((i) => i.productId === id).map((i) => i.id); }
+  /** Space ids whose floor / wall finish is an own product: [{ spaceId, kind }]. */
+  _finishesOfProduct(id) {
+    const out = [];
+    for (const [spaceId, f] of Object.entries(this.finishes)) for (const kind of ['floor', 'wall']) if (f && f[kind] === id) out.push({ spaceId, kind });
+    return out;
+  }
+  /**
+   * Add an own product (one undo step). `opts.linkItem` = id of a placed item that becomes this product (its size,
+   * look, price and link; position stays) in the same step. Returns the stored product, or null if it is not valid.
+   */
+  addCustomProduct(product, opts = {}) {
+    const p = normalizeOwnProduct(product);
+    if (!p || this.getCustomProduct(p.id)) return null;
+    this._record(opts);
+    this._setCustomProducts([...this.customProducts, p]);
+    this.emit('products', { type: 'add', ids: [p.id] });
+    const link = opts.linkItem && this.getItem(opts.linkItem);
+    if (link) {
+      Object.assign(link, itemPatchFromProduct(p));
+      this.emit('items', { type: 'update', ids: [link.id], keys: Object.keys(itemPatchFromProduct(p)) });
+    }
+    return this.getCustomProduct(p.id);
+  }
+  /**
+   * Replace an own product with its edited version (same id) — one undo step. Every item placed from it takes the new
+   * name, look, size, price and link (position, rotation, elevation, level, lock, note stay).
+   */
+  updateCustomProduct(id, product, opts = {}) {
+    const prev = this.getCustomProduct(id);
+    const p = normalizeOwnProduct({ ...product, id, createdAt: prev ? prev.createdAt : product.createdAt });
+    if (!prev || !p) return null;
+    this._record(opts);
+    this._setCustomProducts(this.customProducts.map((x) => (x.id === id ? p : x)));
+    this.emit('products', { type: 'update', ids: [id] });
+    const ids = this.itemsOfProduct(id);
+    const patch = itemPatchFromProduct(this.getCustomProduct(id));
+    for (const iid of ids) Object.assign(this.getItem(iid), JSON.parse(JSON.stringify(patch)));
+    if (ids.length) this.emit('items', { type: 'update', ids, keys: Object.keys(patch) });
+    if (this._finishesOfProduct(id).length) this.emit('finishes', { ids: this._finishesOfProduct(id).map((f) => f.spaceId) });
+    return this.getCustomProduct(id);
+  }
+  /**
+   * Delete an own product — one undo step. Items placed from it stay in the plan as generic items with their size;
+   * rooms that used it as a finish go back to the built-in default. Returns { items: n, finishes: n } or null.
+   */
+  removeCustomProduct(id, opts = {}) {
+    if (!this.getCustomProduct(id)) return null;
+    this._record(opts);
+    const ids = this.itemsOfProduct(id), fins = this._finishesOfProduct(id);
+    this._setCustomProducts(this.customProducts.filter((p) => p.id !== id));
+    for (const iid of ids) Object.assign(this.getItem(iid), GENERIC_PATCH);
+    for (const { spaceId, kind } of fins) this.finishes[spaceId] = { ...this.finishes[spaceId], [kind]: null };
+    this.emit('products', { type: 'remove', ids: [id] });
+    if (ids.length) this.emit('items', { type: 'update', ids, keys: Object.keys(GENERIC_PATCH) });
+    if (fins.length) this.emit('finishes', { ids: [...new Set(fins.map((f) => f.spaceId))] });
+    return { items: ids.length, finishes: fins.length };
+  }
+  /**
+   * Bring placed items in line with the own products (after someone else's change arrived — live collaboration):
+   * an item whose own product is gone becomes generic (size kept); an item whose product's price / link / shop changed
+   * takes the new values. One undo step when anything changed; returns the ids changed.
+   */
+  syncOwnItems(opts = {}) {
+    const byId = new Map(this.customProducts.map((p) => [p.id, p]));
+    const fixes = [];
+    for (const it of this.items) { const f = ownItemFix(it, byId); if (f) fixes.push([it.id, f]); }
+    if (!fixes.length) return [];
+    this._record(opts);
+    for (const [iid, f] of fixes) Object.assign(this.getItem(iid), f);
+    this.emit('items', { type: 'update', ids: fixes.map(([i]) => i), keys: [...new Set(fixes.flatMap(([, f]) => Object.keys(f)))] });
+    return fixes.map(([i]) => i);
+  }
+
   // ---------- persistence ----------
   /**
    * `planEdits` = { walls, openings, rooms } of an edited plan (+ the optional schema-2 keys schema / slants / stairs /
    * levels when the plan carries them), null while the plan is the architect's.
    */
   serialize() {
-    return { app: 'e7-interior-design', version: 1, savedAt: new Date().toISOString(), project: this.project, items: this.items, finishes: this.finishes, ui: uiForSave(this.ui), planEdits: planState(), carpentry: this.carpentry, carpentryImages: this.carpentryImages };
+    const out = { app: 'e7-interior-design', version: 1, savedAt: new Date().toISOString(), project: this.project, items: this.items, finishes: this.finishes, ui: uiForSave(this.ui), planEdits: planState(), carpentry: this.carpentry, carpentryImages: this.carpentryImages };
+    if (this.customProducts.length) out.customProducts = this.customProducts;   // only when there is one: older designs stay byte-identical
+    return out;
   }
   /** Replace the whole design. `data` is the output of serialize(). */
   load(data, opts = {}) {
@@ -458,6 +562,7 @@ class Store {
     this.finishes = clone(data.finishes || {});
     this.carpentry = readCarpentry(data.carpentry);           // a file without carpentry has no runs
     this.carpentryImages = data.carpentryImages && typeof data.carpentryImages === 'object' ? { ...data.carpentryImages } : {};
+    this._setCustomProducts(data.customProducts);            // a file without customProducts has none
     this.project = { ...defaultProject(), ...(data.project || {}) };
     if (data.ui && opts.restoreUI) this.ui = { ...DEFAULT_UI, ...data.ui };
     this._syncLevel(true);
@@ -466,6 +571,7 @@ class Store {
     if (opts.base) this.emit('plan', { reason: 'base', changed: { walls: true, openings: true, rooms: true, levels: true } });
     else if (planChanged(plan.changed)) this.emit('plan', { reason: 'load', changed: plan.changed });
     this.emit('carpentry', { reason: 'load', runIds: Object.keys(this.carpentry.runs) });
+    this.emit('products', { type: 'reset', ids: this.customProducts.map((p) => p.id) });
     this.emit('load', {});
     this.emit('items', { type: 'reset', ids: this.items.map((i) => i.id) });
     this.emit('finishes', { ids: Object.keys(this.finishes) });

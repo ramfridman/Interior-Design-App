@@ -63,7 +63,7 @@ export function initRooms(root, app) {
     h('span', { class: 'fpick__text' },
       h('span', { class: 'fpick__kind' }, kind === 'floor' ? 'Floor' : 'Walls'),
       h('span', { class: 'fpick__name truncate' }, resolved.product ? resolved.product.name : 'Built-in default')),
-    h('span', { class: 'fpick__cost num' }, resolved.product ? fmtPrice(resolved.product.price * area) : ''),
+    h('span', { class: 'fpick__cost num' }, resolved.product ? (resolved.product.price == null ? 'On request' : fmtPrice(resolved.product.price * area)) : ''),
     icon('chevron-down', { size: 14 }));
     return b;
   }
@@ -81,7 +81,7 @@ export function initRooms(root, app) {
     const body = h('div', { class: 'fopts', role: 'listbox', 'aria-label': `${kind === 'floor' ? 'Floor' : 'Wall'} finishes` },
       h('p', { class: 'fopts__title' }, `${kind === 'floor' ? 'Floor' : 'Walls'} of ${space.name}`, h('span', { class: 'num faint' }, fmtArea(area))),
       option(null, 'Built-in default', 'No product, not in the budget', defaults.params, ''),
-      products.map((p) => option(p.id, p.name, `${p.retailer}, ${fmtPrice(p.price)} per m²`, p.params, fmtPrice(p.price * area))),
+      products.map((p) => option(p.id, p.name, `${p.retailer}, ${p.price == null ? 'price on request' : `${fmtPrice(p.price)} per m²`}`, p.params, p.price == null ? 'On request' : fmtPrice(p.price * area))),
       !products.length ? h('p', { class: 'sec__empty' }, `No ${kind === 'floor' ? 'flooring' : 'wall finish'} products in the catalogue yet.`) : null);
     const pop = openPopover(anchor, body, { cls: 'popover--panel popover--finishes', placement: 'left-start', label: 'Choose a finish' });
   }
@@ -165,6 +165,7 @@ export function initRooms(root, app) {
   });
   store.on('plan', (e) => { if (!e || !e.transient) invalidate(); });
   store.on('load', invalidate);
+  store.on('products', invalidate);   // an own finish product edited / deleted
 
   return {
     activate() { active = true; if (dirty) render(); },

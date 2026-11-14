@@ -14,6 +14,8 @@ import { shoppingTotal } from './shopping.js';
 import { createStructureInspector } from './structure-inspector.js';
 import { FEATURES } from '../core/features.js';
 import { viewPlan } from './levels.js';
+import { ownProductsFor, ownMark } from './own-product.js';
+import { isOwnId } from '../catalog/own.js';
 
 const PALETTE = ['#f3f1ec', '#d9d2c5', '#b9b2a6', '#3a3d42', '#c8a476', '#8a5a3b', '#5c6b5a', '#3e5c76', '#b4543a'];
 const STRUCTURAL = ['productId', 'type', 'generic', 'placement', 'locked', 'hidden', 'params', 'price', 'url', 'retailer', 'priceUnit'];
@@ -120,20 +122,25 @@ export function initInspector(root, app) {
       onChange: () => { const v = name.value.trim() || item.name; name.value = v; if (v !== live().name) patch({ name: v }); } });
     const space = (() => { try { return store.spaceOf(item); } catch (err) { return null; } })();
     const cost = h('span', { class: 'insp__price num' }, item.price != null ? fmtPrice(costOf(item)) : '');
+    const ownProduct = isOwnId(item.productId) ? store.getCustomProduct(item.productId) : null;   // CONTRACT § 16
+    const askPrice = !!item.productId && !item.generic && item.price == null;
     const head = h('div', { class: 'insp__head' },
       h('div', { class: 'insp__thumb' }, thumbs.el(item, { size: 128, lazy: false })),
       h('div', { class: 'insp__id' }, name,
         h('p', { class: 'insp__meta truncate' }, [typeLabel(item), space ? `, ${space.name}` : '']),
         item.price != null
           ? h('p', { class: 'insp__buy' }, cost, item.priceUnit !== 'item' ? h('span', { class: 'faint' }, ` (${fmtUnitPrice(item.price, item.priceUnit)})`) : null)
-          : null,
-        item.retailer ? h('p', { class: 'insp__retailer' }, extLink(`Buy at ${item.retailer}`, item.url) || item.retailer) : null));
+          : askPrice ? h('p', { class: 'insp__buy' }, h('span', { class: 'insp__ask' }, 'Price on request'), h('span', { class: 'faint' }, ' — not in the total')) : null,
+        item.retailer ? h('p', { class: 'insp__retailer' }, extLink(`Buy at ${item.retailer}`, item.url) || item.retailer, ownProduct ? ownMark() : null) : null,
+        ownProduct ? h('p', { class: 'insp__ownacts' }, btn('Edit product', { small: true, icon: 'note', onClick: () => ownProductsFor(app).openEdit(ownProduct.id) })) : null));
 
     const generic = item.generic || (!item.productId && item.price == null);
     const nudge = generic ? h('div', { class: 'callout' }, icon('info', { size: 16 }),
       h('div', null, h('p', { class: 'callout__title' }, 'No product chosen yet'),
         h('p', { class: 'callout__text' }, 'This piece comes from the architect’s drawing. Pick a real product to get its exact size, price and shop link.'),
-        btn('Choose a product', { small: true, variant: 'primary', onClick: () => root.querySelector('.swap')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }))) : null;
+        h('div', { class: 'callout__acts' },
+          btn('Choose a product', { small: true, variant: 'primary', onClick: () => root.querySelector('.swap')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }),
+          btn('Link to a product you found…', { small: true, onClick: () => ownProductsFor(app).openLink(item.id) })))) : null;
 
     /* Position & rotation */
     const x = lenField('X', 'x', { title: 'Position X (from the house west face)' });
@@ -194,7 +201,7 @@ export function initInspector(root, app) {
   function renderSwap(item, generic) {
     let alts = [];
     try { alts = catalog.alternativesFor(item, 12) || []; } catch (err) { alts = []; }
-    const rows = alts.map((p) => h('button', { type: 'button', class: 'altrow', 'aria-label': `Swap for ${p.name}, ${fmtPrice(p.price)}`,
+    const rows = alts.map((p) => h('button', { type: 'button', class: 'altrow', 'aria-label': `Swap for ${p.name}, ${p.price == null ? 'price on request' : fmtPrice(p.price)}`,
       onClick: () => {
         store.swapItem(item.id, { ...catalog.itemFromProduct(p, {}, store.project.ceilingHeight), generic: false });
         app.toast(`Swapped for ${p.name}`, { kind: 'success', action: { label: 'Undo', fn: () => app.actions.undo() } });
@@ -202,7 +209,7 @@ export function initInspector(root, app) {
     h('span', { class: 'altrow__thumb' }, thumbs.el(p, { size: 88 })),
     h('span', { class: 'altrow__text' }, h('span', { class: 'altrow__name truncate' }, p.name),
       h('span', { class: 'altrow__meta truncate num' }, `${p.retailer}, ${fmtDims(p.dims.w, p.dims.d, p.dims.h)}`)),
-    h('span', { class: 'altrow__price num' }, fmtPrice(p.price))));
+    h('span', { class: 'altrow__price num' }, p.price == null ? 'On request' : fmtPrice(p.price))));
     return section(generic ? 'Choose a real product' : 'Swap for a similar product', { class: 'swap' },
       rows.length ? h('div', { class: 'altlist' }, rows)
         : h('p', { class: 'sec__empty' }, `No ${typeLabel(item).toLowerCase()} products in the catalogue yet. Browse the catalogue on the left for something close.`));
@@ -290,6 +297,7 @@ export function initInspector(root, app) {
     else if (e.keys.includes('units') || (e.keys.includes('activeSpace') && !store.selection.length)) invalidate();
   });
   store.on('finishes', () => { if (!store.selection.length) invalidate(); });
+  store.on('products', () => { if (store.selection.length === 1) invalidate(); });
   store.on('project', () => { if (!store.selection.length) invalidate(); });
 
   return {

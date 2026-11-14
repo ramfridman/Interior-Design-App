@@ -4,6 +4,7 @@
  *
  *   Doc   = { e: { [key]: Entity }, v: { [key]: [seq, cid] } }
  *   key   = 'item:<id>' | 'finish:<spaceId>' | 'project' | 'plan' | 'run:<id>' | 'carp' | 'cimg:<id>' | 'underlay'
+ *           | 'cprod:<id>' (an own product, CONTRACT § 16)
  *   Op    = { k, p: Entity } (put) | { k, s: { field: value }, u: [field] } (set / unset fields) | { k, d: 1 } (delete)
  *   Group = { gid, base, ops, label? } — one user action
  *
@@ -28,12 +29,12 @@ const isObj = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
 const BAD_FIELD = new Set(['__proto__', 'constructor', 'prototype']);
 
 // ---------------------------------------------------------------- keys
-export const KEY_RE = /^(item|finish|run|cimg):[A-Za-z0-9_.:\-]{1,120}$|^(project|plan|carp|underlay)$/;
+export const KEY_RE = /^(item|finish|run|cimg|cprod):[A-Za-z0-9_.:\-]{1,120}$|^(project|plan|carp|underlay)$/;
 export const keyType = (k) => { const i = k.indexOf(':'); return i < 0 ? k : k.slice(0, i); };
 export const keyId = (k) => { const i = k.indexOf(':'); return i < 0 ? '' : k.slice(i + 1); };
 
-/** Order of application inside one batch of changes (plan first: finishes / rooms depend on it). */
-export const TYPE_ORDER = ['plan', 'project', 'run', 'carp', 'cimg', 'item', 'finish', 'underlay'];
+/** Order of application inside one batch of changes (plan first: finishes / rooms depend on it; own products before the items placed from them). */
+export const TYPE_ORDER = ['plan', 'project', 'run', 'carp', 'cimg', 'cprod', 'item', 'finish', 'underlay'];
 
 // ---------------------------------------------------------------- doc ⇄ project record
 /** An empty doc. */
@@ -61,6 +62,7 @@ export function recordToDoc(rec) {
   for (const [id, r] of Object.entries(carp.runs)) if (isObj(r)) e['run:' + id] = clone(r);
   e.carp = clone(isObj(carp.settings) ? carp.settings : {});
   for (const [id, url] of Object.entries(d.carpentryImages || {})) if (typeof url === 'string') e['cimg:' + id] = { url };
+  for (const p of Array.isArray(d.customProducts) ? d.customProducts : []) if (isObj(p) && typeof p.id === 'string' && /^own-[A-Za-z0-9_.\-]{1,116}$/.test(p.id)) e['cprod:' + p.id] = clone(p);
   if (rec && rec.underlay) { const { image, ...meta } = rec.underlay; e.underlay = { ...clone(meta), img: rec.underlayAsset || (image ? 'inline' : null) }; }
   for (const k of Object.keys(e)) doc.v[k] = [0, ''];
   return doc;
@@ -76,14 +78,17 @@ export function orderedItemKeys(e) {
 export function docToRecord(doc) {
   const e = doc.e, plan = e.plan || {};
   const items = orderedItemKeys(e).map((k) => { const { '@z': z, ...it } = e[k]; return clone(it); });
-  const finishes = {}, runs = {}, images = {};
+  const finishes = {}, runs = {}, images = {}, prods = [];
   for (const k of Object.keys(e)) {
     const t = keyType(k);
     if (t === 'finish') finishes[keyId(k)] = clone(e[k]);
     else if (t === 'run') runs[keyId(k)] = clone(e[k]);
     else if (t === 'cimg') images[keyId(k)] = e[k].url;
+    else if (t === 'cprod') prods.push(clone(e[k]));
   }
   const design = { app: 'e7-interior-design', version: 1, project: clone(e.project || {}), items, finishes, planEdits: clone(plan.edits) || null, carpentry: { runs, settings: clone(e.carp || {}) }, carpentryImages: images };
+  // own products: only when there is one (docs without them give the same record as before); canonical order
+  if (prods.length) design.customProducts = prods.sort((a, b) => (String(a.createdAt || '') < String(b.createdAt || '') ? -1 : String(a.createdAt || '') > String(b.createdAt || '') ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return { name: (e.project && e.project.name) || 'Project', phase: plan.phase === 'draft' ? 'draft' : 'fixed', basePlan: clone(plan.base), design, underlay: e.underlay ? clone(e.underlay) : null };
 }
 
@@ -163,6 +168,11 @@ function checkEntity(k, v) {
     if (v.base != null && (!isObj(v.base) || !Array.isArray(v.base.walls) || optionalKeysProblem(v.base))) return 'plan.base';
   } else if (t === 'run') {
     if (v.id !== undefined && v.id !== keyId(k)) return 'run id does not match its key';
+  } else if (t === 'cprod') {
+    if (v.id !== keyId(k)) return 'own product id does not match its key';
+    if (typeof v.type !== 'string' || typeof v.name !== 'string') return 'own product needs a type and a name';
+    if (v.price != null && !num(v.price)) return 'own product price must be a number or null';
+    if (v.url != null && (typeof v.url !== 'string' || !/^https:\/\//i.test(v.url))) return 'own product links are https only';
   } else if (t === 'cimg') {
     if (typeof v.url !== 'string' || !/^data:image\//.test(v.url)) return 'cimg.url must be an image data URL';
   } else if (t === 'underlay') {
@@ -185,8 +195,8 @@ export function validateOps(ops) {
     if (op.s) {
       if (!isObj(op.s)) return 'bad set';
       for (const f of Object.keys(op.s)) if (BAD_FIELD.has(f)) return 'bad field name';
-      if (keyType(op.k) === 'item' && ('id' in op.s)) return 'item ids cannot change';
-      const probe = checkEntity(op.k, { ...(keyType(op.k) === 'item' ? { id: keyId(op.k), type: 'x', '@z': 0 } : {}), ...(keyType(op.k) === 'plan' ? { phase: 'fixed' } : {}), ...(keyType(op.k) === 'cimg' ? { url: 'data:image/x' } : {}), ...op.s });
+      if ((keyType(op.k) === 'item' || keyType(op.k) === 'cprod') && ('id' in op.s)) return 'item ids cannot change';
+      const probe = checkEntity(op.k, { ...(keyType(op.k) === 'item' ? { id: keyId(op.k), type: 'x', '@z': 0 } : {}), ...(keyType(op.k) === 'cprod' ? { id: keyId(op.k), type: 'x', name: 'x' } : {}), ...(keyType(op.k) === 'plan' ? { phase: 'fixed' } : {}), ...(keyType(op.k) === 'cimg' ? { url: 'data:image/x' } : {}), ...op.s });
       if (probe) return probe;
     }
     if (op.u && (!Array.isArray(op.u) || op.u.some((f) => typeof f !== 'string' || BAD_FIELD.has(f) || f === 'id' || f === '@z'))) return 'bad unset';

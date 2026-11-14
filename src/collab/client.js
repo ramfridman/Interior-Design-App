@@ -88,7 +88,7 @@ export function createClient({ adapter, connect = null, cid = newCid(), now = ()
     dirty = new Set();
     return out;
   }
-  /** Turn dirty keys into one group (`kind`: 'do' | 'undo' | 'redo'). Returns the group or null. */
+  /** Turn dirty keys into one group (`kind`: 'do' | 'undo' | 'redo' | 'sys' — automatic, not undoable). Returns the group or null. */
   function flush(kind = 'do', label = '') {
     if (disposed || adapter.inBatch()) return null;
     const keys = expandDirty();
@@ -125,7 +125,8 @@ export function createClient({ adapter, connect = null, cid = newCid(), now = ()
     }
     pending.push(g);
     const entry = { gid: g.gid, inverse, base: seq, ackSeq: null, label };
-    if (kind === 'undo') redoStack.push(entry);
+    if (kind === 'sys') { /* an automatic fix-up (own products, CONTRACT § 16): sent, but not on anyone's undo stack */ }
+    else if (kind === 'undo') redoStack.push(entry);
     else { undoStack.push(entry); if (kind === 'do') redoStack = []; }
     if (undoStack.length > 200) undoStack.shift();
     emit('history', api.historyState());
@@ -377,6 +378,7 @@ export function createClient({ adapter, connect = null, cid = newCid(), now = ()
   function describeKey(k) {
     const t = keyType(k);
     if (t === 'item') { const it = adapter.get(k); return it ? `“${it.name}”` : 'an item'; }
+    if (t === 'cprod') { const p = adapter.get(k); return p ? `“${p.name}”` : 'an own product'; }
     return { plan: 'the plan', run: 'a carpentry run', finish: 'a finish', project: 'the project settings', underlay: 'the sketch' }[t] || 'a change';
   }
 

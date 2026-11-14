@@ -28,7 +28,7 @@ function toItem(src) {
     placement: src.placement || 'floor',
   };
 }
-const keyOf = (src, size) => { const it = toItem(src); return `${it.id}|${JSON.stringify(it.params)}|${it.w}x${it.d}x${it.h}|${size}`; };
+const keyOf = (src, size) => { const it = toItem(src); return `${it.id}|${it.type}|${JSON.stringify(it.params)}|${it.w}x${it.d}x${it.h}|${size}`; };   // type: an own product can change kind under the same id
 
 function createStudio() {
   const canvas = document.createElement('canvas');

@@ -8,6 +8,8 @@ import { btn, iconBtn, segmented, emptyState } from './components.js';
 import { openPopover, openDialog } from './dialogs.js';
 import { fmtPrice, fmtDims, fmtUnitPrice } from './format.js';
 import { DND_TYPE, finishDndType } from './viewport.js';
+import { ownProductsFor, ownMark } from './own-product.js';
+import { isOwnProduct } from '../catalog/own.js';
 
 const isFinish = (p) => p.type === 'floor-finish' || p.type === 'wall-finish';
 const SORTS = [['relevance', 'Featured'], ['price-asc', 'Price: low to high'], ['price-desc', 'Price: high to low'], ['name', 'Name']];
@@ -15,7 +17,9 @@ const SORTS = [['relevance', 'Featured'], ['price-asc', 'Price: low to high'], [
 /** @param {HTMLElement} root  @param {object} app */
 export function initCatalogPanel(root, app) {
   const { store, catalog, actions, thumbs } = app;
-  const state = { category: null, subcategory: null, query: '', retailers: new Set(), minPrice: null, maxPrice: null, sort: 'relevance' };
+  const state = { category: null, subcategory: null, query: '', retailers: new Set(), minPrice: null, maxPrice: null, sort: 'relevance', own: false };
+  const own = ownProductsFor(app);   // "Add your own product" (CONTRACT § 16)
+  const openAddOwn = () => { detail && detail.close(); own.openAdd({ zone: store.ui.catalogZone, category: state.category }); };
   let results = [];
   let detail = null;
 
@@ -39,11 +43,15 @@ export function initCatalogPanel(root, app) {
   spacer.append(win);
   scroller.append(spacer, empty);
 
+  const addOwn = h('button', { type: 'button', class: 'btn btn--default btn--sm cat__own', 'aria-label': 'Add your own product', 'data-tip': 'Add your own product — from any shop', onClick: openAddOwn },
+    icon('plus', { size: 14 }), h('span', { class: 'btn__label' }, 'Add your own'));
+  const addOwnWide = h('button', { type: 'button', class: 'btn btn--default btn--block cat__ownwide', onClick: openAddOwn },
+    icon('plus', { size: 16 }), h('span', { class: 'btn__label' }, 'Add your own product'));
   root.append(rail, h('div', { class: 'cat' },
-    h('header', { class: 'side__head' }, title, iconBtn('panel-left', 'Hide the catalogue', { onClick: () => app.setPanelOpen('left', false) })),
+    h('header', { class: 'side__head' }, title, addOwn, iconBtn('panel-left', 'Hide the catalogue', { onClick: () => app.setPanelOpen('left', false) })),
     h('div', { class: 'cat__controls' }, zone,
       h('div', { class: 'cat__searchrow' }, h('div', { class: 'search' }, icon('search', { size: 16 }), search, clearSearch), filterBtn),
-      chips),
+      chips, addOwnWide),
     h('div', { class: 'cat__meta' }, resultCount, sort),
     scroller));
 
@@ -78,7 +86,7 @@ export function initCatalogPanel(root, app) {
   }
 
   /* ───────── Query ───────── */
-  function activeFilterCount() { return state.retailers.size + (state.minPrice != null ? 1 : 0) + (state.maxPrice != null ? 1 : 0); }
+  function activeFilterCount() { return state.retailers.size + (state.minPrice != null ? 1 : 0) + (state.maxPrice != null ? 1 : 0) + (state.own ? 1 : 0); }
 
   function refresh() {
     const z = store.ui.catalogZone;
@@ -87,11 +95,12 @@ export function initCatalogPanel(root, app) {
     if (!state.query && cat) { opts.category = cat.id; if (state.subcategory) opts.subcategory = state.subcategory; }
     if (state.minPrice != null) opts.minPrice = state.minPrice;
     if (state.maxPrice != null) opts.maxPrice = state.maxPrice;
+    if (state.own) opts.own = true;
     let list = safe(() => catalog.searchProducts(opts), []);
     if (state.retailers.size) list = list.filter((p) => state.retailers.has(p.retailer));
     results = list;
 
-    title.textContent = state.query ? 'Search results' : cat ? cat.name : (z === 'indoor' ? 'Indoor catalogue' : 'Outdoor catalogue');
+    title.textContent = state.query ? 'Search results' : state.own && !cat ? 'Products you added' : cat ? cat.name : (z === 'indoor' ? 'Indoor catalogue' : 'Outdoor catalogue');
     resultCount.textContent = `${list.length} ${list.length === 1 ? 'product' : 'products'}`;
     const n = activeFilterCount();
     filterBadge.hidden = !n;
@@ -102,7 +111,11 @@ export function initCatalogPanel(root, app) {
     empty.hidden = list.length > 0;
     spacer.hidden = list.length === 0;
     if (!list.length) {
-      setKids(empty, totalInCatalogue === 0
+      const ownCount = safe(() => catalog.searchProducts({ own: true }).length, 0);
+      setKids(empty, state.own && !ownCount
+        ? emptyState({ icon: 'own', title: 'You have not added any products yet', text: 'Add a product from any shop — it then appears here and in the catalogue, ready to place.',
+          action: btn('Add your own product', { small: true, variant: 'primary', icon: 'plus', onClick: openAddOwn }) })
+        : totalInCatalogue === 0
         ? emptyState({ icon: 'sofa', title: 'The catalogue is empty', text: 'Products with prices and retailer links appear here as soon as the catalogue data is loaded.' })
         : emptyState({ icon: 'search', title: state.query ? `Nothing matches “${state.query}”` : 'No products here yet',
           text: n ? 'Try removing a filter.' : state.query ? 'Check the spelling or search for a type, such as “sofa” or “pergola”.' : 'Pick another category from the rail on the left.',
@@ -113,7 +126,7 @@ export function initCatalogPanel(root, app) {
 
   function clearAll() {
     state.query = ''; search.value = ''; clearSearch.hidden = true;
-    state.retailers.clear(); state.minPrice = null; state.maxPrice = null;
+    state.retailers.clear(); state.minPrice = null; state.maxPrice = null; state.own = false;
     renderRail(); renderChips(); refresh();
   }
 
@@ -133,7 +146,10 @@ export function initCatalogPanel(root, app) {
         onChange: () => { const v = parseFloat(input.value.replace(/[^\d.]/g, '')); state[key] = Number.isFinite(v) ? v : null; input.value = state[key] ?? ''; refresh(); } });
       return h('label', { class: 'field' }, h('span', { class: 'field__label' }, label), input);
     };
+    const ownN = safe(() => catalog.searchProducts({ zone: store.ui.catalogZone, own: true }).length, 0);
+    const ownBox = h('input', { type: 'checkbox', class: 'check__input', checked: state.own, onChange: () => { state.own = ownBox.checked; refresh(); } });
     const body = h('div', { class: 'filters' },
+      h('label', { class: 'check filters__own' }, ownBox, h('span', { class: 'check__label truncate' }, 'Only products I added'), ownMark(), h('span', { class: 'check__count num' }, ownN)),
       h('h3', { class: 'filters__title' }, 'Retailer'),
       list.length ? h('div', { class: 'filters__list' }, list.map((r) => {
         const box = h('input', { type: 'checkbox', class: 'check__input', checked: state.retailers.has(r.name), onChange: () => { box.checked ? state.retailers.add(r.name) : state.retailers.delete(r.name); refresh(); } });
@@ -141,7 +157,7 @@ export function initCatalogPanel(root, app) {
       })) : h('p', { class: 'faint' }, 'No retailers in this section yet.'),
       h('h3', { class: 'filters__title' }, 'Price'),
       h('div', { class: 'filters__price' }, numberInput('From', 'minPrice'), numberInput('To', 'maxPrice')),
-      h('div', { class: 'filters__foot' }, btn('Clear filters', { variant: 'quiet', small: true, onClick: () => { state.retailers.clear(); state.minPrice = null; state.maxPrice = null; refresh(); pop.close(); } }),
+      h('div', { class: 'filters__foot' }, btn('Clear filters', { variant: 'quiet', small: true, onClick: () => { state.retailers.clear(); state.minPrice = null; state.maxPrice = null; state.own = false; refresh(); pop.close(); } }),
         btn('Done', { variant: 'primary', small: true, onClick: () => pop.close() })));
     const pop = openPopover(filterBtn, body, { cls: 'popover--panel', placement: 'bottom-end', label: 'Filters' });
   }
@@ -150,12 +166,13 @@ export function initCatalogPanel(root, app) {
   function card(p) {
     const finish = isFinish(p);
     const dims = p.dims ? fmtDims(p.dims.w, p.dims.d, p.dims.h).replace(' cm', '').replace(/ × /g, '×') : '';   // compact: fits beside the price
-    const open = h('button', { type: 'button', class: 'pcard__open', 'aria-label': `${p.name}, ${p.retailer}, ${fmtUnitPrice(p.price, p.priceUnit)}. Show details`, onClick: () => openDetail(p, el) },
+    const priceText = p.price == null ? 'price on request' : fmtUnitPrice(p.price, p.priceUnit);
+    const open = h('button', { type: 'button', class: 'pcard__open', 'aria-label': `${p.name}, ${p.retailer}${isOwnProduct(p) ? ', added by you' : ''}, ${priceText}. Show details`, onClick: () => openDetail(p, el) },
       h('span', { class: 'pcard__media' }, thumbs.el(p, { size: 176, lazy: false })),
       h('span', { class: 'pcard__body' },
         h('span', { class: 'pcard__name clamp-2' }, p.name),
         h('span', { class: 'pcard__retailer' }, h('span', { class: 'truncate' }, p.retailer), supplierMarks(p)),
-        h('span', { class: 'pcard__foot' }, h('span', { class: 'pcard__dims num truncate' }, finish ? (p.priceUnit === 'm2' ? 'per m²' : '') : dims), h('span', { class: 'pcard__price num' }, fmtPrice(p.price)))));
+        h('span', { class: 'pcard__foot' }, h('span', { class: 'pcard__dims num truncate' }, finish ? (p.priceUnit === 'm2' ? 'per m²' : '') : dims), p.price == null ? h('span', { class: 'pcard__price pcard__price--ask' }, 'On request') : h('span', { class: 'pcard__price num' }, fmtPrice(p.price)))));
     const add = h('button', { type: 'button', class: 'pcard__add', 'aria-label': finish ? `Apply ${p.name} to a room` : `Place ${p.name} in the plan`, 'data-tip': finish ? 'Apply to a room' : 'Place in plan',
       onClick: (e) => { e.stopPropagation(); finish ? actions.applyFinish(p, null, add) : actions.place(p); } }, icon(finish ? 'paint' : 'plus', { size: 16 }));
     const el = h('div', { class: 'pcard', draggable: 'true', dataset: { id: p.id } }, open, add);
@@ -181,19 +198,28 @@ export function initCatalogPanel(root, app) {
     const finish = isFinish(p);
     const place = btn(finish ? 'Apply to a room' : 'Place in plan', { variant: 'primary', icon: finish ? 'paint' : 'plus', block: true, attrs: { 'data-autofocus': '' },
       onClick: () => { const d = detail; finish ? actions.applyFinish(p, null, null) : actions.place(p); d && d.close(); } });
+    const mine = isOwnProduct(p);
+    const ownActs = mine ? h('div', { class: 'pdetail__own' },
+      btn('Edit', { small: true, icon: 'note', onClick: () => { detail && detail.close(); own.openEdit(p.id); } }),
+      btn('Delete', { small: true, variant: 'danger', icon: 'trash', onClick: () => { detail && detail.close(); own.confirmDelete(p.id); } })) : null;
     const body = h('div', { class: 'pdetail' },
       h('div', { class: 'pdetail__media' }, thumbs.el(p, { size: 352, lazy: false })),
       h('div', { class: 'pdetail__body' },
         h('p', { class: 'pdetail__retailer' }, [p.brand && p.brand !== p.retailer ? `${p.brand}, ` : '', p.retailer, supplierMarks(p, true)]),
         h('h3', { class: 'pdetail__name display' }, p.name),
         p.nameHe && h('p', { class: 'pdetail__he', lang: 'he', dir: 'rtl' }, p.nameHe),
-        h('p', { class: 'pdetail__price' }, h('span', { class: 'num' }, fmtPrice(p.price)), p.priceUnit && p.priceUnit !== 'item' ? h('span', { class: 'pdetail__unit' }, p.priceUnit === 'm2' ? 'per m²' : 'per metre') : null),
+        h('p', { class: 'pdetail__price' }, p.price == null ? h('span', { class: 'pdetail__ask' }, 'Price on request') : [h('span', { class: 'num' }, fmtPrice(p.price)), p.priceUnit && p.priceUnit !== 'item' ? h('span', { class: 'pdetail__unit' }, p.priceUnit === 'm2' ? 'per m²' : 'per metre') : null]),
         p.description && h('p', { class: 'pdetail__desc' }, p.description),
+        mine && p.note ? h('p', { class: 'pdetail__desc' }, p.note) : null,
         h('dl', { class: 'facts' },
           p.dims && !finish ? [h('dt', null, 'Size'), h('dd', { class: 'num' }, h('span', { class: 'dimline' }, fmtDims(p.dims.w, p.dims.d, p.dims.h)), h('small', { class: 'faint' }, 'width × depth × height'))] : null,
           finish && p.params && p.params.tileW ? [h('dt', null, 'Format'), h('dd', { class: 'num' }, `${p.params.tileW} × ${p.params.tileH || p.params.tileW} cm`)] : null,
-          p.priceDate ? [h('dt', null, 'Price seen'), h('dd', { class: 'num' }, p.priceDate)] : null),
-        h('div', { class: 'pdetail__actions' }, place, btn('View at retailer', { href: p.url, iconRight: 'external', block: true }))));
+          p.priceDate ? [h('dt', null, 'Price seen'), h('dd', { class: 'num' }, p.priceDate)] : null,
+          mine ? [h('dt', null, 'Added'), h('dd', null, `By you${p.createdBy ? ` (${p.createdBy})` : ''}, from the shop’s page`)] : null),
+        h('div', { class: 'pdetail__actions' }, place, p.url ? btn(mine ? 'View at the shop' : 'View at retailer', { href: p.url, iconRight: 'external', block: true }) : null),
+        ownActs,
+        h('button', { type: 'button', class: 'pdetail__other', onClick: () => { detail && detail.close(); own.openAdd({ zone: p.zone, category: p.category }); } },
+          icon('plus', { size: 14 }), h('span', null, 'Add from another shop…'))));
     if (app.isCompact()) {
       const dlg = openDialog({ title: 'Product', size: 'sm', cls: 'dialog--flush', body, onClose: () => { if (detail === dlg) detail = null; } });
       detail = dlg;
@@ -212,6 +238,8 @@ export function initCatalogPanel(root, app) {
   const grid = createVirtualGrid(scroller, spacer, win, card, thumbs);
 
   /* ───────── Store wiring ───────── */
+  // own products: added / edited / deleted here, by undo, by someone else, or another project opened
+  store.on('products', () => { if (detail) { detail.close(); } renderRail(); renderChips(); refresh(); });
   store.on('ui', (e) => {
     if (!e.keys.includes('catalogZone')) return;
     zone.set(store.ui.catalogZone);
@@ -288,15 +316,16 @@ function createVirtualGrid(scroller, spacer, win, renderCard, thumbs) {
  * boutique. They come from the product's tags, which the catalogue research sets only with recorded evidence
  * (see the *.sources.md files). `withText` adds the words (product details).
  */
-const SUPPLIER_MARKS = [
+const SUPPLIER_MARKS = [   // (+ the "added by you" mark of own products, CONTRACT § 16 — from p.own, not a tag)
   { tag: 'top-rated', icon: 'star', label: 'Top-rated supplier', tip: 'Top-rated supplier: a high public rating was recorded when this product was added' },
   { tag: 'boutique', icon: 'gem', label: 'Design studio / boutique', tip: 'Design studio or boutique supplier' },
 ];
 function supplierMarks(p, withText = false) {
   const tags = Array.isArray(p.tags) ? p.tags : [];
-  const marks = SUPPLIER_MARKS.filter((m) => tags.includes(m.tag));
-  if (!marks.length) return null;
-  return h('span', { class: `smarks${withText ? ' smarks--text' : ''}` }, marks.map((m) =>
+  const mine = isOwnProduct(p);
+  const marks = mine ? [] : SUPPLIER_MARKS.filter((m) => tags.includes(m.tag));
+  if (!marks.length && !mine) return null;
+  return h('span', { class: `smarks${withText ? ' smarks--text' : ''}` }, mine ? ownMark(withText) : null, marks.map((m) =>
     h('span', { class: `smark smark--${m.icon}`, role: 'img', 'aria-label': m.label, 'data-tip': m.tip, title: m.tip }, icon(m.icon, { size: withText ? 14 : 12 }), withText ? h('span', null, m.label) : null)));
 }
 

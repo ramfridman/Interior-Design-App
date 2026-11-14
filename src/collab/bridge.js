@@ -79,6 +79,7 @@ export function createStoreBridge(store, { fetchUnderlay = async () => null, upl
       case 'run': return store.carpentry.runs[id] ? clone(store.carpentry.runs[id]) : undefined;
       case 'carp': return clone(store.carpentry.settings || {});
       case 'cimg': return typeof store.carpentryImages[id] === 'string' ? { url: store.carpentryImages[id] } : undefined;
+      case 'cprod': { const p = store.getCustomProduct ? store.getCustomProduct(id) : null; return p ? clone(p) : undefined; }
       case 'underlay': {
         if (!store.underlay) return undefined;
         const { image, ...meta } = store.underlay;
@@ -98,6 +99,7 @@ export function createStoreBridge(store, { fetchUnderlay = async () => null, upl
       case 'finish': return Object.keys(store.finishes).map((id) => 'finish:' + id);
       case 'run': return runIndex().map((id) => 'run:' + id);
       case 'cimg': return Object.keys(store.carpentryImages || {}).map((id) => 'cimg:' + id);
+      case 'cprod': return (store.customProducts || []).map((p) => 'cprod:' + p.id);
       case 'project': case 'plan': case 'carp': return [t];
       case 'underlay': return store.underlay ? ['underlay'] : [];
       default: return [];
@@ -127,6 +129,7 @@ export function createStoreBridge(store, { fetchUnderlay = async () => null, upl
       case 'plan': ks = ['plan']; break;
       case 'carpentry': ks = ['*run', 'carp', '*cimg']; break;
       case 'underlay': ks = ['underlay']; break;
+      case 'products': ks = p.type === 'reset' ? ['*cprod'] : (p.ids || []).map((id) => 'cprod:' + id); break;
       case 'load': if (!collecting) assignZ(store.items.map((i) => i.id), zmap); ks = ['*']; break;
       default: return;
     }
@@ -173,6 +176,17 @@ export function createStoreBridge(store, { fetchUnderlay = async () => null, upl
         const r = { ...store.carpentry.runs };
         for (const [k, v] of runs) { if (v) r[keyId(k)] = clone(v); else delete r[keyId(k)]; }
         store.carpentry = { ...store.carpentry, runs: r, settings: carp.length && carp[0][1] ? clone(carp[0][1]) : store.carpentry.settings };
+      }
+      // own products (before the items placed from them)
+      const prods = by('cprod');
+      if (prods.length) {
+        const m = new Map((store.customProducts || []).map((x) => [x.id, x]));
+        for (const [k, v] of prods) { if (v) m.set(keyId(k), clone(v)); else m.delete(keyId(k)); }
+        store._setCustomProducts([...m.values()]);
+        const pids = prods.map(([k]) => keyId(k));
+        store.emit('products', { type: 'update', ids: pids });
+        const spaces = Object.keys(store.finishes).filter((sid) => { const f = store.finishes[sid]; return f && (pids.includes(f.floor) || pids.includes(f.wall)); });
+        if (spaces.length) store.emit('finishes', { ids: spaces });   // a room finish that is an own product looks different now
       }
       // items
       const removed = [], updated = [], added = [];
@@ -221,8 +235,26 @@ export function createStoreBridge(store, { fetchUnderlay = async () => null, upl
         }
         store.emit('underlay', { reason: 'remote' });
       }
+      if (prods.length || by('item').length) scheduleOwnSync();
       return collecting;
     } finally { collecting = null; }
+  }
+
+  /**
+   * Own products (CONTRACT § 16): someone else's change can leave an item pointing at an own product that was deleted
+   * meanwhile (it becomes generic, size kept) or carrying an old price / link (it takes the product's). Every replica
+   * makes the same fix as an ordinary change of its own, so the values converge whoever's fix the room orders last.
+   */
+  let syncQueued = false;
+  function scheduleOwnSync() {
+    if (syncQueued || typeof store.syncOwnItems !== 'function') return;
+    syncQueued = true;
+    Promise.resolve().then(() => {
+      syncQueued = false;
+      if (!client || store._batch || (client.role && client.role() === 'viewer')) return;
+      client.flush();                                       // the person's own pending change stays a group of its own
+      if (store.syncOwnItems().length) client.flush('sys');   // the fix is not on the person's undo stack
+    });
   }
 
   const api = {

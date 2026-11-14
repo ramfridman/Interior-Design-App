@@ -277,6 +277,45 @@ Both views show the same store state live (move in 2D → moves in 3D, and vice-
   terrace as ground, sun-patch position on L1, void exchange + energy, L1 furniture, edit → re-solve rules, engine
   priority); `node tests/daylight-levels.e2e.mjs [--shots]` (browser, `?levels=1`).
 
+#### Walking between floors (stage F5, additive; a plan without stairs and voids walks exactly as before)
+* **On a stair** (`view3d/walk.js`, stairs from `core/stairs.js`; a stair of the walker's level or arriving at it): the
+  walker steps onto a stair where its surface is within 30 cm of the floor underfoot (the start from below, the arrival
+  edge from above). On it the floor = `floorHeightAt(stair, geo, x, y)` (smooth along the walking line, flat on
+  landings) + the bottom level's elevation, eased like the floor everywhere (τ 0.07 s), the usual head bob; speed × 0.7.
+  The walker's **level changes at the stair's ends**: on the last riser going up (h ≥ rise − riser) onto `to`, on the
+  first going down (h ≤ riser) back onto the bottom level; leaving the footprint elsewhere picks the end it is nearer.
+  Once per crossing; turning back half-way changes nothing. L / U: landings and the turn are walked like a flight.
+* **What blocks.** On a stair: guards on every side run of `stairSides` (open or along a wall; not along the first
+  tread, which can be left sideways), the bottom level's walls below the upper slab, the upper level's walls within
+  2 m of its floor, the furniture of a floor within 60 cm of it. Off a stair: the level's walls, windows and furniture
+  (as F3), plus on the bottom level the stair's sides and underside where the clear height under it is below 1.80 m
+  (flight: waist 18 cm under the pitch line; landing: 20 cm slab) — the start stays open — and on the upper level a
+  railing on every void edge except the stair's arrival edge (as blockers on the floor side; a void without a railing
+  blocks too). An upper-level walker never steps off its floor: a sub-step that would leave the footprint of its level
+  and of the levels below (a terrace), or enter a void, is taken back (sliding along). Doors as before.
+* **API** (`createWalk(…, onLevelChange?)`, additive): `onLevelChange(levelId)` after a level change; `getStair()` →
+  `{ id, height (cm above its bottom floor), bottom, to } | null`; `stairJump(+1 | −1)` (PageUp / PageDown while walking:
+  to just past the top of the nearest stair going up from the level / the foot of the nearest one coming down to it;
+  false when there is none; the hint mentions them when the plan has stairs); `getState()` adds `stair` / `stairHeight`
+  while on one; `blockedAt(x, y, { here: true })` = what blocks where the walker now is (stair, undersides, railings).
+  Exported helpers: `walkStairs(plan)`, `voidBoxes(plan, levelId, stairs)`.
+* **View** (`view3d/index.js`): a level change sets `store.ui.level` (the floor shown follows the walker — the top bar,
+  and the plan / 3D view on leaving the walk; no restart of the walk); `'walk-position'` carries the new `level` at once
+  (forced emit). Walk mode shows every level (F3), so nothing pops on the stair: the void, its railing and the upper floor
+  are seen coming up, the lower room going down. The daylight follows the eye height (F6: the walked level is solved
+  first, and the eye adaptation under a void includes the storey above) — the exposure moves smoothly up the stair.
+  `debug.walker()` → `{ level, x, y, heading, eye, camera, stair, exposure }`.
+* **Walk HUD** (`ui/viewport.js`): the mini-map draws the walker's floor with its voids (dashed) and stairs — those
+  starting there with the plan's stair symbol (`view2d/stairs.js` `drawStairSymbol`, a treads-and-arrow outline when that
+  module is missing), those arriving through its voids faintly with the arrow down; the room label gets the floor name
+  ("· First floor") on plans with levels. "Walk here" on a room of any floor starts on that floor (F7 `showFloorOf`).
+* Tests: `node tests/walk-levels.test.mjs` (headless: Duplex up / down with eye heights, monotonic, half-way, speed,
+  one event per crossing, sides, void railing, underside headroom, per-level blockers, PageUp / PageDown; an L and a
+  U stair both ways; a one-level plan unchanged); `node tests/walk-levels.e2e.mjs [--shots]` (browser, `?levels=1`).
+* Limits: the walker is a 44 cm circle (a guard post at the very first tread is walked through); a stair arriving inside
+  a void (its arrival edge not on a void edge) leaves that void's edges facing the arrival open (as the 3D railing); headroom on the stair
+  itself under a too-short void is not enforced (the rules report it); no winders / spirals (none in F4).
+
 ## 5. UI (`index.html`, `src/styles/*`, `src/ui/*`) — UX/UI team
 `index.html` provides the shell with mount points `#view2d` and `#view3d`, a boot splash `#boot` containing
 `#boot-status`, the import map, and `<script type="module" src="./src/main.js">`.

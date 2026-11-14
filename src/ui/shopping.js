@@ -48,14 +48,16 @@ function spaceOrder(plan) {
  * @param {'room'|'retailer'} groupBy
  * @param {{ level?: string }} [opts]  several floors: only the rows of this floor (the `total` stays the whole design's)
  * @returns {{ groups: Array<{id:string,title:string,rows:object[],subtotal:number,level?}>, pending: object[], total: number,
- *             pieces: number, chosen: number, multi: boolean, shownTotal: number }}  rows carry `level` (floor id)
+ *             pieces: number, chosen: number, multi: boolean, shownTotal: number, onRequest: number }}  rows carry `level` (floor id)
+ *   Own products with "price on request" (CONTRACT § 16) are listed as rows with `onRequest: true`, `unitPrice: null`,
+ *   cost 0 — never in the totals; `onRequest` counts them (pieces of items + finishes) so the UI can say so.
  */
 export function buildShopping({ store, plan, catalog }, groupBy = 'room', opts = {}) {
   const multi = hasLevels(plan), only = multi && opts.level ? opts.level : null;
   let shownTotal = 0;
   const groups = new Map();
   const pendingMap = new Map();
-  let total = 0, pieces = 0, chosen = 0;
+  let total = 0, pieces = 0, chosen = 0, onRequest = 0;
   const group = (id, title) => {
     if (!groups.has(id)) groups.set(id, { id, title, rows: new Map(), subtotal: 0 });
     return groups.get(id);
@@ -67,7 +69,8 @@ export function buildShopping({ store, plan, catalog }, groupBy = 'room', opts =
     const space = safeSpace(store, item) || OTHER;
     const level = itemFloor(item);
     pieces++;
-    if (item.price == null || !item.productId) {
+    const askPrice = !!item.productId && !item.generic && item.price == null;   // an own product with price on request
+    if (!askPrice && (item.price == null || !item.productId)) {
       const key = `${space.id}|${item.type}|${item.name}`;
       const row = pendingMap.get(key) || { key, name: item.name, type: item.type, spaceId: space.id, spaceName: space.name, qty: 0, ids: [], subject: item, level };
       row.qty++; row.ids.push(item.id);
@@ -75,16 +78,17 @@ export function buildShopping({ store, plan, catalog }, groupBy = 'room', opts =
       continue;
     }
     chosen++;
-    const cost = safeCost(catalog, item);
+    const cost = askPrice ? 0 : safeCost(catalog, item);
     const q = itemQuantity(item);
     total += cost;
+    if (askPrice) onRequest++;
     if (only && level !== only) continue;
     const g = groupBy === 'retailer' ? group('r:' + (item.retailer || 'Other'), item.retailer || 'Other') : group(space.id, space.name);
     const key = `${item.productId}|${item.priceUnit || 'item'}`;
     const row = g.rows.get(key) || {
       key: g.id + '|' + key, kind: 'item', name: item.name, retailer: item.retailer || '', url: item.url || null,
       unitPrice: item.price, priceUnit: item.priceUnit || 'item', qty: 0, qtyUnit: q.unit, cost: 0, ids: [],
-      spaceId: space.id, spaceName: space.name, productId: item.productId, subject: item, level,
+      spaceId: space.id, spaceName: space.name, productId: item.productId, subject: item, level, ...(askPrice ? { onRequest: true } : {}),
     };
     row.qty += q.qty; row.cost += cost; row.ids.push(item.id);
     g.rows.set(key, row);
@@ -101,6 +105,8 @@ export function buildShopping({ store, plan, catalog }, groupBy = 'room', opts =
     for (const kind of ['floor', 'wall']) {
       const product = f[kind] && catalog.getProduct(f[kind]);
       if (!product) continue;
+      const ask = product.price == null;
+      if (ask) { cost[kind] = 0; onRequest++; }
       total += cost[kind];
       if (only && level !== only) continue;
       const area = kind === 'floor' ? floorAreaM2(space) : wallAreaM2(space, ceiling, view);
@@ -109,7 +115,7 @@ export function buildShopping({ store, plan, catalog }, groupBy = 'room', opts =
         key: `${g.id}|${kind}|${space.id}`, kind, name: product.name, retailer: product.retailer || '', url: product.url || null,
         unitPrice: product.price, priceUnit: product.priceUnit || 'm2', qty: area, qtyUnit: 'm²', cost: cost[kind], ids: [],
         spaceId: space.id, spaceName: space.name, productId: product.id, subject: product,
-        note: kind === 'floor' ? 'Floor finish' : 'Wall finish', level,
+        note: kind === 'floor' ? 'Floor finish' : 'Wall finish', level, ...(ask ? { onRequest: true } : {}),
       });
       if (groupBy !== 'retailer') g.level = level;
       g.subtotal += cost[kind]; shownTotal += cost[kind];
@@ -122,7 +128,7 @@ export function buildShopping({ store, plan, catalog }, groupBy = 'room', opts =
   else list.sort((a, b) => order(a.id) - order(b.id));
   const pending = [...pendingMap.values()].filter((r) => !only || r.level === only).sort((a, b) => order(a.spaceId) - order(b.spaceId) || a.name.localeCompare(b.name));
   if (carpentry.budget) { total += carpentry.budget.typical; if (!only) shownTotal += carpentry.budget.typical; }
-  return { groups: list, pending, total, shownTotal, multi, pieces, chosen, carpentry: carpentry.units ? { units: carpentry.units, runs: carpentry.runs.size, budget: carpentry.budget } : null };
+  return { groups: list, pending, total, shownTotal, multi, pieces, chosen, onRequest, carpentry: carpentry.units ? { units: carpentry.units, runs: carpentry.runs.size, budget: carpentry.budget } : null };
 }
 
 /** "Custom carpentry — see Carpentry estimate" line text. */
@@ -145,6 +151,11 @@ function safeCost(catalog, item) {
   try { const c = catalog.itemCost(item); return Number.isFinite(c) ? c : 0; } catch (err) { return 0; }
 }
 
+/** "2 products with price on request are not in the total." */
+export function onRequestNote(n) {
+  return n === 1 ? '1 product with price on request is not in the total.' : `${n} products with price on request are not in the total.`;
+}
+
 /** "3" · "12.4 m²" · "6.0 m" */
 export function fmtQty(row) {
   return row.qtyUnit ? `${row.qty.toFixed(1)} ${row.qtyUnit}` : String(Math.round(row.qty));
@@ -153,7 +164,7 @@ export function fmtQty(row) {
 /** Grand total only (cheap enough to call on every change for the budget pill). */
 export function shoppingTotal(ctx) {
   const s = buildShopping(ctx, 'room');
-  return { total: s.total, pieces: s.pieces, chosen: s.chosen, pending: s.pending.reduce((n, r) => n + r.qty, 0) };
+  return { total: s.total, pieces: s.pieces, chosen: s.chosen, pending: s.pending.reduce((n, r) => n + r.qty, 0), onRequest: s.onRequest };
 }
 
 /** CSV of the full list (one line per merged row, then the items still to choose). */
@@ -163,13 +174,14 @@ export function shoppingCSV(ctx, groupBy = 'room') {
   const fl = (r) => (s.multi ? [levelName(ctx.plan, r.level || GROUND) || r.level] : []);
   const lines = [['Group', 'Product', 'Retailer', 'Quantity', 'Unit', 'Unit price (ILS)', 'Cost (ILS)', 'Room', ...(s.multi ? ['Floor'] : []), 'Link'].join(',')];
   for (const g of s.groups) for (const r of g.rows) {
-    lines.push([g.title, r.name, r.retailer, r.qtyUnit ? r.qty.toFixed(2) : Math.round(r.qty), r.qtyUnit || 'pcs', r.unitPrice, Math.round(r.cost), r.spaceName, ...fl(r), r.url || ''].map(csvCell).join(','));
+    lines.push([g.title, r.name, r.retailer, r.qtyUnit ? r.qty.toFixed(2) : Math.round(r.qty), r.qtyUnit || 'pcs', r.onRequest ? 'price on request' : r.unitPrice, r.onRequest ? '' : Math.round(r.cost), r.spaceName, ...fl(r), r.url || ''].map(csvCell).join(','));
   }
   for (const r of s.pending) lines.push(['Still to choose', r.name, '', r.qty, 'pcs', '', '', r.spaceName, ...fl(r), ''].map(csvCell).join(','));
   const cl = carpentryLine(s.carpentry);
   const pad = s.multi ? [''] : [];
   if (cl) lines.push(['Custom carpentry', cl.title, '', cl.what, '', '', cl.typical != null ? cl.typical : '', '', ...pad, ''].map(csvCell).join(','));
   lines.push(['Total', '', '', '', '', '', Math.round(s.total), '', ...pad, ''].join(','));
+  if (s.onRequest) lines.push(['Not in the total', onRequestNote(s.onRequest), '', '', '', '', '', '', ...pad, ''].map(csvCell).join(','));
   return '﻿' + lines.join('\r\n');
 }
 
@@ -179,7 +191,7 @@ export function shoppingText(ctx, groupBy = 'room') {
   const out = [`${ctx.store.project.name} — shopping list`, ''];
   for (const g of s.groups) {
     out.push(`${g.title} — ${fmtPrice(g.subtotal)}`);
-    for (const r of g.rows) out.push(`  ${fmtQty(r)} × ${r.name}${r.retailer ? ' (' + r.retailer + ')' : ''} — ${fmtPrice(r.cost)}${r.url ? '\n    ' + r.url : ''}`);
+    for (const r of g.rows) out.push(`  ${fmtQty(r)} × ${r.name}${r.retailer ? ' (' + r.retailer + ')' : ''} — ${r.onRequest ? 'price on request' : fmtPrice(r.cost)}${r.url ? '\n    ' + r.url : ''}`);
     out.push('');
   }
   if (s.pending.length) {
@@ -190,5 +202,6 @@ export function shoppingText(ctx, groupBy = 'room') {
   const cl = carpentryLine(s.carpentry);
   if (cl) out.push(`${cl.title}: ${cl.what} — ${cl.amount}`, '');
   out.push(`Total ${fmtPrice(s.total)}`);
+  if (s.onRequest) out.push(onRequestNote(s.onRequest));
   return out.join('\n');
 }

@@ -14,9 +14,12 @@ const BREATHE_MS = 48;
 
 /** Stable cache key: products by id; generic items by their look. */
 function keyOf(subject) {
-  if (subject.productId) return 'p:' + subject.productId;
-  if (subject.dims && subject.id) return 'p:' + subject.id;
-  return `i:${subject.type}:${subject.w}x${subject.d}x${subject.h}:${JSON.stringify(subject.params || {})}`;
+  // own products (ids 'own-…', CONTRACT § 16) can be edited: key them by their look so an edit shows a new picture
+  const own = /^own-/.test(subject.productId || (subject.dims ? subject.id : '') || '');
+  if (subject.productId && !own) return 'p:' + subject.productId;
+  if (subject.dims && subject.id && !own) return 'p:' + subject.id;
+  const it = asItem(subject);
+  return `i:${it.type}:${it.w}x${it.d}x${it.h}:${JSON.stringify(it.params || {})}`;
 }
 
 /** Normalise a product or an item to the item-like shape the model functions expect. */

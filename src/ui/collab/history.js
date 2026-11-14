@@ -9,7 +9,7 @@ import { h, setKids } from '../dom.js';
 import { btn } from '../components.js';
 import { openDialog, confirmDialog, toast } from '../dialogs.js';
 
-const TYPE_WORDS = { item: ['item', 'items'], run: ['carpentry run', 'carpentry runs'], finish: ['finish', 'finishes'], plan: ['plan', 'plan'], project: ['project setting', 'project settings'], carp: ['carpentry setting', 'carpentry settings'], cimg: ['reference picture', 'reference pictures'], underlay: ['sketch', 'sketch'] };
+const TYPE_WORDS = { item: ['item', 'items'], run: ['carpentry run', 'carpentry runs'], finish: ['finish', 'finishes'], plan: ['plan', 'plan'], project: ['project setting', 'project settings'], carp: ['carpentry setting', 'carpentry settings'], cimg: ['reference picture', 'reference pictures'], cprod: ['own product', 'own products'], underlay: ['sketch', 'sketch'] };
 const n = (k, t) => `${k} ${TYPE_WORDS[t] ? TYPE_WORDS[t][k === 1 ? 0 : 1] : t}`;
 export const whenText = (iso) => {
   try {

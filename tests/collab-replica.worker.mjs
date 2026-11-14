@@ -54,6 +54,9 @@ const calls = {
   planJSON() { return JSON.stringify(PE.currentPlanData()); },
   levelsKey() { return JSON.stringify(PLAN.levels === undefined ? null : PLAN.levels); },
   activeLevel() { return PE.activeLevel(); },
+  // own products (CONTRACT § 16): any store method by name ([name, args]) and the items / products as JSON
+  async st([name, args]) { const r = store[name](...(args || [])); await tick(); return r === undefined ? null : JSON.parse(JSON.stringify(r)); },
+  ownState() { return JSON.stringify({ products: store.customProducts, items: store.items.filter((i) => i.productId == null || /^own-/.test(i.productId) || i.generic).map(({ id, productId, generic, price, url, retailer, w, d, h }) => ({ id, productId, generic, price, url, retailer, w, d, h })) }); },
   async tryEdit() { const it = store.items[0]; if (it) store.updateItem(it.id, { x: it.x + 50 }); else store.addItem({ type: 'chair', w: 50, d: 50, h: 80, x: 500, y: 500 }); await tick(); return true; },
 
   /** Every mutating store / plan-edit / carpentry API once (each its own user action). */
@@ -75,6 +78,14 @@ const calls = {
     await step('removeItems', () => { store.removeItems([b[1].id]); });
     await step('setProject', () => { store.setProject({ wallColor: '#eeeeee', roof: 'flat' }); });
     await step('setFinish', () => { store.setFinish(PLAN.rooms[0].id, { floor: 'some-floor', wallColor: '#ddd' }); });
+    // own products (CONTRACT § 16)
+    const ownP = { id: 'own-capture1', own: true, name: 'Oslo sofa', retailer: 'kaza.co.il', url: 'https://www.kaza.co.il/p/oslo', price: 4990, priceUnit: 'item', dims: { w: 210, d: 92, h: 80 }, type: 'sofa', params: { color: '#8a5a3b' }, zone: 'indoor', category: 'living', subcategory: 'sofas', tags: ['own'], createdAt: '2026-11-14T10:00:00.000Z' };
+    let ownItem;
+    await step('addCustomProduct', () => { if (!store.addCustomProduct(ownP)) return { ok: false, reason: 'not added' }; });
+    await step('place own product', () => { ownItem = store.addItem({ productId: ownP.id, type: 'sofa', name: ownP.name, w: 210, d: 92, h: 80, price: 4990, url: ownP.url, retailer: ownP.retailer, x: 500, y: 600 }); });
+    await step('updateCustomProduct', () => { if (!store.updateCustomProduct(ownP.id, { ...ownP, price: 4490, dims: { w: 220, d: 95, h: 82 } })) return { ok: false, reason: 'not updated' }; });
+    await step('addCustomProduct (linked to a generic item)', () => { const g = store.items.find((i) => i.generic) || store.addItem({ type: 'chair', generic: true, w: 50, d: 50, h: 80, x: 700, y: 700 }); if (!store.addCustomProduct({ ...ownP, id: 'own-capture2', name: 'Linked chair', type: 'chair', dims: { w: 48, d: 52, h: 80 }, price: null, createdAt: '2026-11-14T10:05:00.000Z' }, { linkItem: g.id })) return { ok: false, reason: 'not linked' }; });
+    await step('removeCustomProduct', () => { if (!store.removeCustomProduct(ownP.id)) return { ok: false, reason: 'not removed' }; void ownItem; });
     await step('setUnderlay (new picture)', () => { store.setUnderlay({ image: 'data:image/webp;base64,AAAA', width: 100, height: 80, transform: [1, 0, 0, 1, 0, 0] }, { replace: true }); });
     await step('setUnderlay (patch)', () => { store.setUnderlay({ opacity: 0.3, visible: false, transform: [2, 0, 0, 2, 10, 20] }); });
     // plan

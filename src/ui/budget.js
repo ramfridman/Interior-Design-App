@@ -7,7 +7,7 @@ import { icon } from './icons.js';
 import { btn, segmented, emptyState, safeUrl } from './components.js';
 import { canPrint } from './exporter.js';
 import { fmtPrice, fmtUnitPrice } from './format.js';
-import { buildShopping, fmtQty, carpentryLine, onCarpentryBudget } from './shopping.js';
+import { buildShopping, fmtQty, carpentryLine, onCarpentryBudget, onRequestNote } from './shopping.js';
 import { getPref, setPref } from './prefs.js';
 import { FEATURES, onFeatureChange } from '../core/features.js';
 import { levelIds, levelName, upperLevels } from '../core/levels.js';
@@ -20,6 +20,7 @@ export function initBudget(root, app) {
 
   const total = h('p', { class: 'budget-total__value display num' }, fmtPrice(0));
   const caption = h('p', { class: 'budget-total__caption' }, '');
+  const askNote = h('p', { class: 'budget-total__note', hidden: true });   // own products with price on request (CONTRACT § 16)
   const grouping = segmented({ options: [{ value: 'room', label: 'By room' }, { value: 'retailer', label: 'By retailer' }], value: groupBy, label: 'Group the list', cls: 'seg--block',
     onChange: (v) => { groupBy = v; setPref('budgetGroup', v); render(); } });
   const list = h('div', { class: 'blist' });
@@ -36,7 +37,7 @@ export function initBudget(root, app) {
       onChange: (v) => { floor = v; render(); } }));
   }
   root.append(
-    h('div', { class: 'budget-total' }, h('p', { class: 'budget-total__label' }, 'Total so far'), total, caption),
+    h('div', { class: 'budget-total' }, h('p', { class: 'budget-total__label' }, 'Total so far'), total, caption, askNote),
     h('div', { class: 'budget-tools' }, grouping, floorHost,
       h('div', { class: 'budget-tools__row' },
         btn('Export CSV', { small: true, icon: 'table', onClick: actions.exportCSV }),
@@ -46,16 +47,16 @@ export function initBudget(root, app) {
   function row(r) {
     const select = () => { if (r.ids.length) actions.focusItems(r.ids); else actions.focusSpace(r.spaceId); };
     const href = safeUrl(r.url);
-    const meta = [fmtQty(r), ' × ', fmtUnitPrice(r.unitPrice, r.priceUnit)].join('');
+    const meta = [fmtQty(r), ' × ', r.onRequest ? 'price on request' : fmtUnitPrice(r.unitPrice, r.priceUnit)].join('');
     return h('li', { class: 'brow' },
-      h('button', { type: 'button', class: 'brow__main', onClick: select, 'aria-label': `${r.name}, ${meta}, ${fmtPrice(r.cost)}. Show in the design` },
+      h('button', { type: 'button', class: 'brow__main', onClick: select, 'aria-label': `${r.name}, ${meta}, ${r.onRequest ? 'not in the total' : fmtPrice(r.cost)}. Show in the design` },
         h('span', { class: 'brow__thumb' }, thumbs.el(r.subject, { size: 80 })),
         h('span', { class: 'brow__text' },
           h('span', { class: 'brow__name truncate' }, r.name),
           h('span', { class: 'brow__meta truncate num' }, r.note ? `${r.note}, ${meta}` : meta),
           h('span', { class: 'brow__sub truncate' }, (groupBy === 'retailer' ? r.spaceName : r.retailer) + (multi() && floor === 'all' && r.level ? ` · ${floorName(r.level)}` : '')))),
       h('span', { class: 'brow__end' },
-        h('span', { class: 'brow__cost num' }, fmtPrice(r.cost)),
+        r.onRequest ? h('span', { class: 'brow__cost brow__cost--ask', 'data-tip': 'Not in the total' }, 'On request') : h('span', { class: 'brow__cost num' }, fmtPrice(r.cost)),
         href ? h('a', { class: 'brow__link', href, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `Open ${r.name} at ${r.retailer || 'the retailer'}`, 'data-tip': 'Open at retailer' }, 'Buy', icon('external', { size: 12 })) : null));
   }
 
@@ -65,6 +66,8 @@ export function initBudget(root, app) {
     const s = buildShopping(app, groupBy, floor !== 'all' ? { level: floor } : {});
     const pendingCount = s.pending.reduce((n, r) => n + r.qty, 0);
     total.textContent = fmtPrice(s.total);
+    askNote.hidden = !s.onRequest;
+    askNote.textContent = s.onRequest ? onRequestNote(s.onRequest) : '';
     caption.textContent = s.pieces === 0 ? 'Nothing placed yet'
       : `${s.chosen} of ${s.pieces} items have a product${pendingCount ? `, ${pendingCount} still to choose` : ''}` + (floor !== 'all' ? ` · ${fmtPrice(s.shownTotal)} on the ${floorName(floor).toLowerCase()}` : '');
     const cl = carpentryLine(s.carpentry);
@@ -104,10 +107,11 @@ export function initBudget(root, app) {
         h('table', null, h('thead', null, h('tr', null, h('th', null, 'Product'), h('th', null, groupBy === 'retailer' ? 'Room' : 'Retailer'), h('th', { class: 'r' }, 'Qty'), h('th', { class: 'r' }, 'Unit price'), h('th', { class: 'r' }, 'Cost'))),
           h('tbody', null, g.rows.map((r) => h('tr', null,
             h('td', null, r.name, r.url ? h('small', null, r.url) : null), cell(groupBy === 'retailer' ? r.spaceName : r.retailer),
-            cell(fmtQty(r), 'r'), cell(fmtUnitPrice(r.unitPrice, r.priceUnit), 'r'), cell(fmtPrice(r.cost), 'r')))))]),
+            cell(fmtQty(r), 'r'), cell(r.onRequest ? 'On request' : fmtUnitPrice(r.unitPrice, r.priceUnit), 'r'), cell(r.onRequest ? '—' : fmtPrice(r.cost), 'r')))))]),
       s.pending.length ? [h('h2', null, 'Still to choose'), h('table', null, h('tbody', null, s.pending.map((r) => h('tr', null, cell(r.name), cell(r.spaceName), cell(`× ${r.qty}`, 'r')))))] : null,
       carpentryLine(s.carpentry) ? [h('h2', null, 'Custom carpentry'), h('p', null, `${carpentryLine(s.carpentry).what} — ${carpentryLine(s.carpentry).amount}. See the Carpentry estimate and quotation package.`)] : null,
-      h('p', { class: 'print__total' }, 'Total ', h('strong', null, fmtPrice(s.total))));
+      h('p', { class: 'print__total' }, 'Total ', h('strong', null, fmtPrice(s.total))),
+      s.onRequest ? h('p', { class: 'print__sub' }, onRequestNote(s.onRequest)) : null);
   };
 
   const invalidate = debounce(() => { if (active) render(); else dirty = true; }, 120);
@@ -115,6 +119,7 @@ export function initBudget(root, app) {
   store.on('finishes', invalidate);
   store.on('project', invalidate);
   store.on('carpentry', (e) => { if (!e || !e.transient) invalidate(); });
+  store.on('products', invalidate);
   onCarpentryBudget(invalidate);
   onFeatureChange(invalidate);
   store.on('plan', (e) => { if (!e || !e.transient) invalidate(); });   // rooms group the list; a plan edit can add or merge rooms
