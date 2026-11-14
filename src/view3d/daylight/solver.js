@@ -567,6 +567,47 @@ export function buildScene(input, opts = {}) {
   return scene;
 }
 
+/** Stair-void portals of a level scene: (cell, patch) of every floor cell over this level's voids (light leaves down)
+ *  and every ceiling cell under the voids of the level above (light leaves up). Level grids share one origin. */
+function portalCells(S) {
+  const dc = [], dp = [], uc = [], up = [];
+  const patchOf = (chId, c) => {
+    const ch = S.charts[chId], i = c % S.nx, j = (c - i) / S.nx;
+    return ch.texPatch[Math.floor((j - ch.j0) / ch.tile) * ch.cols + Math.floor((i - ch.i0) / ch.tile)];
+  };
+  for (let c = 0; c < S.nx * S.ny; c++) {
+    if (S.lv.voidDown[c] && S.floorChart[c] >= 0) { const p = patchOf(S.floorChart[c], c); if (p >= 0) { dc.push(c); dp.push(p); } }
+    if (S.lv.voidUp[c] && S.ceilChart[c] >= 0) { const p = patchOf(S.ceilChart[c], c); if (p >= 0) { uc.push(c); up.push(p); } }
+  }
+  return { downCell: Int32Array.from(dc), downPatch: Int32Array.from(dp), upCell: Int32Array.from(uc), upPatch: Int32Array.from(up), count: dc.length + uc.length };
+}
+
+/**
+ * Light through a stair void between two level scenes (stage F6): the irradiance that reached the portal patches of
+ * `from` (its void floor when light goes down, its ceiling under the void above when it goes up) leaves the matching
+ * portal patches of `to` as a Lambertian exitance (cell by cell, so no flux is created: Σ exitance·area ≤ Σ E·area).
+ * @param {object} to    receiving scene;  @param {object} from  sending scene
+ * @param {Float32Array} E  per-patch RGB irradiance of `from` (relight().portalE)
+ * @param {'down'|'up'} toward  'down' = from the upper level into the one below, 'up' = the other way
+ * @returns {Float32Array|null} per-patch RGB exitance for relight({ emit }) of `to` (null: grids differ / no portal)
+ */
+export function portalEmit(to, from, E, toward) {
+  if (!to || !from || !to.portal || !from.portal || !E || to.nx !== from.nx || to.ny !== from.ny || Math.abs(to.ox - from.ox) > 1e-9 || Math.abs(to.oz - from.oz) > 1e-9) return null;
+  const sc = toward === 'down' ? from.portal.downCell : from.portal.upCell, sp = toward === 'down' ? from.portal.downPatch : from.portal.upPatch;
+  const dc = toward === 'down' ? to.portal.upCell : to.portal.downCell, dp = toward === 'down' ? to.portal.upPatch : to.portal.downPatch;
+  if (!sc.length || !dc.length) return null;
+  const map = new Int32Array(to.nx * to.ny).fill(-1);
+  for (let q = 0; q < sc.length; q++) map[sc[q]] = sp[q];
+  const nP = to.patch.count, out = new Float32Array(nP * 3), cells = new Float32Array(nP);
+  for (let q = 0; q < dc.length; q++) {
+    const p = dp[q]; cells[p]++;
+    const s = map[dc[q]]; if (s < 0) continue;
+    out[p * 3] += E[s * 3]; out[p * 3 + 1] += E[s * 3 + 1]; out[p * 3 + 2] += E[s * 3 + 2];
+  }
+  for (let p = 0; p < nP; p++) if (cells[p] > 0) { out[p * 3] /= cells[p]; out[p * 3 + 1] /= cells[p]; out[p * 3 + 2] /= cells[p]; }
+  return out;
+}
+
 // ───────────────────────── furniture occluders ─────────────────────────
 /**
  * Cells (indices) of the room air whose centres lie inside an occluder's (rotated) footprint.
@@ -645,6 +686,8 @@ export function receiversFor(S, regions) {
 /** Reusable hit record. */
 function hitRecord() { return { type: HIT_NONE, idx: -1, T: 1, x: 0, y: 0, z: 0, exitOpen: -1, side: 0 }; }
 
+/** Height (m, scene-local) of ground element e: its own height in a level scene, else garden / outdoor slab. */
+const groundElY = (S, e) => (S.ground.y ? S.ground.y[e] : (S.ground.kind[e] === 1 ? -0.02 : -S.drop));
 /** Ground level (m) and element index outdoors at world x, z. */
 function groundElement(S, x, z) {
   const G = S.ground;
@@ -658,6 +701,7 @@ function groundElement(S, x, z) {
  * Fills R: type, idx (patch / sky bin / ground element / facade key), T (glass transmittance), hit point, exitOpen.
  */
 function march(S, px, py, pz, dx, dy, dz, stopOut, R, tMax = Infinity) {
+  if (S.lv) return marchLv(S, px, py, pz, dx, dy, dz, stopOut, R, tMax);
   const { nx, ny, ox, oz, kind, reg, clear, H, roofTop, furLo, furHi } = S;
   R.type = HIT_NONE; R.idx = -1; R.T = 1; R.exitOpen = -1;
   let T = 1, lastOpen = -1, exited = false;
@@ -739,6 +783,115 @@ function march(S, px, py, pz, dx, dy, dz, stopOut, R, tMax = Infinity) {
   return R;
 }
 
+/**
+ * march() in a level scene (several floors). The storey itself is marched exactly as above; outdoors (and above a
+ * roof) every column has its own profile: solid below gY (ground, a lower storey's roof / parapet), an overhanging
+ * upper storey between cLo and cHi, the roof (and storeys above) of a building column up to top. Rays that run into
+ * a lower / upper storey's side, or its soffit from below, hit a facade element; landing on a roof is a ground hit.
+ */
+function marchLv(S, px, py, pz, dx, dy, dz, stopOut, R, tMax) {
+  const { nx, ny, ox, oz, kind, reg, clear, H, furLo, furHi } = S;
+  const { top, gY, cLo, cHi, skyTop } = S.lv;
+  R.type = HIT_NONE; R.idx = -1; R.T = 1; R.exitOpen = -1;
+  let T = 1, lastOpen = -1, exited = false;
+  const adx = Math.abs(dx), adz = Math.abs(dz), amax = Math.max(adx, adz);
+  const stepI = dx > 0 ? 1 : -1, stepJ = dz > 0 ? 1 : -1;
+  const tDX = adx > 1e-12 ? CS / adx : Infinity, tDZ = adz > 1e-12 ? CS / adz : Infinity;
+  let t = 0, i, j, tMaxX, tMaxZ, side = -1, prev = -1;
+  const reinit = () => {
+    const gx = (px + dx * t - ox) / CS, gz = (pz + dz * t - oz) / CS;
+    i = Math.floor(gx); j = Math.floor(gz);
+    tMaxX = adx > 1e-12 ? t + ((dx > 0 ? i + 1 - gx : gx - i) * CS) / adx : Infinity;
+    tMaxZ = adz > 1e-12 ? t + ((dz > 0 ? j + 1 - gz : gz - j) * CS) / adz : Infinity;
+  };
+  reinit();
+  for (let guard = 0; guard < 20000; guard++) {
+    if (t > tMax) { R.type = HIT_REACHED; R.T = T; return R; }
+    if (i < 0 || j < 0 || i >= nx || j >= ny) {                          // left the grid: open land at the real ground
+      if (stopOut) { R.type = HIT_EXITED; return R; }
+      if (!exited) R.exitOpen = lastOpen;
+      if (dy < -1e-9) {
+        const tg = (-S.drop - py) / dy;
+        R.type = HIT_GROUND; R.x = px + dx * tg; R.y = -S.drop; R.z = pz + dz * tg; R.idx = groundElement(S, R.x, R.z); R.T = T; return R;
+      }
+      R.type = HIT_SKY; R.idx = binOf(dx, dy, dz); R.T = T; return R;
+    }
+    const c = j * nx + i, k = kind[c];
+    const tExit = tMaxX < tMaxZ ? tMaxX : tMaxZ;
+    const yIn = py + dy * t;
+    if (k === OUT || yIn > top[c] + 1e-7) {                              // outdoor air (beside the storey, or above a roof)
+      if (stopOut) { R.type = HIT_EXITED; return R; }
+      if (!exited) { exited = true; R.exitOpen = lastOpen; }
+      if (dy >= 0 && yIn > skyTop) { R.type = HIT_SKY; R.idx = binOf(dx, dy, dz); R.T = T; return R; }
+      const out = k === OUT, g = out ? gY[c] : top[c], lo = out ? cLo[c] : Infinity, hi = out ? cHi[c] : -Infinity;
+      if (yIn < g - 1e-6 || (yIn > lo + 1e-6 && yIn < hi - 1e-6)) return hitFacadeLv(S, c, side, px + dx * t, yIn, pz + dz * t, T, R);
+      let tEnd = tExit, jump = false;
+      const cl = clear[c];
+      if (cl > 1 && amax > 1e-9) { const ts = t + ((cl - 1) * CS) / amax; if (ts > tEnd) { tEnd = ts; jump = true; } }
+      if (dy < -1e-12) {
+        const s = hi > g && yIn >= hi - 1e-6 ? hi : g, tg = (s - py) / dy;   // the overhang's roof, else the ground / lower roof
+        if (tg <= tEnd) { R.type = HIT_GROUND; R.x = px + dx * tg; R.y = s; R.z = pz + dz * tg; R.idx = groundElement(S, R.x, R.z); R.T = T; return R; }
+      } else if (dy > 1e-12 && lo < Infinity) {
+        const ts = (lo - py) / dy;                                       // the soffit of an overhanging storey
+        if (ts <= tEnd) return hitFacadeLv(S, c, 4, px + dx * ts, lo, pz + dz * ts, T, R);
+      }
+      if (jump) { t = tEnd; reinit(); prev = -1; continue; }
+    } else if (k === ROOM) {
+      if (furHi !== null && furHi[c] > 0) {
+        let ta = t, tb = tExit;
+        const lo = furLo[c], hi = furHi[c];
+        if (dy > 1e-12 || dy < -1e-12) { const t0 = (lo - py) / dy, t1 = (hi - py) / dy; ta = Math.max(ta, Math.min(t0, t1)); tb = Math.min(tb, Math.max(t0, t1)); }
+        else if (yIn < lo || yIn > hi) tb = -1;
+        if (ta <= tb) { R.type = HIT_FURN; R.idx = reg[c]; R.x = px + dx * ta; R.y = py + dy * ta; R.z = pz + dz * ta; R.T = T; return R; }
+      }
+      let tEnd = tExit, jump = false;
+      const cl = clear[c];
+      if (cl > 1 && amax > 1e-9) { const ts = t + ((cl - 1) * CS) / amax; if (ts > tEnd) { tEnd = ts; jump = true; } }
+      if (dy > 1e-12) {
+        const tc = (H - py) / dy;
+        if (tc <= tEnd) { const x = px + dx * tc, z = pz + dz * tc; return hitH(S, x, H, z, -1, T, R); }
+      } else if (dy < -1e-12) {
+        const tf = -py / dy;
+        if (tf <= tEnd) { const x = px + dx * tf, z = pz + dz * tf; return hitH(S, x, 0, z, 1, T, R); }
+      }
+      if (jump) { t = tEnd; reinit(); prev = -1; continue; }
+    } else if (k === WALL || (k === OPEN && (!S.oOpen[reg[c]] || yIn < S.oSill[reg[c]] - 1e-7 || yIn > S.oHead[reg[c]] + 1e-7))) {
+      return hitV(S, c, side, prev, px + dx * t, yIn, pz + dz * t, T, R);
+    } else {                                                             // inside the air band of an opening
+      const o = reg[c];
+      lastOpen = o;
+      if (S.oGlass[o] < 1) {
+        const a = S.oAxisN[o], tp = a === 0 ? (adx > 1e-12 ? (S.oPlane[o] - px) / dx : -1) : (adz > 1e-12 ? (S.oPlane[o] - pz) / dz : -1);
+        if (tp > t - 1e-9 && tp <= tExit && tp <= tMax) T *= S.oGlass[o];
+      }
+      if (dy < -1e-12) {
+        const ts = (S.oSill[o] - py) / dy;
+        if (ts <= tExit) { const x = px + dx * ts, z = pz + dz * ts; return hitH(S, x, S.oSill[o], z, 1, T, R); }
+      } else if (dy > 1e-12) {
+        const th = (S.oHead[o] - py) / dy;
+        if (th <= tExit) { const x = px + dx * th, z = pz + dz * th; return hitH(S, x, S.oHead[o], z, -1, T, R); }
+      }
+    }
+    prev = c;
+    if (tMaxX < tMaxZ) { t = tMaxX; tMaxX += tDX; i += stepI; side = stepI > 0 ? 1 : 0; }
+    else { t = tMaxZ; tMaxZ += tDZ; j += stepJ; side = stepJ > 0 ? 3 : 2; }
+  }
+  return R;
+}
+/** Facade element key of a level scene: ≈ 1 m × 1 m, height counted from the real ground (0…63 m); side 4 = soffit. */
+function facadeKeyLv(S, c, side, y) {
+  const i = c % S.nx, j = (c - i) / S.nx, yi = Math.min(63, Math.max(0, Math.floor(y + S.lv.yOff)));
+  if (side === 4) return ((4 * 4096 + Math.floor(j / 20)) * 512 + Math.floor(i / 20)) * 64 + yi;
+  const plane = side === 0 ? i + 1 : side === 1 ? i : side === 2 ? j + 1 : j, along = side < 2 ? j : i;
+  return ((side * 4096 + plane) * 512 + Math.floor(along / 20)) * 64 + yi;
+}
+function hitFacadeLv(S, c, side, x, y, z, T, R) {
+  R.x = x; R.y = y; R.z = z; R.T = T;
+  if (side < 0) { R.type = HIT_NONE; return R; }
+  R.type = HIT_FACADE; R.side = side; R.idx = facadeKeyLv(S, c, side, y);
+  return R;
+}
+
 /** Horizontal surface hit (floor / ceiling / sill / lintel / threshold) at a world point; ny = surface normal y. */
 function hitH(S, x, y, z, ny, T, R) {
   const i = Math.min(S.nx - 1, Math.max(0, Math.floor((x - S.ox) / CS))), j = Math.min(S.ny - 1, Math.max(0, Math.floor((z - S.oz) / CS)));
@@ -761,7 +914,7 @@ function hitV(S, c, side, prev, x, y, z, T, R) {
     const i = c % S.nx, j = (c - i) / S.nx, plane = side === 0 ? i + 1 : side === 1 ? i : side === 2 ? j + 1 : j;
     const along = side < 2 ? j : i;
     R.type = HIT_FACADE; R.side = side;
-    R.idx = ((side * 4096 + plane) * 512 + Math.floor(along / 20)) * 16 + Math.min(15, Math.max(0, Math.floor(y)));   // ≈ 1 m × 1 m facade elements
+    R.idx = S.lv ? facadeKeyLv(S, c, side, y) : ((side * 4096 + plane) * 512 + Math.floor(along / 20)) * 16 + Math.min(15, Math.max(0, Math.floor(y)));   // ≈ 1 m × 1 m facade elements
     return R;
   }
   const ch = S.faceChart[c * 4 + side];
@@ -955,8 +1108,8 @@ export function createVisibilityJob(S, { coarse = false, base = null, redo = nul
         outdoor.close(); continue;
       }
       let x, y, z, n;
-      if (e < nGround) { const a = e % G.nx, b = (e - a) / G.nx; x = G.ox + a + 0.5; z = G.oz + b + 0.5; y = (G.kind[e] === 1 ? -0.02 : -S.drop) + 0.01; n = [0, 1, 0]; }
-      else { const F = facades[e - nGround]; x = F.x + F.nx * 0.01; y = F.y; z = F.z + F.nz * 0.01; n = [F.nx, 0, F.nz]; }
+      if (e < nGround) { const a = e % G.nx, b = (e - a) / G.nx; x = G.ox + a + 0.5; z = G.oz + b + 0.5; y = groundElY(S, e) + 0.01; n = [0, 1, 0]; }
+      else { const F = facades[e - nGround]; x = F.x + F.nx * 0.01; y = F.y; z = F.z + F.nz * 0.01; n = [F.nx, 0, F.nz]; if (!F.nx && !F.nz) { n = [0, -1, 0]; y -= 0.01; } }   // nx = nz = 0: a soffit
       const rand = rng(e * 7919 + 17);
       const s = Math.max(1, Math.round(Math.sqrt(O.outdoorRays))), w = 1 / (s * s);
       const t1 = Math.abs(n[1]) > 0.5 ? [1, 0, 0] : [0, 1, 0];
@@ -1099,11 +1252,12 @@ export function albedoArrays(S, vis, table = {}) {
       c = surf === SURF.THRESHOLD ? (ri >= 0 && room(ri).floor) || def.floor : (ri >= 0 && room(ri).wall) || table.reveal || def.wall;
     }
     c = clamp(c);
+    if (surf === SURF.VOID_FLOOR || surf === SURF.VOID_CEILING) c = [0, 0, 0];   // a stair void reflects nothing (it passes light on: portalEmit)
     rho[p * 3] = c[0]; rho[p * 3 + 1] = c[1]; rho[p * 3 + 2] = c[2];
   }
   const G = S.ground, gr = table.ground || {};
   const nOut = G.nx * G.nz + (vis ? vis.nFacades : 0), out = new Float32Array(nOut * 3);
-  const gk = [clamp(gr.garden || [0.2, 0.17, 0.13]), clamp(gr.slab || [0.42, 0.4, 0.36]), clamp(gr.paving || [0.33, 0.31, 0.28])];
+  const gk = [clamp(gr.garden || [0.2, 0.17, 0.13]), clamp(gr.slab || [0.42, 0.4, 0.36]), clamp(gr.paving || [0.33, 0.31, 0.28]), clamp(gr.roof || [0.38, 0.36, 0.33])];
   for (let e = 0; e < G.nx * G.nz; e++) out.set(gk[G.kind[e]], e * 3);
   const fa = clamp(table.facade || [0.75, 0.73, 0.68]);
   for (let e = G.nx * G.nz; e < nOut; e++) out.set(fa, e * 3);
@@ -1142,7 +1296,7 @@ export function relight(S, vis, L) {
   const OL = vis.outdoor;
   for (let e = 0; e < nOut; e++) {
     let x, y, z, n;
-    if (e < nGround) { const a = e % G.nx, b = (e - a) / G.nx; x = G.ox + a + 0.5; z = G.oz + b + 0.5; y = (G.kind[e] === 1 ? -0.02 : -S.drop) + 0.01; n = [0, 1, 0]; }
+    if (e < nGround) { const a = e % G.nx, b = (e - a) / G.nx; x = G.ox + a + 0.5; z = G.oz + b + 0.5; y = groundElY(S, e) + 0.01; n = [0, 1, 0]; }
     else { const f = (e - nGround) * 5; x = vis.facades[f] + vis.facades[f + 3] * 0.02; y = vis.facades[f + 1]; z = vis.facades[f + 2] + vis.facades[f + 4] * 0.02; n = [vis.facades[f + 3], 0, vis.facades[f + 4]]; }
     const cos = n[0] * sunDir[0] + n[1] * sunDir[1] + n[2] * sunDir[2];
     if (sunOn && cos > 0) {
@@ -1240,8 +1394,10 @@ export function relight(S, vis, L) {
   let ind = new Float32Array(nP * 3), nxt = new Float32Array(nP * 3);
   const B = new Float32Array(nP * 3);                                      // radiosity × π  (= ρ · E_total)
   const iterations = [];
+  const emit = L.emit && L.emit.length === nP * 3 ? L.emit : null;           // stair-void portals: light from the next level
   for (let it = 0; it < bounces; it++) {
     for (let k = 0; k < nP * 3; k++) B[k] = rho[k] * (src0[k] + ind[k]);
+    if (emit) for (let k = 0; k < nP * 3; k++) B[k] += emit[k];
     updateFB(ind);
     let delta = 0, total = 0;
     for (let p = 0; p < nP; p++) {
@@ -1270,7 +1426,17 @@ export function relight(S, vis, L) {
   if (L.filter !== false) ind = filterCharts(S, ind, L.filterRadius || 2, L.filterSigma || 1.1);
   // after the last pass, B for the probes (radiosity of every patch)
   for (let k = 0; k < nP * 3; k++) B[k] = rho[k] * (src0[k] + ind[k]);
+  if (emit) for (let k = 0; k < nP * 3; k++) B[k] += emit[k];
   updateFB(ind);
+  // portals: everything that reached a stair-void patch (sun included) — passed on to the next level (portalEmit)
+  let portalE = null;
+  if (S.portal && S.portal.count) {
+    portalE = new Float32Array(nP * 3);
+    for (const list of [S.portal.downPatch, S.portal.upPatch]) for (let q = 0; q < list.length; q++) {
+      const p3 = list[q] * 3;
+      for (let ch = 0; ch < 3; ch++) portalE[p3 + ch] = direct[p3 + ch] + lampD[p3 + ch] + outside[p3 + ch] + ind[p3 + ch];
+    }
+  }
 
   // ── lightmap: irradiance without the direct sun (drawn by the shadow-mapped sun) ──
   const A = S.atlas, lightmap = new Float32Array(A.width * A.height * 4);
@@ -1317,7 +1483,7 @@ export function relight(S, vis, L) {
     S.probes.forEach((pr, k) => { if (!vis.probeInside[k]) return; const e = sum.get(pr.room * 2 + pr.layer); if (e) for (let i = 0; i < 18; i++) probes[k * 18 + i] = e.v[i] / e.n; });
   }
   const field = fieldTexture(S, probes);
-  return { direct, lamp: lampD, lampStats, sunFraction: sunFrac, outside, indirect: ind, lightmap, probes, field, sky, sunE, ms: Date.now() - t0, iterations, outdoorE: outE };
+  return { direct, lamp: lampD, lampStats, sunFraction: sunFrac, outside, indirect: ind, lightmap, probes, field, sky, sunE, ms: Date.now() - t0, iterations, outdoorE: outE, portalE, emit };
 }
 // ───────────────────────── lamps ─────────────────────────
 export const LAMP_RANGE = 15;                      // m — beyond this a lamp's direct light is ignored (< 0.5 lx for 1500 lm)

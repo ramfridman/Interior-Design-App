@@ -146,10 +146,9 @@ export function createView3D(container, ctx) {
   const daylightView = () => {
     const walking = mode === 'walk' && !(fly && fly.deferRoof);
     const roofHidden = !walking && (!store.ui.showRoof || !!store.ui.wallsCutaway);
-    // without sun study the hidden roof casts nothing — the solved interior (which has a roof) would not match
-    // several floors: the solve is the ground floor's (F6 adds the others) — on an upper floor the standard lighting
-    const upper = multiLevel() && (walking ? walk.getLevel() !== GROUND : !wholeHouse && shownLevel() !== GROUND);
-    return { mode: walking ? 'walk' : 'orbit', dollhouse: roofHidden, suppress: (roofHidden && store.ui.sunStudy === false) || upper };
+    // without sun study the hidden roof casts nothing — the solved interior (which has a roof) would not match.
+    // several floors: every level is solved (F6); `level` = the one walked / shown (solved first, sets the display gain)
+    return { mode: walking ? 'walk' : 'orbit', dollhouse: roofHidden, suppress: roofHidden && store.ui.sunStudy === false, level: multiLevel() ? (walking ? walk.getLevel() : viewLevel()) : GROUND };
   };
 
   /** Sun position and today's key times: from the environment, or straight from the ephemeris while a stand-in is used. */

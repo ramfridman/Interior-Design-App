@@ -29,8 +29,9 @@
 import { PLAN } from './plan.js';
 import { pointInPolygon, polygonArea, invalidatePlanCaches } from './geometry.js';
 import { OPTIONAL_KEYS, optionalKeysProblem, optionalPart, setOptionalKeys, normalizeOptionalKeys } from './plan-schema.js';
-import { GROUND, upperLevels, levelOf, levelIndex, nextLevelId, recomputeElevations, levelName, footprintOf } from './levels.js';
-import { faces as polyFaces, intersectArea, netArea, union as polyUnion, slitJoin } from './polykernel.js';
+import { GROUND, upperLevels, levelOf, levelIndex, nextLevelId, recomputeElevations, levelName, footprintOf, levelIds, levelElevation, levelHeights, voidsOf, annotateVoids } from './levels.js';
+import { stairGeometry, stairProblems, requiredVoid, proposeStair, SHAPES as STAIR_SHAPES } from './stairs.js';
+import { faces as polyFaces, intersectArea, netArea, union as polyUnion, slitJoin, intersection as polyIntersection, difference as polyDifference } from './polykernel.js';
 import { slantFrame, slantJoins, freePoly, atOf, openingQuad } from './slant-geom.js';
 import { isAngledOpening, hasSlants, slantLevel, checkAngledOpenings, spaceLocator, labelCells, outlineEdges, slantSolids, quadOfOpening, denoiseFaces,
   r01, nearAxis, lineCross, snapSlantEnd, nearRects, centreIn, polyGap, bandExtent, clearPieces, bothFaces, openingRanges } from './slants.js';
@@ -57,6 +58,8 @@ export const REASONS = Object.freeze({
   permit: 'Changing an exterior opening requires a building-permit amendment.',
   thick: (t) => `This ${t} cm wall may be structural — confirm with your structural engineer before changing it.`,
   level: 'Adding or removing a floor, or changing its height, changes the building — it requires a building permit.',
+  // stage F4b
+  stair: 'A stair and the opening it needs in the floor above change the structure of the building — they need a building-permit amendment.',
   // stage A1 texts, no longer returned since stage A2 (kept for callers that still compare with them)
   angledWalls: 'This floor has angled walls: its walls cannot be drawn, moved or removed here yet. Doors and windows in its straight walls, and room names, can be changed.',
   angledOpening: 'Doors and windows in angled walls cannot be added, moved or re-hung here yet — they can be removed.',
@@ -1051,8 +1054,9 @@ function syncBounds() {
  * schema-2 keys the plan must carry (from a saved state); undefined keeps the live ones (an edit never changes them).
  */
 function install(d, opt) {
-  const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a)), lv0 = PLAN.levels;
+  const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a)), lv0 = PLAN.levels, st0 = stairSig();
   if (opt === undefined) opt = optionalPart(PLAN);
+  else if (Array.isArray(opt.levels) && opt.levels.some((l) => voidsOf(l).length || (l.rooms || []).some((r) => r.voids))) opt = { ...opt, levels: opt.levels.map(annotateVoids) };
   if (isArchitectPlan(d, opt)) setBase();
   else {
     PLAN.walls = d.walls; PLAN.openings = d.openings; PLAN.rooms = d.rooms; PLAN.wallOutline = d.wallOutline; modified = true; analysis = d;
@@ -1061,23 +1065,39 @@ function install(d, opt) {
   }
   stateKey = null; invalidatePlanCaches();
   const after = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
-  return { walls: before[0] !== after[0], openings: before[1] !== after[1], rooms: before[2] !== after[2], levels: levelsChanged(lv0) };
+  return withStairs({ walls: before[0] !== after[0], openings: before[1] !== after[1], rooms: before[2] !== after[2], levels: levelsChanged(lv0) }, st0);
 }
 /** Did PLAN.levels change since it was `lv0`? (false on a one-level plan) */
 const levelsChanged = (lv0) => lv0 !== PLAN.levels && JSON.stringify(lv0) !== JSON.stringify(PLAN.levels);
+/** Stairs and voids of every level, as one string ('' on a plan without any — the usual case, cheap). */
+function stairSig() {
+  const ups = upperLevels(PLAN);
+  if (!PLAN.stairs && !ups.some((l) => l.stairs || l.voids)) return '';
+  return JSON.stringify([PLAN.stairs || null, ups.map((l) => [l.id, l.stairs || null, l.voids || null])]);
+}
+/**
+ * `changed` + the stairs (stage F4b): when a stair or a void changed, `stairs: true` (absent otherwise, so the payloads of
+ * plans without stairs are unchanged) and `levels: true` (a stair is schema-2 data of the levels: consumers that rebuild
+ * on `levels` pick it up — a stair of the ground floor lives in PLAN.stairs, its void in the level above).
+ */
+function withStairs(changed, st0) {
+  if (st0 === stairSig()) return changed;
+  return { ...changed, levels: true, stairs: true };
+}
 
 /**
  * Install new optional keys (an upper level edited, added, removed…) with L0 unchanged: back to the exact base plan if
  * everything equals it again, else the plan is modified. Lazy schema: no upper level left → no `levels`, no `schema`.
  */
 function installOptional(opt) {
-  const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a)), lv0 = PLAN.levels;
+  const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a)), lv0 = PLAN.levels, st0 = stairSig();
   const next = optionalPart(normalizeOptionalKeys({ ...opt }));
+  if (Array.isArray(next.levels)) next.levels = next.levels.map(annotateVoids);   // rooms cut by a void say so (F4b)
   if (isArchitectPlan({ walls: PLAN.walls, openings: PLAN.openings, rooms: PLAN.rooms }, next)) setBase();
   else { setOptionalKeys(PLAN, next); modified = true; syncBounds(); }
   stateKey = null; invalidatePlanCaches();
   const after = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
-  return { walls: before[0] !== after[0], openings: before[1] !== after[1], rooms: before[2] !== after[2], levels: levelsChanged(lv0) };
+  return withStairs({ walls: before[0] !== after[0], openings: before[1] !== after[1], rooms: before[2] !== after[2], levels: levelsChanged(lv0) }, st0);
 }
 
 /** A level object with the derived arrays `d` installed (the exact base level again when it equals it). */
@@ -1150,10 +1170,10 @@ export function applyPlanState(state) {
   const none = { walls: false, openings: false, rooms: false, levels: false };
   const toBase = (reason) => {
     if (!modified) return { ok: !reason, reason, changed: none };
-    const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a)), lv0 = PLAN.levels;
+    const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a)), lv0 = PLAN.levels, st0 = stairSig();
     setBase(); stateKey = null; invalidatePlanCaches();
     const base = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
-    return { ok: !reason, reason, changed: { walls: before[0] !== base[0], openings: before[1] !== base[1], rooms: before[2] !== base[2], levels: levelsChanged(lv0) } };
+    return { ok: !reason, reason, changed: withStairs({ walls: before[0] !== base[0], openings: before[1] !== base[1], rooms: before[2] !== base[2], levels: levelsChanged(lv0) }, st0) };
   };
   if (!state) return toBase();
   try {
@@ -2705,7 +2725,9 @@ export function recomputePlan(plan = PLAN) {
  * @param {{ phase?: 'draft' | 'fixed' }} [opts]
  */
 export function setBasePlan(planData, opts = {}) {
-  const base = deepFreeze(normalizeOptionalKeys(clone(planData)));
+  const data = normalizeOptionalKeys(clone(planData));
+  if (Array.isArray(data.levels)) data.levels = data.levels.map(annotateVoids);   // rooms cut by a void say so (F4b)
+  const base = deepFreeze(data);
   BASE_PLAN = JSON.stringify(base) === BUILTIN_KEY ? BUILTIN_PLAN : base;
   phase = opts.phase === 'draft' ? 'draft' : 'fixed';
   for (const k of Object.keys(PLAN)) if (!(k in BASE_PLAN)) delete PLAN[k];   // optional keys absent from the new base go too

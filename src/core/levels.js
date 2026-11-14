@@ -10,7 +10,7 @@
  *   elevation (cm, finished floor above the L0 finished floor) = elevation of the level below + its ceiling + this
  *            level's slab (`heights.slab` = the slab under this level's floor) — see recomputeElevations().
  */
-import { union, netArea } from './polykernel.js';
+import { union, netArea, intersection } from './polykernel.js';
 import { openingQuad } from './slant-geom.js';
 import { joinLevelSlants } from './slants.js';
 
@@ -87,4 +87,51 @@ function slantShapes(level, rects) {
   const joined = joinLevelSlants(sl, rects).joined, byId = new Map(sl.map((s) => [s.id, s]));
   const quads = (level.openings || []).filter((o) => o.axis === 'a' && byId.has(o.wall) && Number.isFinite(o.at) && o.width > 0).map((o) => openingQuad(byId.get(o.wall), o.at, o.width));
   return [...joined.map((s) => ({ poly: s.poly })), ...quads];
+}
+
+// ---------------------------------------------------------------- voids (stage F4b): openings in a level's floor
+/** The usable voids of a level (or of a PLAN-shaped level view): `[{ id, polygon, stair, railing }]` with ≥ 3 points. */
+export const voidsOf = (level) => (level && Array.isArray(level.voids) ? level.voids.filter((v) => v && typeof v.id === 'string' && Array.isArray(v.polygon) && v.polygon.length >= 3) : []);
+
+/**
+ * The parts of a room's floor that are voids (openings in the slab of this level, e.g. over a stair). A room keeps its
+ * outline (walls did not move); its FLOOR area is the polygon minus these. Computed from the geometry (never trusted
+ * from stored data). @returns {Array<{ id, area }>} area in cm² (only voids that overlap the room by more than 1 cm²)
+ */
+export function roomVoids(level, room) {
+  const voids = voidsOf(level);
+  if (!voids.length || !room || !Array.isArray(room.polygon) || room.polygon.length < 3) return [];
+  const out = [];
+  for (const v of voids) {
+    const a = Math.round(netArea(intersection([room.polygon], [v.polygon])));
+    if (a > 1) out.push({ id: v.id, area: a });
+  }
+  return out;
+}
+/** Floor area of a room (cm²): its polygon minus the voids in it. */
+export function roomFloorArea(level, room, polygonArea) {
+  const whole = polygonArea(room.polygon);
+  return whole - roomVoids(level, room).reduce((s, v) => s + v.area, 0);
+}
+
+/**
+ * A level object with its rooms annotated: `room.voids = [{ id, area }]` (cm²) for every room a void cuts, the key
+ * removed from the others. The SAME level object is returned when nothing changes (no voids and no stale keys), so a
+ * level without voids is untouched byte for byte. Used by the plan engine whenever it installs levels.
+ */
+export function annotateVoids(level) {
+  if (!level || !Array.isArray(level.rooms)) return level;
+  const hasVoids = voidsOf(level).length > 0;
+  if (!hasVoids && !level.rooms.some((r) => r && r.voids !== undefined)) return level;
+  let changed = false;
+  const rooms = level.rooms.map((r) => {
+    const vs = hasVoids ? roomVoids(level, r) : [];
+    const was = r.voids === undefined ? '' : JSON.stringify(r.voids), now = vs.length ? JSON.stringify(vs) : '';
+    if (was === now) return r;
+    changed = true;
+    const next = { ...r };
+    if (vs.length) next.voids = vs; else delete next.voids;
+    return next;
+  });
+  return changed ? { ...level, rooms } : level;
 }

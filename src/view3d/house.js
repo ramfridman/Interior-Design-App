@@ -29,7 +29,7 @@
  * edges — a smaller upper level leaves a terrace roof on the one below. Voids cut the upper floor finish and the
  * ceiling below and get a 1.05 m guard rail (open on a stair's arrival edge). Plinth and ground contact: L0 only.
  * A plan without `levels` takes exactly the old path (tests/levels-3d.test.mjs hashes every House 98 mesh).
- * The daylight solver is attached to L0 only (upper levels keep the standard lighting until stage F6).
+ * Daylight (stage F6): every storey gets the hooks of its own level's solve (`dl.level(id)`: lightmap atlas, materials).
  *
  * Live plan edits
  * ---------------
@@ -850,7 +850,7 @@ export function buildHouse(ctx) {
     for (const id of list) {
       const keys = keysOf(id);
       let rec = storeys.get(id);
-      if (!rec) { rec = { s: makeStorey(id), ...keys }; storeys.set(id, rec); if (daylight && id === GROUND) rec.s.setDaylight(daylight); rebuilt++; continue; }
+      if (!rec) { rec = { s: makeStorey(id), ...keys }; storeys.set(id, rec); if (daylight) rec.s.setDaylight(hooksOf(id)); rebuilt++; continue; }
       // L0 is rebuilt on every edit of its own (as always); an upper level when its data changed or the edit was on it
       const own = id === GROUND ? !levelsOnly : !!(e && e.levelId === id);
       if (all || own || keys.shell !== rec.shell) { rec.s.rebuildPlan(); rebuilt++; }
@@ -918,7 +918,8 @@ export function buildHouse(ctx) {
   syncStairs();
   applyView();
 
-  const ground = () => storeys.get(GROUND).s;
+  /** Daylight hooks of one level: `dl.level(id)` (one solve per level, stage F6); a controller without it: L0 only. */
+  const hooksOf = (id) => (!daylight ? null : typeof daylight.level === 'function' ? daylight.level(id) : (id === GROUND ? daylight : null));
   return {
     group,
     floorMeshes,
@@ -956,10 +957,18 @@ export function buildHouse(ctx) {
     },
     /** Level id of a scene object of the house (its level group), or null. */
     levelOfObject(o) { for (let n = o; n; n = n.parent) if (n.userData && n.userData.levelId) return n.userData.levelId; return null; },
-    /** Attach / detach the daylight solver — the ground level only (upper levels keep the standard lighting until F6). */
-    setDaylight(dl) { daylight = dl || null; ground().setDaylight(daylight); },
-    forEachInterior(fn) { ground().forEachInterior(fn); },
-    setFakeShading(on) { fakeShading = !!on; ground().setFakeShading(fakeShading); },
+    /**
+     * Attach / detach the daylight solver: `dl.level(id)` → that level's hooks { prepareMesh, lightmapMaterial,
+     * fieldMaterial, patchTree } (every level is solved, stage F6); a `dl` without `level` attaches to L0 only.
+     */
+    setDaylight(dl) { daylight = dl || null; for (const [id, rec] of storeys) rec.s.setDaylight(hooksOf(id)); },
+    /** Visit the interior meshes of every level (or of level `only`) — `fn(name, mesh, levelId)`. */
+    forEachInterior(fn, only = null) { for (const [id, rec] of storeys) if (!only || only === id) rec.s.forEachInterior((name, mesh) => fn(name, mesh, id)); },
+    /** Baked contact strips on / off — on every level, or on level `id` only (it shows solved light or not). */
+    setFakeShading(on, id = null) {
+      if (id) { const rec = storeys.get(id); if (rec) rec.s.setFakeShading(!!on); return; }
+      fakeShading = !!on; for (const rec of storeys.values()) rec.s.setFakeShading(fakeShading);
+    },
     dispose() {
       for (const rec of storeys.values()) rec.s.dispose(true);
       storeys.clear(); floorMeshes.length = 0;
