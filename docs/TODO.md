@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 11): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 12): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -37,6 +37,17 @@ Small follow-ups noted: island stools do not travel with the island; overlap of 
   - Photos / scans: a rough starting point only (about three quarters of the wall area, openings mostly not found) — the user traces over the underlay.
   - Limits: straight right-angled walls and one floor (angled / curved pieces are flagged for redrawing by hand); the safe room cannot be recognised from a drawing (set the room type by hand); the lot of an imported house is a default 3 m margin, not the lot drawn on the sheet; window heights / sills and door styles are defaults; not tried inside the real viewer on the owner's device; encrypted PDFs and the two-point re-align modes are untested.
 - [x] Scope chosen while the owner was away (to confirm): vector PDF + image, orthogonal walls, one floor first. DXF / DWG, angled walls and several floors would be later extensions.
+
+## Done in version 12 (14 Nov 2026)
+- [x] Check-and-fix pass on the night's features: two-finger pan and an offset loupe when measuring on a phone; no shader errors after switching projects several times; project name stays visible in Structure mode; lamp thumbnails always lit; stools move and turn with the kitchen island; duplicate price-tier selector removed. Verified working: re-align of the sketch underlay, dark theme, password-protected PDF message, project create / switch / duplicate / rename / export / import / delete on phone and desktop, the whole carpentry path on a phone, real drag of finishes onto the 3D view.
+- [ ] Carpentry on a phone: drawings sheet covers the bottom navigation, the Runs sheet stays open after picking a run, a long elevation is unreadable when fitted to the phone width [in progress, Sonnet].
+
+## Waiting for the owner
+1. **Sketch import scope** — built as: vector PDFs read exactly, photos / scans traced with guidance, straight right-angled walls, one floor. Confirm, or say what matters more (DXF / DWG, angled walls, several floors).
+2. **Hosting** — the site build is ready (`node dev/build-site.mjs`). Needed: a free Cloudflare account, authorising its GitHub app for the repo, the email addresses to invite, and whether the working branch is merged into the default branch first (a pull request).
+3. **Online saving with several people on one project** — must people edit at the same moment, or is taking turns enough? Sign-in by email code, Google, or both? Roughly how many people and projects?
+4. **Hebrew PDF wording** — a native speaker should check the terms listed above under version 8.
+5. **Try version 12 on the real devices** — 3D speed on a real graphics card and touch gestures of the structure tools have only been tested in emulation.
 
 ## Next
 - [x] **Stretched display on a phone** — fixed in version 6 (13 Nov): off-screen sheets made the page itself scrollable, so the app could slide up and out of view. The root and the app shell are now clipped and page scroll is reset; the top bar fits down to 360 px wide (at 320 px the File menu is still cut off).
