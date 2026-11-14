@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 9): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 10): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -28,6 +28,13 @@ Small follow-ups noted: island stools do not travel with the island; overlap of 
 - [x] Lamps light the rooms at night through the same light simulation (auto on at dusk; Lights: auto / on / off), Sky: clear / overcast, Realistic daylight on / off, furniture blocks light, direct sun strength follows the simulation's model (dimmer, truer sunrise / sunset). Lamp brightness uses typical lumen values per lamp type, not each product's data sheet. The architect's starting layout contains no lamps, so nights stay dark until lamps are placed.
 - [x] Catalogue: 878 products (28 added).
 
+## Done in version 10 (13–14 Nov 2026, night)
+- [x] **Projects**: several projects, each with its own plan, location and design; project switcher (click the project name, or ⋯ → Projects… on a phone); New project (empty lot or copy of House 98); rename, duplicate, delete, export / import a project file; the earlier saved design becomes the first project. A new house is drawn in a "draft" phase (everything editable, rooms follow the walls) and then confirmed as "the house as built", after which the permission levels and the changes list apply. Storage sits behind an adapter so an online backend can replace it later. Known limits: no project thumbnails; the boot splash always shows House 98; not tested on a real phone.
+
+## In progress now
+- [ ] **Sketch import** — engine that reads walls, doors and windows from a vector PDF (tested against the House 98 drawings) [Opus, running]; then the import screen: choose a PDF or image → set / confirm the scale → review and correct with the Structure tools → new project. Scope chosen while the owner was away (to confirm): vector PDFs read exactly, photos / scans traced with guidance, straight right-angled walls, one floor.
+
+## Next
 - [x] **Stretched display on a phone** — fixed in version 6 (13 Nov): off-screen sheets made the page itself scrollable, so the app could slide up and out of view. The root and the app shell are now clipped and page scroll is reset; the top bar fits down to 360 px wide (at 320 px the File menu is still cut off).
 - [x] **Carpentry in 3D** — published in version 7 (13 Nov): every unit is built in 3D from the same data as the drawings (fronts, handles, worktops with cut-outs, corner pantry in its true L shape); 3D tab in the carpentry workbench with section cut, Open fronts, fit warnings pinned on the units. Follow-ups: the interior is dim at some hours (add a neutral studio-light option for inspecting carpentry); splashbacks / upstands not modelled; lift-off doors look like hinged doors while closed; sliding wardrobe doors do not follow the run's door split; corner pantry shape checked by numeric tests only, not by eye; phone layout of the 3D tab unchecked.
 - [ ] Touch gestures for the structure tools are untested on a real device.
