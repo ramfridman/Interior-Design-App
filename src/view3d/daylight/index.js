@@ -39,6 +39,7 @@ import { buildScene, sceneInputFromPlan, chartFor, chartUV, transferLightmap, to
 import { lampEmitters, occluderBox } from './lamps.js';
 import { createEngine } from './engine.js';
 import { finishParams } from '../house.js';
+import { hasLevels } from '../../core/levels.js';
 
 const DOLL_TARGET = 0.3;                         // renderer units (≈ 15 klux): mean interior irradiance shown in the dollhouse
 const ADAPT_KEY = 0.13, ADAPT_POWER = 0.75, MAX_ADAPT = 20;   // eye adaptation: target luminance, partial adaptation, cap
@@ -65,7 +66,7 @@ varying vec4 vDlBox;     // lookup clamp: keeps bilinear filtering from reaching
 `;
 const FIELD_FRAG_DECL = /* glsl */`
 uniform sampler2D dlFieldA; uniform sampler2D dlFieldB;
-uniform vec4 dlFieldBox;   // origin x, origin z, texel size (m), unused
+uniform vec4 dlFieldBox;   // origin x, origin z, texel size (m), top (m; > 0 with several floors: the field lights only below it)
 uniform vec2 dlFieldN;     // texels per tile (x, z)
 uniform vec2 dlFieldH;     // probe heights of the two layers (m)
 varying vec3 vDlW;
@@ -77,6 +78,7 @@ vec4 dlCube(sampler2D t, vec2 g, float layer, vec3 n) {
   vec3 q = n * n;
   return q.x * dlTap(t, g, n.x >= 0.0 ? 0.0 : 1.0, layer) + q.y * dlTap(t, g, n.y >= 0.0 ? 2.0 : 3.0, layer) + q.z * dlTap(t, g, n.z >= 0.0 ? 4.0 : 5.0, layer);
 }
+float dlBelowTop(vec3 p) { return dlFieldBox.w > 0.0 ? step(p.y, dlFieldBox.w) : 1.0; }   // upper floors keep the standard lighting (F6)
 vec4 dlField(vec3 p, vec3 n) {
   vec2 g = (p.xz + n.xz * 0.15 - dlFieldBox.xy) / dlFieldBox.z;
   float h = clamp((p.y - dlFieldH.x) / max(0.01, dlFieldH.y - dlFieldH.x), 0.0, 1.0);
@@ -131,9 +133,9 @@ function patchFieldShader(shader, U) {
   const begin = THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );',
     'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= dlSunGlass;');
   shader.fragmentShader = COMMON_FRAG_DECL + FIELD_FRAG_DECL + shader.fragmentShader
-    .replace('#include <lights_fragment_begin>', 'float dlSunGlass = mix(1.0, dlGlass, dlOn * clamp(dlTap(dlFieldB, (vDlW.xz - dlFieldBox.xy) / dlFieldBox.z, 2.0, 0.0).a, 0.0, 1.0));\n' + begin)
+    .replace('#include <lights_fragment_begin>', 'float dlSunGlass = mix(1.0, dlGlass, dlOn * clamp(dlTap(dlFieldB, (vDlW.xz - dlFieldBox.xy) / dlFieldBox.z, 2.0, 0.0).a, 0.0, 1.0) * dlBelowTop(vDlW));\n' + begin)
     .replace('#include <lights_fragment_maps>',
-    '#include <lights_fragment_maps>\nvec4 dlF = dlField(vDlW, normalize(inverseTransformDirection(normal, viewMatrix)));\n' + indirect('dlOn * clamp(dlF.a, 0.0, 1.0)', 'dlF.rgb * dlGain'));
+    '#include <lights_fragment_maps>\nvec4 dlF = dlField(vDlW, normalize(inverseTransformDirection(normal, viewMatrix)));\n' + indirect('dlOn * clamp(dlF.a, 0.0, 1.0) * dlBelowTop(vDlW)', 'dlF.rgb * dlGain'));
 }
 
 // ───────────────────────── textures ─────────────────────────
@@ -231,7 +233,8 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
     state.H = S.H; state.patches = S.patch.count;
     state.timings.scene = performance.now() - t0;
     const F = S.field;
-    U.dlFieldBox.value.set(F.ox, F.oz, F.cell, 0); U.dlFieldN.value.set(F.nx, F.nz);
+    // several floors: the solve is the ground floor's (stage F6 adds the others) — furniture above its ceiling keeps the standard lighting
+    U.dlFieldBox.value.set(F.ox, F.oz, F.cell, hasLevels(plan) ? S.H + 0.05 : 0); U.dlFieldN.value.set(F.nx, F.nz);
     // carry the old solution over to the new layout (no black frame, no pop)
     const carried = transferLightmap(S0, state.lastLightmap, S);
     lm.reset(S.atlas.width, S.atlas.height, toHalf(carried));
@@ -525,6 +528,7 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
       if (state.failed) return;
       const boxes = [];
       for (const item of store.items || []) {
+        if (item.level && item.level !== 'L0' && hasLevels(plan)) continue;   // upper floors: not in the ground-floor solve (F6)
         const b = items && items.boxOf ? items.boxOf(item.id) : null;
         const box = occluderBox(item, b && Number.isFinite(b.min.y) ? b.min.y - (item.elev || 0) / 100 : 0);
         if (box) boxes.push(box);
@@ -577,6 +581,8 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
     /** store 'plan': rebuild the layout (after house.rebuildPlan()), carry the old solution over, re-solve. */
     onPlan(e) {
       if (state.failed) return;
+      // several floors: an edit on an upper level leaves the ground-floor solve as it is (until F6 solves every level)
+      if (e && e.changed && e.changed.levels && !e.changed.walls && !e.changed.openings && !e.changed.rooms && e.levelId && e.levelId !== 'L0') return;
       clearTimeout(planTimer);
       // a wall / door being dragged sends a transient 'plan' per mouse move: re-solve once the drag pauses
       const go = () => { planTimer = 0; try { rebuildScene(); sendScene(); refreshLamps(); refreshOccluders(); } catch (err) { fail(err); } };

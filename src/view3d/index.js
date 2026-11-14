@@ -15,6 +15,8 @@ import { createWalk, walkFov } from './walk.js';
 import { createCarpentryLayer } from './carpentry.js';
 import { createFinishDrop } from './finish-drop.js';
 import { sunPosition, sunTimes, sunDirectionWorld, compassPoint, todayAt } from './sun.js';
+import { hasLevels, levelIds, validLevel, elevationM, ceilingCm, GROUND } from './levels.js';
+import { levelName } from '../core/levels.js';
 
 const CUTAWAY_CM = 120;
 const WALK_NEAR = 0.05, ORBIT_NEAR = 0.1, FAR = 600;
@@ -82,11 +84,23 @@ export function createView3D(container, ctx) {
   canvas.addEventListener('wheel', () => { framing = null; }, { passive: true });
   const items = createItemsLayer({ scene, ctx, invalidate });
   items.group.visible = store.ui.showItems !== false;
+
+  // ───────────── levels (several floors) ─────────────
+  // The view follows store.ui.level: levels above it are hidden (their items too), it follows the roof / cut-away
+  // controls, levels below are complete. "Show whole house" (and walk mode) shows every level. Plans without levels:
+  // all of this is inert.
+  let wholeHouse = false;
+  const multiLevel = () => hasLevels(plan);
+  const shownLevel = () => validLevel(plan, store.ui.level);
+  /** The level the view is built around: the shown one, the top one for the whole house / walk mode. */
+  const topLevel = () => { const l = levelIds(plan); return l[l.length - 1]; };
+  const viewLevel = () => (wholeHouse || mode === 'walk' ? topLevel() : shownLevel());
   const interaction = createInteraction({
     dom: canvas, camera, scene, ctx, items, rig, invalidate, emit,
     structures: () => [house && house.group, site && site.group].filter(Boolean),
-    cutHeight: () => (mode === 'orbit' && store.ui.wallsCutaway ? CUTAWAY_CM / 100 : null),
+    cutHeight: () => (mode === 'orbit' && store.ui.wallsCutaway ? CUTAWAY_CM / 100 + (multiLevel() ? elevationM(plan, viewLevel()) : 0) : null),
     clipped: (p) => !!(carpentry && carpentry.clipped(p)),
+    levels: { active: () => shownLevel(), levelOfObject: (o) => (house && house.levelOfObject ? house.levelOfObject(o) : null) },
   });
   // finish drag-and-drop: target under the cursor + highlight of the floor / walls it would cover
   const finishDrop = createFinishDrop({
@@ -104,7 +118,17 @@ export function createView3D(container, ctx) {
 
   // ───────────── house / site / environment ─────────────
   const call = (obj, method, ...args) => { try { if (obj && typeof obj[method] === 'function') return obj[method](...args); } catch (e) { console.error(`[view3d] ${method}() failed`, e); } return undefined; };
+  /** Several floors: which levels (and their items) are shown, and the overlay pill. */
+  function applyLevels() {
+    if (!multiLevel()) { items.setLevelFilter(null); call(house, 'setLevel', GROUND); call(house, 'setWholeHouse', false); syncLevelPill(); return; }
+    call(house, 'setLevel', shownLevel());
+    call(house, 'setWholeHouse', wholeHouse || mode === 'walk');
+    const ids = levelIds(plan), top = ids.indexOf(viewLevel());
+    items.setLevelFilter((lv) => ids.indexOf(lv) <= top, ids.slice(0, top + 1).join(','));
+    syncLevelPill();
+  }
   function applyHouseState() {
+    applyLevels();
     const walking = mode === 'walk' && !(fly && fly.deferRoof);
     call(house, 'setCutaway', !walking && store.ui.wallsCutaway ? CUTAWAY_CM : null);
     call(house, 'setRoofVisible', walking || !!store.ui.showRoof);
@@ -123,7 +147,9 @@ export function createView3D(container, ctx) {
     const walking = mode === 'walk' && !(fly && fly.deferRoof);
     const roofHidden = !walking && (!store.ui.showRoof || !!store.ui.wallsCutaway);
     // without sun study the hidden roof casts nothing — the solved interior (which has a roof) would not match
-    return { mode: walking ? 'walk' : 'orbit', dollhouse: roofHidden, suppress: roofHidden && store.ui.sunStudy === false };
+    // several floors: the solve is the ground floor's (F6 adds the others) — on an upper floor the standard lighting
+    const upper = multiLevel() && (walking ? walk.getLevel() !== GROUND : !wholeHouse && shownLevel() !== GROUND);
+    return { mode: walking ? 'walk' : 'orbit', dollhouse: roofHidden, suppress: (roofHidden && store.ui.sunStudy === false) || upper };
   };
 
   /** Sun position and today's key times: from the environment, or straight from the ephemeris while a stand-in is used. */
@@ -153,7 +179,8 @@ export function createView3D(container, ctx) {
   function rebuildFromPlan(e) {
     if (!house || destroyed) return;
     const t0 = performance.now();
-    call(house, 'rebuildPlan');
+    call(house, 'rebuildPlan', e);
+    applyLevels();
     call(env, 'refreshPlan');
     walk.refreshPlan(); interaction.refreshPlan(); items.refreshPlan(); finishDrop.refreshPlan();
     call(daylight, 'onPlan', e);
@@ -282,7 +309,8 @@ export function createView3D(container, ctx) {
     camera.quaternion.slerpQuaternions(f.q0, f.q1, k);
     camera.fov = f.f0 + (f.f1 - f.f0) * k;
     camera.updateProjectionMatrix();
-    if (f.deferRoof && camera.position.y < store.project.ceilingHeight / 100 - 0.1) { f.deferRoof = false; applyHouseState(); }
+    const lv = walk.getLevel(), ceiling = lv === GROUND ? store.project.ceilingHeight / 100 : elevationM(plan, lv) + ceilingCm(plan, lv) / 100;
+    if (f.deferRoof && camera.position.y < ceiling - 0.1) { f.deferRoof = false; applyHouseState(); }
     if (t >= 1) finishFly();
   }
   function finishFly() {
@@ -299,7 +327,7 @@ export function createView3D(container, ctx) {
     if (mode === 'walk') {
       // Already walking: a bare repeat call (UI + store both asking) is a no-op; explicit coordinates teleport.
       if (opts.x == null && opts.y == null && opts.heading == null) return;
-      finishFly(); walk.start(opts); invalidate(); return;
+      finishFly(); walk.start({ level: walk.getLevel(), ...opts }); invalidate(); return;
     }
     finishFly();
     saved = { pose: rig.getPose(), near: camera.near };
@@ -308,7 +336,7 @@ export function createView3D(container, ctx) {
     rig.setEnabled(false);
     interaction.setEnabled(false);
     camera.near = WALK_NEAR;
-    walk.start(opts);
+    walk.start({ level: shownLevel(), ...opts });                       // several floors: walk the floor that is shown
     const eye = walk.eyePose(), fov = walkFov(camera.aspect);
     const settle = () => { camera.fov = fov; camera.updateProjectionMatrix(); walk.syncCamera(); applyHouseState(); };
     if (opts.animate === false || reducedMotion() || !ready || slow) settle();
@@ -319,6 +347,7 @@ export function createView3D(container, ctx) {
     camera.updateProjectionMatrix();
     applyHouseState();
     emit('mode', { mode });
+    syncLevelPill();
     invalidate();
   }
 
@@ -355,6 +384,10 @@ export function createView3D(container, ctx) {
       if (keys.includes('daylight')) call(daylight, 'setEnabled', store.ui.daylight !== false);
       if (keys.includes('daylightSky')) { call(env, 'setSky', store.ui.daylightSky); call(daylight, 'relight'); }
       if (keys.includes('showRoof') || keys.includes('wallsCutaway') || keys.includes('sunStudy')) applyHouseState();
+      if (keys.includes('level')) {
+        if (mode === 'walk' && walk.getLevel() !== shownLevel()) { finishFly(); walk.start({ level: shownLevel() }); }
+        applyHouseState();
+      }
       if (keys.includes('mode')) {
         if (store.ui.mode === 'walk' && mode !== 'walk') enterWalk();
         else if (store.ui.mode !== 'walk' && mode === 'walk') exitWalk({ animate: false });
@@ -366,6 +399,29 @@ export function createView3D(container, ctx) {
     store.on('selection', invalidate),
     store.on('plan', rebuildFromPlan),
   ];
+
+  // ───────────── "Show whole house" (several floors only) ─────────────
+  const pill = document.createElement('div');
+  pill.className = 'v3d-levels';
+  pill.style.cssText = 'position:absolute;top:12px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:8px;padding:4px 4px 4px 12px;border-radius:999px;background:rgba(255,255,255,.88);box-shadow:0 1px 6px rgba(0,0,0,.16);font:500 12.5px/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#2b2d31;pointer-events:auto;white-space:nowrap;max-width:calc(100% - 32px)';
+  const pillText = document.createElement('span');
+  const wholeBtn = document.createElement('button');
+  wholeBtn.type = 'button';
+  wholeBtn.className = 'v3d-whole-house';
+  wholeBtn.textContent = 'Show whole house';
+  wholeBtn.style.cssText = 'border:0;border-radius:999px;padding:5px 11px;font:inherit;cursor:pointer;background:#eceae5;color:inherit';
+  wholeBtn.addEventListener('click', () => api.setWholeHouse(!wholeHouse));
+  pill.append(pillText, wholeBtn);
+  overlay.append(pill);
+  function syncLevelPill() {
+    const on = multiLevel() && mode === 'orbit';
+    pill.style.display = on ? 'flex' : 'none';
+    if (!on) return;
+    pillText.textContent = wholeHouse ? 'Whole house' : (levelName(plan, shownLevel()) || '');
+    wholeBtn.setAttribute('aria-pressed', String(wholeHouse));
+    wholeBtn.style.background = wholeHouse ? 'var(--accent, #2f7cf6)' : '#eceae5';
+    wholeBtn.style.color = wholeHouse ? '#fff' : 'inherit';
+  }
 
   resize();
   rig.setPreset(framing, { animate: false });
@@ -391,6 +447,19 @@ export function createView3D(container, ctx) {
       return rig.setPreset(name, opts);
     },
     enterWalk, exitWalk,
+    /**
+     * Several floors: "Show whole house" — every level with the roof on (true), or the floor of store.ui.level with the
+     * levels above it hidden (false, default). No effect on a one-level plan.
+     */
+    setWholeHouse(on) {
+      if (!!on === wholeHouse) return;
+      wholeHouse = !!on;
+      if (wholeHouse && !store.ui.showRoof) store.setUI({ showRoof: true });   // the whole house is seen with its roof on (the button can take it off again)
+      applyHouseState();
+      call(daylight, 'relight');
+      emit('whole-house', { on: wholeHouse });
+    },
+    getWholeHouse: () => wholeHouse,
     /** Frame an item in the orbit camera. */
     focusItem(id, opts = {}) {
       const box = items.boxOf(id);
@@ -488,6 +557,8 @@ export function createView3D(container, ctx) {
       isFlying: () => !!fly,
       stats: () => ({ ...stats, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, items: items.count(), planRebuildMs, planRebuilds }),
       house: () => house, environment: () => env, sun: () => sunInfo,
+      /** Several floors: the levels as built ({ id, y, wallTop, top, visible }) and the level the view is built around. */
+      levels: () => ({ list: house && house.levels ? house.levels() : [], shown: shownLevel(), view: viewLevel(), whole: wholeHouse, walk: walk.getLevel() }),
       /** Daylight solver: state() (patch count, timings, …), sampleAt(xcm, ycm, hcm) → irradiance there. */
       daylight: () => (daylight ? daylight.debug : null),
       renderNow,
@@ -522,7 +593,7 @@ function unavailableView(container, handlers) {
   const noop = () => {};
   return {
     resize: noop, setActive: noop, setMode: noop, getMode: () => 'orbit', setCameraPreset: () => false,
-    enterWalk: noop, exitWalk: noop, focusItem: () => false,
+    enterWalk: noop, exitWalk: noop, focusItem: () => false, setWholeHouse: noop, getWholeHouse: () => false,
     /**
      * Carpentry workbench 3D tab: { runId (null = off), open (fronts open), cut (section cut in front of the run), frame
      * (move the camera onto the run), animate }. Omitted keys keep their value. Returns the current carpentry 3D state.

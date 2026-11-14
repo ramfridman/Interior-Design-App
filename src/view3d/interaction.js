@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { wallFaces, wallsHitByItem, itemAABB, isIndoors, spaceAt, inWallOrOpening } from '../core/geometry.js';
 import { groundY, visibleDeep, bakeModel, LAYER_SELECTED, LAYER_HOVER } from './items.js';
+import { hasLevels, levelIds, viewOf, elevationM, levelAtY, validLevel, ceilingCm, GROUND } from './levels.js';
 
 const SNAP_DIST = 8;        // cm — snap to a wall face when the item edge is this close
 const SNAP_PENETRATION = 14; // cm — …or has been pushed this far into it
@@ -177,7 +178,7 @@ function createOutline(accent) {
  *           structures: () => THREE.Object3D[], cutHeight: () => number|null,
  *           invalidate: () => void, emit: (event: string, payload: object) => void }} o
  */
-export function createInteraction({ dom, camera, scene, ctx, items, rig, structures, cutHeight, invalidate, emit, clipped = null }) {
+export function createInteraction({ dom, camera, scene, ctx, items, rig, structures, cutHeight, invalidate, emit, clipped = null, levels = null }) {
   const { store, plan, models } = ctx;
   const host = dom.parentElement || dom;
   const raycaster = new THREE.Raycaster();
@@ -194,6 +195,12 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
   const ghostGroup = new THREE.Group();
   ghostGroup.name = 'placing-ghost';
   scene.add(ghostGroup);
+
+  // ───────────── levels (several floors) ─────────────
+  /** The level the view is built around (store.ui.level); 'L0' for a one-level plan. */
+  const activeLevel = () => (levels && hasLevels(plan) ? validLevel(plan, levels.active()) : GROUND);
+  /** Level of a picked house object (its level group), else from the height of the point. */
+  const levelOfHit = (o, point) => (hasLevels(plan) ? validLevel(plan, (levels && levels.levelOfObject(o)) || levelAtY(plan, point.y)) : GROUND);
 
   // ───────────── picking ─────────────
   function setRay(clientX, clientY) {
@@ -212,7 +219,7 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
       for (let n = o; n && !spaceId; n = n.parent) spaceId = n.userData && n.userData.spaceId;
       if (cut != null && !spaceId && h.point.y > cut + 0.03) continue;
       const normal = h.face ? h.face.normal.clone().transformDirection(o.matrixWorld) : null;
-      return { point: h.point, distance: h.distance, spaceId: spaceId || null, normal };
+      return { point: h.point, distance: h.distance, spaceId: spaceId || null, normal, level: levelOfHit(o, h.point) };
     }
     return null;
   }
@@ -223,8 +230,12 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
     if (!hit || hit.distanceTo(raycaster.ray.origin) > 180) return null;
     return { x: hit.x * 100, y: hit.z * 100 };
   }
-  /** Plan point (cm) on the walkable ground under a screen position (floor level indoors / on slabs, garden level outside). */
+  /**
+   * Plan point (cm) on the walkable ground under a screen position (floor level indoors / on slabs, garden level outside).
+   * Several floors: the floor of the level under the pointer ({ x, y, level }); empty space → the shown level's floor.
+   */
   function floorPoint(clientX, clientY) {
+    if (hasLevels(plan)) return levelFloorPoint(clientX, clientY);
     setRay(clientX, clientY);
     const a = planeHit(0);
     if (!a) return null;
@@ -232,6 +243,25 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
     if (g === 0) return a;
     const b = planeHit(g);
     return b && groundY(b.x, b.y, plan) === g ? b : a;
+  }
+  function levelFloorPoint(clientX, clientY) {
+    setRay(clientX, clientY);
+    const st = structureHit();
+    if (st && (st.spaceId || (st.normal && st.normal.y > 0.7))) {
+      const lv = st.level, y = groundY(st.point.x * 100, st.point.z * 100, viewOf(plan, lv), lv);
+      if (Math.abs(st.point.y - y) < 0.12) return { x: st.point.x * 100, y: st.point.z * 100, level: lv };
+    }
+    const lv = activeLevel();
+    if (lv === GROUND) {
+      const a = planeHit(0);
+      if (!a) return null;
+      const g = groundY(a.x, a.y, plan);
+      if (g === 0) return { ...a, level: GROUND };
+      const b = planeHit(g);
+      return { ...(b && groundY(b.x, b.y, plan) === g ? b : a), level: GROUND };
+    }
+    const a = planeHit(elevationM(plan, lv));
+    return a ? { ...a, level: lv } : null;
   }
   /**
    * What is under a screen position.
@@ -244,23 +274,25 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
     const st = structureHit();
     if (it && (!st || it.distance <= st.distance + 0.01)) return { kind: 'item', id: it.id, point: it.point, normal: it.normal };
     if (st) {
-      if (st.spaceId) return { kind: 'floor', spaceId: st.spaceId, point: st.point };
+      const lv = st.level || GROUND, lp = viewOf(plan, lv);
+      if (st.spaceId) return { kind: 'floor', spaceId: st.spaceId, point: st.point, level: lv };
       if (st.normal && st.normal.y > 0.7) {
-        const s = spaceAt(st.point.x * 100, st.point.z * 100, plan);
-        if (s && Math.abs(st.point.y - groundY(st.point.x * 100, st.point.z * 100, plan)) < 0.12) return { kind: 'floor', spaceId: s.id, point: st.point };
+        const s = spaceAt(st.point.x * 100, st.point.z * 100, lp);
+        if (s && Math.abs(st.point.y - groundY(st.point.x * 100, st.point.z * 100, lp, lv)) < 0.12) return { kind: 'floor', spaceId: s.id, point: st.point, level: lv };
       }
-      return { kind: 'structure', point: st.point, normal: st.normal };
+      return { kind: 'structure', point: st.point, normal: st.normal, level: lv };
     }
     const f = floorPoint(clientX, clientY);
     if (!f) return null;
-    const s = spaceAt(f.x, f.y, plan);
-    return s ? { kind: 'floor', spaceId: s.id, point: new THREE.Vector3(f.x / 100, groundY(f.x, f.y, plan), f.y / 100) } : null;
+    const lv = f.level || GROUND, lp = viewOf(plan, lv);
+    const s = spaceAt(f.x, f.y, lp);
+    return s ? { kind: 'floor', spaceId: s.id, point: new THREE.Vector3(f.x / 100, groundY(f.x, f.y, lp, lv), f.y / 100), level: lv } : null;
   }
 
   // ───────────── constraints ─────────────
   const placementOf = (it) => it.placement || (models.MODEL_TYPES && models.MODEL_TYPES[it.type] && models.MODEL_TYPES[it.type].placement) || 'floor';
-  /** Final pose for an item the user wants at plan (x, y). Returns { x, y, rot? } or null when there is no valid spot. */
-  function constrain(item, x, y, free) {
+  /** Final pose for an item the user wants at plan (x, y) on level view `plan`. Returns { x, y, rot? } or null when there is no valid spot. */
+  function constrain(item, x, y, free, plan = ctx.plan) {
     const sb = plan.site.bounds;
     x = Math.max(sb.x, Math.min(sb.x + sb.w, x)); y = Math.max(sb.y, Math.min(sb.y + sb.h, y));
     const placement = placementOf(item);
@@ -313,7 +345,7 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
     const pt = planeHit(drag.planeY);
     const primary = store.getItem(drag.primary);
     if (!pt || !primary) return;
-    const want = constrain(primary, pt.x + drag.off[0], pt.y + drag.off[1], e.altKey) || drag.last;
+    const want = constrain(primary, pt.x + drag.off[0], pt.y + drag.off[1], e.altKey, items.planOf ? items.planOf(primary) : plan) || drag.last;   // drag stays on its level
     drag.last = { x: want.x, y: want.y, rot: want.rot ?? drag.start[drag.primary].rot };
     const s0 = drag.start[drag.primary], dx = want.x - s0.x, dy = want.y - s0.y;
     store.updateItems(drag.ids, (it) => (it.id === drag.primary
@@ -354,20 +386,23 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
     g.visible = false;
     return { group: g, model, pad, dispose() { mats.forEach((m) => m.dispose()); padGeo.dispose(); padMat.dispose(); model.traverse((o) => { if (o.isMesh && o.userData.baked) o.geometry.dispose(); }); } };
   }
-  function defaultElev(partial) {
+  function defaultElev(partial, level = GROUND) {
     if (partial.elev != null) return partial.elev;
-    return placementOf(partial) === 'ceiling' ? Math.max(0, store.project.ceilingHeight - (partial.h || 0)) : 0;
+    const ceiling = level === GROUND ? store.project.ceilingHeight : ceilingCm(plan, level);   // an upper level: its own ceiling
+    return placementOf(partial) === 'ceiling' ? Math.max(0, ceiling - (partial.h || 0)) : 0;
   }
   /** Resolve where a partial item would land for a screen position: { x, y, rot } or null. */
   function landing(partial, clientX, clientY, rot) {
     const pt = floorPoint(clientX, clientY);
-    if (!pt || !spaceAt(pt.x, pt.y, plan)) return null;
+    const level = (pt && pt.level) || GROUND, lp = viewOf(plan, level);
+    if (!pt || !spaceAt(pt.x, pt.y, lp)) return null;
     const probe = { w: 100, d: 100, h: 100, ...partial, rot };
-    const c = constrain(probe, pt.x, pt.y, false) || (placementOf(probe) === 'wall' ? null : { x: pt.x, y: pt.y });
-    return c ? { x: c.x, y: c.y, rot: c.rot ?? rot } : null;
+    const c = constrain(probe, pt.x, pt.y, false, lp) || (placementOf(probe) === 'wall' ? null : { x: pt.x, y: pt.y });
+    return c ? { x: c.x, y: c.y, rot: c.rot ?? rot, level } : null;
   }
   function addAt(partial, pos) {
-    return store.addItem({ ...partial, x: Math.round(pos.x * 10) / 10, y: Math.round(pos.y * 10) / 10, rot: pos.rot, elev: defaultElev(partial), zone: isIndoors(pos.x, pos.y, plan) ? 'indoor' : 'outdoor' });
+    const level = pos.level || GROUND, lp = viewOf(plan, level);
+    return store.addItem({ ...partial, x: Math.round(pos.x * 10) / 10, y: Math.round(pos.y * 10) / 10, rot: pos.rot, elev: defaultElev(partial, level), zone: isIndoors(pos.x, pos.y, lp) ? 'indoor' : 'outdoor', ...(level !== GROUND ? { level } : {}) });
   }
   function moveGhost(clientX, clientY) {
     if (!placing) return;
@@ -377,10 +412,10 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
     const g = placing.ghost.group;
     g.visible = !!pos && !overlayHidden;
     if (pos) {
-      const base = groundY(pos.x, pos.y, plan);
+      const base = pos.level && pos.level !== GROUND ? groundY(pos.x, pos.y, plan, pos.level) : groundY(pos.x, pos.y, plan);
       g.position.set(pos.x / 100, base, pos.y / 100);
       g.rotation.y = (-pos.rot * Math.PI) / 180;
-      placing.ghost.model.position.y = defaultElev(placing.partial) / 100;
+      placing.ghost.model.position.y = defaultElev(placing.partial, pos.level || GROUND) / 100;
     }
     invalidate();
   }
@@ -486,26 +521,27 @@ export function createInteraction({ dom, camera, scene, ctx, items, rig, structu
     if (st) {
       if (st.spaceId) return { surface: 'floor', spaceId: st.spaceId };
       if (st.normal && st.normal.y > 0.7) {
-        const s = spaceAt(st.point.x * 100, st.point.z * 100, plan);
+        const s = spaceAt(st.point.x * 100, st.point.z * 100, viewOf(plan, st.level));
         return { surface: 'floor', spaceId: s ? s.id : null };
       }
       if (st.normal && Math.abs(st.normal.y) < 0.3) return { surface: 'wall', point: st.point.clone(), normal: st.normal.clone() };
       return null;
     }
     const f = floorPoint(clientX, clientY);
-    const s = f && spaceAt(f.x, f.y, plan);
+    const s = f && spaceAt(f.x, f.y, viewOf(plan, f.level));
     return s ? { surface: 'floor', spaceId: s.id } : null;
   }
 
   return {
     pick, floorPoint, surfaceAt,
     /** The plan was edited: drop the cached wall snap targets (they are re-derived on the next drag). */
-    refreshPlan() { invalidateWallRuns(plan); },
+    refreshPlan() { for (const id of levelIds(plan)) invalidateWallRuns(viewOf(plan, id)); },
     /** Where a walk-mode click should take the walker: plan cm, pulled back from walls / furniture. */
     walkTarget(clientX, clientY) {
       const hit = pick(clientX, clientY);
       if (!hit) return null;
-      const pt = hit.point, flat = hit.kind === 'floor' || (hit.normal && hit.normal.y > 0.7 && pt.y < groundY(pt.x * 100, pt.z * 100, plan) + 0.3);
+      const lv = hit.level || GROUND;
+      const pt = hit.point, flat = hit.kind === 'floor' || (hit.normal && hit.normal.y > 0.7 && pt.y < groundY(pt.x * 100, pt.z * 100, viewOf(plan, lv), lv) + 0.3);
       if (flat) return { x: pt.x * 100, y: pt.z * 100 };
       const d = raycaster.ray.direction, len = Math.hypot(d.x, d.z) || 1;
       return { x: (pt.x - (d.x / len) * 0.45) * 100, y: (pt.z - (d.z / len) * 0.45) * 100 };

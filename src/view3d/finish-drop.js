@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { spaceAt, pointInPolygon } from '../core/geometry.js';
 import { groundY } from './items.js';
+import { hasLevels, levelIds, viewOf, elevationM, levelAtY, ceilingCm } from './levels.js';
 
 const LIFT = 0.012;     // m — highlight floats this far above the floor / off the wall face (no z-fighting)
 
@@ -29,7 +30,15 @@ export function createFinishDrop({ scene, ctx, surfaceAt, wallTop, invalidate, a
   let key = '';
 
   const spaces = () => [...(plan.rooms || []), ...(plan.outdoorAreas || [])];
-  const spaceById = (id) => spaces().find((s) => s.id === id) || null;
+  // several floors: the rooms of the upper levels too, drawn at their level's height
+  const levelOfSpace = new WeakMap();
+  const spaceById = (id) => {
+    const own = spaces().find((s) => s.id === id);
+    if (own || !hasLevels(plan)) return own || null;
+    for (const lv of levelIds(plan).slice(1)) { const v = viewOf(plan, lv), s = [...v.rooms, ...(v.outdoorAreas || [])].find((r) => r.id === id); if (s) { levelOfSpace.set(s, lv); return s; } }
+    return null;
+  };
+  const liftOf = (space) => (levelOfSpace.has(space) ? elevationM(plan, levelOfSpace.get(space)) : 0);
 
   /**
    * The space a finish dropped at this screen position goes to.
@@ -42,7 +51,7 @@ export function createFinishDrop({ scene, ctx, surfaceAt, wallTop, invalidate, a
     if (hit.surface === 'floor') return hit.spaceId ? { spaceId: hit.spaceId, surface: 'floor' } : null;
     const n = hit.normal, p = hit.point;
     const len = Math.hypot(n.x, n.z) || 1;
-    const s = spaceAt(p.x * 100 + (n.x / len) * 12, p.z * 100 + (n.z / len) * 12, plan);
+    const s = spaceAt(p.x * 100 + (n.x / len) * 12, p.z * 100 + (n.z / len) * 12, hasLevels(plan) ? viewOf(plan, levelAtY(plan, p.y)) : plan);
     return s && s.kind === 'room' ? { spaceId: s.id, surface: 'wall' } : null;
   }
 
@@ -54,7 +63,7 @@ export function createFinishDrop({ scene, ctx, surfaceAt, wallTop, invalidate, a
     const poly = space.polygon || [];
     if (poly.length < 3) return;
     const y = (!plan.rooms.includes(space)
-      ? groundY(space.label ? space.label[0] : poly[0][0], space.label ? space.label[1] : poly[0][1], plan) : 0) + LIFT;
+      ? (levelOfSpace.has(space) ? 0 : groundY(space.label ? space.label[0] : poly[0][0], space.label ? space.label[1] : poly[0][1], plan)) : 0) + LIFT + liftOf(space);
     // shape in the XY plane with y = −plan y, then laid flat (rotation −90° about X maps shape y → world −z → +plan y)
     const shape = new THREE.Shape(poly.map(([x, py]) => new THREE.Vector2(x / 100, -py / 100)));
     const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), fill);
@@ -66,7 +75,8 @@ export function createFinishDrop({ scene, ctx, surfaceAt, wallTop, invalidate, a
 
   function wallMeshes(space) {
     const poly = space.polygon || [];
-    const top = Math.max(0.3, wallTop());
+    const e = liftOf(space), lv = levelOfSpace.get(space);
+    const top = Math.max(0.3, lv ? Math.min(wallTop(), ceilingCm(plan, lv) / 100) : wallTop()) + e;
     const pos = [];
     for (let i = 0; i < poly.length; i++) {
       const [x0, y0] = poly[i], [x1, y1] = poly[(i + 1) % poly.length];
@@ -80,7 +90,7 @@ export function createFinishDrop({ scene, ctx, surfaceAt, wallTop, invalidate, a
       if (!inA) { nx = -nx; ny = -ny; }
       const ox = nx * LIFT, oz = ny * LIFT;
       const a = [x0 / 100 + ox, y0 / 100 + oz], b = [x1 / 100 + ox, y1 / 100 + oz];
-      pos.push(a[0], 0, a[1], b[0], 0, b[1], b[0], top, b[1], a[0], 0, a[1], b[0], top, b[1], a[0], top, a[1]);
+      pos.push(a[0], e, a[1], b[0], e, b[1], b[0], top, b[1], a[0], e, a[1], b[0], top, b[1], a[0], top, a[1]);
     }
     if (!pos.length) return;
     const geo = new THREE.BufferGeometry();

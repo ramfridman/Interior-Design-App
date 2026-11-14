@@ -1,5 +1,5 @@
 /**
- * The building shell in 3D, generated entirely from PLAN (cm → m; X = x/100, Z = y/100, Y up, floor at Y = 0).
+ * The building shell in 3D, generated entirely from PLAN (cm → m; X = x/100, Z = y/100, Y up, ground floor at Y = 0).
  *
  * How it is built
  * ---------------
@@ -20,16 +20,32 @@
  * slab / parapet, and (cut-away) invisible full-height walls, lintels and window / door frames. They are drawn with
  * `colorWrite: false, depthWrite: false`, so they exist only in the sun's shadow map.
  *
+ * Several levels (stage F3, docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md)
+ * -------------------------------------------------------------------
+ * Every level is built by the same grid builder (buildStorey) on its PLAN-shaped view (core/plan-edit.js levelPlan) in
+ * level-local coordinates and placed at Y = elevation / 100. A level below another one has walls up to that level's
+ * slab; the slab under level k ≥ 1 is a prism of its footprint minus its voids; the roof of each level covers its
+ * footprint minus the footprint of the level above (core/polykernel.js), with the parapet / coping only on the open
+ * edges — a smaller upper level leaves a terrace roof on the one below. Voids cut the upper floor finish and the
+ * ceiling below and get a 1.05 m guard rail (open on a stair's arrival edge). Plinth and ground contact: L0 only.
+ * A plan without `levels` takes exactly the old path (tests/levels-3d.test.mjs hashes every House 98 mesh).
+ * The daylight solver is attached to L0 only (upper levels keep the standard lighting until stage F6).
+ *
  * Live plan edits
  * ---------------
  * Nothing derived from the plan outlives `rebuildPlan()`: grid, opening sides, footprint, floors, ceilings, shell,
  * roof and openings are rebuilt from `ctx.plan` as it is at that moment and swapped in within the same frame.
+ * With levels, `rebuildPlan(e)` rebuilds L0 on its own edits, an upper level when its data changed, and only a level's
+ * roof when just the footprint above it moved.
  */
 import * as THREE from 'three';
 import { resolveFinish } from '../core/finishes.js';
 import { pointInPolygon } from '../core/geometry.js';
 import { floorMaterial, wallMaterial, surfaceMaterial, disposeMaterials } from './textures.js';
 import { Soup, buildOpenings, openingFrame, mergeSoups, casterMaterial, casterMesh } from './openings.js';
+import { levelIds, levelElevation, levelHeights, footprintOf, GROUND } from '../core/levels.js';
+import { levelPlan } from '../core/plan-edit.js';
+import { difference, offset, union } from '../core/polykernel.js';
 
 const OUT = 0, WALL = 1, OPENING = 2, ROOM = 3;
 const SKIRT_H = 0.07, SKIRT_T = 0.012;        // skirting board (m)
@@ -88,11 +104,12 @@ export function finishParams(ctx, spaceId, kind) {
 }
 
 // ───────────────────────── plan grid ─────────────────────────
-function makeGrid(plan) {
+function makeGrid(plan, extra = null) {
   const xs = new Set(), ys = new Set();
   const rect = (r) => { xs.add(r.x); xs.add(r.x + r.w); ys.add(r.y); ys.add(r.y + r.h); };
   plan.walls.forEach(rect); plan.openings.forEach(rect);
   for (const r of plan.rooms) for (const [x, y] of r.polygon) { xs.add(x); ys.add(y); }
+  if (extra) for (const poly of extra) for (const [x, y] of poly) { xs.add(x); ys.add(y); }   // upper levels: void outlines
   const X = [...xs].sort((a, b) => a - b), Y = [...ys].sort((a, b) => a - b);
   X.unshift(X[0] - 100); X.push(X[X.length - 1] + 100); Y.unshift(Y[0] - 100); Y.push(Y[Y.length - 1] + 100);
   const nx = X.length - 1, ny = Y.length - 1;
@@ -194,7 +211,7 @@ function buildShellSoups(grid, plan, sides, top, ceiling, plinthDepth, dryRooms)
     ]) {
       const nk = (j + dj) * nx + (i + di), nKind = kind[nk];
       if (nKind === WALL) continue;
-      if (nKind === OUT) addFace(axis, c + s * PLINTH_PROUD, s, a0, a1, -plinthDepth, 0.012, 'plinth');   // stands 8 mm proud, laps the wall foot
+      if (nKind === OUT && plinthDepth != null) addFace(axis, c + s * PLINTH_PROUD, s, a0, a1, -plinthDepth, 0.012, 'plinth');   // stands 8 mm proud, laps the wall foot
       for (const [y0, y1] of subtract(solid, solidOf(grid, nk, top))) {
         if (nKind === OPENING) splitAcross(ref[nk], a0, a1, (p, q, mat) => addFace(axis, c, s, p, q, y0, y1, mat));
         else addFace(axis, c, s, a0, a1, y0, y1, faceMat(grid, nk));
@@ -254,8 +271,10 @@ function buildShellSoups(grid, plan, sides, top, ceiling, plinthDepth, dryRooms)
 }
 
 // ───────────────────────── floors & ceilings ─────────────────────────
-function buildFloorSoups(grid, plan) {
+function buildFloorSoups(grid, plan, floorHoles = null, ceilingHoles = null) {
   const { X, Y, nx, ny, kind, ref } = grid;
+  /** Cell centre inside one of the hole polygons (a stair void in this level's floor / in the slab above). */
+  const inHole = (holes, i, j) => !!holes && holes.some((p) => pointInPolygon((X[i] + X[i + 1]) / 2, (Y[j] + Y[j + 1]) / 2, p));
   const roomIds = new Set(plan.rooms.map((r) => r.id));
   const floors = new Map(plan.rooms.map((r) => [r.id, new Soup()]));
   const ceilings = new Soup();
@@ -267,14 +286,15 @@ function buildFloorSoups(grid, plan) {
     if (!id) continue;
     const x0 = X[i] / 100, x1 = X[i + 1] / 100, z0 = Y[j] / 100, z1 = Y[j + 1] / 100;
     const uv = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
-    floors.get(id).quad([[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1]], [0, 1, 0], uv);
-    if (kind[k] === ROOM) ceilings.quad([[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1]], [0, -1, 0], uv);
+    if (!floorHoles || !inHole(floorHoles, i, j)) floors.get(id).quad([[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1]], [0, 1, 0], uv);
+    if (kind[k] === ROOM && !(ceilingHoles && inHole(ceilingHoles, i, j))) ceilings.quad([[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1]], [0, -1, 0], uv);
   }
   // the ceiling also runs over the wall heads (hidden inside the walls): the hair-line cracks of the wall / ceiling
   // T-junctions then show ceiling, not the exterior roof soffit above it (visible indoors once the eye adapts)
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
     const k = j * nx + i;
     if (kind[k] !== WALL && kind[k] !== OPENING) continue;
+    if (ceilingHoles && inHole(ceilingHoles, i, j)) continue;
     const xs = [X[i] / 100, (X[i] + X[i + 1]) / 200, X[i + 1] / 100], zs = [Y[j] / 100, (Y[j] + Y[j + 1]) / 200, Y[j + 1] / 100];
     for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) {             // halves: each takes the room on its own side
       const x0 = xs[a], x1 = xs[a + 1], z0 = zs[b], z1 = zs[b + 1];
@@ -365,32 +385,110 @@ function buildRoofSoups(outline, H, slab, parapet) {
   return { ext, top: topSoup, coping };
 }
 
-// ───────────────────────── public API ─────────────────────────
+// ───────────────────────── several levels: roofs, slabs, railings from polygons (cm) ─────────────────────────
+/** Polygon-kernel expolygons → prism() rings: outer as is (clockwise on screen, like traceFootprint), holes turned clockwise too. */
+const prismRings = (e) => ({ outer: e.outer, holes: e.holes.map((h) => h.slice().reverse()) });
+
 /**
- * Build the house shell.
- * @param {{ store, plan, catalog, models }} ctx
- * @returns {{ group: THREE.Group, update(): void, rebuildPlan(): number, setRoofVisible(v: boolean): void,
- *             setCutaway(heightCm: number|null): void, setDoorsOpen(v: boolean): void, setSunStudy(v: boolean): void,
- *             floorMeshes: THREE.Object3D[], dispose(): void }}
+ * Flat roof over a region of a level (several levels: the level's footprint minus the one above) — the same parts as
+ * buildRoofSoups(): slab (top + soffit + edge), parapet and coping, each a list of expolygons.
  */
-export function buildHouse(ctx) {
-  const { store, plan } = ctx;
-  const group = new THREE.Group(); group.name = 'house';
+function buildRoofPolySoups(shape, H) {
+  const ext = new Soup(), topSoup = new Soup(), coping = new Soup();
+  if (!shape) return { ext, top: topSoup, coping };
+  const slab = shape.slab, parapet = shape.parapet;
+  for (const e of shape.polys.map(prismRings)) prism(e.outer, e.holes, H, H + slab, { top: topSoup });
+  for (const e of shape.soffit.map(prismRings)) prism(e.outer, e.holes, H, H + slab, { bottom: ext });
+  for (const e of shape.polys.map(prismRings)) prism(e.outer, e.holes, H - 0.015, H + slab, { side: ext });
+  if (parapet > 0.01) {
+    const y = H + slab;
+    for (const e of shape.parapetPolys.map(prismRings)) prism(e.outer, e.holes, y, y + parapet, { side: ext });
+    for (const e of shape.copingPolys.map(prismRings)) prism(e.outer, e.holes, y + parapet, y + parapet + COPING_H, { top: coping, bottom: coping, side: coping });
+  }
+  return { ext, top: topSoup, coping };
+}
+
+/** The structural slab under an upper level: its footprint minus its voids, from −depth to the finished floor (no top: the floors cover it). */
+function buildSlabSoup(shape) {
+  const soup = new Soup();
+  if (!shape) return soup;
+  for (const e of shape.polys.map(prismRings)) prism(e.outer, e.holes, -shape.depth, 0, { bottom: soup, side: soup });
+  return soup;
+}
+
+const RAIL_H = 1.05, RAIL_POST = 0.04, RAIL_SPACING = 1.2, RAIL_INSET = 0.05;   // m: guard rail height, post size, max bay, set back from the void edge
+const UP_VEC = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
+/** Walking direction of a stair (plan unit vector): its `up` side, else from its rotation (rot 0 = towards the north). */
+function stairUp(st) {
+  if (st && UP_VEC[st.up]) return UP_VEC[st.up];
+  const a = ((Number(st && st.rot) || 0) * Math.PI) / 180;
+  return [Math.sin(a), -Math.cos(a)];
+}
+/**
+ * A simple guard rail around each void of a level (1.05 m: posts + top rail, mid rail, bottom rail), set back 5 cm
+ * onto the floor. The edge where the void's stair arrives (`void.stair` → that stair's walking direction) stays open.
+ */
+function buildRailingSoup(voids, stairOf) {
+  const soup = new Soup(), m = new THREE.Matrix4();
+  for (const v of voids) {
+    if (!v || v.railing === false || !Array.isArray(v.polygon) || v.polygon.length < 3) continue;
+    const ring = v.polygon, sgn = Math.sign(ring.reduce((s, p, i) => { const b = ring[(i + 1) % ring.length]; return s + p[0] * b[1] - b[0] * p[1]; }, 0)) || 1;
+    const st = v.stair ? stairOf(v.stair) : null, up = st ? stairUp(st) : null;
+    ring.forEach((p, i) => {
+      const b = ring[(i + 1) % ring.length], len = Math.hypot(b[0] - p[0], b[1] - p[1]) / 100;
+      if (len < 0.05) return;
+      const ux = (b[0] - p[0]) / 100 / len, uy = (b[1] - p[1]) / 100 / len;
+      const ox = uy * sgn, oy = -ux * sgn;                               // outward from the void, onto the floor
+      if (up && ox * up[0] + oy * up[1] > 0.9) return;                  // the stair's arrival edge stays open
+      // local frame: x along the edge from p, z across (+z onto the floor), y up
+      m.set(ux, 0, ox, p[0] / 100 + ox * RAIL_INSET, 0, 1, 0, 0, uy, 0, oy, p[1] / 100 + oy * RAIL_INSET, 0, 0, 0, 1);
+      const h = RAIL_POST / 2, bays = Math.max(1, Math.ceil(len / RAIL_SPACING));
+      for (let q = 0; q <= bays; q++) { const x = Math.min(len - h, Math.max(h, (len * q) / bays)); soup.box(m, x - h, x + h, 0, RAIL_H - 0.04, -h, h); }
+      soup.box(m, 0, len, RAIL_H - 0.04, RAIL_H, -0.025, 0.025);         // handrail
+      soup.box(m, 0, len, 0.52, 0.545, -0.012, 0.012);                    // mid rail
+      soup.box(m, 0, len, 0.1, 0.125, -0.012, 0.012);                     // bottom rail
+    });
+  }
+  return soup;
+}
+
+// ───────────────────────── one level ─────────────────────────
+/**
+ * The shell of ONE level, built in level-local coordinates (its finished floor at Y = 0); the caller places it.
+ * This is the original single-storey builder: with no options it builds exactly what it always built.
+ * @param {object} ctx { store, catalog }
+ * @param {{ view: () => object, levelId?: string, ground?: boolean, ceilingH?: () => number|null,
+ *           roofShape?: () => object|undefined, slabShape?: () => object|null, ceilingHoles?: () => number[][][],
+ *           stairOf?: (id) => object|null }} opts  view() = the level's PLAN-shaped view (re-read on every rebuild);
+ *           roofShape() undefined = the classic roof over the traced outline; ceilingH() null = the project's ceiling.
+ */
+function buildStorey(ctx, opts) {
+  const { store } = ctx;
+  const ground = opts.ground !== false;
+  let plan = opts.view();
+  const group = new THREE.Group(); group.name = 'level:' + (opts.levelId || 'L0'); group.userData.levelId = opts.levelId || 'L0';
   const shell = new THREE.Group(); shell.name = 'house-shell';
   const roof = new THREE.Group(); roof.name = 'house-roof';
   const casters = new THREE.Group(); casters.name = 'house-sun-casters';   // shadow-only stand-ins for hidden roof / cut walls
   group.add(shell, roof, casters);
 
   // everything derived from the plan — refreshed by readPlan(), never kept across a plan edit
-  let grid, sides, outline, dryRooms;
+  let grid, sides, outline, dryRooms, floorHoles = null, ceilingHoles = null, viewChanged = false;
   function readPlan() {
-    grid = makeGrid(plan);
+    const next = opts.view();
+    if (next && next !== plan) { plan = next; viewChanged = true; }
+    if (!ground) floorHoles = (plan.voids || []).map((v) => v && v.polygon).filter((p) => Array.isArray(p) && p.length >= 3);
+    const above = opts.ceilingHoles ? opts.ceilingHoles() : null;
+    ceilingHoles = above && above.length ? above : null;
+    const extra = [...(floorHoles || []), ...(ceilingHoles || [])];
+    grid = extra.length ? makeGrid(plan, extra) : makeGrid(plan);
+    if (floorHoles && !floorHoles.length) floorHoles = null;
     sides = openingSides(grid, plan);
     outline = traceFootprint(grid)[0] || null;
     dryRooms = new Set(plan.rooms.filter((r) => !r.wet).map((r) => r.id));
   }
   readPlan();
-  const plinthDepth = (plan.heights.floorAboveGround || 15) / 100 + 0.12;
+  const plinthDepth = ground ? (plan.heights.floorAboveGround || 15) / 100 + 0.12 : null;   // the plinth / ground contact: L0 only
 
   const state = {
     H: 0, cut: null, doorsOpen: false, roofVisible: !!(store.ui && store.ui.showRoof),
@@ -407,6 +505,7 @@ export function buildHouse(ctx) {
     caster: casterMaterial(),                                           // cut-away walls: back faces, exactly like the visible shell
     roofCaster: Object.assign(casterMaterial(), { shadowSide: THREE.DoubleSide }),   // hidden roof: both faces, so nothing touching the ceiling plane is lit
   };
+  if (!ground) own.railing = new THREE.MeshStandardMaterial({ color: '#3b3d41', roughness: 0.45, metalness: 0.55 });
   const meshes = new Map();
   let daylight = null;                                                  // daylight/index.js hooks (lightmap UVs + materials)
   let fakeShading = true;                                               // baked contact strips: off while real daylight is shown
@@ -425,6 +524,9 @@ export function buildHouse(ctx) {
   }
 
   const ceilingH = () => {
+    const forced = opts.ceilingH ? opts.ceilingH() : null;              // several levels: the next level's slab sits on it
+    if (forced != null) return forced;
+    if (!ground) return plan.heights.ceiling / 100;
     const v = Number(store.project && store.project.ceilingHeight);
     return (Number.isFinite(v) && v >= 200 ? Math.min(v, 600) : plan.heights.ceiling) / 100;
   };
@@ -433,7 +535,7 @@ export function buildHouse(ctx) {
   // floors + ceilings: geometry depends on the plan only
   const floorMeshes = [];
   function rebuildFloors() {
-    const fc = buildFloorSoups(grid, plan);
+    const fc = floorHoles || ceilingHoles ? buildFloorSoups(grid, plan, floorHoles, ceilingHoles) : buildFloorSoups(grid, plan);
     const ids = new Set(plan.rooms.map((r) => r.id));
     for (const [name, mesh] of [...meshes]) {                           // rooms that no longer exist
       if (!name.startsWith('floor:') || ids.has(name.slice(6))) continue;
@@ -442,7 +544,7 @@ export function buildHouse(ctx) {
     floorMeshes.length = 0;                                             // same array object: callers may hold on to it
     for (const room of plan.rooms) {
       const mesh = setMesh('floor:' + room.id, fc.floors.get(room.id), shell, false, true);
-      if (mesh) { mesh.userData.spaceId = room.id; if (mesh.visible) floorMeshes.push(mesh); }
+      if (mesh) { mesh.userData.spaceId = room.id; if (!ground) mesh.userData.levelId = opts.levelId; if (mesh.visible) floorMeshes.push(mesh); }
     }
     const ceilingMesh = setMesh('ceilings', fc.ceilings, roof, false, false);
     if (ceilingMesh) ceilingMesh.material = own.ceiling;
@@ -469,8 +571,18 @@ export function buildHouse(ctx) {
     }
     wallCasterStale = true;
   }
+  /** Upper levels: the slab under the floor (footprint minus voids) and the guard rails around the voids. */
+  function rebuildStructure() {
+    if (ground) return;
+    const slab = setMesh('slab', buildSlabSoup(opts.slabShape ? opts.slabShape() : null), shell, true, true);
+    if (slab) slab.userData.levelId = opts.levelId;
+    setMesh('railing', buildRailingSoup(plan.voids || [], opts.stairOf || (() => null)), shell, true, true);
+  }
   function rebuildRoof() {
-    const r = buildRoofSoups(outline, state.H, (plan.heights.slab || 20) / 100, (plan.heights.parapet || 0) / 100);
+    const shape = opts.roofShape ? opts.roofShape() : undefined;
+    const r = shape === undefined
+      ? buildRoofSoups(outline, state.H, (plan.heights.slab || 20) / 100, (plan.heights.parapet || 0) / 100)
+      : buildRoofPolySoups(shape, state.H);
     setMesh('roof:ext', r.ext, roof, true, true);
     setMesh('roof:top', r.top, roof, true, true);
     setMesh('roof:coping', r.coping, roof, true, true);
@@ -515,6 +627,7 @@ export function buildHouse(ctx) {
     assign('wall:ext', exterior); assign('roof:ext', exterior);
     assign('wall:plinth', own.plinth); assign('wall:cap', own.cap); assign('wall:skirting', own.skirting);
     assign('roof:top', surfaceMaterial('roof')); assign('roof:coping', own.coping);
+    if (!ground) { assign('slab', exterior); assign('railing', own.railing); }
     for (const room of plan.rooms) {
       assign('floor:' + room.id, floorMaterial(finishParams(ctx, room.id, 'floor')));
       assign('wall:room:' + room.id, wallMaterial(finishParams(ctx, room.id, 'wall')));
@@ -530,15 +643,27 @@ export function buildHouse(ctx) {
 
   state.H = ceilingH();
   state.frameColor = (store.project && store.project.frameColor) || '#2b2d31';
-  rebuildShell(); rebuildRoof();
-  const openings = buildOpenings(plan, openingOpts());
+  rebuildShell(); rebuildRoof(); rebuildStructure();
+  let openings = buildOpenings(plan, openingOpts());
   shell.add(openings.group);
-  const rebuildOpenings = () => { openings.rebuild(openingOpts()); if (daylight) daylight.patchTree(openings.group); };
+  viewChanged = false;
+  const rebuildOpenings = () => {
+    if (viewChanged) {                                                  // an upper level's view object was replaced: new builder on it
+      viewChanged = false;
+      shell.remove(openings.group); openings.dispose();
+      openings = buildOpenings(plan, openingOpts());
+      shell.add(openings.group);
+    } else openings.rebuild(openingOpts());
+    if (daylight) daylight.patchTree(openings.group);
+  };
   applyMaterials(); applyRoofVisibility();
 
   return {
     group,
     floorMeshes,
+    levelId: opts.levelId || 'L0',
+    /** Height (m) of this level's walls (its ceiling) as built. */
+    height: () => state.H,
     /** Re-read store.project and store.finishes and refresh whatever changed. */
     update() {
       const H = ceilingH();
@@ -555,13 +680,15 @@ export function buildHouse(ctx) {
       const t0 = performance.now();
       state.H = ceilingH();
       readPlan();
-      rebuildFloors(); rebuildShell(); rebuildRoof();
+      rebuildFloors(); rebuildShell(); rebuildRoof(); rebuildStructure();
       rebuildOpenings();
       applyMaterials(); applyRoofVisibility();
       return performance.now() - t0;
     },
+    /** Several levels: only the roof changed (the footprint of the level above moved). */
+    rebuildRoof() { rebuildRoof(); applyMaterials(); applyRoofVisibility(); },
     /** Show / hide roof slab, parapet and room ceilings (always hidden while a cutaway is active). */
-    setRoofVisible(v) { state.roofVisible = !!v; applyRoofVisibility(); },
+    setRoofVisible(v) { if (!!v === state.roofVisible) return; state.roofVisible = !!v; applyRoofVisibility(); },
     /** Limit wall / window / door heights (cm above the floor) for a dollhouse view; null restores full height. */
     setCutaway(heightCm) {
       const cut = heightCm == null || !Number.isFinite(+heightCm) ? null : Math.max(0.1, +heightCm / 100);
@@ -579,7 +706,6 @@ export function buildHouse(ctx) {
       if (state.cut != null) rebuildOpenings();
       applyRoofVisibility();
     },
-    /** Open (≈ 85°, on the hinge, towards `swing`) or close all hinged doors; the terrace slider parks half open. */
     /**
      * Attach / detach the daylight solver: { prepareMesh(mesh), lightmapMaterial(material), patchTree(root) }.
      * Interior meshes get a second UV set into the lightmap atlas and lightmap-aware material clones.
@@ -598,17 +724,217 @@ export function buildHouse(ctx) {
       fakeShading = !!on;
       for (const name of ['ao:floor', 'ao:ceiling']) { const m = meshes.get(name); if (m && m.geometry.index && m.geometry.index.count) m.visible = fakeShading; }
     },
+    /** Open (≈ 85°, on the hinge, towards `swing`) or close all hinged doors; the terrace slider parks half open. */
     setDoorsOpen(v) {
       if (!!v === state.doorsOpen) return;
       state.doorsOpen = !!v;
       rebuildOpenings();
     },
-    dispose() {
+    /** Geometries that stand in for this level in the sun's shadow map while it is hidden (shared — never dispose them). */
+    shadowGeometries() {
+      const out = [];
+      for (const [name, mesh] of meshes) if (mesh.visible && (name === 'slab' || name.startsWith('roof:') || (name.startsWith('wall:') && name !== 'wall:skirting' && name !== 'wall:cap'))) out.push(mesh.geometry);
+      return out;
+    },
+    /** `keepShared`: leave the module-wide finish material cache alone (another level still uses it). */
+    dispose(keepShared = false) {
       for (const mesh of meshes.values()) mesh.geometry.dispose();
       for (const mesh of casterMeshes.values()) if (!mesh.userData.shared) mesh.geometry.dispose();
       meshes.clear(); casterMeshes.clear(); floorMeshes.length = 0;
       openings.dispose();
       Object.values(own).forEach((m) => m.dispose());
+      if (!keepShared) disposeMaterials();
+      group.clear();
+    },
+  };
+}
+
+// ───────────────────────── public API ─────────────────────────
+/** Small integer id per array object (cheap change detection of a level's arrays). */
+const arrayIds = new WeakMap();
+let arraySerial = 0;
+const idOf = (a) => { if (!a || typeof a !== 'object') return 0; let v = arrayIds.get(a); if (!v) { v = ++arraySerial; arrayIds.set(a, v); } return v; };
+
+/**
+ * Build the house: one shell per level (docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md, stage F3), each placed at
+ * Y = elevation / 100. A plan without `levels` is exactly the one-storey house it always was.
+ *
+ * Several levels: the slab under level k (k ≥ 1) is its footprint minus its voids; the roof of level k covers its
+ * footprint minus the footprint of level k + 1 (the top level: all of it) — a smaller upper level leaves a terrace roof
+ * with its parapet on the level below; guard rails run around the voids (open at a stair's arrival edge).
+ * View: `setLevel(id)` — levels above it are hidden (shadow-only stand-ins keep blocking the sun in the sun study), the
+ * active level follows the roof / cut-away controls, levels below are complete (their roof where nothing stands on it);
+ * `setWholeHouse(true)` treats the top level as the active one.
+ * @param {{ store, plan, catalog, models }} ctx
+ * @returns {{ group: THREE.Group, update(): void, rebuildPlan(e?): number, setRoofVisible(v: boolean): void,
+ *             setCutaway(heightCm: number|null): void, setDoorsOpen(v: boolean): void, setSunStudy(v: boolean): void,
+ *             setLevel(id: string): void, setWholeHouse(v: boolean): void, levels(): object[],
+ *             floorMeshes: THREE.Object3D[], dispose(): void }}
+ */
+export function buildHouse(ctx) {
+  const { store, plan } = ctx;
+  const group = new THREE.Group(); group.name = 'house';
+  const stand = new THREE.Group(); stand.name = 'house-level-casters';   // shadow-only stand-ins of hidden upper levels
+  group.add(stand);
+  const standMat = Object.assign(casterMaterial(), { shadowSide: THREE.DoubleSide });
+  const storeys = new Map();                                            // level id → { s: storey, shellKey, roofKey }
+  const floorMeshes = [];
+  const view = {
+    level: GROUND, whole: false, cut: null, roof: !!(store.ui && store.ui.showRoof),
+    study: !store.ui || store.ui.sunStudy !== false, doors: false,
+  };
+  let daylight = null, fakeShading = true;
+
+  const ids = () => levelIds(plan);
+  const multi = () => ids().length > 1;
+  const viewOf = (id) => levelPlan(plan, id) || plan;
+  const elevationOf = (id) => (levelElevation(plan, id) || 0) / 100;
+  const voidsOf = (id) => (id === GROUND ? [] : (viewOf(id).voids || []).map((v) => v && v.polygon).filter((p) => Array.isArray(p) && p.length >= 3));
+  const above = (id) => { const l = ids(); const i = l.indexOf(id); return i >= 0 && i + 1 < l.length ? l[i + 1] : null; };
+  function stairOf(sid) {
+    for (const l of ids()) { const st = (viewOf(l).stairs || []).find((s) => s && s.id === sid); if (st) return st; }
+    return (plan.stairs || []).find((s) => s && s.id === sid) || null;
+  }
+  /** Wall height (m) of a level under another level: up to that level's slab. */
+  function stackedCeiling(id) {
+    const up = above(id);
+    if (!up) return id === GROUND ? null : viewOf(id).heights.ceiling / 100;
+    return Math.max(2, (levelElevation(plan, up) - (levelHeights(plan, up).slab || 0) - levelElevation(plan, id)) / 100);
+  }
+  function roofShape(id) {
+    if (!multi()) return undefined;                                     // one level: the classic roof over the traced outline
+    const v = viewOf(id), fp = footprintOf(v).polygons, up = above(id);
+    const upFp = up ? footprintOf(viewOf(up)).polygons : [];
+    // what the level above covers; for the coping also its overhang next to the upper walls, outside this footprint
+    const cover = (polys, overhang = false) => (!upFp.length ? polys : difference(polys, overhang ? union([upFp, difference(offset(upFp, COPING_OVER), fp)]) : upFp));
+    const polys = cover(fp);
+    const slab = ((up ? levelHeights(plan, up).slab : v.heights.slab) || 20) / 100;
+    const parapet = (v.heights.parapet || 0) / 100;
+    return {
+      polys, slab, parapet,
+      soffit: polys.length ? offset(polys, -4) : [],
+      parapetPolys: parapet > 0.01 && polys.length ? cover(difference(fp, offset(fp, -PARAPET_T))) : [],
+      copingPolys: parapet > 0.01 && polys.length ? cover(difference(offset(fp, COPING_OVER), offset(fp, -(PARAPET_T + COPING_OVER))), true) : [],
+    };
+  }
+  function slabShape(id) {
+    const v = viewOf(id), holes = voidsOf(id), fp = footprintOf(v).polygons;
+    return { polys: holes.length ? difference(fp, holes) : fp, depth: (v.heights.slab || 0) / 100 };
+  }
+
+  function makeStorey(id) {
+    const s = buildStorey(ctx, {
+      view: () => viewOf(id), levelId: id, ground: id === GROUND,
+      ceilingH: () => (multi() ? stackedCeiling(id) : null),
+      roofShape: () => roofShape(id),
+      slabShape: () => slabShape(id),
+      ceilingHoles: () => { const up = above(id); return up ? voidsOf(up) : []; },
+      stairOf,
+    });
+    s.group.position.y = elevationOf(id);
+    group.add(s.group);
+    return s;
+  }
+  const keysOf = (id) => {
+    const v = viewOf(id), up = above(id);
+    return {
+      shell: [idOf(v.walls), idOf(v.openings), idOf(v.rooms), idOf(v.wallOutline), JSON.stringify(v.heights), v.elevation || 0,
+        JSON.stringify(v.voids || []), up ? JSON.stringify(voidsOf(up)) : '', multi() ? stackedCeiling(id) : '-', id === GROUND ? '' : JSON.stringify(stairsKey())].join('|'),
+      roof: JSON.stringify(roofShape(id) || null),
+    };
+  };
+  const stairsKey = () => ids().map((l) => viewOf(l).stairs || null).concat([plan.stairs || null]);
+
+  /** Create / rebuild / drop level shells after a plan change. `e` = the store 'plan' event (optional). */
+  function syncLevels(e) {
+    const list = ids(), all = !e, levelsOnly = !!(e && e.changed && e.changed.levels && !e.changed.walls && !e.changed.openings && !e.changed.rooms);
+    let rebuilt = 0;
+    for (const [id, rec] of [...storeys]) if (!list.includes(id)) { rec.s.group.removeFromParent(); rec.s.dispose(true); storeys.delete(id); }
+    for (const id of list) {
+      const keys = keysOf(id);
+      let rec = storeys.get(id);
+      if (!rec) { rec = { s: makeStorey(id), ...keys }; storeys.set(id, rec); if (daylight && id === GROUND) rec.s.setDaylight(daylight); rebuilt++; continue; }
+      // L0 is rebuilt on every edit of its own (as always); an upper level when its data changed or the edit was on it
+      const own = id === GROUND ? !levelsOnly : !!(e && e.levelId === id);
+      if (all || own || keys.shell !== rec.shell) { rec.s.rebuildPlan(); rebuilt++; }
+      else if (keys.roof !== rec.roof) rec.s.rebuildRoof();
+      rec.shell = keys.shell; rec.roof = keys.roof;
+      rec.s.group.position.y = elevationOf(id);
+    }
+    floorMeshes.length = 0;
+    for (const id of list) floorMeshes.push(...storeys.get(id).s.floorMeshes);
+    return rebuilt;
+  }
+
+  /** Visibility per level from the active level, the whole-house switch and the roof / cut-away controls. */
+  function applyView() {
+    const list = ids();
+    const ai = view.whole ? list.length - 1 : Math.max(0, list.indexOf(view.level));
+    list.forEach((id, i) => {
+      const s = storeys.get(id).s;
+      s.group.visible = i <= ai;
+      s.setSunStudy(view.study);
+      s.setDoorsOpen(view.doors);
+      if (i === ai) { s.setCutaway(view.cut); s.setRoofVisible(view.roof); }
+      else if (i < ai) { s.setCutaway(null); s.setRoofVisible(true); }
+    });
+    // hidden upper levels keep blocking the sun in the sun study (like the hidden roof of the active level)
+    for (const m of [...stand.children]) stand.remove(m);
+    if (view.study) list.forEach((id, i) => {
+      if (i <= ai) return;
+      const s = storeys.get(id).s;
+      for (const g of s.shadowGeometries()) { const m = casterMesh('caster:level:' + id, g, standMat); m.position.y = elevationOf(id); stand.add(m); }
+    });
+  }
+
+  syncLevels();
+  applyView();
+
+  const ground = () => storeys.get(GROUND).s;
+  return {
+    group,
+    floorMeshes,
+    /** Re-read store.project and store.finishes and refresh whatever changed. */
+    update() { for (const id of ids()) storeys.get(id).s.update(); applyView(); },
+    /**
+     * The plan was edited in place: rebuild what derives from it — L0 on its own edits, an upper level when its data
+     * changed (`e.levelId` / its arrays, heights, voids), a level's roof alone when only the level above moved.
+     * @param {object} [e] the store 'plan' event
+     * @returns {number} milliseconds the rebuild took
+     */
+    rebuildPlan(e) {
+      const t0 = performance.now();
+      syncLevels(e && typeof e === 'object' ? e : null);
+      applyView();
+      return performance.now() - t0;
+    },
+    setRoofVisible(v) { view.roof = !!v; applyView(); },
+    setCutaway(heightCm) { view.cut = heightCm == null || !Number.isFinite(+heightCm) ? null : +heightCm; applyView(); },
+    setSunStudy(v) { view.study = !!v; applyView(); },
+    setDoorsOpen(v) { view.doors = !!v; applyView(); },
+    /** The level shown (store.ui.level): levels above it are hidden, it follows the roof / cut-away controls. */
+    setLevel(id) { const next = ids().includes(id) ? id : GROUND; if (next === view.level) return; view.level = next; applyView(); },
+    /** "Show whole house": every level, the top one following the roof / cut-away controls. */
+    setWholeHouse(v) { if (!!v === view.whole) return; view.whole = !!v; applyView(); },
+    /** The level the view is built around (the top one while the whole house is shown). */
+    viewLevel: () => { const l = ids(); return view.whole ? l[l.length - 1] : (l.includes(view.level) ? view.level : GROUND); },
+    /** Levels bottom-up: { id, y (finished floor, m), wallTop (m), top (roof incl. parapet, m), visible }. */
+    levels() {
+      return ids().map((id) => {
+        const s = storeys.get(id).s, v = viewOf(id), y = elevationOf(id), H = s.height();
+        return { id, y, wallTop: y + H, top: y + H + ((v.heights.slab || 0) + (v.heights.parapet || 0)) / 100, visible: s.group.visible };
+      });
+    },
+    /** Level id of a scene object of the house (its level group), or null. */
+    levelOfObject(o) { for (let n = o; n; n = n.parent) if (n.userData && n.userData.levelId) return n.userData.levelId; return null; },
+    /** Attach / detach the daylight solver — the ground level only (upper levels keep the standard lighting until F6). */
+    setDaylight(dl) { daylight = dl || null; ground().setDaylight(daylight); },
+    forEachInterior(fn) { ground().forEachInterior(fn); },
+    setFakeShading(on) { fakeShading = !!on; ground().setFakeShading(fakeShading); },
+    dispose() {
+      for (const rec of storeys.values()) rec.s.dispose(true);
+      storeys.clear(); floorMeshes.length = 0;
+      standMat.dispose();
       disposeMaterials();
       group.clear();
     },

@@ -14,6 +14,7 @@
 import * as THREE from 'three';
 import * as Carp from '../carpentry/index.js';
 import { LAYER_SELECTED } from './items.js';
+import { viewOf, validLevel, itemLevel } from './levels.js';
 
 const cssVar = (name, fallback) => { try { return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback; } catch (e) { return fallback; } };
 
@@ -70,6 +71,8 @@ export function createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay
   });
 
   // ───────── section cut ─────────
+  /** Walls of the level a run stands on (several floors: `run.level`; the plan's own walls on the ground floor). */
+  const runWalls = (run) => (run && run.level && plan.levels ? viewOf(plan, validLevel(plan, run.level)).walls : plan.walls) || [];
   /** Camera-side direction (plan, unit) and the cut distance (cm from the anchor line) for a run. */
   function cutFor(got) {
     const run = got.run, a = (run.anchor.dir * Math.PI) / 180, fn = [-Math.sin(a), Math.cos(a)];
@@ -78,7 +81,7 @@ export function createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay
     let tmin = Infinity;
     for (const k of [0.2, 0.5, 0.8]) {
       const [x, y] = Carp.toPlan(run.anchor, run.length * k, dmax + 1);
-      tmin = Math.min(tmin, rayRects([x, y], fn, plan.walls || [], 25));
+      tmin = Math.min(tmin, rayRects([x, y], fn, runWalls(run), 25));
     }
     return { s: fn, D: Number.isFinite(tmin) ? Math.max(dmax + 40, dmax + 1 + tmin - 2) : dmax + 220 };
   }
@@ -92,8 +95,9 @@ export function createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay
       planeSet = true;
       // what stands between the run's fronts and the cut (an island, a table, another run) is hidden too
       const own = new Set(run.unitIds || []), dmin = run.kind === 'island' ? 1 : Math.max(20, ...got.units.filter((u) => !u.hidden).map((u) => u.d || 0)) - 5;
+      const lv = plan.levels ? validLevel(plan, run.level) : null;          // several floors: only what stands on the run's level
       for (const it of store.items) {
-        if (it.hidden || own.has(it.id) || it.placement === 'wall') continue;
+        if (it.hidden || own.has(it.id) || it.placement === 'wall' || (lv && itemLevel(it, plan, store) !== lv)) continue;
         const dx = it.x - A.x, dy = it.y - A.y, dep = dx * s[0] + dy * s[1], al = dx * along[0] + dy * along[1];
         if (dep > dmin && dep < D && al > -60 && al < run.length + 60) corridor.push(it.id);
       }

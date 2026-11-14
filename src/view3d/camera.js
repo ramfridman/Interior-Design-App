@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { polygonBounds } from '../core/geometry.js';
+import { levelIds, viewOf, elevationM, hasLevels } from './levels.js';
 
 const SIDE = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
 /** Unit plan vector [dx, dy] for a compass side ('n' | 's' | 'e' | 'w'). */
@@ -91,11 +92,25 @@ export function createOrbitRig({ camera, dom, plan, onChange, isSlow }) {
   controls.addEventListener('change', onChange);
 
   const hb = plan.bounds, sb = plan.site.bounds, G = -plan.heights.floorAboveGround / 100;
-  const roofY = (plan.heights.ceiling + plan.heights.slab + plan.heights.parapet) / 100;
+  /** Top of the roof parapet (m): the top level's elevation + its ceiling, slab and parapet (one level: the plan's). */
+  const roofTop = () => {
+    if (!hasLevels(plan)) return (plan.heights.ceiling + plan.heights.slab + plan.heights.parapet) / 100;
+    let top = 0;
+    for (const id of levelIds(plan)) { const h = viewOf(plan, id).heights; top = Math.max(top, elevationM(plan, id) + (h.ceiling + h.slab + h.parapet) / 100); }
+    return top;
+  };
+  let roofY = roofTop();
   const houseBox = new THREE.Box3(new THREE.Vector3(hb.x / 100, 0, hb.y / 100), new THREE.Vector3((hb.x + hb.w) / 100, roofY, (hb.y + hb.h) / 100));
   const lotBox = new THREE.Box3(new THREE.Vector3(sb.x / 100, G, sb.y / 100), new THREE.Vector3((sb.x + sb.w) / 100, roofY * 0.6, (sb.y + sb.h) / 100));
   const houseC = houseBox.getCenter(new THREE.Vector3());
   const lotC = lotBox.getCenter(new THREE.Vector3());
+  /** Several floors: the total height follows levels being added / removed (frame-house presets, target clamp). */
+  function refreshHeight() {
+    const y = roofTop();
+    if (y === roofY) return;
+    roofY = y; houseBox.max.y = y; lotBox.max.y = y * 0.6;
+    houseBox.getCenter(houseC); lotBox.getCenter(lotC);
+  }
   const aspect = () => camera.aspect || 1;
 
   /** Street-side diagonal that also shows the parking bays: plan vector [dx, dy]. */
@@ -110,14 +125,21 @@ export function createOrbitRig({ camera, dom, plan, onChange, isSlow }) {
   }
   const opening = (id) => plan.openings.find((o) => o.id === id) || null;
   const openingCentre = (o, y = 1.2) => new THREE.Vector3((o.x + o.w / 2) / 100, y, (o.y + o.h / 2) / 100);
-  const space = (id) => plan.rooms.find((r) => r.id === id) || plan.outdoorAreas.find((r) => r.id === id) || null;
+  /** A room / outdoor area by id on any level, with the elevation (m) of its level. */
+  const space = (id) => {
+    for (const lv of levelIds(plan)) {
+      const v = viewOf(plan, lv), s = v.rooms.find((r) => r.id === id) || v.outdoorAreas.find((r) => r.id === id);
+      if (s) return lv === 'L0' ? s : { ...s, elevation: elevationM(plan, lv) };
+    }
+    return null;
+  };
 
   /** Pose that frames `points` tightly from (theta, phi); the orbit target is slid along the view ray onto the floor. */
-  function framed(points, theta, phi, fov, margin) {
+  function framed(points, theta, phi, fov, margin, floorY = 0) {
     const { target, radius } = framePoints(points, theta, phi, fov, aspect(), margin);
     const dirY = -Math.cos(Math.max(phi, 6e-4));
     let r = radius;
-    if (dirY < -0.3) { const s = -target.y / dirY; target.addScaledVector(_d.setFromSphericalCoords(1, Math.max(phi, 6e-4), theta), -s); r = radius + s; }
+    if (dirY < -0.3) { const s = (floorY - target.y) / dirY; target.addScaledVector(_d.setFromSphericalCoords(1, Math.max(phi, 6e-4), theta), -s); r = radius + s; }
     return { target, theta, phi, fov, radius: Math.max(0.5, r) };
   }
   const lotPoints = () => [
@@ -128,17 +150,18 @@ export function createOrbitRig({ camera, dom, plan, onChange, isSlow }) {
 
   /** Dollhouse view into one room from a raised corner. */
   function roomPose(room) {
-    const b = polygonBounds(room.polygon);
-    const box = new THREE.Box3(new THREE.Vector3(b.x / 100, 0, b.y / 100), new THREE.Vector3((b.x + b.w) / 100, 2.2, (b.y + b.h) / 100));
-    const c = box.getCenter(new THREE.Vector3()); c.y = 0.4;
+    const b = polygonBounds(room.polygon), e = room.elevation || 0;      // a room of an upper level: its floor's height
+    const box = new THREE.Box3(new THREE.Vector3(b.x / 100, e, b.y / 100), new THREE.Vector3((b.x + b.w) / 100, e + 2.2, (b.y + b.h) / 100));
+    const c = box.getCenter(new THREE.Vector3()); c.y = e + 0.4;
     const diag = streetDiagonal(1);
     const dx = Math.abs(c.x - houseC.x) > 0.5 ? Math.sign(c.x - houseC.x) : Math.sign(diag[0]) || 1;
     const dz = Math.abs(c.z - houseC.z) > 0.5 ? Math.sign(c.z - houseC.z) : Math.sign(diag[1]) || 1;
-    return framed(boxCorners(box), Math.atan2(dx, dz * 1.25), THREE.MathUtils.degToRad(27), 45, 1.3);
+    return framed(boxCorners(box), Math.atan2(dx, dz * 1.25), THREE.MathUtils.degToRad(27), 45, 1.3, e);
   }
 
   /** Pose for a named preset or a room id; null when unknown. */
   function presetPose(name) {
+    refreshHeight();
     if (name === 'aerial') {
       const d = streetDiagonal();
       return framed(lotPoints(), Math.atan2(d[0], d[1]), THREE.MathUtils.degToRad(57), 40, 1.06);
@@ -255,7 +278,7 @@ export function createOrbitRig({ camera, dom, plan, onChange, isSlow }) {
   function clampTarget() {
     const t = controls.target;
     const x = THREE.MathUtils.clamp(t.x, lotBox.min.x - 12, lotBox.max.x + 12);
-    const y = THREE.MathUtils.clamp(t.y, 0, 8);
+    const y = THREE.MathUtils.clamp(t.y, 0, Math.max(8, roofY + 1));
     const z = THREE.MathUtils.clamp(t.z, lotBox.min.z - 12, lotBox.max.z + 12);
     if (x !== t.x || y !== t.y || z !== t.z) { camera.position.x += x - t.x; camera.position.y += y - t.y; camera.position.z += z - t.z; t.set(x, y, z); }
   }

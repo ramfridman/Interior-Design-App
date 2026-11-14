@@ -27,6 +27,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { sunPosition, sunTimes, sunDirectionWorld, compassPoint, todayAt, DEFAULT_SITE } from './sun.js';
 import { sunNormalLux, diffuseHorizontalLux, LUX_PER_UNIT } from './daylight/sky.js';
+import { levelIds, viewOf, elevationM, hasLevels } from './levels.js';
 
 const DEG = Math.PI / 180;
 const MIN_LIGHT_ELEVATION = 2;                                   // degrees — the shadow frustum never goes flatter than this
@@ -163,22 +164,37 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
   for (let i = 0; i < FILL_COUNT; i++) { const l = new THREE.PointLight(0xfff1e0, 0, 10, 1.5); l.castShadow = false; fillLights.push(l); fills.add(l); }
   scene.add(sun, sun.target, hemisphere, ambient, fills);
 
-  /** Anchor points of the bounce / fill lights: one per room, one per named zone of the open-plan space. */
+  /**
+   * Anchor points of the bounce / fill lights: one per room, one per named zone of the open-plan space. Several floors:
+   * the rooms of every level, each anchor's y = its level's elevation (m) and `ceiling` = that level's ceiling (m).
+   */
   const anchors = [];
-  let order = [], dist = new Float32Array(0);
+  let order = [], dist = new Float32Array(0), multi = false, houseTop = 0;
   function readAnchors() {
     anchors.length = 0;
-    for (const room of plan.rooms || []) {
-      const spots = room.zones && room.zones.length ? room.zones.map((z) => z.label) : [room.label];
-      for (const p of spots) if (Array.isArray(p)) anchors.push(new THREE.Vector3(p[0] / 100, 0, p[1] / 100));
+    multi = hasLevels(plan);
+    houseTop = 0;
+    for (const id of multi ? levelIds(plan) : ['L0']) {
+      const v = multi ? viewOf(plan, id) : plan, y = multi ? elevationM(plan, id) : 0;
+      if (multi) houseTop = Math.max(houseTop, y + v.heights.ceiling / 100);
+      for (const room of v.rooms || []) {
+        const spots = room.zones && room.zones.length ? room.zones.map((z) => z.label) : [room.label];
+        for (const p of spots) if (Array.isArray(p)) { const a = new THREE.Vector3(p[0] / 100, y, p[1] / 100); if (multi) a.ceiling = v.heights.ceiling / 100; anchors.push(a); }
+      }
     }
     order = anchors.map((_, i) => i); dist = new Float32Array(anchors.length);
   }
   readAnchors();
 
   // ── shadow frustum: the whole lot, independent of the camera, snapped to whole texels ──
+  // several floors: the box reaches 2 m over the top of the house, so the upper storeys cast and receive like the rest
   const boxCorners = [];
-  for (const x of [lot.x / 100 - 1.5, (lot.x + lot.w) / 100 + 1.5]) for (const z of [lot.y / 100 - 1.5, (lot.y + lot.h) / 100 + 1.5]) for (const y of [-0.4, 9]) boxCorners.push(new THREE.Vector3(x, y, z));
+  const readBox = () => {
+    boxCorners.length = 0;
+    const top = multi ? Math.max(9, houseTop + 2.6) : 9;
+    for (const x of [lot.x / 100 - 1.5, (lot.x + lot.w) / 100 + 1.5]) for (const z of [lot.y / 100 - 1.5, (lot.y + lot.h) / 100 + 1.5]) for (const y of [-0.4, top]) boxCorners.push(new THREE.Vector3(x, y, z));
+  };
+  readBox();
   const _v = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0), _lx = new THREE.Vector3(), _ly = new THREE.Vector3();
   const ladder = (v) => Math.pow(TEXEL_LADDER, Math.ceil(Math.log(v) / Math.log(TEXEL_LADDER)));
   /**
@@ -334,8 +350,12 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
       state.study = !!on;
       apply();
     },
-    /** Re-read the room list after the plan was edited (anchor points of the interior fill lights). */
-    refreshPlan: readAnchors,
+    /** Re-read the room list after the plan was edited (anchor points of the interior fill lights; several floors: the shadow box height). */
+    refreshPlan() {
+      const was = boxCorners.length ? boxCorners[1].y : 0;
+      readAnchors(); readBox();
+      if (boxCorners[1].y !== was) apply();
+    },
     /**
      * true while the roof / ceilings are shown (walk-through). Rooms then get a soft bounce / fill look and a lifted
      * exposure — applied only while the camera is actually inside the house, so exterior views keep true daylight.
@@ -377,19 +397,21 @@ export function createEnvironment({ scene, renderer, ctx, shadowMapSize }) {
       if (camera.far) { sky.scale.setScalar(camera.far * 0.95); scene.fog.far = Math.min(330, camera.far * 0.9); }
       if (!state.interior) return;
       // indoor look only while the camera is under the roof; fades out within 2.5 m of the facade
-      const H = ceilingH();
+      const H = multi ? houseTop : ceilingH();                         // several floors: under the top level's ceiling
       const away = Math.max(houseBox.x0 - _v.x, _v.x - houseBox.x1, houseBox.z0 - _v.z, _v.z - houseBox.z1, _v.y - H, 0);
       const k = (1 - smooth(0, 2.5, away)) * (1 - state.daylight);
       if (Math.abs(k - state.k) > 0.002 || state.forceBlend) { state.forceBlend = false; blend(k); }
       if (k <= 0.001 || !anchors.length) return;
       const y = H * 0.6;
-      for (let i = 0; i < anchors.length; i++) dist[i] = Math.hypot(anchors[i].x - _v.x, anchors[i].z - _v.z);
+      // several floors: the anchors of the camera's own level come first (another storey's rooms are 3 m × 4 further)
+      if (multi) for (let i = 0; i < anchors.length; i++) dist[i] = Math.hypot(anchors[i].x - _v.x, anchors[i].z - _v.z, _v.y >= anchors[i].y - 0.2 && _v.y < anchors[i].y + anchors[i].ceiling + 0.4 ? 0 : 12);
+      else for (let i = 0; i < anchors.length; i++) dist[i] = Math.hypot(anchors[i].x - _v.x, anchors[i].z - _v.z);
       order.sort((a, b) => dist[a] - dist[b]);
       const cutoff = anchors.length > FILL_COUNT ? dist[order[FILL_COUNT]] : Infinity;
       for (let i = 0; i < FILL_COUNT; i++) {
         const light = fillLights[i], a = order[i];
         if (a === undefined) { light.intensity = 0; continue; }
-        light.position.set(anchors[a].x, y, anchors[a].z);
+        light.position.set(anchors[a].x, multi ? anchors[a].y + anchors[a].ceiling * 0.6 : y, anchors[a].z);
         light.color.copy(state.fillColor);
         light.intensity = state.fillIntensity * k * (cutoff === Infinity ? 1 : smooth(0, 2.5, cutoff - dist[a]));
       }

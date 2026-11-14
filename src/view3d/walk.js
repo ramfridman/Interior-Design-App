@@ -14,6 +14,7 @@
 import * as THREE from 'three';
 import { walkBoxes, spaceAt, openingFrame } from '../core/geometry.js';
 import { groundY } from './items.js';
+import { validLevel, viewOf, itemLevel, GROUND } from './levels.js';
 import { sideVec, sideHeading } from './camera.js';
 
 export const EYE_HEIGHT = 1.65;
@@ -34,8 +35,22 @@ export function walkFov(aspect) {
   return clamp(v, 60, 72);
 }
 
-/** Default start: just inside the entrance door, looking along its swing direction into the house. */
+/**
+ * Default start: just inside the entrance door, looking along its swing direction into the house. An upper level (a
+ * level view with `levelId`) has no entrance: the middle of its largest room, looking north.
+ */
 export function defaultWalkStart(plan) {
+  if (plan.levelId && plan.levelId !== GROUND) {
+    let best = null, area = 0;
+    for (const r of plan.rooms || []) {
+      const p = r.polygon, a = Math.abs(p.reduce((s, q, i) => { const b = p[(i + 1) % p.length]; return s + q[0] * b[1] - b[0] * q[1]; }, 0)) / 2;
+      if (a > area) { area = a; best = r; }
+    }
+    if (best) {
+      const at = Array.isArray(best.label) ? best.label : best.polygon.reduce((s, q) => [s[0] + q[0] / best.polygon.length, s[1] + q[1] / best.polygon.length], [0, 0]);
+      return { x: at[0], y: at[1], heading: 0 };
+    }
+  }
   const door = plan.openings.find((o) => o.id === 'door-entry') || plan.openings.find((o) => o.kind === 'door' && o.exterior);
   if (!door) return { x: plan.bounds.x + plan.bounds.w / 2, y: plan.bounds.y + plan.bounds.h / 2, heading: 0 };
   const inward = door.swing || { n: 's', s: 'n', e: 'w', w: 'e' }[door.outside] || 'w';
@@ -48,11 +63,11 @@ const boxBlocker = (b) => ({ cx: b.cx / 100, cy: b.cy / 100, hw: b.hw / 100, hh:
 /** Collision boxes (metres) of the plan's walls and windows. */
 export const wallBlockers = (plan) => walkBoxes({ ...plan }).map(boxBlocker);
 
-function furnitureBlockers(items, models) {
+function furnitureBlockers(items, models, onLevel = null) {
   const out = [];
   const carp = models && typeof models.getModel === 'function' ? models.getModel('carpentry-unit') : null;
   for (const it of items) {
-    if (it.hidden || it.placement !== 'floor' || !(it.h > 45) || (it.elev || 0) > 120 || PASSABLE.has(it.type)) continue;
+    if ((onLevel && !onLevel(it)) || it.hidden || it.placement !== 'floor' || !(it.h > 45) || (it.elev || 0) > 120 || PASSABLE.has(it.type)) continue;
     const a = ((it.rot || 0) * Math.PI) / 180;
     // a corner pantry blocks its two arms, not the open floor inside its L
     const fp = it.carp && carp && carp.footprint ? carp.footprint(it) : null;
@@ -110,9 +125,15 @@ const css = (el, text) => { el.style.cssText = text; return el; };
  *           emit: (event: string, payload: object) => void, requestExit: () => void }} o
  */
 export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, requestExit }) {
-  const { store, plan } = ctx;
-  const sb = plan.site.bounds;
+  const { store } = ctx;
+  const sb = ctx.plan.site.bounds;
   const lot = { x0: sb.x / 100 - LOT_MARGIN, x1: (sb.x + sb.w) / 100 + LOT_MARGIN, y0: sb.y / 100 - LOT_MARGIN, y1: (sb.y + sb.h) / 100 + LOT_MARGIN };
+  // several floors: the walker stays on the level it started on (stage F5 adds stairs) — that level's walls, floor height
+  // and furniture only. `plan` is that level's view (the plan itself on the ground floor).
+  let level = GROUND, plan = ctx.plan;
+  const setLevel = (id) => { level = validLevel(ctx.plan, id); plan = viewOf(ctx.plan, level); };
+  const floorY = (x, y) => (level === GROUND ? groundY(x, y, plan) : groundY(x, y, plan, level));
+  const onLevel = (it) => itemLevel(it, ctx.plan, store) === level;
   // a shallow copy defeats any per-plan cache in core: the plan's arrays are replaced when the owner edits the house
   const readWalls = () => wallBlockers(plan);
   let walls = readWalls();
@@ -157,7 +178,7 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
 
   // ───────────── blockers ─────────────
   function rebuildBlockers() {
-    blockers = walls.concat(furnitureBlockers(store.items, ctx.models));
+    blockers = walls.concat(furnitureBlockers(store.items, ctx.models, level === GROUND && !ctx.plan.levels ? null : onLevel));
     blockersDirty = false;
     for (const b of [...ignore]) if (!b.wall) ignore.delete(b);
     adoptContaining();
@@ -193,7 +214,7 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
     const sig = `${s.x.toFixed(1)}|${s.y.toFixed(1)}|${s.heading.toFixed(1)}`;
     if (!force && sig === lastSent) return;
     lastSent = sig; lastEmit = now;
-    emit('walk-position', { x: s.x, y: s.y, heading: s.heading, spaceId: s.spaceId });
+    emit('walk-position', level === GROUND ? { x: s.x, y: s.y, heading: s.heading, spaceId: s.spaceId } : { x: s.x, y: s.y, heading: s.heading, spaceId: s.spaceId, level });
   }
 
   function applyCamera() {
@@ -210,7 +231,7 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
     ignore.clear();
     if (blockersDirty) rebuildBlockers(); else adoptContaining();
     resolve(p, WALKER_RADIUS, blockers, ignore);
-    gy = groundY(p.x * 100, p.y * 100, plan);
+    gy = floorY(p.x * 100, p.y * 100);
   }
 
   /** Glide to a plan point (cm). Walls stop the glide; furniture is crossed and left on arrival. */
@@ -362,14 +383,20 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
     const wantBob = glide || reducedMotion() ? 0 : clamp(speedNow / WALK_SPEED, 0, 1.25);
     bobAmt += (wantBob - bobAmt) * (1 - Math.exp(-dt * 8));
     bob += speedNow * dt * 4.1;
-    gy += (groundY(p.x * 100, p.y * 100, plan) - gy) * (1 - Math.exp(-dt / 0.07));
+    gy += (floorY(p.x * 100, p.y * 100) - gy) * (1 - Math.exp(-dt / 0.07));
     applyCamera();
     emitPosition(performance.now(), false);
   }
 
   return {
-    /** @param {{ x?: number, y?: number, heading?: number, pointerLock?: boolean }} [opts] plan cm / degrees clockwise from north-up */
+    /**
+     * @param {{ x?: number, y?: number, heading?: number, pointerLock?: boolean, level?: string }} [opts] plan cm / degrees
+     *        clockwise from north-up; `level` (several floors): the level to walk on (default: the ground floor)
+     */
     start(opts = {}) {
+      const was = level;
+      setLevel(opts.level);
+      if (was !== level) { walls = readWalls(); ignore.clear(); }
       const d = defaultWalkStart(plan);
       usePointerLock = opts.pointerLock !== false;
       blockersDirty = true;
@@ -434,12 +461,15 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
     },
     blockerCount: () => (blockersDirty ? (rebuildBlockers(), blockers.length) : blockers.length),
     /** The plan was edited: re-read walls / windows; a walker now standing inside a wall is let out, not trapped. */
+    /** The level walked on ('L0' …). */
+    getLevel: () => level,
     refreshPlan() {
+      setLevel(level);
       walls = readWalls();
       for (const b of [...ignore]) if (b.wall) ignore.delete(b);
       glide = null;
       rebuildBlockers();
-      if (active) gy = groundY(p.x * 100, p.y * 100, plan);
+      if (active) gy = floorY(p.x * 100, p.y * 100);
     },
     dispose() { this.stop(); offItems(); },
   };

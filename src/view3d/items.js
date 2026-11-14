@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { spaceAt, isIndoors, itemCorners } from '../core/geometry.js';
+import { itemLevel, viewOf, elevationM, GROUND } from './levels.js';
 
 /** Layers used by the selection / hover outline mask (see interaction.js). */
 export const LAYER_SELECTED = 1;
@@ -19,8 +20,12 @@ export const LAYER_HOVER = 2;
 const LAMP_POOL = 8;
 const LAMP_TYPES = new Set(['floor-lamp', 'table-lamp', 'pendant', 'ceiling-light', 'wall-light', 'ceiling-fan', 'outdoor-light']);
 
-/** World Y (m) of the walkable ground under a plan point: 0 on the house floor and slabs, garden level elsewhere. */
-export function groundY(x, y, plan) {
+/**
+ * World Y (m) of the walkable ground under a plan point: 0 on the house floor and slabs, garden level elsewhere.
+ * `level` (several floors): an upper level's finished floor everywhere on that level (its floor, or the roof below).
+ */
+export function groundY(x, y, plan, level) {
+  if (level && level !== GROUND) return plan.levelId === level ? (plan.elevation || 0) / 100 : elevationM(plan, level);   // a level view or the whole plan
   const s = spaceAt(x, y, plan);
   if (s && (s.kind === 'room' || s.kind === 'outdoor-area')) return 0;
   if (isIndoors(x, y, plan)) return 0;
@@ -120,6 +125,7 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
   let materialHook = null;                                             // daylight: patches item materials for the probe field
   let viewHidden = new Set();                                          // hidden by the view only (carpentry section cut)
   let variant = null;                                                  // (item) => { key, view? } | null: extra build state (carpentry)
+  let levelShown = null, levelKey = null;                              // (levelId) => boolean | null: items of hidden levels are hidden
   const variantOf = (item) => { try { return variant ? variant(item) : null; } catch (e) { return null; } };
   const notify = () => listeners.forEach((fn) => fn());
 
@@ -169,10 +175,12 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
   }
 
   function pose(entry, item) {
-    const base = groundY(item.x, item.y, plan);
+    const level = itemLevel(item, plan, store);                         // several floors: Y += the level's elevation
+    const base = level === GROUND ? groundY(item.x, item.y, plan) : groundY(item.x, item.y, plan, level);
+    entry.level = level;
     entry.root.position.set(item.x / 100, base + (item.elev || 0) / 100, item.y / 100);
     entry.root.rotation.y = (-(item.rot || 0) * Math.PI) / 180;
-    entry.root.visible = !item.hidden && !viewHidden.has(item.id);
+    entry.root.visible = !item.hidden && !viewHidden.has(item.id) && !(levelShown && !levelShown(level));
     entry.root.updateMatrixWorld(true);
     const b = entry.box.makeEmpty();
     for (const [cx, cy] of itemCorners(item)) {
@@ -222,7 +230,8 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
     const h = store.project.ceilingHeight;
     if (h === ceiling || !(h > 0)) return;
     ceiling = h;
-    const ids = store.items.filter((i) => i.placement === 'ceiling' && i.elev !== Math.max(0, h - i.h)).map((i) => i.id);
+    // (the project's ceiling is the ground floor's: ceiling items of upper levels keep theirs)
+    const ids = store.items.filter((i) => i.placement === 'ceiling' && i.elev !== Math.max(0, h - i.h) && (!i.level || itemLevel(i, plan, store) === GROUND)).map((i) => i.id);
     if (ids.length) store.updateItems(ids, (i) => ({ elev: Math.max(0, h - i.h) }), { transient: true });
   });
 
@@ -242,6 +251,19 @@ export function createItemsLayer({ scene, ctx, invalidate }) {
      * the model as `item.view` (never stored). Used by the carpentry view (run spec / worktops, open fronts).
      */
     setVariant(fn) { variant = typeof fn === 'function' ? fn : null; },
+    /** Several floors: `fn(levelId)` → false hides the items of that level (levels above the one shown); null shows all. `key`: same key = no change. */
+    setLevelFilter(fn, key = null) {
+      const next = typeof fn === 'function' ? fn : null;
+      if (!next && !levelShown) return;
+      if (next && levelShown && key != null && key === levelKey) return;
+      levelShown = next; levelKey = next ? key : null;
+      for (const item of store.items) { const entry = entries.get(item.id); if (entry) pose(entry, item); }
+      notify(); invalidate();
+    },
+    /** Level id an item is drawn on ('L0' …). */
+    levelOf: (id) => (entries.get(id) ? entries.get(id).level : GROUND),
+    /** The level view (PLAN-shaped) an item stands on. */
+    planOf: (item) => viewOf(plan, itemLevel(item, plan, store)),
     /** Hide these item ids in the view only (the store is untouched); [] shows them again. */
     setViewHidden(ids) {
       const next = new Set(ids || []);
