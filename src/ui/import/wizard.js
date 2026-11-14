@@ -981,8 +981,226 @@ export function openImportWizard(app, opts = {}) {
     return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
   }
 
+  // ════════════════════════ 3b. align floors (several floors, F8) ════════════════════════
+  let alignView = null;
+  const SIDE_NAMES = { n: 'North', e: 'East', s: 'South', w: 'West' };
+  const CONF_WORDS = { high: 'confident', medium: 'fairly confident', low: 'unsure — please check' };
+  /** The automatic proposal for floor k over floor k − 1 (a turn found by the search re-reads the floor turned). */
+  async function ensureAlign(k) {
+    stash();
+    const F = floorAt(k);
+    if (F.align) return true;
+    const L = floorAt(k - 1), lower = L.result;
+    const lowerMarks = (L.marks && L.marks.stairs) || [];
+    const upMarks = () => [...((floorAt(k).marks || {}).voids || []), ...((floorAt(k).marks || {}).stairs || [])];
+    const a = alignFloors(lower, F.result, { rotations: F.orientSet ? [0] : [0, 90, 180, 270], lowerMarks, upperMarks: upMarks() });
+    if (!a.rot) { F.align = { dx: a.dx, dy: a.dy, auto: a, turned: 0 }; return true; }
+    let ok = true;
+    await eachFloor(async (i) => {
+      if (i !== k) return;
+      S.rotate = (((S.rotate || 0) + a.rot) % 360 + 360) % 360;
+      ok = await analyse();
+      if (ok) floorAt(k).marks = marksOf();
+    });
+    if (!ok) return false;
+    const a2 = alignFloors(lower, floorAt(k).result, { rotations: [0], lowerMarks, upperMarks: upMarks() });
+    F.align = { dx: a2.dx, dy: a2.dy, auto: { ...a2, notes: [...a.notes.filter((n) => !/turned by/.test(n) || /clockwise to fit/.test(n)), ...a2.notes] }, turned: a.rot };
+    if (S.floors[k + 1]) S.floors[k + 1].align = null;
+    return true;
+  }
+  async function proposeAll() {
+    if (S.busy || S.alignBusy) return;
+    S.alignBusy = true;
+    let ok = true;
+    try { for (let k = 1; k < S.floors.length && ok; k++) ok = await ensureAlign(k); } finally { S.alignBusy = false; }
+    S.alignFailed = !ok;
+    if (steps()[S.step].id === 'align') render();
+  }
+  function alignReport(k) {
+    stash();
+    const F = floorAt(k), L = floorAt(k - 1);
+    return alignmentReport(L.result, F.result, { rot: 0, dx: F.align.dx, dy: F.align.dy });
+  }
+  function renderAlign() {
+    sheet.setOverlay(null);
+    stash();
+    if (S.floors.slice(1).some((F) => !F.align)) {
+      setKids(content, h('div', { class: 'callout' }, icon('levels', { size: 16 }), h('div', null,
+        h('p', { class: 'callout__title' }, S.alignFailed ? 'The floors could not be read again' : 'Lining up the floors…'),
+        h('p', { class: 'callout__text' }, S.alignFailed ? 'Go back and check the scale and orientation of each floor.' : 'Each upper floor is fitted over the floor below by its outer walls.'))));
+      if (!S.alignFailed) proposeAll();
+      return;
+    }
+    const k = Math.min(Math.max(1, S.alignK || 1), S.floors.length - 1);
+    S.alignK = k;
+    const F = floorAt(k), L = floorAt(k - 1);
+    if (!alignView) {
+      alignView = createAlignView({
+        onMove: (dx, dy, { final }) => {
+          const A = floorAt(S.alignK).align;
+          A.dx = Math.round(dx * 100) / 100; A.dy = Math.round(dy * 100) / 100; A.manual = true;
+          S.stairs = null; S.built = null;
+          if (final) syncAlignInfo();
+        },
+        snap: (dx, dy, r) => { stash(); const K = S.alignK; return snapFaces(floorAt(K - 1).result, floorAt(K).result, { rot: 0, dx, dy, radius: Math.min(15, r) }); },
+        onPick: (pt, which) => matchPick(pt, which),
+      });
+    }
+    alignView.set({ lower: L.result, upper: F.result, dx: F.align.dx, dy: F.align.dy, lowerMarks: (L.marks && L.marks.stairs) || [], upperMarks: [...((F.marks || {}).voids || []), ...((F.marks || {}).stairs || [])], picks: matchPicks() });
+    alignView.setMode(S.match && S.match.want ? `pick-${S.match.want}` : 'drag');
+    alignView.setHint(S.match && S.match.want ? (S.match.want === 'upper' ? `Click a point on the ${lowerFirst(F.name)} (blue) — a stair corner, a shaft, a house corner.` : `Now click the same point on the ${lowerFirst(L.name)} (grey).`) : '');
+    const pairs = S.floors.length > 2 ? h('div', { class: 'ifloortabs', role: 'tablist', 'aria-label': 'Which floors' }, S.floors.slice(1).map((G, j) => h('button', { type: 'button', role: 'tab', class: `ifloortabs__tab${j + 1 === k ? ' is-on' : ''}`,
+      'aria-selected': String(j + 1 === k), onClick: () => { S.alignK = j + 1; S.match = null; alignView.fit(); render(); } }, h('span', { class: 'ifloortabs__name' }, `${G.name} over ${lowerFirst(S.floors[j].name)}`)))) : null;
+    const auto = F.align.auto;
+    const info = h('div', { class: 'ialign__info', 'aria-live': 'polite' });
+    setKids(content, pairs, h('div', { class: 'isplit' },
+      h('div', { class: 'isplit__main' }, alignView.el),
+      h('div', { class: 'isplit__side' },
+        h('p', { class: 'iside__title' }, `Line up the ${lowerFirst(F.name)} over the ${lowerFirst(L.name)}`),
+        h('p', { class: 'iside__text' }, `Grey: the ${lowerFirst(L.name)}. Blue: the ${lowerFirst(F.name)}. Drag the blue floor to move it (its walls snap to the walls below), or use the arrow keys: 1 cm, with Shift 5 cm.`),
+        h('div', { class: `ialign__auto ialign__auto--${auto.confidence}` },
+          h('p', { class: 'ialign__title' }, icon(auto.confidence === 'low' ? 'warn' : 'check', { size: 14 }), `Proposed automatically: ${auto.text.toLowerCase()} — ${CONF_WORDS[auto.confidence]}`),
+          auto.notes && auto.notes.length ? h('ul', { class: 'iwarns__list' }, auto.notes.map((t) => h('li', { class: 'iwarns__item iwarns--info' }, icon('info', { size: 14 }), h('span', null, t)))) : null,
+          F.align.manual ? btn('Back to the proposal', { small: true, variant: 'quiet', icon: 'reset', onClick: () => { Object.assign(F.align, { dx: auto.dx, dy: auto.dy, manual: false }); S.stairs = null; S.built = null; render(); } }) : null),
+        info,
+        h('div', { class: 'iopt' },
+          h('p', { class: 'iopt__title' }, 'Match two points'),
+          h('p', { class: 'iopt__text' }, 'Click a point on the upper floor, then the same point on the floor below — a stair corner, a shaft, a corner of the house. A second pair checks that the floors are not turned against each other.'),
+          h('div', { class: 'iopt__rows' },
+            btn(S.match && S.match.want ? 'Cancel matching' : S.match && S.match.pairs.length === 1 ? 'Match a second pair' : 'Match two points', { small: true, icon: 'target',
+              onClick: () => { if (S.match && S.match.want) S.match = null; else S.match = { want: 'upper', pairs: S.match && S.match.pairs.length === 1 ? S.match.pairs : [], cur: {} }; render(); } }),
+            S.match && S.match.note ? h('p', { class: 'iopt__text', role: 'status' }, S.match.note) : null)),
+        h('div', { class: 'iopt' },
+          h('p', { class: 'iopt__title' }, 'Turn the upper floor'),
+          h('p', { class: 'iopt__text' }, 'If the drawing is turned against the floor below, turn it by a quarter and line it up again.'),
+          btn('Turn 90° clockwise', { small: true, icon: 'rotate-cw', onClick: () => turnUpper(k, 90) })))));
+    syncAlignInfo();
+    requestAnimationFrame(() => { alignView.resize(); });
+  }
+  function syncAlignInfo() {
+    const info = content.querySelector('.ialign__info');
+    if (!info) return;
+    const k = S.alignK, F = floorAt(k), rep = alignReport(k);
+    const side = (d) => { const o = rep.sides ? rep.sides[d].overhang : 0; return Math.abs(o) < 0.5 ? 'flush' : o > 0 ? `sticks out ${Math.round(o)} cm` : `set back ${Math.round(-o)} cm`; };
+    setKids(info,
+      h('p', { class: 'isanity__title' }, `${rep.text}; overlap ${Math.round(rep.overlap * 100)} %`),
+      h('ul', { class: 'ialign__sides' }, ['n', 'e', 's', 'w'].map((d) => h('li', null, h('span', null, SIDE_NAMES[d]), h('b', null, side(d)), rep.sides && rep.sides[d].coincide ? h('span', { class: 'faint' }, ' · walls coincide') : null))),
+      h('p', { class: 'isanity__text' }, `Moved ${Math.round(F.align.dx)} cm east and ${Math.round(F.align.dy)} cm south of the floor below's north-west corner${F.align.turned ? `; drawing turned ${F.align.turned}°` : ''}.`),
+      ...rep.warnings.map((w) => h('p', { class: 'isanity__warn' }, icon('warn', { size: 14 }), w)));
+  }
+  function matchPicks() {
+    if (!S.match) return [];
+    const out = [];
+    const F = floorAt(S.alignK);
+    S.match.pairs.forEach((p, i) => { out.push({ x: p.u[0] + F.align.dx, y: p.u[1] + F.align.dy, which: 'upper', label: String(i + 1) }, { x: p.l[0], y: p.l[1], which: 'lower', label: String(i + 1) }); });
+    if (S.match.cur.u) out.push({ x: S.match.cur.u[0] + F.align.dx, y: S.match.cur.u[1] + F.align.dy, which: 'upper', label: String(S.match.pairs.length + 1) });
+    return out;
+  }
+  /** "Match two points": the first pair moves the upper floor, the second checks the turn (a quarter turn is applied). */
+  async function matchPick(pt, which) {
+    const M = S.match;
+    if (!M || M.want !== which) return;
+    const k = S.alignK, F = floorAt(k), A = F.align;
+    if (which === 'upper') { M.cur = { u: [pt[0] - A.dx, pt[1] - A.dy] }; M.want = 'lower'; render(); return; }
+    const pair = { u: M.cur.u, l: pt };
+    M.pairs.push(pair); M.cur = {}; M.want = null;
+    if (M.pairs.length === 1) {
+      // translation: the upper point lands on the lower one
+      const T = affThen([1, 0, 0, 1, 0, 0], [1, 0, 0, 1, pt[0] - pair.u[0], pt[1] - pair.u[1]]);
+      const d = affApply(T, 0, 0);
+      Object.assign(A, { dx: Math.round(d[0] * 100) / 100, dy: Math.round(d[1] * 100) / 100, manual: true });
+      M.note = 'Moved so the two points meet. Match a second pair to check the turn.';
+    } else {
+      const [p1, p2] = M.pairs, vu = [p2.u[0] - p1.u[0], p2.u[1] - p1.u[1]], vl = [p2.l[0] - p1.l[0], p2.l[1] - p1.l[1]];
+      const lu = Math.hypot(...vu), ll = Math.hypot(...vl);
+      if (lu < 20 || ll < 20) { M.note = 'The two points of a pair are too close together to check the turn — pick points further apart.'; M.pairs = [p1]; render(); return; }
+      let ang = (Math.atan2(vl[1], vl[0]) - Math.atan2(vu[1], vu[0])) * 180 / Math.PI;
+      ang = ((ang % 360) + 540) % 360 - 180;
+      const quarter = Math.round(ang / 90) * 90, off = Math.abs(ang - quarter), ratio = ll / lu;
+      if (Math.abs(ratio - 1) > 0.03) M.note = `The second pair is ${Math.round(Math.abs(ratio - 1) * 100)} % longer or shorter on one floor — check each floor's scale. The floors stay as moved by the first pair.`;
+      else if (off > 3) M.note = `The second pair is ${off.toFixed(1)}° off a quarter turn — the drawings may be skewed. The floors stay as moved by the first pair.`;
+      else if (!quarter) {
+        M.note = `The second pair agrees: the floors are not turned against each other (within ${off.toFixed(1)}°).`;
+      } else {
+        await turnUpper(k, (quarter + 360) % 360, p1);
+        M.note = `The upper floor was turned by ${(quarter + 360) % 360}° so both pairs meet.`;
+      }
+      M.pairs = [];
+    }
+    S.stairs = null; S.built = null;
+    render();
+  }
+  /** Turn floor k's drawing by `rot` (re-read turned); keep `anchor` (a pair { u (its own frame), l }) or its north-west corner where it was. */
+  async function turnUpper(k, rot, anchor = null) {
+    stash();
+    const F = floorAt(k), before = F.result, A = F.align;
+    const place = placeFloor(before, rot);                       // own frame → the turned frame (affine: rotation, then the new corner at 0, 0)
+    const centre = (() => { const b = before.stats && before.stats.bounds; return b ? [b.x + b.w / 2, b.y + b.h / 2] : [0, 0]; })();
+    let ok = true;
+    await eachFloor(async (i) => {
+      if (i !== k) return;
+      S.rotate = (((S.rotate || 0) + rot) % 360 + 360) % 360;
+      ok = await analyse();
+      if (ok) floorAt(k).marks = marksOf();
+    });
+    if (!ok) return;
+    F.orientSet = true;
+    // keep the anchor (or the floor's centre) where it was on the floor below
+    const src = anchor ? anchor.u : centre, dst = anchor ? anchor.l : [centre[0] + A.dx, centre[1] + A.dy];
+    const q = place.map(src);
+    Object.assign(A, { dx: Math.round((dst[0] - q[0]) * 100) / 100, dy: Math.round((dst[1] - q[1]) * 100) / 100, manual: true, turned: ((A.turned || 0) + rot) % 360 });
+    if (S.floors[k + 1]) S.floors[k + 1].align = null;
+    S.stairs = null; S.built = null;
+    render();
+  }
+
+  // ── stairs and openings between the floors (F8) ──
+  /** Match the stairs found on each floor to what the floor above shows, build the plan and let the engine try them. */
+  async function prepareStairs() {
+    stash();
+    const n = S.floors.length, list = [];
+    const moved = (o) => (q) => ({ ...q, x: q.x + o.x, y: q.y + o.y });
+    for (let k = 0; k < n - 1; k++) {
+      const off = offsetOf(k), offU = offsetOf(k + 1), up = floorAt(k + 1).marks || {};
+      const st = ((floorAt(k).marks || {}).stairs || []).map(moved(off));
+      const m = matchStairs(st, { voids: (up.voids || []).map(moved(offU)), stairs: (up.stairs || []).map(moved(offU)) });
+      floorAt(k + 1).plainVoids = m.plainVoids.map(moved({ x: -offU.x, y: -offU.y }));
+      m.stairs.forEach((q) => list.push({ ...q, level: k ? `L${k}` : 'L0', floor: k }));
+    }
+    const topStairs = ((floorAt(n - 1).marks || {}).stairs || []).length;
+    S.built = null;
+    const b = build();
+    S.built = b;
+    let verdicts = null, checked = false;
+    if (list.length && b.plan && (b.plan.levels || []).length) {
+      const shifted = list.map((q) => ({ ...q, x: q.x + b.shift.x, y: q.y + b.shift.y }));
+      const v = await work('Checking the stairs with the plan engine…', () => engine('stair-check', { plan: b.plan, stairs: shifted }));
+      if (Array.isArray(v)) { verdicts = v; checked = true; }
+    }
+    S.stairs = { list, verdicts, checked, topStairs, voids: S.floors.reduce((t, F) => t + (F.plainVoids || []).length, 0) };
+    return true;
+  }
+  /** The stairs and openings between the floors, for the Review step. */
+  function stairsBox() {
+    const st = S.stairs;
+    if (!st) return null;
+    const items = [];
+    const NAMES = { n: 'north', e: 'east', s: 'south', w: 'west' };
+    st.list.forEach((q, i) => {
+      const v = st.verdicts && st.verdicts[i], from = floorAt(q.floor).name, to = lowerFirst(floorAt(q.floor + 1).name);
+      if (!st.checked) items.push({ cls: 'info', text: `Stair from the ${lowerFirst(from)} to the ${to} (${q.lines} risers drawn): it is checked by the plan engine when the project is created.` });
+      else if (v && v.ok) items.push({ cls: 'pass', text: `Stair from the ${lowerFirst(from)} to the ${to} will be added: ${v.risers} risers of ${(v.rise / v.risers).toFixed(1)} cm, going ${v.going} cm, up towards the ${NAMES[v.up]}${q.upFrom === 'opening above' ? ' (towards the opening drawn above)' : ''}, with its opening in the floor above.${v.notes && v.notes.length ? ' ' + v.notes.join(' ') : ''}` });
+      else items.push({ cls: 'warn', text: `Stair from the ${lowerFirst(from)} to the ${to} (${q.lines} risers drawn) cannot be added as drawn: ${v ? v.reason : 'no stair fits'} Place it with the Stairs tool (Structure mode, T) after importing.` });
+    });
+    if (!st.list.length) items.push({ cls: 'info', text: 'No stair was found on the drawings (a run of at least 6 evenly spaced tread lines in a rectangle). After importing, place one with the Stairs tool — Structure mode, T.' });
+    if (st.topStairs) items.push({ cls: 'info', text: `The top floor shows a stair (${st.topStairs}); a stair needs a floor above it, so it is not added.` });
+    if (st.voids) items.push({ cls: 'info', text: `${st.voids} opening${st.voids === 1 ? '' : 's'} in a floor (drawn with a cross or marked “void”) will be added as ${st.voids === 1 ? 'an opening' : 'openings'} with a railing.` });
+    return h('div', { class: 'iwarns istairs' }, h('p', { class: 'newproj__label' }, 'Stairs and openings between the floors'),
+      h('ul', { class: 'iwarns__list' }, items.map((it) => h('li', { class: `iwarns__item iwarns--${it.cls}` }, icon(it.cls === 'pass' ? 'check' : it.cls === 'warn' ? 'warn' : 'info', { size: 14 }), h('span', null, it.text)))));
+  }
+
   // ════════════════════════ 4. review ════════════════════════
-  const show = { page: true, detections: true };
+  const show = { page: true, detections: true, below: true };
   function renderReview() {
     const r = S.result;
     sheet.setMode('view');
@@ -1014,14 +1232,17 @@ export function openImportWizard(app, opts = {}) {
       : null;
     const toggles = h('div', { class: 'itoggles' },
       checkbox('Show the page', show.page, (v) => { show.page = v; sheet.showPage(v); }),
-      checkbox('Show what was found', show.detections, (v) => { show.detections = v; sheet.redraw(); }));
+      checkbox('Show what was found', show.detections, (v) => { show.detections = v; sheet.redraw(); }),
+      multi() && S.cur > 0 ? checkbox('Show the floor below (alignment)', show.below, (v) => { show.below = v; sheet.redraw(); }) : null);
     setKids(content, h('div', { class: 'isplit' },
       h('div', { class: 'isplit__main' }, sheet.el),
       h('div', { class: 'isplit__side' },
-        h('p', { class: 'iside__title' }, 'What was found'),
+        h('p', { class: 'iside__title' }, multi() ? `What was found on the ${lowerFirst(floorAt(S.cur).name)}` : 'What was found'),
         banner, empty,
         legend, toggles,
-        warningList(r))));
+        warningList(r),
+        multi() ? stairsBox() : null)));
+    if (multi()) content.prepend(floorTabs((i) => { const R = valOf(i, 'result'); return R ? `${R.walls.length + slantsOf(R).length} walls · ${R.openings.length} openings` : ''; }));
     requestAnimationFrame(() => { sheet.resize(); fitToResult(); });
   }
   function fitToResult() {
@@ -1082,6 +1303,41 @@ export function openImportWizard(app, opts = {}) {
       poly(rectPts(u, 15));
       ctx.setLineDash([5, 3]); ctx.strokeStyle = col.uns; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
       ctx.fillStyle = col.uns + '22'; ctx.fill();
+    }
+    if (multi()) floorsOverlay(ctx, P, poly, col);
+  }
+  /** Several floors: the floor below (grey, dashed — how the alignment puts it under this one), the stairs found here
+   *  (the drawn run dashed, the engine's stair over it in green when it fits, red when refused) and the openings above. */
+  function floorsOverlay(ctx, P, poly, col) {
+    const k = S.cur, off = offsetOf(k);
+    if (k > 0 && show.below) {
+      const lo = offsetOf(k - 1), d = { x: lo.x - off.x, y: lo.y - off.y }, L = floorAt(k - 1).result;
+      ctx.setLineDash([6, 4]); ctx.strokeStyle = 'rgba(80, 88, 94, 0.85)'; ctx.lineWidth = 1.5;
+      for (const w of (L && L.walls) || []) { poly(rectPts({ x: w.x + d.x, y: w.y + d.y, w: w.w, h: w.h })); ctx.stroke(); }
+      ctx.setLineDash([]);
+    }
+    const st = S.stairs;
+    if (!st) return;
+    const shift = S.built && S.built.shift ? S.built.shift : { x: 0, y: 0 };
+    st.list.forEach((q, i) => {
+      if (q.floor !== k) return;
+      const v = st.verdicts && st.verdicts[i];
+      poly(rectPts({ x: q.x - off.x, y: q.y - off.y, w: q.w, h: q.h }));
+      ctx.setLineDash([5, 3]); ctx.strokeStyle = col.uns; ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]);
+      if (!v || !v.input) return;
+      const geo = stairGeometry(v.input, { rise: v.rise });
+      if (!geo) return;
+      const ring = geo.footprint.map(([x, y]) => [x - shift.x - off.x, y - shift.y - off.y]);
+      poly(ring);
+      ctx.fillStyle = v.ok ? 'rgba(37, 110, 67, 0.25)' : 'rgba(168, 50, 42, 0.18)'; ctx.fill();
+      ctx.strokeStyle = v.ok ? '#256e43' : '#a8322a'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.lineWidth = 1;
+      for (const f of geo.flights) for (const t of f.treads) { poly(t.poly.map(([x, y]) => [x - shift.x - off.x, y - shift.y - off.y])); ctx.stroke(); }
+    });
+    const F = floorAt(k);
+    for (const vd of (F.marks && F.marks.voids) || []) {
+      poly(rectPts(vd));
+      ctx.strokeStyle = '#256e43'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]);
     }
   }
   /** An opening in an angled wall: the gap, then a door's leaf(s) and swing arc or a window's two glass lines, turned with the wall. */
