@@ -3,7 +3,8 @@
  * Duplicate / Export / Import / Delete), the "New project" dialog (empty lot, copy of House 98, or a sketch → the
  * import dialog in ./import/wizard.js, loaded on first use), the draft ↔ fixed card of the Structure guide and the hint shown on an
  * empty plan. Storage and switching are done by core/projects.js (`app.projects`); nothing here uses alert / confirm /
- * window.open, and files go through exporter.js `saveFile`.
+ * window.open, and files go through exporter.js `saveFile`. With a collaboration backend (src/collab/online.js) the menu
+ * also lists online projects (owned by me / shared with me, role, who is in it) and offers Share… / History….
  */
 import { h, setKids } from './dom.js';
 import { icon } from './icons.js';

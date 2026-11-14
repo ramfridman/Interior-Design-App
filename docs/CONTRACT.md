@@ -1286,11 +1286,16 @@ op group), `await room.getUnderlay()` → `{ id, type, data }`, `room.listVersio
 `versions`, `version:<id>`, `asset:underlay`. No timers: everything happens on a message. The log keeps the last 500
 groups; a client further behind gets the doc.
 
-### REST (dev server; the Worker exposes the same) — identity from the Access header (dev: `?as=` or `X-Dev-User`)
+### REST (dev server; the Worker exposes the same) — identity from Access (dev server: `?as=` or `X-Dev-User`)
 `GET /api/health` → `{ ok, user }` · `GET /api/projects` → summaries the user is a member of ·
 `POST /api/projects` `{ record }` → `{ id }` (creator = owner) · `GET /api/projects/:id` → record ·
 `DELETE /api/projects/:id` (owner) · `GET|PUT /api/projects/:id/members` `{ [email]: role }` (owner) ·
 `GET|PUT /api/projects/:id/underlay` (picture, ≤ 4 MB; PUT = editor) · WebSocket `GET /api/rooms/:id`.
+Additions (both hosts): list summaries carry `people: [{ email, name, color, role }]` (who is in the room now) ·
+`GET /api/projects/:id/versions/:vid` (any member) → `{ ok, id, items, runs, changes: { total, byType: { [keyType]:
+{ added, removed, changed } } } }` = what restoring that point would change (`src/collab/version-summary.js`).
+Errors: 401 no identity · 403 role / cross-site · 404 not a member (indistinguishable from "no such project") ·
+400 bad body · 413 too large · 503 (Worker) Access not configured — the probe then treats the host as having no backend.
 
 ### Files and hooks
 * `src/collab/ops.js` — doc, ops, validation, the room's rules (pure). `room.js` — the room. `client.js` — the client
@@ -1298,8 +1303,23 @@ groups; a client further behind gets the doc.
   (`@z` drawing order, remote apply with the store's events, plan-engine intents, soft locks, `openDoc(doc)`).
   `online.js` — backend probe, `projects.openOnline(id)` / `projects.putOnline()`, `?online=<id>` in the address opens a room.
   `presence.js` — presence and the collaboration UI (status bar cell, people in the top bar, 2D pointers / selections /
-  locks, 3D selection boxes, temporary "Put online" button). `api/health` — static `{ ok: false }` so the probe never
-  fails on a static host (copied by `dev/build-site.mjs`).
+  locks, 3D selection boxes, the "Share" button). `api/health` — static `{ ok: false }` so the probe never
+  fails on a static host (copied by `dev/build-site.mjs`). The probe's 1.5 s timeout covers only the wait for the
+  answer's headers (a busy page may read the body later). `adapter-online.js` — the § 10 storage adapter over REST
+  (`list / get / put / remove` + `members / setMembers / versionSummary`); the controller (`app.collab`) adds `online`
+  (that adapter), `linkFor(id)`, `removeOnline(id)`, `leaveToLocal()`, `openShare()`, `openHistory()`.
+* UI (`src/ui/collab/`, loaded with the controller): `share.js` (Share dialog: put online, link, people + roles, add /
+  remove, keep a local copy), `history.js` (restore points: list, save now, summary, restore with confirmation — a
+  "Before restoring …" point is saved first), `index.js` (view-only banner + `.app.is-viewonly` disabling editing tools,
+  restore / role / removal notices). Styles: `src/styles/collab.css`. Project menu (`src/ui/projects.js`): "On this
+  device" / "Online · owned by me" / "Online · shared with me" (role, who is in it), Share…, History…, Delete online
+  project… (owner) / Leave this online project — only when a backend answered.
+* Cloudflare host (`server/`, see `server/README.md`): one Worker serving `dist/site` (static assets with `_headers`) and
+  `/api/*`; `ProjectRoom` Durable Object per project wrapping `room.js` (SQLite storage through `{ get, put, delete }`,
+  values split into ≤ 512 K-character pieces; WebSocket Hibernation API, sockets re-joined silently after eviction);
+  `ProjectIndex` Durable Object for owners / members / roles. Identity: the verified `Cf-Access-Jwt-Assertion` only
+  (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`); `DEV_AUTH=1` (localhost only, refused next to Access or with `PRODUCTION=1`)
+  accepts `X-Dev-User` / a `dev_user` cookie for local runs. WebSockets need a same-origin `Origin`.
 * Store (additive): `store.collab = { undo, redo, historyState, batchEnded, planIntent } | null` — set by the bridge;
   `commit()` / `cancel()` call `batchEnded()`; `undo()` / `redo()` / `historyState()` delegate while it is set.
   `normalizeItem` is exported. Plan engine: `bindPlanHost({ …, intent(name, args) })` — each successful top-level
@@ -1310,4 +1330,6 @@ groups; a client further behind gets the doc.
   work on it (export / duplicate = a local copy).
 * Events: remote changes emit the usual store events; `'plan'` and `'carpentry'` carry `reason: 'remote'` (or `'phase'`).
 * Tests: `node tests/collab.test.mjs` (Node; real-store replicas in worker threads), `node tests/collab.browser.test.mjs`
-  (two browsers + a viewer on `dev/collab-server.mjs`).
+  (two browsers + a viewer on `dev/collab-server.mjs`; the scenario lives in `tests/collab-scenario.mjs`),
+  `node tests/collab.worker.test.mjs` (JWT / storage / hibernation unit tests, then the same scenario, REST roles, room
+  isolation and a runtime restart under `wrangler dev`; needs `npm ci --prefix server` once).
