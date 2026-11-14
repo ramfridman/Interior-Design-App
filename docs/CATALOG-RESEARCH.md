@@ -204,3 +204,33 @@ Four shops the earlier passes could not reach. Discovery only; nothing was added
 | Kastiel | none found | — | — | — | a 2017 press article reports the high-end operation closing; current status unconfirmed |
 | KualaStyle | none found | — | — | — | only an unverified promotional page; existence unverified |
 | Million Chairs | million-kisot.co.il (from a directory listing, not confirmed by the shop) | no — HTTP 403 twice, stopped | — | — | blocks automated reading; add by hand with "Add your own product" |
+
+## Price-on-request suppliers (14 Nov 2026)
+
+Owner decision: suppliers that publish no price may be listed with `price: null`, `priceOnRequest: true` and tag `price-on-request`; a published dimension set is still required. Catalogue before 1,264, after 1,410 (+146; 137 of them price on request, 9 with a shekel price shown on the page). `loadCatalog()` loads with 0 warnings and 0 duplicate ids; 1,273 priced products sum to 2,086,492.18 and 137 price-on-request products are outside any total. Marked blocks `>>> <supplier> (price-on-request pass 2026-11-14)` in lighting-decor.js, kitchen-bath-appliances.js, finishes.js and outdoor-living.js. 16 random new URLs were re-opened at the end: all HTTP 200, shekel prices still shown. Per-supplier detail is in the matching `*.sources.md`. No `boutique` and no `top-rated` mark was set on any of these products.
+
+### Added (supplier, evidence, count)
+| Supplier | Count | Evidence and how size was obtained |
+|---|---|---|
+| Karney Tchelet (karney.co.il) | 31 | Official sitemaps (33 shop + 723 catalogue pages) all opened; no page shows a price. Size = the page's "מידות" field, round lamps only with diameter (ק) and height (ג) (letter codes checked against the same lamp's full-word page and Astro sheets); 4 Astro lamps (Cabin wall, Messina, Enna Wall, Enna Desk) take W x H x D from the Astro sheet PDF the page links. Brands Louis Poulsen 9, Moooi 6, Flos 4, Vibia 3, Bover 1, Modular 4, Astro 4. Not `boutique`: about page says "קרני תכלת, בית לגופי תאורה בינלאומיים ..." and "המשווקת הרשמית בישראל של כמה מותגי על" (official distributor). |
+| Aqua Creations (aquagallery.com, the studio's own shop) | 54 | USD prices only (no conversion), so price on request. Size from each page's "Dimensions" block (H x Ø or labelled H / L / W / D only). Not `boutique` (page: "handmade to order in our studio"). |
+| Hamat (hamat.co.il) | 41 | No price on any product page. Size read from the dimensions drawing image linked on each page: 7 wall-hung toilets, 22 bathroom basins, 12 kitchen sinks (stainless sinks: bowl depth used as height, said in the description). |
+| Golan Westline, Smeg (golan-westline.co.il) | 8 | 6 priced (shekel price on the page), 2 with no price on the page; size from smeg.com/ie/products/<same model> ("Dimensions of the product"). |
+| Tambour (tambour.co.il) | 9 | Wall-paint colours from the official hue pages (hex, LRV); no price on the page; finish type `wall-finish` kind `paint` already exists. |
+| SCAB (scab.co.il) | 3 | Bondi chair stone / grey / white: size printed on the page, price 400 shown ("from", regular fabric). |
+
+### Skipped (reason)
+* **Waxman (waxman.co.il, shop.waxman.co.il)**: product pages give no size (only catalogue / 2D / 3D downloads, some for registered users); the online shop shows prices but no size. Nothing added.
+* **Hezibank**: the category pages show brand images only, no product pages, no size, no price.
+* **Alony**: product pages give labelled length and width, but no height except three bathtubs / basins with a "thickness" (T-EDGE 54/37 states width 36 and 37 in two places); no price. Nothing added.
+* **Negev Group (negev-group.co.il)**: prices are shown, sizes only inside product names ("אורך 58 סמ", "38/38") without height; nothing added.
+* **Nirlat**: colour pages publish no hex / RGB, so no paint colours could be added honestly.
+* **Smeg at Golan**: SIM1844DS, SO4201, SO4202, STL362DQ, STFABCR3 (smeg.com page 404), CPR215B (no matching 3D type).
+* **SCAB**: all other products (no complete size on the page).
+* **Karney / Aqua / Hamat items** with ambiguous or missing numbers are listed in the sources files.
+
+### Blocked
+None. All sites answered the default client; one set of curl calls to waxman.co.il was refused by the session's permission layer and was repeated with the page-reading tool instead.
+
+### Schema notes
+Price-on-request tiles do not have a `priceDate`. The Tambour colours use `priceUnit: m2`. Pendant `h` follows the shade + 60 cm cord convention (Karney, Aqua). Aqua colour is a page selector, so `color` is a neutral placeholder. Hamat stainless kitchen sinks use bowl depth as `h`.

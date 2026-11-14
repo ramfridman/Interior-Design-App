@@ -51,3 +51,6 @@ Caveats and decisions:
 * Colours (hex) for Tollman's DOT are sampled from the product photo (median of the central, non-white pixels) and tagged `hex-estimated`; Argaman4U and Rocking Chair colours are estimates from the name and typical finish (stated in the description).
 * Aviv Hegia: only the Nimrod bench has one fixed size; its other items are made to measure with a size-dependent price and were skipped. The price (302) is read from the page's JSON-LD Offer; the visible price block is script-rendered.
 * Skipped: SCAB (scab.co.il, 144 products) - prices are "from" prices with variants and the size table is empty in the page text, so no dimensions; Rocking Chair hammock chairs (hanging height not published); Argaman4U Napoleon Legend 365 (depth not readable); Canopia Feria and Sanremo (no dimensions block in the text).
+
+## Price-on-request pass (14 Nov 2026): SCAB
+Block `>>> scab-1`: 3 Bondi garden chairs (stone / grey / white) from scab.co.il, price 400 shown as "החל מ" (regular textilene; double fabric +50), size from the page text "רוחב: 57 ס"מ | עומק: 60 ס"מ | גובה: 90 ס"מ". The other SCAB pages have no complete size (grills / tables give one or two numbers, sofa sets none), so they stay out.
