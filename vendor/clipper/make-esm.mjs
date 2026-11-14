@@ -59,6 +59,20 @@ once(`	if (typeof Number.toInteger === "undefined")
 `, `	// [vendored ES module] removed: a global write \`Number.toInteger = null\` (only read on a Firefox-only branch).
 `);
 
+// The full licence texts travel inside the shipped file (Boost: "must be included in all copies ... in source form";
+// JSBN: "all redistributions must retain an intact copy of this copyright notice"), as // comments.
+const here = new URL('.', import.meta.url);
+const asComment = (file) => readFileSync(new URL(file, here), 'utf8').replace(/\r\n/g, '\n').trimEnd().split('\n').map((l) => ('// ' + l).trimEnd()).join('\n');
+s = `// Javascript Clipper 6.4.2 (clipper-lib 6.4.2 from the npm registry) as an ES module for E7 House Designer.
+// Changes from the published file: see vendor/clipper/README.md (made by vendor/clipper/make-esm.mjs).
+//
+// ---- Licence of Clipper (Angus Johnson) and its Javascript translation (Timo): vendor/clipper/LICENSE-Boost.txt
+${asComment('LICENSE-Boost.txt')}
+//
+// ---- Licence of the JSBN big-integer code it contains (Tom Wu): vendor/clipper/LICENSE-jsbn.txt
+${asComment('LICENSE-jsbn.txt')}
+` + s;
+
 const tail = s.lastIndexOf('})();');
 if (tail < 0 || s.slice(tail + 5).trim() !== '') throw new Error('unexpected end of file');
 s = s.slice(0, tail) + `	return ClipperLib;

@@ -1333,3 +1333,81 @@ Errors: 401 no identity · 403 role / cross-site · 404 not a member (indistingu
   (two browsers + a viewer on `dev/collab-server.mjs`; the scenario lives in `tests/collab-scenario.mjs`),
   `node tests/collab.worker.test.mjs` (JWT / storage / hibernation unit tests, then the same scenario, REST roles, room
   isolation and a runtime restart under `wrangler dev`; needs `npm ci --prefix server` once).
+
+## 14. Polygon kernel and slant geometry (`src/core/polykernel.js`, `src/core/slant-geom.js`) — core, pure logic
+
+Stage A0 of `docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md`. New files only; **nothing in the app imports them yet** (A1 wires
+them into the mixed derive), so the initial load is unchanged. Library: `vendor/clipper/clipper.js` (Clipper 6.4.2,
+Boost licence; ES module, pure ASCII, no `eval`, no globals — see `vendor/clipper/README.md`). Tests:
+`node tests/polykernel.test.mjs`; shared test houses (Wedge, Duplex) in `tests/fixtures/houses.mjs`.
+
+### Units, precision, conventions
+* In and out: plan **centimetres** (floats). Inside, coordinates are rounded to integers of **0.01 mm** (`SCALE` = 1000
+  per cm): results are multiples of 0.001 cm, and whole-cm input comes back exactly (House 98 is reproduced bit for bit).
+  Exact fast path while |coordinate| ≤ `MAX_EXACT` = 47 453 cm (±474 m); further out it is exact but slow. A rounded
+  intersection vertex moves ≤ 0.0005 cm (area effect < 0.5 cm² per vertex on a 10 m edge).
+* **Shapes** (inputs): a ring `[[x, y], …]` (any orientation), a rect `{ x, y, w, h }`, `{ poly }` (a slant),
+  `{ polygon }` (a room), an expolygon `{ outer, holes }`, or a (nested) array of these. Every ring / rect is a solid;
+  holes exist only inside an expolygon.
+* **Results**: arrays of expolygons `{ outer, holes }`. `outer` is clockwise on screen (positive Σ x1·y2 − x2·y1) and
+  starts at min y, then min x — the engine's room-polygon convention; holes are counter-clockwise, start at min x then
+  min y, sorted by that vertex; the list is sorted by the outer start vertex (y, x), then larger area first. No
+  duplicate or collinear vertices; rings are strictly simple (regions that meet at one point are separate expolygons,
+  like the engine's 4-connected cells). Output order depends only on the geometry, not on the input order.
+
+### `polykernel.js`
+* `union(shapes)`, `difference(a, b)`, `intersection(a, b)` → expolygons; `intersectArea(a, b)` → cm².
+* `offset(shapes, delta, { join: 'miter' | 'square' | 'round', miterLimit = 2, arcTolerance = 0.25 })` → expolygons;
+  `delta` > 0 grows, < 0 shrinks (an empty result = nothing that wide: the A2 "min clear 60" test is
+  `offset(room, -30).length === 0`).
+* `area(ring)` signed (+ = clockwise on screen); `netArea(shapes)` (holes negative); `bounds(shapes)`; `rings(expolys)`;
+  `rectRing(r)`.
+* `pointInPolys(x, y, shapes)` → `1` inside, `0` outside, `-1` on a boundary (truthy).
+* `faces(solids, bbox?)` → `{ outdoor: [{ outer, holes }], rooms: [{ outer, holes, area }] }` — faces of the complement
+  of the solids inside `bbox` (default: their bounds + 100 cm). Faces touching the frame are outdoors, the others rooms.
+  Same semantics as the grid engine: pass openings as solids (they separate rooms); an enclosed courtyard is a room.
+* `normalise(ring, { hole })` — engine form: duplicates and straight collinear vertices dropped (slit spikes kept),
+  oriented and rotated as above.
+* `slitJoin(outer, holes)` — polygon with holes → the single ring with zero-width slits the app's rooms use (each hole,
+  by its first vertex (x, y), joined by a horizontal slit leftwards to the nearest upward edge). Identical to
+  `plan-edit.js` `roomPolygon` for rectilinear rooms (tested on rooms with 1–3 free-standing walls).
+* Shadow equivalence (tested): `faces(PLAN.walls + PLAN.openings)` gives House 98's 9 rooms with symmetric difference
+  0 and identical vertices; the outdoor face touches every exterior wall; "touches the outdoor face" reproduces the
+  engine's exterior class of every segment (safe room excluded). Union + faces of House 98: ≈ 1 ms in Node.
+
+### `slant-geom.js`
+A slant is `{ id, x1, y1, x2, y2, t, kind, … }` (centre line + thickness, cm). `u` = unit direction x1→x2; the
+**right-hand normal on screen** `n = (−uy, ux)` points to side `'r'` (wall running east → `'r'` is south); `at` = cm
+along the centre line from (x1, y1).
+* `slantFrame(s)` → `{ x1, y1, x2, y2, len, ux, uy, nx, ny, t, hw, angle }`; `pointAt(s, at)`, `atOf(s, x, y)`,
+  `offsetOf(s, x, y)` (signed, + = `'r'`), `sideOf(s, x, y)` → `'l' | 'r' | null`; `faceLines(s)` → `{ l, r }` (each from
+  the x1 end to the x2 end); `distToCentre(s, x, y)`; `distToWall(s, x, y)` (0 inside; uses `s.poly` when present).
+* `freePoly(s)` — square (butt) caps through the end points. `openingQuad(s, at, width)` — the gap quad through the
+  whole thickness.
+* `joinSlants(slants, rects = [])` → `[{ …slant, poly }]` in input order: the joined footprint, computed from centre
+  lines, `t` and the rects only (order-independent, idempotent; an existing `poly` is ignored).
+  `slantJoins(slants, rects)` → per slant `{ id, ends: [{ type, with }, …], fills: [rectIndex…] }` for inspection
+  (`type`: `free | mitre | bevel | multi | tee | rect | degenerate`).
+  Rules (constants `JOIN_EPS` = 1 cm, `MITRE_LIMIT` = 3):
+  - ends of different slants within 1 cm form a junction; each wall keeps the wedge between the rays from the junction
+    point to the mitre points with its neighbours, so 2, 3 or more walls tile the junction with no gap and no overlap
+    (2 walls: the classic mitre line; ≥ 3: the star of the mitre points — the design's "hull piece", without the
+    poke-out a non-convex hull would add). An outer mitre longer than 3 t (t of the thicker wall; equal t: inner angle
+    < 19.2°) is bevelled by the chord between the two face end points;
+  - an end whose centre line meets another slant's centre line within its length, stopping at most `t` short of it
+    (or overshooting by at most `t`), is cut along that centre line (T);
+  - an end whose centre ray enters a rect within the same reach is cut at the face it enters, and the part inside the
+    rect is added clipped by the rect: it reaches the far face and never pokes out (beyond the far face or the rect's
+    ends);
+  - a rect whose end face (short side) heads into a slant with its nearest corner at most the slant's `t` from the
+    near face stays a rect; a joint fill (the rect's extension along its sides to the slant's centre line, clipped to
+    the slant's length) is added to the slant's `poly` — gap-free where the design's "projection hull" leaves a notch;
+  - otherwise the end is free (square cap).
+  Shared junction points are snapped so neighbouring pieces share edges exactly after rounding (their union has no
+  hairline gaps; tested on 1000 random cases, and by rotation invariance of a 4-slant room within 1 cm²).
+
+### Limits (A0)
+* A slant shorter than 1 cm keeps its free footprint and takes part in no join. Slant ends more than 1 cm apart are not a
+  junction (the editor / import must snap them). A T join and a rect-end joint fill need at least 5° between the walls.
+* Walls overlapping along their length (parallel, collinear) are not merged into one wall; their union is still exact.
+* Curved walls are polylines of slants (A6). Openings across a junction or in a joint fill are not supported (§ 5).

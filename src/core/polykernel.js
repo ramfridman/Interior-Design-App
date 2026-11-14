@@ -75,7 +75,7 @@ export const rectRing = (r) => [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + 
 function list(shapes) {
   if (shapes == null) return [];
   if (isRing(shapes) || !Array.isArray(shapes)) return [shapes];
-  return shapes;
+  return shapes.flatMap((s) => (Array.isArray(s) && !isRing(s) ? list(s) : [s]));     // nested lists (e.g. results) flatten
 }
 function ringOf(sh) {
   if (isRing(sh)) return sh;

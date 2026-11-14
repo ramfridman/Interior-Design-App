@@ -15,8 +15,8 @@
  *   1. End meets end(s): ends of different slants within JOIN_EPS (1 cm) form a junction at C (their mean point).
  *      The walls are sorted by direction around C; between two neighbours the facing face lines meet at Q (the mitre
  *      point). Each wall keeps the wedge between the rays C→Q on its two sides ("pinwheel"), so the walls tile the
- *      junction exactly — no gap, no overlap — for 2, 3 or more walls. For two walls of equal thickness this is the
- *      classic mitre along the bisector; for three or more it covers exactly the star polygon of the Q points (the
+ *      junction exactly — no gap, no overlap — for 2, 3 or more walls. For two walls the cut is the one line through both
+ *      mitre points (the classic mitre; along the bisector when t is equal); for three or more it covers exactly the star polygon of the Q points (the
  *      design's "hull joint piece" when that is convex; when it is not, the hull would poke out and the pinwheel does
  *      not). On an outer (reflex, > 180°) side the mitre is kept while |CQ| ≤ MITRE_LIMIT · t (3 t, t of the thicker
  *      wall), otherwise that corner is bevelled: cut by the chord between the two walls' face end points, the split
@@ -179,10 +179,10 @@ function analyse(slants, rectsIn) {
 
 function junction(members) {
   const pts = members.map((e) => [e.x, e.y]).sort((p, q) => p[0] - q[0] || p[1] - q[1]);
-  const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length, cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+  const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length, cy = pts.reduce((s, p) => s + p[1], 0) / pts.length, C = [cx, cy];
   const M = members.map((e) => ({ e, ang: Math.atan2(e.dy, e.dx), hw: e.a.f.hw, t: e.a.f.t }));
   M.sort((p, q) => p.ang - q.ang || p.hw - q.hw || cmpStr(p.e.a.key, q.e.a.key) || p.e.k - q.e.k);
-  const k = M.length, rays = new Array(k), bevels = new Array(k).fill(null);
+  const k = M.length, rays = new Array(k), cuts = new Array(k), bevels = new Array(k).fill(null);
   for (let g = 0; g < k; g++) {
     const m = M[g], q = M[(g + 1) % k];
     let theta = q.ang - m.ang + (g === k - 1 ? TAU : 0);
@@ -196,24 +196,37 @@ function junction(members) {
       Q = [(EA[0] + EB[0]) / 2, (EA[1] + EB[1]) / 2];
       bevels[g] = { EA, EB };
     }
-    let rho = Q && Math.hypot(Q[0] - cx, Q[1] - cy) > 1e-9 ? Math.atan2(Q[1] - cy, Q[0] - cx) - m.ang : theta / 2;
+    let rho = Q && Math.hypot(Q[0] - cx, Q[1] - cy) > 1e-9 ? Math.atan2(Q[1] - cy, Q[0] - cx) - m.ang : NaN;
     rho = ((rho % TAU) + TAU) % TAU;
-    if (!(rho >= 0 && rho <= theta)) rho = theta / 2;
+    if (!(rho >= 0 && rho <= theta)) { rho = theta / 2; Q = null; }       // degenerate: split along the bisector
     rays[g] = m.ang + rho;
+    cuts[g] = Q;
   }
   const anyBevel = bevels.some(Boolean);
+  const keys = [C, ...cuts.filter(Boolean), ...bevels.filter(Boolean).flatMap((b) => [b.EA, b.EB])];
   for (let g = 0; g < k; g++) {
-    const m = M[g], start = rays[(g + k - 1) % k];
-    let span = (((rays[g] - start) % TAU) + TAU) % TAU;
-    if (span === 0 && k === 1) span = TAU;
-    const mid = start + span / 2, wx = cx + Math.cos(mid), wy = cy + Math.sin(mid);
-    const H0 = hpToward(cx, cy, Math.cos(start), Math.sin(start), wx, wy), H1 = hpToward(cx, cy, Math.cos(rays[g]), Math.sin(rays[g]), wx, wy);
+    const m = M[g], gp = (g + k - 1) % k, far = [m.e.fx, m.e.fy];
     const extra = [];
-    for (const b of [bevels[(g + k - 1) % k], bevels[g]]) if (b) extra.push(hpToward(b.EA[0], b.EA[1], b.EB[0] - b.EA[0], b.EB[1] - b.EA[1], m.e.fx, m.e.fy));
-    const alts = span <= Math.PI + 1e-12 ? [[H0, H1, ...extra]] : [[H0, ...extra], [H1, ...extra]];
+    for (const b of [bevels[gp], bevels[g]]) if (b) extra.push(hpToward(b.EA[0], b.EA[1], b.EB[0] - b.EA[0], b.EB[1] - b.EA[1], far[0], far[1]));
+    let alts = null;
+    const A = cuts[gp], B = cuts[g];
+    if (k === 2 && A && B && Math.hypot(A[0] - B[0], A[1] - B[1]) > 1e-6) {
+      // two walls: one cut line through both mitre (or bevel-split) points — the classic mitre, also for unequal t
+      const H = hpToward(A[0], A[1], B[0] - A[0], B[1] - A[1], far[0], far[1]);
+      if ((far[0] - A[0]) * H.nx + (far[1] - A[1]) * H.ny > 1e-9) alts = [[H, ...extra]];
+    }
+    if (!alts) {
+      // pinwheel: the wedge between the rays C→cut on both sides; rays pass exactly through C and the cut points
+      const start = rays[gp], span = (((rays[g] - start) % TAU) + TAU) % TAU || TAU;
+      const mid = start + span / 2, wx = cx + Math.cos(mid), wy = cy + Math.sin(mid);
+      const line = (Q, ang) => (Q ? [Q[0] - cx, Q[1] - cy] : [Math.cos(ang), Math.sin(ang)]);
+      const [ax, ay] = line(A, start), [bx, by] = line(B, rays[g]);
+      const H0 = hpToward(cx, cy, ax, ay, wx, wy), H1 = hpToward(cx, cy, bx, by, wx, wy);
+      alts = span <= Math.PI + 1e-12 ? [[H0, H1, ...extra]] : [[H0, ...extra], [H1, ...extra]];
+    }
     const others = M.filter((o) => o !== m).map((o) => o.e.a.i).sort((p, q) => p - q);
     const type = k === 2 ? (anyBevel ? 'bevel' : 'mitre') : 'multi';
-    m.e.a.ends[m.e.k] = { type, with: others, alts, ...(k > 2 && anyBevel ? { bevel: true } : {}) };
+    m.e.a.ends[m.e.k] = { type, with: others, alts, keys, ...(k > 2 && anyBevel ? { bevel: true } : {}) };
   }
 }
 
@@ -308,7 +321,15 @@ function polyOf(a, tmax) {
   for (const c0 of e0.alts) for (const c1 of e1.alts) pieces.push(clipAll(strip, [...c0, ...c1]));
   for (const [end, other] of [[e0, e1], [e1, e0]]) {
     if (end.type !== 'rect') continue;
-    for (const c of other.alts) pieces.push(clipAll(strip, [...rectHps(end.rect), ...c]));
+    // the part inside the rect; its near-face bound is moved 0.01 cm outwards so it overlaps the body piece
+    const H = end.alts[0][0], inside = rectHps(end.rect).map((q) => (q.nx === -H.nx && q.ny === -H.ny ? hp(q.px - q.nx * 0.01, q.py - q.ny * 0.01, q.nx, q.ny) : q));
+    for (const c of other.alts) pieces.push(clipAll(strip, [...inside, ...c]));
+  }
+  // shared junction points: snap the clipped copies to the one computed point, so neighbouring walls share their
+  // cut edges exactly (bit for bit) and their union has no hairline gap after rounding to the kernel grid
+  const keys = [...(e0.keys || []), ...(e1.keys || [])];
+  if (keys.length) for (const p of pieces) for (let i = 0; i < p.length; i++) {
+    for (const q of keys) if (Math.abs(p[i][0] - q[0]) < 1e-6 && Math.abs(p[i][1] - q[1]) < 1e-6) { p[i] = q; break; }
   }
   for (const fl of a.fills) pieces.push(fl.poly);
   const solid = pieces.filter((p) => p.length >= 3 && Math.abs(area(p)) > 1e-6);
