@@ -174,4 +174,13 @@ they reload; if the collaboration protocol changed, the app asks them to reload.
 * **Product data** (names, prices, links) is a November 2026 snapshot and will drift.
 * **Regulations panel** is a design aid, not a permit review — it says so.
 * **Licences:** Three.js (MIT), the fonts (OFL) and the other bundled libraries' licence files are in `vendor/`.
+* **A GPL-licensed part (the DWG reader).** To open AutoCAD `.dwg` files, the hosted app includes GNU LibreDWG compiled
+  to WebAssembly (the npm package `@mlightcad/libredwg-web` 0.8.8, in `vendor/dwg/`), which is licensed under the
+  **GNU General Public License, version 3** (text: `vendor/dwg/LICENSE-GPL-3.0.txt`, also at
+  https://www.gnu.org/licenses/gpl-3.0.html; its source: https://github.com/mlightcad/libredwg-web, from GNU LibreDWG,
+  https://www.gnu.org/software/libredwg/). In plain words: when you make the app available to other people, this part
+  comes under that licence's terms. The app's own source is already in your repository; keep the licence file and the
+  source link (`vendor/dwg/README.md`) with the published files — both builds ship them. This is the licence's name and
+  where to read it, not legal advice; if you want certainty about what distribution means for you, read the text or
+  ask someone qualified. The rest of the app does not depend on it: DXF, PDF and pictures import without it.
 * **Privacy:** everyone you invite sees the layout of your home in the projects you share with them.
