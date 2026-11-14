@@ -6,6 +6,8 @@ run together under Cloudflare's own local runtime (`wrangler dev`) and pass the 
 Cloudflare account and takes about 30 minutes of clicking, following section 4 below. Steps that I could not try because
 they need your account are listed in section 9.
 
+Note (14 Nov 2026): the repository now has a `main` branch (created at the version 23 commit). Use `main` as the production branch when connecting the repository to Cloudflare, and make it the default branch in GitHub → Settings → Branches.
+
 ## Owner's decisions (13 Nov 2026)
 
 | Question | Decision |

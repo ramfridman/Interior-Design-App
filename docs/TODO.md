@@ -109,7 +109,7 @@ Stairs tool in the plan (straight / L / U, move, turn, resize, opening above fol
 - [ ] Performance check on a real graphics card (only a software renderer has been measured).
 - [x] Catalogue gaps, first pass (878 products): added 8 linear pendants, 7 fountains, 2 stepping stones, 1 palm, 6 clothes racks, 4 composters — all read from the seller's page with price and size.
 - [ ] Catalogue gaps still open (no Israeli page found with both a price and published dimensions): bird baths, composite (WPC) decking, concrete pavers, heat-pump water heaters, date palms / large specimen palms, rotary clotheslines. Details in `docs/CATALOG-RESEARCH.md`.
-- [ ] Merge branch `ccr-70c095fe-io3e41` into the default branch (pull request).
+- [x] Main branch (14 Nov 2026, on the owner's request): the repository only had the working branch, which was also its default branch, so there was nothing to merge into — `main` was created at the same commit (version 23). To do by the owner in GitHub → Settings → Branches: make `main` the default branch. Later work continues on the working branch and goes to `main` by pull request when asked.
 
 ## Later
 - [ ] **Public hosting, invite-only** — Cloudflare Pages + Cloudflare Access, free subdomain, hidden from search engines. Full plan and the owner's decisions: `docs/HOSTING-PLAN.md`.
