@@ -18,13 +18,15 @@
  *      faces the outside along at least half of one side is exterior.
  */
 import { segmentsOf, penStats, dominantAngle, DEG, wMedian, penKey, affApply } from './prep.js';
+import { findGaps, outsideMask, classifyKinds } from './gaps.js';
+import { symbolContext, classifyGaps } from './openings.js';
 
-const DEFAULTS = { snap: 5, minThickness: 7, maxThickness: 40, maxOpening: 400, minOpening: 25, mergeTol: 0.6 };
+const DEFAULTS = { snap: 5, minThickness: 7, maxThickness: 40, maxOpening: 400, minOpening: 25, mergeTol: 0.6, maxPassage: 120 };
 
 /** Score pens as wall outlines at a given scale. Returns pens sorted by score with { score, thickness }. */
-export function scoreWallPens(prims, cmPerUnit, opts = {}) {
+export function scoreWallPens(prims, cmPerUnit, opts = {}, pre = null) {
   const o = { ...DEFAULTS, ...opts };
-  const stats = penStats(segmentsOf(prims));
+  const stats = (pre || penStats(segmentsOf(prims))).map((s) => ({ ...s }));
   const maxLw = Math.max(1e-9, ...stats.map((s) => s.lw));
   for (const s of stats) {
     let inWin = 0, tot = 0;
@@ -103,8 +105,12 @@ export function detectWalls(prims, scale, options = {}) {
 
   // ---- 3. wall-pen segments in the frame; non-orthogonal / curved pieces are reported ----
   const H = [], V = [], unsupported = [];
+  const clip = o.clip;
+  const inClip = (x, y) => !clip || (x >= clip.x && x <= clip.x + clip.w && y >= clip.y && y <= clip.y + clip.h);
+  if (clip) for (const f of fills) f.polys = f.polys.filter((p) => p.pts.every((q) => inClip(q[0], q[1])));
   for (const s of wallSegs) {
     const [ax, ay] = affApply(toFrame, s.x1, s.y1), [bx, by] = affApply(toFrame, s.x2, s.y2);
+    if (!inClip(ax, ay) || !inClip(bx, by)) continue;
     const dx = Math.abs(bx - ax), dy = Math.abs(by - ay), len = Math.hypot(dx, dy);
     if (len < 0.2) continue;
     if (!s.curved && dy <= Math.max(0.3, len * Math.tan(1 * DEG))) H.push({ k: (ay + by) / 2, a: Math.min(ax, bx), b: Math.max(ax, bx) });
@@ -158,82 +164,27 @@ export function detectWalls(prims, scale, options = {}) {
     }
   }
 
-  // ---- 4. decomposition ----
-  const S = (i, j) => i >= 0 && j >= 0 && i < nx && j < ny && solid[j * nx + i] === 1;
-  // run lengths for tie-breaks
-  const label = new Int8Array(nx * ny); // 1 = H, 2 = V
-  const runH = new Float64Array(nx * ny), runV = new Float64Array(nx * ny);
-  for (let j = 0; j < ny; j++) for (let i = 0; i < nx;) {
-    if (!S(i, j)) { i++; continue; }
-    let e = i; while (S(e, j)) e++;
-    for (let t = i; t < e; t++) runH[j * nx + t] = xs[e] - xs[i];
-    i = e;
+  // ---- 4. snap to a uniform grid (cell centres sampled from the parity grid), then decompose ----
+  let ox = Infinity, oy = Infinity, ex = -Infinity, ey = -Infinity;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) if (solid[j * nx + i]) {
+    ox = Math.min(ox, xs[i]); oy = Math.min(oy, ys[j]); ex = Math.max(ex, xs[i + 1]); ey = Math.max(ey, ys[j + 1]);
   }
-  for (let i = 0; i < nx; i++) for (let j = 0; j < ny;) {
-    if (!S(i, j)) { j++; continue; }
-    let e = j; while (S(i, e)) e++;
-    for (let t = j; t < e; t++) runV[t * nx + i] = ys[e] - ys[j];
-    j = e;
+  const step = o.snap;
+  const gx = Math.max(0, Math.round((ex - ox) / step)), gy = Math.max(0, Math.round((ey - oy) / step));
+  const U = new Uint8Array(gx * gy);
+  {
+    const colOf = new Int32Array(gx), rowOf = new Int32Array(gy);
+    for (let i = 0; i < gx; i++) colOf[i] = cellIdx(xs, ox + (i + 0.5) * step);
+    for (let j = 0; j < gy; j++) rowOf[j] = cellIdx(ys, oy + (j + 0.5) * step);
+    for (let j = 0; j < gy; j++) for (let i = 0; i < gx; i++) {
+      const a = colOf[i], b = rowOf[j];
+      if (a >= 0 && b >= 0 && a < nx && b < ny && solid[b * nx + a]) U[j * gx + i] = 1;
+    }
   }
-  // band-level "through": a cell is crossed horizontally when the solid run continues on both sides of its
-  // whole vertical band (the column run through it), so extra grid lines inside a wall do not change the result.
-  const bandRow = (i, j) => { let a = j, b = j; while (S(i, a - 1)) a--; while (S(i, b + 1)) b++; return [a, b]; };
-  const bandCol = (i, j) => { let a = i, b = i; while (S(a - 1, j)) a--; while (S(b + 1, j)) b++; return [a, b]; };
-  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-    if (!S(i, j)) continue;
-    const l = S(i - 1, j), r = S(i + 1, j), u = S(i, j - 1), d = S(i, j + 1);
-    let hThrough = l && r, vThrough = u && d;
-    // thick blobs: decide by the longer run
-    let lab;
-    if (hThrough && !vThrough) lab = 1;
-    else if (vThrough && !hThrough) lab = 2;
-    else if (hThrough && vThrough) {
-      // inside a wall band (a cell in the middle of a thick wall) or a cross: use the band extents
-      const [ca, cb] = bandCol(i, j), [ra, rb] = bandRow(i, j);
-      const lenH = xs[cb + 1] - xs[ca], lenV = ys[rb + 1] - ys[ra];
-      lab = lenH >= lenV ? 1 : 2;
-    } else if ((l || r) && !(u || d)) lab = 1;
-    else if ((u || d) && !(l || r)) lab = 2;
-    else if (l || r) {
-      // corner (one horizontal and one vertical neighbour): the horizontal run takes it, unless the cell is the end of
-      // a vertical band that continues (thicker rows) — keep it simple and deterministic: horizontal
-      lab = 1;
-    } else lab = runH[j * nx + i] >= runV[j * nx + i] ? 1 : 2;
-    label[j * nx + i] = lab;
-  }
-  // make labels consistent across a wall's thickness: a row band of a horizontal run takes the majority label
-  const rects = [];
-  const used = new Uint8Array(nx * ny);
-  // horizontal: maximal runs per row, then stack identical runs
-  for (let j = 0; j < ny; j++) for (let i = 0; i < nx;) {
-    const id = j * nx + i;
-    if (label[id] !== 1 || used[id]) { i++; continue; }
-    let e = i; while (e < nx && label[j * nx + e] === 1 && !used[j * nx + e]) e++;
-    let jj = j + 1;
-    const rowOk = (r) => { if (r >= ny) return false; if (i > 0 && label[r * nx + i - 1] === 1 && !used[r * nx + i - 1]) return false; for (let t = i; t < e; t++) if (label[r * nx + t] !== 1 || used[r * nx + t]) return false; return !(e < nx && label[r * nx + e] === 1 && !used[r * nx + e]); };
-    while (rowOk(jj)) jj++;
-    for (let r = j; r < jj; r++) for (let t = i; t < e; t++) used[r * nx + t] = 1;
-    rects.push({ x0: xs[i], x1: xs[e], y0: ys[j], y1: ys[jj], o: 'h' });
-    i = e;
-  }
-  for (let i = 0; i < nx; i++) for (let j = 0; j < ny;) {
-    const id = j * nx + i;
-    if (label[id] !== 2 || used[id]) { j++; continue; }
-    let e = j; while (e < ny && label[e * nx + i] === 2 && !used[e * nx + i]) e++;
-    let ii = i + 1;
-    const colOk = (cc) => { if (cc >= nx) return false; if (j > 0 && label[(j - 1) * nx + cc] === 2 && !used[(j - 1) * nx + cc]) return false; for (let t = j; t < e; t++) if (label[t * nx + cc] !== 2 || used[t * nx + cc]) return false; return !(e < ny && label[e * nx + cc] === 2 && !used[e * nx + cc]); };
-    while (colOk(ii)) ii++;
-    for (let cc = i; cc < ii; cc++) for (let t = j; t < e; t++) used[t * nx + cc] = 1;
-    rects.push({ x0: xs[i], x1: xs[ii], y0: ys[j], y1: ys[e], o: 'v' });
-    j = e;
-  }
-
-  // ---- snapping (relative to the north-west corner of all solid cells) ----
-  const ox = Math.min(...rects.map((r) => r.x0)), oy = Math.min(...rects.map((r) => r.y0));
-  const sn5 = (v, org) => org + Math.round((v - org) / o.snap) * o.snap;
-  let snapped = rects.map((r) => ({ ...r, x0: sn5(r.x0, ox), x1: sn5(r.x1, ox), y0: sn5(r.y0, oy), y1: sn5(r.y1, oy) }))
-    .filter((r) => r.x1 > r.x0 && r.y1 > r.y0);
-  snapped = mergeRects(snapped);
+  const rects = decompose(U, gx, gy).map((r) => ({
+    x0: ox + r.i0 * step, x1: ox + r.i1 * step, y0: oy + r.j0 * step, y1: oy + r.j1 * step, o: r.o,
+  }));
+  const snapped = rects;
 
   // ---- 5. thickness filter ----
   const walls = [], rejected = [];
@@ -251,26 +202,68 @@ export function detectWalls(prims, scale, options = {}) {
     if (disagree > 0.02 * area) warnings.push({ code: 'open-outline', text: `Some wall outlines are not closed (${Math.round(disagree / 1e4 * 10) / 10} m² ambiguous); those parts were left out.`, where: null });
   }
 
-  // ---- 6. exterior / interior ----
-  const gaps = findGaps(walls, o);
-  const outside = outsideMask(walls, gaps, o);
-  for (const w of walls) {
-    w.kind = facesOutside(w, outside) ? 'exterior' : 'interior';
-    w.thickness = Math.min(w.w, w.h);
+  // ---- several drawings on one sheet (plan + site plan, two variants…): group walls, keep one ----
+  const drawings = groupDrawings(walls, o.maxOpening);
+  let chosen = 0;
+  if (drawings.length > 1 && !o.clip) {
+    // re-run on the chosen drawing alone, so its grid snapping starts at its own corner
+    chosen = Math.min(drawings.length - 1, Math.max(0, o.drawing ?? 0));
+    const b = drawings[chosen].bbox, m = 60;
+    const res = detectWalls(prims, scale, { ...options, angle, clip: { x: b.x - m, y: b.y - m, w: b.w + 2 * m, h: b.h + 2 * m } });
+    res.warnings.unshift({ code: 'several-drawings', text: `The sheet holds ${drawings.length} separate wall drawings; drawing ${chosen + 1} (${drawings[chosen].walls.length} walls, the ${chosen ? 'number ' + (chosen + 1) + ' by' : 'largest by'} wall area) was used. Choose another with the "drawing" option.`, where: { ...b, frame: 'drawing-cm' } });
+    res.drawings = drawings.map((d, i) => ({ index: i, bbox: d.bbox, walls: d.walls.length, area: Math.round(d.area) }));
+    res.drawing = chosen;
+    return res;
   }
+
+  // ---- 6. exterior / interior ----
+  // only gaps that hold a door / window symbol, or short collinear passages, close the envelope: a wide empty gap
+  // (an open porch side) must let the outside in
+  const gaps = findGaps(walls, o);
+  const frame0 = { matrix: toFrame, angle, cmPerUnit: k };
+  const closing = classifyGaps(gaps, symbolContext(prims, frame0, pens.map((p) => p.pen)), o);
+  const outside = outsideMask(walls, closing, o);
+  classifyKinds(walls, outside);
   walls.sort((a, b) => a.y - b.y || a.x - b.x);
   walls.forEach((w, i) => { w.id = 'w' + String(i + 1).padStart(2, '0'); });
 
+  void mergeRects;
   const conf = pens.length ? Math.min(1, pens[0].pairFrac + 0.1) * (disagree > 0 ? 0.9 : 1) * (pieces.length ? 0.9 : 1) : 0.6;
   return {
     walls, gaps, frame: { matrix: toFrame, angle, cmPerUnit: k, origin: [ox, oy], snap: o.snap },
     pens: pens.map((p) => ({ pen: p.pen, lw: p.lw, color: p.color, score: +p.score.toFixed(3), thickness: p.thickness, pairFrac: +p.pairFrac.toFixed(3) })),
     fills: fills.map((f) => ({ color: f.color, n: f.polys.length })),
-    unsupported: pieces, rejected, warnings,
+    unsupported: pieces.filter((u) => !drawings.length || inBox(u, drawings[chosen].bbox, o.maxOpening)), rejected, warnings,
+    drawings: drawings.map((d, i) => ({ index: i, bbox: d.bbox, walls: d.walls.length, area: Math.round(d.area) })), drawing: chosen, clip: clip || null,
     stats: { wallSegments: wallSegs.length, merged: mH.length + mV.length, grid: [nx, ny], rects: walls.length, ambiguousArea: Math.round(disagree), deskew: angle },
     confidence: +conf.toFixed(2),
     options: o,
   };
+}
+
+const inBox = (r, b, m) => r.x + r.w >= b.x - m && r.x <= b.x + b.w + m && r.y + r.h >= b.y - m && r.y <= b.y + b.h + m;
+
+/** Walls closer than `link` cm to each other belong to one drawing; groups sorted by wall area (largest first). */
+function groupDrawings(walls, link) {
+  const parent = walls.map((_, i) => i);
+  const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const order = walls.map((w, i) => i).sort((a, b) => walls[a].x - walls[b].x);
+  for (let a = 0; a < order.length; a++) {
+    const p = walls[order[a]];
+    for (let b = a + 1; b < order.length; b++) {
+      const q = walls[order[b]];
+      if (q.x > p.x + p.w + link) break;
+      const dy = Math.max(0, q.y - (p.y + p.h), p.y - (q.y + q.h));
+      if (dy <= link) parent[find(order[a])] = find(order[b]);
+    }
+  }
+  const groups = new Map();
+  walls.forEach((w, i) => { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(w); });
+  return [...groups.values()].map((ws) => {
+    const x0 = Math.min(...ws.map((w) => w.x)), y0 = Math.min(...ws.map((w) => w.y));
+    const x1 = Math.max(...ws.map((w) => w.x + w.w)), y1 = Math.max(...ws.map((w) => w.y + w.h));
+    return { walls: ws, area: ws.reduce((t, w) => t + w.w * w.h, 0), bbox: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } };
+  }).filter((g) => g.walls.length >= 3 || g.area >= 2e4).sort((a, b) => b.area - a.area);
 }
 
 function groupUnsupported(list) {
@@ -325,6 +318,37 @@ function clusterCoords(vals, tol) {
   return out;
 }
 
+/** Index of the interval [arr[i], arr[i+1]) containing v, or -1. */
+function cellIdx(arr, v) {
+  if (v < arr[0] || v >= arr[arr.length - 1]) return -1;
+  let lo = 0, hi = arr.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (arr[m] <= v) lo = m; else hi = m; }
+  return lo;
+}
+
+/**
+ * Rectangle decomposition of a solid cell mask (uniform grid), scanline-greedy: take the top-most, then left-most
+ * uncovered solid cell, extend right as far as the row stays solid and uncovered, then extend down while that whole
+ * span stays solid and uncovered. This is the convention of a hand extraction read top-to-bottom: a wall reached
+ * first keeps the junction (a vertical wall that starts at a corner takes the corner; a through wall keeps its
+ * T-junctions when its top is above the branch). Deterministic; area is preserved exactly.
+ */
+export function decompose(U, gx, gy) {
+  const used = new Uint8Array(gx * gy);
+  const ok = (i, j) => i < gx && j < gy && U[j * gx + i] === 1 && !used[j * gx + i];
+  const rects = [];
+  for (let j = 0; j < gy; j++) for (let i = 0; i < gx; i++) {
+    if (!ok(i, j)) continue;
+    let e = i; while (ok(e, j)) e++;
+    let jj = j + 1;
+    const rowOk = (r) => { for (let t = i; t < e; t++) if (!ok(t, r)) return false; return true; };
+    while (jj < gy && rowOk(jj)) jj++;
+    for (let r = j; r < jj; r++) for (let t = i; t < e; t++) used[r * gx + t] = 1;
+    rects.push({ i0: i, i1: e, j0: j, j1: jj, o: e - i >= jj - j ? 'h' : 'v' });
+  }
+  return rects;
+}
+
 function nearestIdx(arr, v) {
   let lo = 0, hi = arr.length - 1;
   while (hi - lo > 1) { const m = (lo + hi) >> 1; if (arr[m] <= v) lo = m; else hi = m; }
@@ -357,123 +381,6 @@ function mergeRects(rs) {
     }
   }
   return rs;
-}
-
-/** Occupancy grid at `snap` resolution over the walls' bounding box plus a margin. */
-export function occupancy(walls, snap, margin = 2) {
-  const x0 = Math.min(...walls.map((w) => w.x)) - margin * snap, y0 = Math.min(...walls.map((w) => w.y)) - margin * snap;
-  const x1 = Math.max(...walls.map((w) => w.x + w.w)) + margin * snap, y1 = Math.max(...walls.map((w) => w.y + w.h)) + margin * snap;
-  const nx = Math.round((x1 - x0) / snap), ny = Math.round((y1 - y0) / snap);
-  const g = new Uint8Array(nx * ny);
-  const cx = (x) => Math.round((x - x0) / snap), cy = (y) => Math.round((y - y0) / snap);
-  const fill = (r, v) => { for (let j = cy(r.y); j < cy(r.y + r.h); j++) for (let i = cx(r.x); i < cx(r.x + r.w); i++) g[j * nx + i] = v; };
-  walls.forEach((w) => fill(w, 1));
-  return { g, nx, ny, x0, y0, snap, cx, cy, fill, at: (i, j) => (i < 0 || j < 0 || i >= nx || j >= ny ? 0 : g[j * nx + i]) };
-}
-
-/**
- * Gaps in walls: from the free end of a wall run, the wall's thickness band stays empty for 25–400 cm and is then
- * fully closed by another wall (collinear, or the face of a crossing wall). Returns gaps in drawing cm:
- * { x, y, w, h, axis: 'h'|'v' (direction the wall runs), width, thickness, from, to (wall indices) }.
- */
-export function findGaps(walls, opts = {}) {
-  const o = { ...DEFAULTS, ...opts };
-  if (!walls.length) return [];
-  const occ = occupancy(walls, o.snap, Math.ceil(o.maxOpening / o.snap) + 2);
-  const { at, cx, cy, snap } = occ;
-  const owner = new Int32Array(occ.nx * occ.ny).fill(-1);
-  walls.forEach((w, n) => { for (let j = cy(w.y); j < cy(w.y + w.h); j++) for (let i = cx(w.x); i < cx(w.x + w.w); i++) owner[j * occ.nx + i] = n; });
-  const gaps = [], seen = new Set();
-  const maxSteps = Math.round(o.maxOpening / snap);
-  walls.forEach((w, n) => {
-    const i0 = cx(w.x), i1 = cx(w.x + w.w), j0 = cy(w.y), j1 = cy(w.y + w.h);
-    const sideFree = (dir) => {
-      if (dir === 'e') { for (let j = j0; j < j1; j++) if (at(i1, j)) return false; return true; }
-      if (dir === 'w') { for (let j = j0; j < j1; j++) if (at(i0 - 1, j)) return false; return true; }
-      if (dir === 's') { for (let i = i0; i < i1; i++) if (at(i, j1)) return false; return true; }
-      for (let i = i0; i < i1; i++) if (at(i, j0 - 1)) return false; return true;
-    };
-    const opp = { e: 'w', w: 'e', s: 'n', n: 's' };
-    for (const dir of ['e', 'w', 's', 'n']) {
-      const horiz = dir === 'e' || dir === 'w';
-      const band = horiz ? w.h : w.w, along = horiz ? w.w : w.h;
-      if (band > o.maxThickness * 1.25) continue;
-      if (!sideFree(dir)) continue;
-      // probe only along the wall: it is elongated that way, or it is the free end of a run that continues behind it
-      if (!(along > band || !sideFree(opp[dir]))) continue;
-      let hit = -1, steps = 0;
-      for (let s = 1; s <= maxSteps; s++) {
-        let occN = 0, tot = 0, who = -1;
-        if (horiz) { const i = dir === 'e' ? i1 - 1 + s : i0 - s; for (let j = j0; j < j1; j++) { tot++; if (at(i, j)) { occN++; who = owner[j * occ.nx + i]; } } }
-        else { const j = dir === 's' ? j1 - 1 + s : j0 - s; for (let i = i0; i < i1; i++) { tot++; if (at(i, j)) { occN++; who = owner[j * occ.nx + i]; } } }
-        if (occN === 0) continue;
-        if (occN === tot) { hit = who; steps = s - 1; }
-        break;
-      }
-      if (hit < 0) continue;
-      const width = steps * snap;
-      if (width < o.minOpening) continue;
-      let g;
-      if (dir === 'e') g = { x: w.x + w.w, y: w.y, w: width, h: w.h, axis: 'h' };
-      else if (dir === 'w') g = { x: w.x - width, y: w.y, w: width, h: w.h, axis: 'h' };
-      else if (dir === 's') g = { x: w.x, y: w.y + w.h, w: w.w, h: width, axis: 'v' };
-      else g = { x: w.x, y: w.y - width, w: w.w, h: width, axis: 'v' };
-      const key = [g.x, g.y, g.w, g.h].join(',');
-      if (seen.has(key)) continue;
-      seen.add(key);
-      gaps.push({ ...g, width, thickness: band, from: n, to: hit });
-    }
-  });
-  return gaps;
-}
-
-/** Outside cells: flood fill from the border over free cells, with the gaps closed. */
-export function outsideMask(walls, gaps, opts = {}) {
-  const o = { ...DEFAULTS, ...opts };
-  if (!walls.length) return null;
-  const occ = occupancy(walls, o.snap, 3);
-  gaps.forEach((g) => occ.fill(g, 1));
-  const { g, nx, ny } = occ;
-  const out = new Uint8Array(nx * ny);
-  const st = [];
-  for (let i = 0; i < nx; i++) { st.push(i, (ny - 1) * nx + i); }
-  for (let j = 0; j < ny; j++) { st.push(j * nx, j * nx + nx - 1); }
-  while (st.length) {
-    const id = st.pop();
-    if (out[id] || g[id]) continue;
-    out[id] = 1;
-    const i = id % nx, j = (id / nx) | 0;
-    if (i > 0) st.push(id - 1); if (i < nx - 1) st.push(id + 1); if (j > 0) st.push(id - nx); if (j < ny - 1) st.push(id + nx);
-  }
-  return { ...occ, out };
-}
-
-export function facesOutside(w, m) {
-  if (!m) return false;
-  const { cx, cy, nx, ny, out } = m;
-  const isOut = (i, j) => i >= 0 && j >= 0 && i < nx && j < ny && out[j * nx + i] === 1;
-  const i0 = cx(w.x), i1 = cx(w.x + w.w), j0 = cy(w.y), j1 = cy(w.y + w.h);
-  const frac = (cells) => cells.filter(Boolean).length / Math.max(1, cells.length);
-  const range = (a, b) => Array.from({ length: b - a }, (_, t) => a + t);
-  const sides = [
-    range(i0, i1).map((i) => isOut(i, j0 - 1)), range(i0, i1).map((i) => isOut(i, j1)),
-    range(j0, j1).map((j) => isOut(i0 - 1, j)), range(j0, j1).map((j) => isOut(i1, j)),
-  ];
-  return sides.some((s) => frac(s) >= 0.5);
-}
-
-/** Which side of a gap / wall faces the outside: 'n' | 's' | 'e' | 'w' | null (drawing frame). */
-export function outsideSide(r, m) {
-  if (!m) return null;
-  const { cx, cy, nx, ny, out } = m;
-  const isOut = (i, j) => i >= 0 && j >= 0 && i < nx && j < ny && out[j * nx + i] === 1;
-  const i0 = cx(r.x), i1 = cx(r.x + r.w), j0 = cy(r.y), j1 = cy(r.y + r.h);
-  const count = (cells) => cells.filter(Boolean).length;
-  const range = (a, b) => Array.from({ length: Math.max(0, b - a) }, (_, t) => a + t);
-  const s = { n: count(range(i0, i1).map((i) => isOut(i, j0 - 1))), s: count(range(i0, i1).map((i) => isOut(i, j1))),
-    w: count(range(j0, j1).map((j) => isOut(i0 - 1, j))), e: count(range(j0, j1).map((j) => isOut(i1, j))) };
-  const best = Object.entries(s).sort((a, b) => b[1] - a[1])[0];
-  return best[1] > 0 ? best[0] : null;
 }
 
 export { penKey };

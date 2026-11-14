@@ -138,8 +138,26 @@ export function fitArc(pts) {
   if (Math.abs(det) < 1e-12) return null;
   const b1 = (suuu + suvv) / 2, b2 = (svvv + svuu) / 2;
   const uc = (b1 * svv - b2 * suv) / det, vc = (suu * b2 - suv * b1) / det;
-  const cx = mx + uc, cy = my + vc;
-  const r = Math.sqrt(uc * uc + vc * vc + (suu + svv) / n);
+  let cx = mx + uc, cy = my + vc;
+  let r = Math.sqrt(uc * uc + vc * vc + (suu + svv) / n);
+  // geometric refinement (Gauss–Newton on the distances), removes the algebraic fit's bias on short arcs
+  for (let it = 0; it < 12; it++) {
+    let a11 = 0, a12 = 0, a13 = 0, a22 = 0, a23 = 0, a33 = 0, g1 = 0, g2 = 0, g3 = 0;
+    for (let i = 0; i < n; i++) {
+      const dx = cx - pts[2 * i], dy = cy - pts[2 * i + 1], d = Math.hypot(dx, dy) || 1e-12;
+      const j1 = dx / d, j2 = dy / d, j3 = -1, res = d - r;
+      a11 += j1 * j1; a12 += j1 * j2; a13 += j1 * j3; a22 += j2 * j2; a23 += j2 * j3; a33 += j3 * j3;
+      g1 += j1 * res; g2 += j2 * res; g3 += j3 * res;
+    }
+    const D = a11 * (a22 * a33 - a23 * a23) - a12 * (a12 * a33 - a23 * a13) + a13 * (a12 * a23 - a22 * a13);
+    if (Math.abs(D) < 1e-18) break;
+    const s1 = (g1 * (a22 * a33 - a23 * a23) - a12 * (g2 * a33 - a23 * g3) + a13 * (g2 * a23 - a22 * g3)) / D;
+    const s2 = (a11 * (g2 * a33 - a23 * g3) - g1 * (a12 * a33 - a23 * a13) + a13 * (a12 * g3 - g2 * a13)) / D;
+    const s3 = (a11 * (a22 * g3 - g2 * a23) - a12 * (a12 * g3 - g2 * a13) + g1 * (a12 * a23 - a22 * a13)) / D;
+    cx -= s1; cy -= s2; r -= s3;
+    if (Math.abs(s1) + Math.abs(s2) + Math.abs(s3) < 1e-9 * (1 + r)) break;
+  }
+  if (!(r > 0) || !Number.isFinite(cx + cy + r)) return null;
   let e = 0;
   for (let i = 0; i < n; i++) { const d = Math.hypot(pts[2 * i] - cx, pts[2 * i + 1] - cy) - r; e += d * d; }
   const rms = Math.sqrt(e / n);
@@ -156,19 +174,89 @@ export function fitArc(pts) {
 
 /**
  * Arcs drawn on the page (curved paths, or polylines of ≥ 5 points that fit a circle), in page units.
- * Consecutive pieces of the same PDF path are joined first (CAD exports often split a quarter circle).
+ * Each arc keeps its points (`pts`).
  */
-export function arcsOf(prims, { excludePens = new Set() } = {}) {
+export function arcsOf(prims, { excludePens = new Set(), joinGap = 2.5, maxPiece = 6 } = {}) {
   const arcs = [];
-  prims.paths.forEach((p, pi) => {
-    if (!p.stroke || excludePens.has(penKey(p))) return;
-    if (!p.curved && p.pts.length < 10) return;
-    const f = fitArc(p.pts);
+  const tryFit = (pts, extra) => {
+    const f = fitArc(pts);
     if (!f || f.r <= 0) return;
-    if (f.rms > Math.max(0.03 * f.r, 0.05)) return;
+    if (f.rms > Math.max(0.035 * f.r, 0.05)) return;
     if (Math.abs(f.sweep) < 20) return;
-    arcs.push({ ...f, path: pi, pen: penKey(p), dashed: !!(p.dash && p.dash.length && p.dash.some((d) => d > 0)) });
+    arcs.push({ ...f, ...extra, pts });
+  };
+  const pieces = [];
+  prims.paths.forEach((p, pi) => {
+    if (!p.stroke) return;
+    const pen = penKey(p);
+    if (excludePens.has(pen)) return;
+    const dashed = !!(p.dash && p.dash.length && p.dash.some((d) => d > 0));
+    if (p.curved || p.pts.length >= 10) tryFit(p.pts, { path: pi, pen, dashed });
+    const n = p.pts.length, loop = Math.hypot(p.pts[0] - p.pts[n - 2], p.pts[1] - p.pts[n - 1]) < 1e-6;
+    if (!p.curved && !p.closed && !loop && n / 2 <= maxPiece) pieces.push({ pi, pen, pts: p.pts });
   });
+  // arcs drawn as separate short pieces (hand-dashed swings, exploded polylines): chain pieces of one pen whose
+  // ends are within joinGap page units, then fit
+  // hatch pens (hundreds of pieces nearly all in one direction) cannot form arcs: leave them out of the chaining
+  const dirs = new Map();
+  for (const q of pieces) {
+    const n = q.pts.length, a = Math.round(((Math.atan2(q.pts[n - 1] - q.pts[1], q.pts[n - 2] - q.pts[0]) / DEG) + 360) % 180 / 2);
+    let h = dirs.get(q.pen); if (!h) dirs.set(q.pen, h = { n: 0, bins: new Map() });
+    h.n++; h.bins.set(a, (h.bins.get(a) || 0) + 1);
+  }
+  const hatch = new Set([...dirs].filter(([, h]) => h.n >= 200 && Math.max(...h.bins.values()) >= 0.85 * h.n).map(([pen]) => pen));
+  if (hatch.size) for (let i = pieces.length - 1; i >= 0; i--) if (hatch.has(pieces[i].pen)) pieces.splice(i, 1);
+  const cell = joinGap, grid = new Map();
+  const keyOf = (x, y) => Math.floor(x / cell) + ',' + Math.floor(y / cell);
+  const ends = (q) => [[q.pts[0], q.pts[1]], [q.pts[q.pts.length - 2], q.pts[q.pts.length - 1]]];
+  pieces.forEach((q, n) => ends(q).forEach(([x, y], e) => { const k = keyOf(x, y); if (!grid.has(k)) grid.set(k, []); grid.get(k).push([n, e]); }));
+  const used = new Uint8Array(pieces.length);
+  // a piece may continue the chain only if it turns gently, the same way as the chain so far (an arc does;
+  // hatch zig-zags and glyph strokes do not)
+  const dirAt = (pts, atEnd) => {
+    const n = pts.length;
+    return atEnd ? [pts[n - 2] - pts[n - 4], pts[n - 1] - pts[n - 3]] : [pts[0] - pts[2], pts[1] - pts[3]];
+  };
+  const turn = (u, v) => Math.atan2(u[0] * v[1] - u[1] * v[0], u[0] * v[0] + u[1] * v[1]);
+  const findNext = (chain, dir, pen, sign) => {
+    const atEnd = dir > 0;
+    const x = atEnd ? chain[chain.length - 2] : chain[0], y = atEnd ? chain[chain.length - 1] : chain[1];
+    const d0 = dirAt(chain, atEnd);
+    const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
+    let best = null, bd = joinGap;
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const [n, e] of grid.get((cx + a) + ',' + (cy + b)) || []) {
+      if (used[n] || pieces[n].pen !== pen) continue;
+      const q = pieces[n].pts;
+      if (q.length < 4) continue;
+      const [px, py] = ends(pieces[n])[e];
+      const d = Math.hypot(px - x, py - y);
+      if (d >= bd) continue;
+      // direction of the piece leaving the joint (away from the chain)
+      const d1 = e === 0 ? [q[2] - q[0], q[3] - q[1]] : [q[q.length - 4] - q[q.length - 2], q[q.length - 3] - q[q.length - 1]];
+      const t = turn(d0, d1);
+      if (Math.abs(t) > 45 * DEG || Math.abs(t) < 1 * DEG) continue; // arcs turn at every joint; straight dashes do not
+      bd = d; best = [n, e, t];
+    }
+    return best;
+  };
+  for (let n0 = 0; n0 < pieces.length; n0++) {
+    if (used[n0]) continue;
+    used[n0] = 1;
+    let chain = pieces[n0].pts.slice(), count = 1;
+    for (const dir of [1, -1]) {
+      let sign = 0;
+      for (;;) {
+        const nx = findNext(chain, dir, pieces[n0].pen, sign * dir);
+        if (!nx) break;
+        const [n, e, t] = nx; used[n] = 1; count++;
+        if (Math.abs(t) > 1e-3 && !sign) sign = Math.sign(t) * dir;
+        let pts = pieces[n].pts.slice();
+        if ((dir > 0 && e === 1) || (dir < 0 && e === 0)) { const r = []; for (let i = pts.length - 2; i >= 0; i -= 2) r.push(pts[i], pts[i + 1]); pts = r; }
+        chain = dir > 0 ? chain.concat(pts) : pts.concat(chain);
+      }
+    }
+    if (count >= 3 && chain.length >= 10) tryFit(chain, { path: pieces[n0].pi, pen: pieces[n0].pen, dashed: true, joined: count });
+  }
   return arcs;
 }
 
