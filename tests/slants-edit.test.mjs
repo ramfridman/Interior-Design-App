@@ -54,7 +54,7 @@ group('addWall({ angled: true }) on the Wedge (fixed): a 45° partition across t
   const got = roomsAreas(), want = [...before.filter((a) => !near(a, westArea0, 1)), tri, rest].sort((a, b) => a - b);
   check('4 rooms; the west room split with exact areas (|Δ| < 1 cm²)', PLAN.rooms.length === 4 && got.every((a, i) => near(a, want[i], 1)), `${got.map((a) => a.toFixed(1))} vs ${want.map((a) => a.toFixed(1))}`);
   const fresh = PLAN.rooms.find((x) => x.name === 'New room');
-  check('the smaller piece is a new room; warned it has no door', !!fresh && near(area(fresh.polygon), tri, 1) && r.warnings.some((w) => /no door/.test(w)));
+  check('the smaller piece is a new room (it holds the entry door: no "no door" warning)', !!fresh && near(area(fresh.polygon), tri, 1) && opening('door-entry').rooms.includes(fresh.id) && !r.warnings.length);
   const diff = E.planDiff();
   check('planDiff: slant-added (free), ref seg:a:s03', diff.items.some((i) => i.kind === 'slant-added' && i.level === 'free' && i.ref === 'seg:a:s03'), JSON.stringify(diff.items));
   store.undo();
@@ -91,13 +91,13 @@ group('addWall angled: near an axis, refusals');
 group('joins: T onto a rect, T onto a slant, a corner with another slant (mitre, shared end point)');
 {
   wedge();
-  const t1 = E.addWall({ x1: 200, y1: 600, x2: 487, y2: 700, angled: true });      // end 8 cm short of the partition face (x 495)
+  const t1 = E.addWall({ x1: 200, y1: 600, x2: 487, y2: 700, angled: true });      // end 13 cm short of the partition face (x 500)
   const s = lastSlant(), f = SG.slantFrame(s), j = SG.slantJoins(PLAN.slants, [...PLAN.walls, ...PLAN.openings.filter((o) => o.axis !== 'a')]);
-  check('T onto a rect: the end within 1.5 t of the partition face is extended onto it (x 495), joined (rect), start free', t1.ok && near(s.x2, 495, 0.06) && j[2].ends[1].type === 'rect' && j[2].ends[0].type === 'free'
+  check('T onto a rect: the end within 1.5 t of the partition face is extended onto it (x 500), joined (rect), start free', t1.ok && near(s.x2, 500, 0.06) && j[2].ends[1].type === 'rect' && j[2].ends[0].type === 'free'
     && JSON.stringify(seg('seg:a:' + s.id).freeEnds) === '[true,false]', JSON.stringify([s, j[2].ends.map((e) => e.type)]));
   void f;
   store.undo();
-  const t2 = E.addWall({ x1: 300, y1: 420, x2: 172, y2: 172, angled: true });        // ends 9 cm off s02's centre line
+  const t2 = E.addWall({ x1: 300, y1: 500, x2: 81.4, y2: 256.4, angled: true });      // ends 9 cm off s02's centre line, away from its door
   const j2 = SG.slantJoins(PLAN.slants, [...PLAN.walls]);
   check('T onto a slant (s02): joined as a tee', t2.ok && j2[2].ends[1].type === 'tee' && j2[2].ends[1].with[0] === 1, JSON.stringify([t2.reason, j2[2] && j2[2].ends]));
   store.undo();
@@ -152,7 +152,7 @@ group('resize (start / end along the centre line) and rotateWallEnd');
   const x60 = 25 + 275 / Math.tan(Math.PI / 3);
   const r1 = E.rotateWallEnd('seg:a:s02', 'b', { x: x60, y: 25 });
   const s2 = slant('s02'), ang = (Math.atan2(s2.y2 - s2.y1, s2.x2 - s2.x1) * 180) / Math.PI;
-  check('rotateWallEnd(s02, b) to 60°: end where given (0.1 cm), start kept, door keeps its distance from the start', r1.ok && near(ang, -60, 0.05) && s2.x1 === 25 && s2.y1 === 300 && opening('door-s02').at === WEDGE.openings[1].at, JSON.stringify([r1.reason, s2]));
+  check('rotateWallEnd(s02, b) to 60°: end where given (0.1 cm), start kept, door keeps its distance from the start', r1.ok && near(ang, -60, 0.05) && s2.x1 === 25 && s2.y1 === 300 && opening('door-s02').at === W.openings.find((o) => o.id === 'door-s02').at, JSON.stringify([r1.reason, s2]));
   check('…planDiff: slant-changed (change: rotated)', E.planDiff().items.some((i) => i.kind === 'slant-changed' && i.change === 'rotated'));
   const r2 = E.rotateWallEnd('seg:a:s02', 'b', { x: 300, y: 25 });
   check('…and back to exactly 45°: the original bytes, not modified', r2.ok && bytes() === b0 && !E.isPlanModified(), r2.reason);
@@ -217,11 +217,11 @@ group('openings in slants');
   const h0 = opening(dd.ids[0]);
   check('flip cycle: hinge a ↔ b, swing l ↔ r (back where it started)', flips[0][0] !== flips[1][0] && flips[2][1] !== flips[3][1] && flips[3] === flips[1] && /^[ab][lr]$/.test(h0.hinge + h0.swing), flips.join(' '));
   check('hinge / swing letters of rect doors are refused for a door in a slant', !E.updateOpening(dd.ids[0], { hinge: 'n' }).ok);
-  const dd2 = E.addOpening({ kind: 'door', wall: sa.id, at: 60, width: 60 });
-  const atA = opening(dd.ids[0]).at, atB = opening(dd2.ids[0]).at, gapNow = atA - 35 - (atB + 30);
-  const w90 = E.updateOpening(dd2.ids[0], { width: 60 + 2 * (gapNow - 10) });
-  const w95 = E.updateOpening(dd2.ids[0], { width: 60 + 2 * (gapNow - 10) + 10 });
-  check('widening a door until it crowds / overlaps its neighbour is refused (exact widths keep the centre)', dd2.ok && w90.ok && !w95.ok && /10 cm|overlap/.test(w95.reason), JSON.stringify([dd2.reason, w90.reason, w95.reason, gapNow]));
+  const dd2 = E.addOpening({ kind: 'door', wall: sa.id, at: 80, width: 60 });
+  const gapNow = opening(dd.ids[0]).at - 35 - (80 + 30);                 // wall between the two doors (≈ 29.7 cm)
+  const w95 = E.updateOpening(dd2.ids[0], { width: 95 }), w100 = E.updateOpening(dd2.ids[0], { width: 100 }), w130 = E.updateOpening(dd2.ids[0], { width: 130 });
+  check('widening a door (centre kept): 95 leaves ≥ 10 cm to its neighbour — ok; 100 crowds it, 130 overlaps — refused', dd2.ok && w95.ok && !w100.ok && /10 cm/.test(w100.reason) && !w130.ok && /overlap/.test(w130.reason),
+    JSON.stringify([dd2.reason, w95.reason, w100.reason, w130.reason, gapNow]));
   const sl = E.updateOpening(dd2.ids[0], { x: 0, y: 0 });
   check('sliding by point is clamped to the nearest place that fits', sl.ok || /not enough/.test(sl.reason));
   const rm = E.removeOpening(dd.ids[0]);
@@ -243,18 +243,21 @@ group('rect walls on a level with slants');
   const w = PLAN.walls.find((x) => x.y === 295 && x.h === 10);
   const face = (y) => { const f = SG.slantFrame(WEDGE.slants[0]); const px = 990 + f.nx * 10, py = 10 + f.ny * 10; return px + ((y - py) * f.ux) / f.uy; };
   check('…its end: the 5 cm position before the face (both corners outside, gap < 5)', w && w.x + w.w <= Math.min(face(295), face(305)) && Math.min(face(295), face(305)) - (w.x + w.w) < 5, JSON.stringify(w));
-  const mv = E.moveWallSegment(r.ids[0], 50);
-  const w2 = PLAN.walls.find((x) => x.y === 345 && x.h === 10);
-  check('moving it 50 cm south: its end is refitted to the slant face at the new place', mv.ok && w2 && Math.min(face(345), face(355)) - (w2.x + w2.w) < 5 && w2.x + w2.w <= Math.min(face(345), face(355)), JSON.stringify([mv.reason, w2]));
+  const mv = E.moveWallSegment(r.ids[0], -50);
+  const w2 = PLAN.walls.find((x) => x.y === 245 && x.h === 10);
+  check('moving it 50 cm north: its end is refitted to the slant face at the new place', mv.ok && w2 && Math.min(face(245), face(255)) - (w2.x + w2.w) < 5 && w2.x + w2.w <= Math.min(face(245), face(255)), JSON.stringify([mv.reason, w2]));
+  const mv50 = E.moveWallSegment(mv.ids[0], 150);
+  check('…150 cm south would end it on the window in s01: refused', !mv50.ok && /door or window/.test(mv50.reason), mv50.reason);
   const rm = E.removeWallSegment(mv.ids[0]);
   check('…and removing it: 3 rooms again', rm.ok && PLAN.rooms.length === 3, rm.reason);
   store.undo(); store.undo(); store.undo();
   check('undo ×3 → base bytes', bytes() === WB);
   const x = E.addWall({ x1: 700, y1: 20, x2: 700, y2: 700 });
-  check('a rect wall whose end would hit the window gap / cross s01 is fitted or refused, never through it', x.ok || /door or window|exterior/.test(x.reason), x.reason);
+  const wq = G.openingPoly(opening('win-s01'));
+  check('a rect wall drawn into s01 is fitted to its face or refused — never through its window', x.ok ? PLAN.walls.every((w) => K.intersectArea([K.rectRing(w)], [wq]) < 0.01) : typeof x.reason === 'string', x.reason);
   if (x.ok) store.undo();
-  const rs = E.resizeWallSegment(E.wallSegments().find((s) => s.axis === 'v' && s.core.x === 500 && s.core.y > 400).id, { end: 700 });
-  check('resize of a rect wall on a level with slants works (its own rules)', rs.ok || typeof rs.reason === 'string', rs.reason);
+  const rs = E.resizeWallSegment(E.segmentAt(505, 650).id, { end: 700 });
+  check('resize of a rect wall on a level with slants runs its own rules (shortening the partition opens the rooms: refused or done)', rs.ok || typeof rs.reason === 'string', rs.reason);
   E.resetPlan();
 }
 
@@ -303,10 +306,10 @@ group('House 98 + added slants (fixed)');
 {
   E.setBasePlan(E.BUILTIN_PLAN);
   const b1 = PLAN.rooms.find((r) => r.id === 'bedroom-1'), a0 = area(b1.polygon);
-  // a 45° wall across bedroom 1's south-east corner (wall faces x 1515, y 1360)
-  const r = E.addWall({ x1: 1515, y1: 1220, x2: 1375, y2: 1360, angled: true });
+  // a 45° wall across bedroom 1's south-west corner (wall faces x 1155, y 1360; its door is higher up the west wall)
+  const r = E.addWall({ x1: 1155, y1: 1240, x2: 1275, y2: 1360, angled: true });
   const nr = PLAN.rooms.find((x) => x.name === 'New room');
-  const tri = (140 - 5 * R2) ** 2 / 2, rest = a0 - (140 + 5 * R2) ** 2 / 2;
+  const tri = (120 - 5 * R2) ** 2 / 2, rest = a0 - (120 + 5 * R2) ** 2 / 2;
   check('added on House 98: schema 2 + slants on PLAN; bedroom 1 split with exact areas', r.ok && PLAN.schema === 2 && PLAN.slants.length === 1 && nr && near(area(nr.polygon), tri, 1) && near(area(PLAN.rooms.find((x) => x.id === 'bedroom-1').polygon), rest, 1),
     JSON.stringify([r.reason, nr && area(nr.polygon), tri]));
   const m = E.moveWallSegment(r.ids[0], -15), d = E.addOpening({ kind: 'door', wall: r.ids[0], at: 90, width: 70 });

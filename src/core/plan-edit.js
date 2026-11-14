@@ -1323,7 +1323,7 @@ function slantContact(E, axis, c0, c1, end, dir, reach) {
     const ext = bandExtent(p, axis, c0, c1);
     if (!ext) continue;
     const d = dir > 0 ? ext[0] - end : end - ext[1];
-    if (d < -TMAX || d > reach) continue;
+    if (d < -reach || d > reach) continue;
     if (!best || d < best.d) best = { d, quad, at: dir > 0 ? ext[0] : ext[1] };
   }
   if (!best) return null;
@@ -1598,9 +1598,20 @@ function planMoveWall(s, d0) {
   const cross = 'That would cross another wall.';
   // a level with angled walls: an end of this wall on an angled wall is refitted to its face at the new place
   const slantEnd = [false, false];
-  if (E.mixed) for (const [n, v] of [[0, va0 - 1], [1, va1]]) for (let u = uc0; u < uc1; u++) if (v >= 0 && m.cell[K(u, v)] === SLANT) slantEnd[n] = true;
+  let b0 = a0, b1 = a1;
+  if (E.mixed) {
+    for (const [n, v] of [[0, va0 - 1], [1, va1]]) for (let u = uc0; u < uc1; u++) if (v >= 0 && m.cell[K(u, v)] === SLANT) slantEnd[n] = true;
+    for (const [n, dir] of [[0, -1], [1, 1]]) {
+      if (!slantEnd[n]) continue;
+      const q = slantContact(E, s.axis, n0, n1, n ? a1 : a0, dir, 200);
+      if (!q) return fail('That wall would come off the angled wall it ends on.');
+      if (q.quad) return fail('That wall would end on a door or window.');
+      if (n) b1 = q.end; else b0 = q.end;
+    }
+  }
   for (let v = va0; v < va1; v++) for (let u = d0 > 0 ? uc1 : un0; u < (d0 > 0 ? un1 : uc0); u++) {
     const k = K(u, v);
+    if (E.mixed && (E.A[v + 1] <= b0 || E.A[v] >= b1)) continue;          // beyond a refitted end
     if (m.cell[k] === SLANT && E.mixed) continue;
     if (m.cell[k]) return fail(cross);
     if (m.out[k] && !ENV.draft) return fail('A wall cannot leave the house.');
@@ -1641,14 +1652,6 @@ function planMoveWall(s, d0) {
   const openings = PLAN.openings.map((o) => (moved(o) ? { ...o, x: o.x + (shift.x || 0), y: o.y + (shift.y || 0) } : o));
   let target = E.rect(n0, n1, a0, a1), extra = [];
   if (E.mixed) {
-    let b0 = a0, b1 = a1;
-    for (const [n, dir] of [[0, -1], [1, 1]]) {
-      if (!slantEnd[n]) continue;
-      const q = slantContact(E, s.axis, n0, n1, n ? a1 : a0, dir, 200);
-      if (!q) return fail('That wall would come off the angled wall it ends on.');
-      if (q.quad) return fail('That wall would end on a door or window.');
-      if (n) b1 = q.end; else b0 = q.end;
-    }
     if (b1 - b0 < MIN_WALL) return fail(`A wall must be at least ${MIN_WALL} cm long.`);
     if (openings.some((o) => moved(o) && (along(o) < b0 + MIN_JAMB || along(o) + o.width > b1 - MIN_JAMB))) return fail('That wall would end on a door or window.');
     target = E.rect(n0, n1, b0, b1);

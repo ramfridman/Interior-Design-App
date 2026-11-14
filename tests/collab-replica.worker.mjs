@@ -49,6 +49,9 @@ const calls = {
   // levels (stage F1)
   async addLevel(opts) { const r = PE.addLevel(opts); await tick(); return r; },
   async wallOn([level, input]) { PE.setActiveLevel(level); const r = PE.addWall(input); await tick(); return r; },
+  // any plan-edit call by name (angled walls, stage A2): [name, args]
+  async pe([name, args]) { const r = PE[name](...(args || [])); await tick(); return r && typeof r === 'object' ? JSON.parse(JSON.stringify(r)) : r; },
+  planJSON() { return JSON.stringify(PE.currentPlanData()); },
   levelsKey() { return JSON.stringify(PLAN.levels === undefined ? null : PLAN.levels); },
   activeLevel() { return PE.activeLevel(); },
   async tryEdit() { const it = store.items[0]; if (it) store.updateItem(it.id, { x: it.x + 50 }); else store.addItem({ type: 'chair', w: 50, d: 50, h: 80, x: 500, y: 500 }); await tick(); return true; },
