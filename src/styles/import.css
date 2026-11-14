@@ -1,5 +1,7 @@
 /* Sketch import (src/ui/import/): the "Import a sketch" dialog, its drawing viewer, the Structure guide's underlay
-   card and the "what next" card. Colours of the detections come from these tokens (light, then dark). */
+   card and the "what next" card. Colours of the detections come from these tokens. They are the same in every theme:
+   the detections are drawn over the page, which is always paper-white (the legend swatches carry an outline so they
+   read on a dark panel too). */
 :root {
   --imp-ext: #1d4e89;     /* exterior walls */
   --imp-int: #256e43;     /* interior walls */
@@ -115,7 +117,7 @@
 .ilegend { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-13); }
 .ilegend__item { display: flex; align-items: center; gap: var(--s-2); }
 .ilegend__item > b { margin-left: auto; font-variant-numeric: tabular-nums; }
-.ilegend__sw { flex: none; width: 14px; height: 10px; border-radius: 2px; background: var(--sw); }
+.ilegend__sw { flex: none; width: 14px; height: 10px; border-radius: 2px; background: var(--sw); box-shadow: 0 0 0 1px var(--line-strong); }
 .ilegend--ext { --sw: var(--imp-ext); }
 .ilegend--int { --sw: var(--imp-int); }
 .ilegend--door { --sw: var(--imp-door); }
@@ -176,7 +178,3 @@
   .inext { left: 50%; transform: translateX(-50%); bottom: calc(52px + var(--s-3) + env(safe-area-inset-bottom, 0px)); }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --imp-ext: #8dbbee; --imp-int: #7fcf9b; --imp-door: #c9a2f0; --imp-win: #6fd0dc; --imp-pass: #b6c0c0; --imp-uns: #f0b04a; }
-}
-:root[data-theme="dark"] { --imp-ext: #8dbbee; --imp-int: #7fcf9b; --imp-door: #c9a2f0; --imp-win: #6fd0dc; --imp-pass: #b6c0c0; --imp-uns: #f0b04a; }

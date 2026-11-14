@@ -150,8 +150,14 @@ export function openRealign(app) {
       h('div', { class: 'isplit__side' }, h('p', { class: 'iside__title' }, 'Line the drawing up with the walls'), status, modeBox)))),
     actions: [btn('Cancel', { variant: 'quiet', onClick: () => dlg.close() }),
       btn('Reset', { variant: 'quiet', onClick: () => { T = u0.transform.slice(); mode = null; pts = []; status.textContent = ''; sync(); } }),
-      btn('Apply', { variant: 'primary', onClick: () => { store.setUnderlay({ transform: T.map((v) => +v.toFixed(6)) }); dlg.close(); toast('Sketch re-aligned', { kind: 'success' }); } })],
+      btn('Apply', { variant: 'primary', onClick: () => {
+        const before = store.underlay && store.underlay.transform;
+        store.setUnderlay({ transform: T.map((v) => +v.toFixed(6)) }); dlg.close();
+        // the underlay is outside the undo history (CONTRACT § 12): offer the way back here
+        toast('Sketch re-aligned', { kind: 'success', action: before && { label: 'Undo', fn: () => { if (store.underlay) store.setUnderlay({ transform: before }); } } });
+      } })],
     onClose: () => sheet.destroy() });
+  dlg.el._realign = { sheet, get transform() { return T.slice(); }, get mode() { return mode; }, get points() { return pts.length; } };   // for tests
   sync();
   requestAnimationFrame(() => sheet.resize());
   return dlg;
