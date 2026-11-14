@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 19): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 20): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -82,7 +82,7 @@ Stairs tool in the plan (straight / L / U, move, turn, resize, opening above fol
 - [x] Owner's decisions: no "boutique" category; the supplier filter stays; a small star (top-rated supplier, only with a recorded public rating ≥ 4.5 from ≥ 100 reviews) and gem (design studio / boutique) beside the supplier's name.
 - [x] Phone: catalogue category chips no longer overlap (version 17).
 - [ ] Second research pass on the suppliers that were skipped and the ones the owner named (Kaza, Ubject, Zaga…) [Sonnet, running]. Will return two lists for the owner: suppliers with no public price (carry them as "price on request"?) and sites that block automated reading.
-- [ ] "Add your own product": add any product from any shop by hand (link, shop, name, price or "price on request", kind of item, sizes), saved with the project and synced [Opus, running].
+- [x] "Add your own product" (version 20): catalogue → "+ Add your own"; link, shop, name, price or "price on request", kind of item from 3D thumbnails, sizes, live preview; saved with the project, synced in shared projects, optional library on the device; "added by you" mark and an "Only products I added" filter (`tests/own-product.test.mjs`). To check: the 3D preview was blank in one desktop screenshot (possibly a timing artefact); a lamp's preview looks dark.
 
 ## Still waiting for the owner
 1. **Hosting** — a free Cloudflare account, authorising its GitHub app for the repo, the email addresses to invite, and whether the working branch is merged into the default branch first (a pull request). With live collaboration the site becomes a Cloudflare Worker with static files instead of plain Pages; steps will be updated when part C is done.
