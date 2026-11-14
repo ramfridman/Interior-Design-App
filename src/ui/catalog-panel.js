@@ -154,7 +154,7 @@ export function initCatalogPanel(root, app) {
       h('span', { class: 'pcard__media' }, thumbs.el(p, { size: 176, lazy: false })),
       h('span', { class: 'pcard__body' },
         h('span', { class: 'pcard__name clamp-2' }, p.name),
-        h('span', { class: 'pcard__retailer truncate' }, p.retailer),
+        h('span', { class: 'pcard__retailer' }, h('span', { class: 'truncate' }, p.retailer), supplierMarks(p)),
         h('span', { class: 'pcard__foot' }, h('span', { class: 'pcard__dims num truncate' }, finish ? (p.priceUnit === 'm2' ? 'per m²' : '') : dims), h('span', { class: 'pcard__price num' }, fmtPrice(p.price)))));
     const add = h('button', { type: 'button', class: 'pcard__add', 'aria-label': finish ? `Apply ${p.name} to a room` : `Place ${p.name} in the plan`, 'data-tip': finish ? 'Apply to a room' : 'Place in plan',
       onClick: (e) => { e.stopPropagation(); finish ? actions.applyFinish(p, null, add) : actions.place(p); } }, icon(finish ? 'paint' : 'plus', { size: 16 }));
@@ -184,7 +184,7 @@ export function initCatalogPanel(root, app) {
     const body = h('div', { class: 'pdetail' },
       h('div', { class: 'pdetail__media' }, thumbs.el(p, { size: 352, lazy: false })),
       h('div', { class: 'pdetail__body' },
-        h('p', { class: 'pdetail__retailer' }, [p.brand && p.brand !== p.retailer ? `${p.brand}, ` : '', p.retailer]),
+        h('p', { class: 'pdetail__retailer' }, [p.brand && p.brand !== p.retailer ? `${p.brand}, ` : '', p.retailer, supplierMarks(p, true)]),
         h('h3', { class: 'pdetail__name display' }, p.name),
         p.nameHe && h('p', { class: 'pdetail__he', lang: 'he', dir: 'rtl' }, p.nameHe),
         h('p', { class: 'pdetail__price' }, h('span', { class: 'num' }, fmtPrice(p.price)), p.priceUnit && p.priceUnit !== 'item' ? h('span', { class: 'pdetail__unit' }, p.priceUnit === 'm2' ? 'per m²' : 'per metre') : null),
@@ -282,3 +282,21 @@ function createVirtualGrid(scroller, spacer, win, renderCard, thumbs) {
     layout() { if (measure()) update(true); },
   };
 }
+
+/**
+ * Small marks beside the supplier's name: a star for a supplier with a recorded high rating, a gem for a design studio /
+ * boutique. They come from the product's tags, which the catalogue research sets only with recorded evidence
+ * (see the *.sources.md files). `withText` adds the words (product details).
+ */
+const SUPPLIER_MARKS = [
+  { tag: 'top-rated', icon: 'star', label: 'Top-rated supplier', tip: 'Top-rated supplier: a high public rating was recorded when this product was added' },
+  { tag: 'boutique', icon: 'gem', label: 'Design studio / boutique', tip: 'Design studio or boutique supplier' },
+];
+function supplierMarks(p, withText = false) {
+  const tags = Array.isArray(p.tags) ? p.tags : [];
+  const marks = SUPPLIER_MARKS.filter((m) => tags.includes(m.tag));
+  if (!marks.length) return null;
+  return h('span', { class: `smarks${withText ? ' smarks--text' : ''}` }, marks.map((m) =>
+    h('span', { class: `smark smark--${m.icon}`, role: 'img', 'aria-label': m.label, 'data-tip': m.tip, title: m.tip }, icon(m.icon, { size: withText ? 14 : 12 }), withText ? h('span', null, m.label) : null)));
+}
+

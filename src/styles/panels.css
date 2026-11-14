@@ -46,7 +46,14 @@
 .pcard__media { flex: 1 1 auto; min-height: 0; display: block; }
 .pcard__body { flex: none; display: flex; flex-direction: column; height: 84px; padding: 7px 9px 8px; }
 .pcard__name { font-size: var(--fs-12); font-weight: 500; line-height: 1.3; color: var(--ink); }
-.pcard__retailer { margin-top: 1px; font-size: var(--fs-11); color: var(--ink-3); }
+.pcard__retailer { display: flex; align-items: center; gap: 4px; min-width: 0; margin-top: 1px; font-size: var(--fs-11); color: var(--ink-3); }
+.pcard__retailer > .truncate { flex: 0 1 auto; }
+/* supplier marks: star = top-rated supplier, gem = design studio / boutique */
+.smarks { flex: none; display: inline-flex; align-items: center; gap: 3px; }
+.smark { display: inline-flex; align-items: center; gap: 4px; line-height: 1; }
+.smark--star { color: var(--warn); }
+.smark--gem { color: var(--accent); }
+.smarks--text { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: var(--fs-12); color: var(--ink-2); }
 .pcard__foot { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin-top: auto; }
 .pcard__dims { font-size: 10.5px; color: var(--ink-3); }
 .pcard__price { flex: none; font-size: var(--fs-13); font-weight: 600; }
