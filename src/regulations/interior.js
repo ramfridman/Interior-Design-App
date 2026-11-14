@@ -6,7 +6,7 @@ import { finding } from './building.js';
 import { GROUND, hasLevels } from '../core/levels.js';
 import { coverageM2 } from './footprint.js';
 import {
-  rectPoly, wallObstacle, openingObstacle, m, num, cmStr, segDist, polyDist, faceFrame, freeDepth, compass, doorSwing, openingSides,
+  rectPoly, wallObstacle, openingObstacle, slantObstacles, sideZone, m, num, cmStr, segDist, polyDist, faceFrame, freeDepth, compass, doorSwing, openingSides,
   makeGrid, cloneGrid, fillPoly, clearance, flood, reachedNear, cellsNear, planRev,
 } from './geom.js';
 
@@ -51,9 +51,11 @@ export function buildContext({ store, plan, catalog }) {
   const walls = [
     ...plan.walls.map((w, i) => wallObstacle(plan, i, { wall: w })),
     ...plan.openings.filter((o) => o.kind === 'window').map((o) => openingObstacle(o, { opening: o })),
+    ...slantObstacles(plan),                                     // angled walls (stage A5): their solid pieces
   ];
   const ctx = { plan, store, catalog, items, byRoom, walls, H };
   if (floor === GROUND) ctx.coverage = coverageM2(plan);       // ground covered by the house, all floors projected (m²)
+  else if (!floor && Array.isArray(plan.slants) && plan.slants.length) ctx.coverage = coverageM2(plan);   // angled walls (A5): from the polygons
   return ctx;
 }
 
@@ -154,7 +156,7 @@ function checkDoorsAndWindows(ctx, out) {
       const R = Math.max(o.width, 60) + 5;
       const nearby = movable.filter((i) => i.bb.x < o.x + o.w + R && i.bb.x + i.bb.w > o.x - R && i.bb.y < o.y + o.h + R && i.bb.y + i.bb.h > o.y - R);
       const inSwing = swing ? nearby.filter((i) => convexOverlap(i.poly, swing, 1.5)) : [];
-      const zones = openingSides(o, 60).map((s) => rectPoly(s.rect));
+      const zones = openingSides(o, 60).map(sideZone);
       // second leaf hung in the same doorway (the safe room's inner door, which opens into the room)
       const innerSwing = o.innerDoor ? doorSwing({ ...o, ...o.innerDoor, kind: 'door', width: num(o.innerDoor.width, o.width) }) : null;
       const inInner = innerSwing ? nearby.filter((i) => !inSwing.includes(i) && convexOverlap(i.poly, innerSwing, 1.5)) : [];
@@ -184,7 +186,7 @@ function checkDoorsAndWindows(ctx, out) {
     } else if (o.kind === 'window') {
       const side = openingSides(o, mamad ? 60 : 30).find((s) => plan.rooms.some((r) => pointInPolygon(s.probe[0], s.probe[1], r.polygon)));
       if (!side) continue;
-      const zone = rectPoly(side.rect);
+      const zone = sideZone(side);
       const tall = movable.filter((i) => i.room && i.top > o.sill + 5 && i.bb.x < o.x + o.w + 65 && i.bb.x + i.bb.w > o.x - 65 && i.bb.y < o.y + o.h + 65 && i.bb.y + i.bb.h > o.y - 65 && convexOverlap(i.poly, zone, 1.5));
       if (tall.length) {
         blockedWindows++;
@@ -505,7 +507,9 @@ function checkKitchen(ctx, out) {
 }
 /** Do a box and an opening overlap along the opening's wall? */
 const rangesOverlap = (bb, o) => {
-  const F = openingFrame(o), [b0, bl] = rectExtent(bb, F.ux, F.uy), [o0, ol] = rectExtent(o, F.ux, F.uy);
+  const F = openingFrame(o), [b0, bl] = rectExtent(bb, F.ux, F.uy);
+  // an opening in an angled wall: its gap's true extent along the wall (its x / y / w / h is only a bounding box)
+  const [o0, ol] = o.axis === 'a' ? [(F.cx - F.L / 2 * F.ux) * F.ux + (F.cy - F.L / 2 * F.uy) * F.uy, F.L] : rectExtent(o, F.ux, F.uy);
   return b0 < o0 + ol && o0 < b0 + bl;
 };
 
@@ -593,6 +597,11 @@ function openingSidesOfRoom(plan, room) {
     if (dx && dy) continue;
     const px = cx + dx * (w.w / 2 + 10), py = cy + dy * (w.h / 2 + 10);
     if (!plan.rooms.some((r) => pointInPolygon(px, py, r.polygon))) exterior.push(polys[i]);
+  }
+  // angled walls (stage A5): an exterior slant that borders the room
+  for (const o of slantObstacles(plan)) {
+    if (o.wall.kind !== 'exterior' || o.bb.x > bb.x + bb.w + 1 || o.bb.x + o.bb.w < bb.x - 1 || o.bb.y > bb.y + bb.h + 1 || o.bb.y + o.bb.h < bb.y - 1) continue;
+    if (polyDist(o.poly, room.polygon) < 1) exterior.push(o.poly);
   }
   return { exterior };
 }

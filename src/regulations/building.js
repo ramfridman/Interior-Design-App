@@ -3,9 +3,10 @@
  * Everything is computed from `plan` — no coordinates are hard-coded.
  */
 import { roomFloorArea } from '../core/levels.js';
-import { areaM2, polygonArea, pointInPolygon, polygonBounds, pointInRect, convexOverlap, edgeNormal, rectExtent, inWallOrOpening, openingFrame, openingPoint, openingPoly, wallPolys } from '../core/geometry.js';
+import { areaM2, polygonArea, pointInPolygon, polygonBounds, pointInRect, convexOverlap, edgeNormal, rectExtent, inWallOrOpening, openingFrame, openingPoint, openingPoly, wallPolys, slantPolys, openingFaceSign } from '../core/geometry.js';
+import { intersectArea } from '../core/polykernel.js';
 import { ruleById, refString } from './rules.js';
-import { m, num, planRev, rectPoly, wallObstacle, openingObstacle, freeDepth, largestInnerRect, narrowPassages, overshoot, segDist, polyInside } from './geom.js';
+import { m, num, planRev, rectPoly, wallObstacle, openingObstacle, slantObstacles, openingFacing, freeDepth, largestInnerRect, narrowPassages, overshoot, segDist, polyInside } from './geom.js';
 
 /** Build one finding; category / kind / reference come from the rule. */
 export function finding(ruleId, severity, key, title, detail, extra) {
@@ -156,7 +157,9 @@ function checkLight(plan, out, metrics) {
   const kitchenIn = kitchenRoom(plan);
   for (const r of plan.rooms) {
     const { area, windows: wins, glazing: total, ratio } = metrics.get(r);
-    const list = wins.length ? wins.map((o) => `${o.kind === 'window' ? 'window' : 'glazed door'} ${dimsOf(o)}`).join(', ') : 'no window';
+    // a window in an angled wall (stage A5): width × height whatever the angle, and the way it faces from the wall's true normal
+    const faces = (o) => { const f = o.axis === 'a' ? openingFacing(o, plan) : null; return f ? ` facing ${f.name}` : ''; };
+    const list = wins.length ? wins.map((o) => `${o.kind === 'window' ? 'window' : 'glazed door'} ${dimsOf(o)}${faces(o)}`).join(', ') : 'no window';
     const assumed = wins.some((o) => (o.assumed || []).some((f) => f === 'height' || f === 'width'));
     const extra = { spaceId: r.id, at: wins[0] ? openingCentre(wins[0]) : spot(r) };
     if (HABITABLE.has(r.type)) {
@@ -303,10 +306,12 @@ function checkDoors(plan, out, multi = false) {
 
 /**
  * Walls and openings lying along each edge of a room, with thickness and whether the far side is outdoors.
- * Works on any edge direction; walls and openings are rects (their x / y / w / h), projected on the edge's axes.
+ * Works on any edge direction; walls and openings are rects (their x / y / w / h), projected on the edge's axes; an angled
+ * wall along an edge (stage A5) is listed as { id, kind, slant: true, t } with its true thickness `t`.
  */
 export function roomSides(plan, room) {
   const poly = room.polygon, sides = [], wp = wallPolys(plan);
+  const slants = slantPolys(plan).map((fp, i) => { const sl = plan.slants[i]; return { poly: fp, wall: { id: sl.id, kind: sl.kind, slant: true, t: sl.t } }; });
   const lo = (r, d) => rectExtent(r, d[0], d[1])[0], ext = (r, d) => rectExtent(r, d[0], d[1])[1];
   for (let i = 0; i < poly.length; i++) {
     const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % poly.length];
@@ -325,14 +330,26 @@ export function roomSides(plan, room) {
       return ox > 0 && oy > 0 && ox > 5 && (!strip || convexOverlap(strip, rp(), 0));
     };
     const walls = plan.walls.filter((w, k) => touching(w, () => wp[k])), openings = plan.openings.filter((o) => touching(o, () => openingPoly(o)));
+    // angled walls (stage A5): a slant whose footprint covers > 4 cm of the 2 cm strip beyond the edge lies along it
+    if (slants.length) {
+      const band = [[x1, y1], [x2, y2], [x2 + n[0] * 2, y2 + n[1] * 2], [x1 + n[0] * 2, y1 + n[1] * 2]];
+      for (const sl of slants) if (intersectArea([band], [sl.poly]) > 8) walls.push(sl.wall);
+    }
     if (!walls.length && !openings.length) continue;
-    const thick = (r) => ext(r, p);
+    const thick = (r) => (r.slant ? r.t : ext(r, p));
     const thickness = Math.min(...walls.map(thick), ...(walls.length ? [] : openings.map(thick)));
     const px = mx + n[0] * (thickness + 10), py = my + n[1] * (thickness + 10);
     const dir = Math.abs(n[1]) >= Math.abs(n[0]) ? (n[1] < 0 ? 'north' : 'south') : (n[0] < 0 ? 'west' : 'east');
     sides.push({ dir, n, walls, openings, thickness, exterior: !roomAt(plan, px, py), at: { x: mx, y: my } });
   }
   return sides;
+}
+
+/** Does a leaf hung in opening `o` with `swing` open towards the room side `side` (roomSides entry) — outwards? */
+function swingsTo(o, swing, side) {
+  if (o.axis !== 'a') return swing === side.dir[0];
+  const F = openingFrame(o);                             // an opening in an angled wall: 'l' / 'r' against the side's normal
+  return openingFaceSign(o, swing) * (F.nx * side.n[0] + F.ny * side.n[1]) > 0;
 }
 
 function checkMamad(plan, H, store, catalog, out, metrics) {
@@ -384,7 +401,7 @@ function checkMamad(plan, H, store, catalog, out, metrics) {
     for (const o of doors) {
       const dAt = openingCentre(o);
       const side = sides.find((s) => s.openings.includes(o));
-      const outward = side ? (o.swing === side.dir[0]) : true;
+      const outward = side ? swingsTo(o, o.swing, side) : true;
       const blast = o.style === 'mamad';
       const okSize = o.width >= 70 && o.width <= 90 && o.height >= 200;
       const std = o.width <= 80;
@@ -398,7 +415,7 @@ function checkMamad(plan, H, store, catalog, out, metrics) {
       const inn = o.innerDoor;
       if (inn) {
         const iw = num(inn.width, o.width), ih = num(inn.height, o.height);
-        const inward = !side || !inn.swing || inn.swing !== side.dir[0];
+        const inward = !side || !inn.swing || !swingsTo(o, inn.swing, side);
         const fits = iw <= o.width && ih <= o.height;
         out.push(finding('mamad-inner-door', inward && fits ? 'info' : 'warn', o.id,
           inward ? `Inner door ${iw} × ${ih} cm behind the blast door — optional, not a requirement` : 'Inner door opens OUTWARDS, against the blast door',
@@ -423,7 +440,7 @@ function checkMamad(plan, H, store, catalog, out, metrics) {
           + (ok ? '.' : ' — otherwise the door must be shielded by a concrete wall as the Home Front Command specification details. Confirm with the architect.'), { spaceId: r.id, at: dAt }));
 
         // free floor in front of the door, up to the first wall (an interior wall the owner adds can come too close)
-        if (!wallObstacles) wallObstacles = [...plan.walls.map((w, i) => wallObstacle(plan, i, { wall: w })), ...plan.openings.filter((x) => x.kind === 'window').map((x) => openingObstacle(x, { wall: x }))];
+        if (!wallObstacles) wallObstacles = [...plan.walls.map((w, i) => wallObstacle(plan, i, { wall: w })), ...plan.openings.filter((x) => x.kind === 'window').map((x) => openingObstacle(x, { wall: x })), ...slantObstacles(plan)];
         const F = openingFrame(o, plan), outFace = side.n[0] * F.nx + side.n[1] * F.ny > 0;
         const face = openingPoint(F, F.L / 2, outFace ? F.T : 0);                 // centre of the door's face on that side
         const { depth, hit } = freeDepth({ o: face, u: side.n, v: [F.ux, F.uy], hw: o.width / 2 }, 400, wallObstacles, { inset: 1 });
@@ -472,10 +489,18 @@ function rayToExterior(plan, from, n, skip) {
   for (let d = skip + 5; d < 3000; d += 5) {
     const x = from.x + n[0] * d, y = from.y + n[1] * d;
     if (x < b.x || y < b.y || x > b.x + b.w || y > b.y + b.h) return d - skip;
-    if (plan.walls.some((w) => w.kind === 'exterior' && pointInRect(x, y, w)) || plan.openings.some((o) => o.exterior && pointInRect(x, y, o))) return d - skip;
+    if (plan.walls.some((w) => w.kind === 'exterior' && pointInRect(x, y, w)) || plan.openings.some((o) => o.exterior && (o.axis === 'a' ? pointInPolygon(x, y, openingPoly(o, plan)) : pointInRect(x, y, o)))) return d - skip;
+    if (exteriorSlant(plan, x, y)) return d - skip;
     if (!roomAt(plan, x, y) && !inWallOrOpening(x, y, plan)) return d - skip;
   }
   return 3000;
+}
+
+/** Inside the footprint of an exterior angled wall (stage A5)? */
+function exteriorSlant(plan, x, y) {
+  if (!Array.isArray(plan.slants) || !plan.slants.length) return false;
+  const fps = slantPolys(plan);
+  return plan.slants.some((s, i) => s.kind === 'exterior' && pointInPolygon(x, y, fps[i]));
 }
 
 // ───────────────────────── site ─────────────────────────
@@ -509,6 +534,12 @@ function checkSite(plan, out, outlines) {
     const e = boundaryEdge(site.boundary, side); if (!e) continue;
     let dist = Infinity;
     for (const poly of wallOutlines) for (const [x, y] of poly) dist = Math.min(dist, segDist(x, y, e.a[0], e.a[1], e.b[0], e.b[1]));
+    // an angled wall (stage A5): the true distance between its footprint and the property line (an edge can come
+    // closer than its corners when the line ends beside it)
+    if (!outlines) for (const fp of slantPolys(plan)) for (let i = 0; i < fp.length; i++) {
+      const a = fp[i], b = fp[(i + 1) % fp.length];
+      dist = Math.min(dist, segDist(e.a[0], e.a[1], a[0], a[1], b[0], b[1]), segDist(e.b[0], e.b[1], a[0], a[1], b[0], b[1]));
+    }
     const need = site.setbacks && site.setbacks[side];
     const ok = need == null || dist >= need - 2;
     if (!ok) worst = 'fail';

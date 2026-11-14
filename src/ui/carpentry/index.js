@@ -382,8 +382,13 @@ export function createCarpentry(app) {
     const floorRun = levels.some((l) => FLOOR.has(l));
     const tallOnly = !levels.includes('base') && levels.some((l) => l === 'tall' || l === 'full');
     const blocks = span.openings.filter((o) => (floorRun && o.kind !== 'window') || (tallOnly && o.kind === 'window'));
-    const from = Math.max(0, ...blocks.filter((o) => o.to <= span.at + 0.01).map((o) => o.to));
-    const to = Math.min(span.length, ...blocks.filter((o) => o.from >= span.at - 0.01).map((o) => o.from));
+    let from = Math.max(0, ...blocks.filter((o) => o.to <= span.at + 0.01).map((o) => o.to));
+    let to = Math.min(span.length, ...blocks.filter((o) => o.from >= span.at - 0.01).map((o) => o.from));
+    if (span.corners) {                    // an acute corner with an angled wall: the run stays back from it (as createRun)
+      const ins = Carp.cornerInsets(span, kind);
+      if (from < 0.5) from = Math.max(from, ins.left);
+      if (to > span.length - 0.5) to = Math.min(to, span.length - ins.right);
+    }
     const windows = span.openings.some((o) => o.kind === 'window' && Math.min(to, o.to) - Math.max(from, o.from) > 0.5);
     return { span, from, to, length: to - from, windows };
   }

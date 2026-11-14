@@ -4,14 +4,14 @@
  * Errors = cannot be built / installed as drawn; warnings = against best practice; info = notes for the designer.
  */
 import { PLAN } from '../core/plan.js';
-import { itemAABB, openingHinge, itemCorners } from '../core/geometry.js';
+import { itemAABB, openingHinge, itemCorners, convexOverlap, pointInPolygon, slantSolids } from '../core/geometry.js';
 import { allStairs, stairInfo } from '../core/plan-edit.js';
 import { voidsOf } from '../core/levels.js';
 import { intersectArea } from '../core/polykernel.js';
 import { view, planOf, ceilingOf, runLevel, itemFloor } from './state.js';
 import { RULES } from './spec.js';
 import { unitsOf, positions, geometryOf, unitCodes, isFloorLevel } from './layout.js';
-import { spanOfRun, openingConflicts, toPlan, frame } from './walls.js';
+import { spanOfRun, openingConflicts, toPlan, frame, cornerAt } from './walls.js';
 import { computeWorktops } from './worktop.js';
 import { validateCustomLayout } from './bespoke.js';
 import { circled } from './features.js';
@@ -84,6 +84,19 @@ function findingsFor(run, v) {
         add('info', 'end-panel', `${C(endU)} is the open end of the run — a finished end panel is recommended.`, `${C(endU)} בקצה פתוח של הקו — מומלץ פאנל צד גמור.`, [endU]);
       }
     }
+  }
+
+  // ── angled corners (stage A5): an end where the wall meets the next one at an angle other than 90° ──
+  if (span && span.corners) for (const side of ['left', 'right']) {
+    const c = cornerAt(run, side, span);
+    if (!c) continue;
+    const row = floor.length ? floor : wall, endU = row.length ? (side === 'left' ? row[0] : row[row.length - 1]) : null;
+    const gap = side === 'left' ? span.runFrom : span.length - span.runTo, need = endU ? c.inset(endU.g.d) : 0;
+    const sideHe = side === 'left' ? 'השמאלי' : 'הימני';
+    if (endU && gap < need - 0.5) add('error', 'corner-angle', `${C(endU)} runs into the angled wall at the ${side} end (a ${c.angle}° corner): keep the run ${r1(need)} cm from the corner so its ${r1(endU.g.d)} cm deep front clears the wall.`,
+      `${C(endU)} נכנס לקיר האלכסוני בקצה ה${sideHe} (פינה של ${c.angle}°): יש להרחיק את הקו ${r1(need)} ס״מ מהפינה כדי שהחזית בעומק ${r1(endU.g.d)} ס״מ לא תפגע בקיר.`, [endU]);
+    else add('info', 'corner-angle', `The ${side} end meets the wall at ${c.angle}° (not square): close the ${c.angle < 90 ? 'triangle in front of the corner' : 'wedge behind the end unit'} with a scribed filler / panel cut to the angle on site; no corner unit there.`,
+      `הקצה ה${sideHe} פוגש את הקיר בזווית ${c.angle}° (לא ישרה): יש לסגור את ${c.angle < 90 ? 'המשולש שמול הפינה' : 'הטריז שמאחורי הארון האחרון'} בפילר / דופן המותאמים לזווית באתר; ללא ארון פינה בקצה זה.`, endU ? [endU] : []);
   }
 
   // ── corners ──
@@ -246,11 +259,15 @@ function findingsFor(run, v) {
   const aisleNeed = ['kitchen', 'island'].includes(run.kind) ? RULES.aisleMin : ['wardrobe', 'entry', 'utility', 'pantry'].includes(run.kind) ? RULES.wardrobeAisle : 70;
   if (run.kind !== 'island') {
     const f = frame(run.anchor.dir);
+    // stage A5: at an acute angled corner the ray in front of the end units meets the wall of the corner itself, not an aisle
+    const returns = span && span.corners ? ['left', 'right'].map((sd) => cornerAt(run, sd, span)).filter((c) => c && c.angle < 90).map((c) => c.with) : [];
+    const isReturn = (d) => d && d.what === 'a wall' && d.n && returns.some((w) => Math.abs(Math.abs(w[0] * d.n[0] + w[1] * d.n[1]) - 1) < 1e-3);
     let worst = null;
     for (const x of floor.filter((y) => !y.virtual && !y.mod.corner)) {
       for (let s = x.at + 5; s <= x.end - 5 + 0.01; s += Math.max(5, (x.w - 10) / 2 || 5)) {
         const [px, py] = toPlan(run.anchor, s, x.g.d + 0.5);
         const dist = rayClear(px, py, f.nx, f.ny, others.filter((o) => (o.elev || 0) < 120 && o.h > 30 && !(o.carp && linked.has(o.carp.runId))), 400, plan);
+        if (returns.length && isReturn(dist)) continue;
         if (dist != null && (!worst || dist.d < worst.d)) worst = { ...dist, x };
       }
     }
@@ -278,7 +295,8 @@ function findingsFor(run, v) {
   for (const it of others) {
     if (it.carp) continue;
     const bb = itemAABB(it), lo = it.elev || 0, hi = lo + (it.h || 0);
-    const hits = list.filter((x) => { if (x.virtual) return false; const b = itemAABB(x.u); return b.x < bb.x + bb.w - 1 && bb.x < b.x + b.w - 1 && b.y < bb.y + bb.h - 1 && bb.y < b.y + b.h - 1 && x.elev < hi - 1 && lo < x.top - 1; });
+    const turned = (it.rot || 0) % 90 || (run.anchor.dir || 0) % 90;     // stage A5: turned footprints are compared exactly
+    const hits = list.filter((x) => { if (x.virtual) return false; const b = itemAABB(x.u); return b.x < bb.x + bb.w - 1 && bb.x < b.x + b.w - 1 && b.y < bb.y + bb.h - 1 && bb.y < b.y + b.h - 1 && x.elev < hi - 1 && lo < x.top - 1 && (!turned || convexOverlap(itemCorners(x.u), itemCorners(it), 1)); });
     if (hits.length) add('warning', 'clash', `${it.name || it.type} overlaps ${hits.map(C).join(', ')}.`, `${it.name || it.type} חופף ל-${hits.map(C).join(', ')}.`, hits);
   }
   return out;
@@ -344,13 +362,22 @@ export function doorSwingHit(item, plan = PLAN) {
   return null;
 }
 
-/** Leaf sweep of a hinged door as { hx, hy (hinge point), r, sx, sy } in plan cm: the quadrant on the sx / sy side of the hinge. */
+/**
+ * Leaf sweep of a hinged door as { hx, hy (hinge point), r, sx, sy } in plan cm: the quadrant on the sx / sy side of the
+ * hinge. A door in an angled wall (stage A5) also gets `poly`: the true quarter circle (15° steps) the leaf sweeps.
+ */
 export function swingRect(o) {
   if (!o.swing || !o.hinge) return null;
   const h = openingHinge(o);
-  return { hx: h.x, hy: h.y, r: o.width, sx: h.closed[0] + h.open[0], sy: h.closed[1] + h.open[1] };
+  const sw = { hx: h.x, hy: h.y, r: o.width, sx: h.closed[0] + h.open[0], sy: h.closed[1] + h.open[1] };
+  if (o.axis === 'a') {
+    sw.poly = [[h.x, h.y]];
+    for (let a = 0; a <= 90; a += 15) { const c = Math.cos(a * Math.PI / 180), s = Math.sin(a * Math.PI / 180); sw.poly.push([h.x + o.width * (c * h.closed[0] + s * h.open[0]), h.y + o.width * (c * h.closed[1] + s * h.open[1])]); }
+  }
+  return sw;
 }
 function itemHitsSwing(it, sw) {
+  if (sw.poly) return convexOverlap(itemCorners(it), sw.poly, 1);
   const b = itemAABB(it);
   const qx0 = sw.sx > 0 ? sw.hx : sw.hx - sw.r, qy0 = sw.sy > 0 ? sw.hy : sw.hy - sw.r;
   const ix0 = Math.max(b.x, qx0), ix1 = Math.min(b.x + b.w, qx0 + sw.r), iy0 = Math.max(b.y, qy0), iy1 = Math.min(b.y + b.h, qy0 + sw.r);
@@ -371,15 +398,64 @@ function rayToRect(px, py, dx, dy, r) {
   }
   return t1 < t0 ? null : t0;
 }
+/**
+ * Distance along the unit ray (dx, dy) from (px, py) to the first edge of a polygon it crosses (stage A5: angled walls,
+ * turned items), or null when it misses it or starts more than 0.5 cm inside it (as rayToRect).
+ */
+function rayToPoly(px, py, dx, dy, poly) {
+  let best = null;
+  for (let i = 0; i < poly.length; i++) {
+    const [ax, ay] = poly[i], [bx, by] = poly[(i + 1) % poly.length], ex = bx - ax, ey = by - ay, den = dx * ey - dy * ex;
+    if (Math.abs(den) < 1e-12) continue;
+    const t = ((ax - px) * ey - (ay - py) * ex) / den, u = ((ax - px) * dy - (ay - py) * dx) / den;
+    if (u < 0 || u > 1 || t < -0.5) continue;
+    if (best == null || t < best) best = t;
+  }
+  if (best == null) return null;
+  return pointInPolygon(px, py, poly) && best > 0.5 ? null : best;
+}
+/** Outward normal of the rect side (of any rect in `walls`) nearest to a point. */
+function rectHitNormal(x, y, walls) {
+  let best = null;
+  for (const r of walls) for (const [d, n] of [[Math.abs(x - r.x), [-1, 0]], [Math.abs(x - r.x - r.w), [1, 0]], [Math.abs(y - r.y), [0, -1]], [Math.abs(y - r.y - r.h), [0, 1]]]) {
+    if (x < r.x - 1 || x > r.x + r.w + 1 || y < r.y - 1 || y > r.y + r.h + 1) continue;
+    if (!best || d < best.d) best = { d, n };
+  }
+  return best ? best.n : null;
+}
+/** Unit normal of the polygon edge nearest to a point (orientation-free: callers compare |dot|). */
+function polyHitNormal(x, y, ring) {
+  let best = null;
+  for (let i = 0; i < ring.length; i++) {
+    const [ax, ay] = ring[i], [bx, by] = ring[(i + 1) % ring.length], ex = bx - ax, ey = by - ay, L = Math.hypot(ex, ey);
+    if (!L) continue;
+    const t = Math.max(0, Math.min(1, ((x - ax) * ex + (y - ay) * ey) / (L * L))), d = Math.hypot(x - ax - t * ex, y - ay - t * ey);
+    if (!best || d < best.d) best = { d, n: [ey / L, -ex / L] };
+  }
+  return best ? best.n : null;
+}
 /** Clear distance along a ray (unit direction) to the first wall (of `plan`, the run's floor) / item. */
 export function rayClear(px, py, dx, dy, items, max, plan = PLAN) {
   let best = { d: max, what: 'nothing', whatHe: 'מכשול' }, hit = false;
-  const test = (r, what, whatHe) => {
-    const d = rayToRect(px, py, dx, dy, r);
-    if (d != null && d >= -0.5 && d < best.d) { best = { d: Math.max(0, d), what, whatHe }; hit = true; }
-  };
+  const take = (d, what, whatHe) => { if (d != null && d >= -0.5 && d < best.d) { best = { d: Math.max(0, d), what, whatHe }; hit = true; } };
+  const test = (r, what, whatHe) => take(rayToRect(px, py, dx, dy, r), what, whatHe);
   for (const w of plan.walls) test(w, 'a wall', 'קיר');
-  for (const it of items) test(itemAABB(it), it.carp ? 'another run' : (it.name || it.type), it.carp ? 'קו ארונות אחר' : (it.name || it.type));
+  // angled walls (stage A5): the ray against the edges of their solid pieces; a wall hit then also carries `n`, the unit
+  // normal of the face it reached (so a caller can tell a facing wall from the return wall of an angled corner)
+  const angled = plan.slants && plan.slants.length;
+  if (angled) {
+    if (hit) best.n = rectHitNormal(px + dx * best.d, py + dy * best.d, plan.walls);
+    for (const sw of slantSolids(plan)) for (const ring of sw.rings) {
+      const d = rayToPoly(px, py, dx, dy, ring), before = best;
+      take(d, 'a wall', 'קיר');
+      if (best !== before) best.n = polyHitNormal(px + dx * best.d, py + dy * best.d, ring);
+    }
+  }
+  for (const it of items) {
+    const what = it.carp ? 'another run' : (it.name || it.type), whatHe = it.carp ? 'קו ארונות אחר' : (it.name || it.type);
+    if ((it.rot || 0) % 90) take(rayToPoly(px, py, dx, dy, itemCorners(it)), what, whatHe);   // a turned item: its true outline
+    else test(itemAABB(it), what, whatHe);
+  }
   return hit ? best : null;
 }
 

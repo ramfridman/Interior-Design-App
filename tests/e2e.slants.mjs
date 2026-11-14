@@ -6,8 +6,8 @@
 // the angled wall. The WEDGE fixture (buildPlan({ slants: true }) + projects.create({ fromPlan })) with its dimensions,
 // a ∥ guide while drawing, and its plan PNG export. With the switch off: the House 98 plan PNG identical to the capture
 // taken before stage A3 (tests/fixtures/house98-plan-png.json) and no new controls. A phone viewport: drawing by touch,
-// the read-out lifted above the finger. No console errors (the 3D view of a plan with angled walls is stage A4: its
-// THREE NaN warnings are listed, not counted).
+// the read-out lifted above the finger. The Wedge in 3D (stage A4): orbit, cut-away on / off, a wall finish dropped on the
+// slanted wall, a walk into an angled wall (blocked). No console errors anywhere (THREE NaN warnings included).
 //   node tests/e2e.slants.mjs [--shots]      (screenshots go to dev/screens/e2e-slants-*.png)
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -29,14 +29,12 @@ const server = spawn(process.execPath, [path.join(root, 'dev', 'serve.mjs'), Str
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? '  ok ' : 'FAIL '} ${name}${extra ? ' — ' + extra : ''}`); if (!ok) failed++; };
-/** THREE warnings from the 3D view of a plan with angled walls (stage A4 builds that view): reported, not failures. */
-const isA4 = (t) => /computeBoundingSphere\(\): Computed radius is NaN/.test(t);
 
 async function boot(browser, query, viewport = { width: 1440, height: 900 }, extra = {}) {
   const context = await browser.newContext({ viewport, ...extra });
   const page = await context.newPage();
-  const errors = [], a4 = [];
-  page.on('console', (m) => { if (m.type() === 'error') (isA4(m.text()) ? a4 : errors).push(m.text()); });
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('response', (r) => { if (r.status() >= 400) errors.push(`HTTP ${r.status()}: ${r.url()}`); });
   await page.addInitScript(() => { try { localStorage.clear(); } catch (e) { /* none */ } });
@@ -45,7 +43,7 @@ async function boot(browser, query, viewport = { width: 1440, height: 900 }, ext
   await sleep(900);
   await page.getByRole('button', { name: 'Start designing' }).click({ timeout: 10000 }).catch(() => {});
   await sleep(400);
-  return { context, page, errors, a4, ready };
+  return { context, page, errors, ready };
 }
 const scr = (page, x, y) => page.evaluate(({ x, y }) => window.app.view2d.planToScreen(x, y), { x, y });
 const draft = (page) => page.evaluate(() => { const D = window.app.view2d._debug.state.struct.draft; return D ? { readout: D.readout, shown: D.shown, angleKind: D.angleKind, endKind: D.endKind, ok: D.ok, reason: D.reason, angled: D.angled, joined: D.joined, input: D.input, guides: (D.slantGuides || []).map((g) => g.kind) } : null; });
@@ -68,7 +66,7 @@ async function main() {
   const browser = await chromium.launch();
 
   // ════════ the switch on: a rectangular house and a 45° partition ════════
-  const { page, errors, a4, ready } = await boot(browser, '?angled=1');
+  const { page, errors, ready } = await boot(browser, '?angled=1');
   check('app boots with ?angled=1', ready);
   if (!ready) { console.log(errors.join('\n')); await browser.close(); return; }
 
@@ -312,7 +310,6 @@ async function main() {
   const angledRect = await page.evaluate(() => { const { plan, store } = window.app, sel = store.ui.structureSel; const s = (plan.slants || []).find((q) => sel && sel.id === `seg:a:${q.id}`); return s && { ang: Math.atan2(-(s.y2 - s.y1), s.x2 - s.x1) * 180 / Math.PI, s }; });
   check('a straight wall’s end dragged off its axis turns it into an angled wall (75°)', rectEnd.ok && angledRect && Math.abs(Math.abs(angledRect.ang) - 75) < 0.1, JSON.stringify(angledRect));
   check('main page: no console errors', errors.length === 0, errors.slice(0, 5).join(' | '));
-  if (a4.length) console.log(`  (3D, stage A4: ${a4.length} THREE NaN warning(s) while the 3D view holds angled walls)`);
 
   // ── Settings → Experimental carries the switch with its works / not-yet text ──
   const setting = await page.evaluate(async () => {
@@ -325,9 +322,9 @@ async function main() {
     const checked = box ? !!box.querySelector('input[type="checkbox"]')?.checked || box.querySelector('[aria-checked="true"]') !== null : false;
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    return { found: !!box, checked, works: /Works: drawing walls at any angle/.test(text), notYet: /Not yet: angled walls in 3D/.test(text) };
+    return { found: !!box, checked, works: /Works: drawing walls at any angle.*angled walls in 3D/.test(text), approx: /Approximate: the light simulation/.test(text), notYet: /Not yet: the regulation/.test(text) && !/Not yet: angled walls in 3D/.test(text) };
   });
-  check('Settings → Experimental: "Angled walls (in development)", on, with what works and what not yet', setting.found && setting.checked && setting.works && setting.notYet, JSON.stringify(setting));
+  check('Settings → Experimental: "Angled walls (in development)", on, with what works (3D too), what is approximate (light) and what not yet', setting.found && setting.checked && setting.works && setting.approx && setting.notYet, JSON.stringify(setting));
   await sleep(300);
 
   // ════════ the Wedge: dimensions, a ∥ guide, the plan PNG ════════
@@ -360,6 +357,81 @@ async function main() {
   const png = await exportPng(page);
   check('the Wedge plan PNG exports (A3 sheet)', png.length > 50000 && png.slice(1, 4).toString() === 'PNG', `${png.length} bytes`);
   check('Wedge: no console errors', errors.length === 0, errors.slice(0, 5).join(' | '));
+
+  // ════════ the Wedge in 3D (stage A4) ════════
+  const shot3d = async (name) => { if (shots) await page.locator('#view3d').screenshot({ path: path.join(shotDir, `e2e-slants-${name}.png`), scale: 'css' }); };
+  const look = (t, theta, phi, radius) => page.evaluate(([t, th, ph, r]) => { const d = window.app.view3d.debug; d.rig.setPose({ target: new d.camera.position.constructor(...t), theta: th, phi: ph, radius: r, fov: 45 }, { animate: false }); d.renderNow(); }, [t, theta, phi, radius]);
+  await page.evaluate(() => window.app.store.setUI({ mode: '3d', showRoof: false, wallsCutaway: false }));
+  await sleep(4000);
+  const in3d = await page.evaluate(() => {
+    const d = window.app.view3d.debug, house = d.house(), names = [];
+    let nan = 0, angled = 0;
+    house.group.traverse((o) => {
+      if (!o.isMesh) return;
+      names.push(o.name);
+      const g = o.geometry; g.computeBoundingSphere();
+      if (!Number.isFinite(g.boundingSphere.radius)) nan++;
+      if (o.name.startsWith('wall:room:')) { const n = g.attributes.normal; for (let i = 0; i < n.count; i++) if (Math.abs(n.getX(i)) > 0.1 && Math.abs(n.getZ(i)) > 0.1) { angled++; break; } }
+    });
+    return { ready: d.isReady(), nan, angled, walls: names.filter((n) => n.startsWith('wall:room:')).length, calls: d.stats().calls };
+  });
+  check('Wedge in 3D: room walls with angled faces, no NaN bounding spheres', in3d.angled >= 3 && in3d.walls === 3 && in3d.nan === 0, JSON.stringify(in3d));
+  for (const [theta, phi] of [[0.6, 0.9], [2.4, 1.1], [-2.2, 0.8], [3.6, 1.2]]) { await look([5, 0.8, 4], theta, phi, 16); await sleep(250); }   // orbit
+  await look([5, 0.8, 4], 2.2, 1.15, 17);
+  await sleep(1500);
+  await shot3d('wedge-3d-outside');
+  await page.evaluate(() => window.app.store.setUI({ wallsCutaway: true }));
+  await sleep(1500);
+  const cut = await page.evaluate(() => { const h = window.app.view3d.debug.house(); let top = -Infinity; h.group.traverse((o) => { if (o.isMesh && o.name === 'wall:cap' && o.geometry.index.count) { o.geometry.computeBoundingBox(); top = Math.max(top, o.geometry.boundingBox.max.y); } }); return top; });
+  check('cut-away on: the walls (angled ones too) are capped at the cut-away height', cut > 0.5 && cut < 1.6, String(cut));
+  await look([5, 0, 4], 0.3, 0.35, 15);
+  await sleep(1500);
+  await shot3d('wedge-3d-cutaway');
+  // a wall finish dropped on the inner face of s01 (the east room)
+  const drop = await page.evaluate(async () => {
+    const { plan, view3d, store } = window.app, d = view3d.debug;
+    const s = plan.slants.find((q) => q.id === 's01'), L = Math.hypot(s.x2 - s.x1, s.y2 - s.y1), ux = (s.x2 - s.x1) / L, uy = (s.y2 - s.y1) / L, nx = -uy, ny = ux;
+    const east = plan.rooms.find((r) => r.polygon.some(([x]) => x > 900));
+    const at = 0.3 * L, fx = s.x1 + ux * at + nx * (s.t / 2 + 1), fy = s.y1 + uy * at + ny * (s.t / 2 + 1);   // inner face ('r' side)
+    const V = d.camera.position.constructor;
+    d.rig.setPose({ target: new V(fx / 100, 0.6, fy / 100), theta: Math.atan2(nx, ny), phi: 1.05, radius: 3.2, fov: 45 }, { animate: false });
+    d.renderNow();
+    await new Promise((r) => setTimeout(r, 300));
+    const p = new V(fx / 100, 0.6, fy / 100).project(d.camera), rect = d.renderer.domElement.getBoundingClientRect();
+    const cx = rect.left + (p.x + 1) / 2 * rect.width, cy = rect.top + (1 - p.y) / 2 * rect.height;
+    const target = view3d.finishTargetAt(cx, cy);
+    const prod = (await import('/src/catalog/index.js')).allProducts().find((q) => q.type === 'wall-finish');
+    let applied = null;
+    if (prod) {
+      const dt = new DataTransfer();
+      dt.setData('application/x-e7-product', prod.id);
+      document.getElementById('pane3d').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, clientX: cx, clientY: cy, bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 400));
+      applied = (store.finishes[east.id] || {}).wall || null;
+    }
+    return { target, east: east.id, prod: prod && prod.id, applied };
+  });
+  check('a wall finish dropped on the slanted wall (inside) goes to the east room', drop.target && drop.target.surface === 'wall' && drop.target.spaceId === drop.east && drop.prod && drop.applied === drop.prod, JSON.stringify(drop));
+  await page.evaluate(() => window.app.store.setUI({ wallsCutaway: false }));
+  await sleep(800);
+  await look([4.6, 1.2, 3.6], -2.6, 1.35, 4.2);
+  await sleep(1500);
+  await shot3d('wedge-3d-interior');
+  // walk into s02 from the NW triangle, away from its door: blocked
+  await page.evaluate(() => window.app.store.setUI({ mode: 'walk' }));
+  await sleep(2500);
+  await page.evaluate(() => window.app.view3d.debug.walk.teleport(60, 200, 135));
+  await sleep(300);
+  await page.keyboard.down('KeyW');
+  await sleep(2500);
+  await page.keyboard.up('KeyW');
+  await sleep(300);
+  const walked = await page.evaluate(() => window.app.view3d.debug.walker());
+  check('walking into the 45° wall (not at its door) is blocked: the walker stays in the NW triangle', walked.x + walked.y > 270 && walked.x + walked.y < 318 - 5 && walked.x < 200, JSON.stringify({ x: walked.x, y: walked.y }));
+  await page.evaluate(() => window.app.store.setUI({ mode: '3d' }));
+  await sleep(1200);
+  check('Wedge 3D: no console errors (no THREE NaN warnings)', errors.length === 0, errors.slice(0, 5).join(' | '));
+  console.log(`      Wedge 3D: ${in3d.calls} draw calls (orbit, roof off)`);
   await page.context().close();
 
   // ════════ the switch off: House 98 identical, no new controls, the wall tool as before ════════

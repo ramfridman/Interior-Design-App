@@ -15,6 +15,7 @@ import * as THREE from 'three';
 import * as Carp from '../carpentry/index.js';
 import { LAYER_SELECTED } from './items.js';
 import { viewOf, validLevel, itemLevel } from './levels.js';
+import { slantPolys } from '../core/geometry.js';
 
 const cssVar = (name, fallback) => { try { return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback; } catch (e) { return fallback; } };
 
@@ -29,6 +30,21 @@ function rayRects(p, s, rects, min = 1) {
       t0 = Math.max(t0, Math.min(u, v)); t1 = Math.min(t1, Math.max(u, v));
     }
     if (t0 <= t1 && t0 >= min && t0 < best) best = t0;
+  }
+  return best;
+}
+
+/** Ray (plan cm) from p along unit direction s against polygons (angled walls): nearest edge crossing ≥ min, or Infinity. */
+function rayPolys(p, s, polys, min = 1) {
+  let best = Infinity;
+  for (const poly of polys) {
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length], ex = b[0] - a[0], ey = b[1] - a[1];
+      const den = s[0] * ey - s[1] * ex;
+      if (Math.abs(den) < 1e-12) continue;
+      const qx = a[0] - p[0], qy = a[1] - p[1], t = (qx * ey - qy * ex) / den, u = (qx * s[1] - qy * s[0]) / den;
+      if (u >= 0 && u <= 1 && t >= min && t < best) best = t;
+    }
   }
   return best;
 }
@@ -72,16 +88,21 @@ export function createCarpentryLayer({ scene, renderer, ctx, items, rig, overlay
 
   // ───────── section cut ─────────
   /** Walls of the level a run stands on (several floors: `run.level`; the plan's own walls on the ground floor). */
-  const runWalls = (run) => (run && run.level && plan.levels ? viewOf(plan, validLevel(plan, run.level)).walls : plan.walls) || [];
+  const runView = (run) => (run && run.level && plan.levels ? viewOf(plan, validLevel(plan, run.level)) : plan);
+  const runWalls = (run) => runView(run).walls || [];
+  /** Angled walls of the run's level (stage A4): the cut also stops in front of them. */
+  const runSlants = (run) => { const v = runView(run); return Array.isArray(v.slants) && v.slants.length ? slantPolys(v) : null; };
   /** Camera-side direction (plan, unit) and the cut distance (cm from the anchor line) for a run. */
   function cutFor(got) {
     const run = got.run, a = (run.anchor.dir * Math.PI) / 180, fn = [-Math.sin(a), Math.cos(a)];
     if (run.kind === 'island') return { s: [-fn[0], -fn[1]], D: 45 };
     const dmax = Math.max(30, ...got.units.filter((u) => !u.hidden).map((u) => u.d || 0));
     let tmin = Infinity;
+    const slants = runSlants(run);
     for (const k of [0.2, 0.5, 0.8]) {
       const [x, y] = Carp.toPlan(run.anchor, run.length * k, dmax + 1);
       tmin = Math.min(tmin, rayRects([x, y], fn, runWalls(run), 25));
+      if (slants) tmin = Math.min(tmin, rayPolys([x, y], fn, slants, 25));
     }
     return { s: fn, D: Number.isFinite(tmin) ? Math.max(dmax + 40, dmax + 1 + tmin - 2) : dmax + 220 };
   }

@@ -38,6 +38,7 @@ import { SKY_BINS, SKY, binOf, skyRadiance, LUX_PER_UNIT } from './sky.js';
 import { levelIds, levelElevation, levelHeights, footprintOf, hasLevels, GROUND } from '../../core/levels.js';
 import { levelPlan } from '../../core/plan-edit.js';
 import { difference, offset } from '../../core/polykernel.js';
+import { slantPolys, openingFrame, openingPoly } from '../../core/geometry.js';
 
 export { LUX_PER_UNIT };
 export const CELL_M = 0.05;
@@ -106,12 +107,23 @@ export function sceneInputFromPlan(plan, o = {}) {
   const h = plan.heights || {};
   const ceiling = Number(o.ceilingCm) >= 200 ? Math.min(600, Number(o.ceilingCm)) : (h.ceiling || 300);
   const rect = (r) => ({ x: +r.x, y: +r.y, w: +r.w, h: +r.h });
-  return {
+  // angled walls (stage A4, the cheap daylight fallback of the design — exact faces are stage A7): their joined
+  // footprints are rasterised as wall cells, the openings in them carry their gap quad and frame
+  const slanted = Array.isArray(plan.slants) && plan.slants.length > 0;
+  const input = {
     walls: (plan.walls || []).filter((w) => w.w > 0 && w.h > 0).map(rect),
-    openings: (plan.openings || []).filter((q) => q.w > 0 && q.h > 0).map((q) => ({
-      ...rect(q), id: q.id, axis: q.axis, kind: q.kind, style: q.style, sill: +q.sill || 0, height: +q.height || 0,
-      width: +q.width || 0, exterior: !!q.exterior, rooms: (q.rooms || []).slice(),
-    })),
+    openings: (plan.openings || []).filter((q) => (q.axis === 'a' ? slanted && q.width > 0 : q.w > 0 && q.h > 0)).map((q) => {
+      const r = {
+        ...rect(q), id: q.id, axis: q.axis, kind: q.kind, style: q.style, sill: +q.sill || 0, height: +q.height || 0,
+        width: +q.width || 0, exterior: !!q.exterior, rooms: (q.rooms || []).slice(),
+      };
+      if (q.axis === 'a') {
+        const F = openingFrame(q, plan);
+        r.quad = openingPoly(q, plan).map((p) => [p[0], p[1]]);
+        r.frame = { cx: F.cx, cy: F.cy, ux: F.ux, uy: F.uy, nx: F.nx, ny: F.ny, L: F.L, T: F.T };
+      }
+      return r;
+    }),
     rooms: (plan.rooms || []).filter((r) => Array.isArray(r.polygon) && r.polygon.length >= 3).map((r) => ({ id: r.id, type: r.type, polygon: r.polygon.map((p) => [p[0], p[1]]) })),
     outdoorAreas: (plan.outdoorAreas || []).map((a) => ({ id: a.id, type: a.type, polygon: a.polygon.map((p) => [p[0], p[1]]) })),
     paths: ((plan.site && plan.site.paths) || []).map((p) => p.polygon.map((q) => [q[0], q[1]])),
@@ -121,6 +133,41 @@ export function sceneInputFromPlan(plan, o = {}) {
     H: ceiling / 100, slab: (h.slab || 20) / 100, parapet: (h.parapet || 0) / 100, drop: (h.floorAboveGround || 15) / 100,
     doorsOpen: o.doorsOpen !== false, glass: Number.isFinite(o.glass) ? o.glass : DEFAULTS.glass,
   };
+  if (slanted) input.slants = slantPolys(plan).map((p) => p.map((q) => [q[0], q[1]]));
+  return input;
+}
+
+/**
+ * Angled walls in the occlusion grid (stage A4 fallback): a cell is WALL when ≥ 2 of its 4 × 4 sub-samples lie in a
+ * slant footprint (supercover: > 10 % of the cell), so a 7 cm wall at any angle stays 4-connected (no ray leaks through
+ * it; it thickens by up to ≈ 2.5 cm); then the gap of every opening in a slant: the cells whose centre is in its quad.
+ */
+function rasteriseSlants(input, kind, reg, nx, ny, oxcm, ozcm) {
+  const ops = input.openings;
+  for (const poly of input.slants) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of poly) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    const i0 = Math.max(0, Math.floor((x0 - oxcm) / CELL_CM)), i1 = Math.min(nx - 1, Math.floor((x1 - oxcm) / CELL_CM));
+    const j0 = Math.max(0, Math.floor((y0 - ozcm) / CELL_CM)), j1 = Math.min(ny - 1, Math.floor((y1 - ozcm) / CELL_CM));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      let hits = 0;
+      for (let b = 0; b < 4 && hits < 2; b++) for (let a = 0; a < 4 && hits < 2; a++) {
+        if (pointInPolygon(oxcm + (i + (a + 0.5) / 4) * CELL_CM, ozcm + (j + (b + 0.5) / 4) * CELL_CM, poly)) hits++;
+      }
+      if (hits >= 2) { const c = j * nx + i; kind[c] = WALL; reg[c] = -1; }
+    }
+  }
+  for (let k = ops.length - 1; k >= 0; k--) {
+    const q = ops[k].quad;
+    if (!q) continue;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of q) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    for (let j = Math.max(0, Math.floor((y0 - ozcm) / CELL_CM)); j <= Math.min(ny - 1, Math.floor((y1 - ozcm) / CELL_CM)); j++) {
+      for (let i = Math.max(0, Math.floor((x0 - oxcm) / CELL_CM)); i <= Math.min(nx - 1, Math.floor((x1 - oxcm) / CELL_CM)); i++) {
+        if (pointInPolygon(oxcm + (i + 0.5) * CELL_CM, ozcm + (j + 0.5) * CELL_CM, q)) { const c = j * nx + i; kind[c] = OPEN; reg[c] = k; }
+      }
+    }
+  }
 }
 
 // ───────────────────────── several floors (stage F6) ─────────────────────────
@@ -292,6 +339,7 @@ export function buildScene(input, opts = {}) {
   const ops = input.openings, nO = ops.length;
   const oSill = new Float32Array(nO), oHead = new Float32Array(nO), oGlass = new Float32Array(nO).fill(1), oOpen = new Uint8Array(nO);
   const oAxisN = new Uint8Array(nO), oPlane = new Float32Array(nO), oExt = new Uint8Array(nO);
+  const oDir = ops.some((o) => o.frame) ? new Float32Array(nO * 2) : null;   // openings in slants: unit normal (x, z)
   ops.forEach((o, k) => {
     const hinged = o.kind === 'door';
     oOpen[k] = hinged ? (!o.exterior && input.doorsOpen ? 1 : 0) : 1;
@@ -301,15 +349,21 @@ export function buildScene(input, opts = {}) {
     if (oHead[k] <= oSill[k] + 0.01) oOpen[k] = 0;
     oAxisN[k] = o.axis === 'h' ? 2 : 0;                                    // axis of the wall NORMAL (x for a north-south wall)
     oPlane[k] = o.axis === 'h' ? (o.y + o.h / 2) / 100 : (o.x + o.w / 2) / 100;
+    if (o.frame) {                                                         // an opening in a slant: its glass plane p·n = oPlane
+      const F = o.frame;
+      oAxisN[k] = 3; oDir[k * 2] = F.nx; oDir[k * 2 + 1] = F.ny; oPlane[k] = (F.cx * F.nx + F.cy * F.ny) / 100;
+    }
     oExt[k] = o.exterior ? 1 : 0;
   });
   for (let k = nO - 1; k >= 0; k--) {
     const o = ops[k];
+    if (o.quad) continue;                                                  // in a slant: rasteriseSlants()
     // always rasterised as an opening, so the chart layout does not depend on door states; a closed door (or a gap
     // with no height) is solid while marching
     cellsIn(o.x, o.y, o.x + o.w, o.y + o.h, (c) => { kind[c] = OPEN; reg[c] = k; });
   }
   for (const w of input.walls) cellsIn(w.x, w.y, w.x + w.w, w.y + w.h, (c) => { kind[c] = WALL; reg[c] = -1; });
+  if (input.slants) rasteriseSlants(input, kind, reg, nx, ny, oxcm, ozcm);
   // the outdoor slabs (terrace, porch, utility yard) are 13 cm above the garden
   const slabAt = (xcm, ycm) => input.outdoorAreas.some((a) => pointInPolygon(xcm, ycm, a.polygon));
   for (const a of input.outdoorAreas) {
@@ -555,7 +609,7 @@ export function buildScene(input, opts = {}) {
   const scene = {
     input, opts: O, H, roofTop, drop, nx, ny, ox, oz, kind, reg, gcls, clear, nR, nO, nRegions,
     roomIds: rooms.map((r) => r.id), roomTypes: rooms.map((r) => r.type), openingIds: ops.map((o) => o.id), openingRooms: ops.map((o) => o.rooms),
-    oSill, oHead, oGlass, oOpen, oAxisN, oPlane, oExt, nRows, rowH,
+    oSill, oHead, oGlass, oOpen, oAxisN, oPlane, oExt, oDir, nRows, rowH,
     charts, chartByKey, floorChart, ceilChart, faceChart, patch, texelOf, avgTexel,
     atlas: { width: W, height: AH, fillDst: Int32Array.from(fillDst), fillSrcStart: Int32Array.from(fillSrcStart), fillSrc: Int32Array.from(fillSrc) },
     probes, ground: { ox: gox, oz: goz, nx: gnx, nz: gnz, kind: groundKind, y: groundY },
@@ -765,7 +819,7 @@ function march(S, px, py, pz, dx, dy, dz, stopOut, R, tMax = Infinity) {
       const o = reg[c];
       lastOpen = o;
       if (S.oGlass[o] < 1) {
-        const a = S.oAxisN[o], tp = a === 0 ? (adx > 1e-12 ? (S.oPlane[o] - px) / dx : -1) : (adz > 1e-12 ? (S.oPlane[o] - pz) / dz : -1);
+        const a = S.oAxisN[o], tp = a === 0 ? (adx > 1e-12 ? (S.oPlane[o] - px) / dx : -1) : a !== 3 ? (adz > 1e-12 ? (S.oPlane[o] - pz) / dz : -1) : glassT(S, o, px, pz, dx, dz);
         if (tp > t - 1e-9 && tp <= tExit && tp <= tMax) T *= S.oGlass[o];
       }
       if (dy < -1e-12) {
@@ -861,7 +915,7 @@ function marchLv(S, px, py, pz, dx, dy, dz, stopOut, R, tMax) {
       const o = reg[c];
       lastOpen = o;
       if (S.oGlass[o] < 1) {
-        const a = S.oAxisN[o], tp = a === 0 ? (adx > 1e-12 ? (S.oPlane[o] - px) / dx : -1) : (adz > 1e-12 ? (S.oPlane[o] - pz) / dz : -1);
+        const a = S.oAxisN[o], tp = a === 0 ? (adx > 1e-12 ? (S.oPlane[o] - px) / dx : -1) : a !== 3 ? (adz > 1e-12 ? (S.oPlane[o] - pz) / dz : -1) : glassT(S, o, px, pz, dx, dz);
         if (tp > t - 1e-9 && tp <= tExit && tp <= tMax) T *= S.oGlass[o];
       }
       if (dy < -1e-12) {
@@ -930,12 +984,26 @@ function hitV(S, c, side, prev, x, y, z, T, R) {
   return R;
 }
 
+/** Ray parameter where (px, pz) + t (dx, dz) crosses the glass plane of an opening in a slant (−1: parallel). */
+function glassT(S, o, px, pz, dx, dz) {
+  const nx = S.oDir[o * 2], nz = S.oDir[o * 2 + 1], dn = nx * dx + nz * dz;
+  return Math.abs(dn) > 1e-12 ? (S.oPlane[o] - (nx * px + nz * pz)) / dn : -1;
+}
+
 // ───────────────────────── apertures ─────────────────────────
 /** Exterior openings that let light in, with stratified sample points on their glass plane. */
 function apertures(S) {
   const list = [];
   S.input.openings.forEach((o, k) => {
     if (!S.oExt[k] || !S.oOpen[k]) return;
+    if (o.frame) {                                                         // in a slant: sampled along its centre line
+      const F = o.frame, y0 = S.oSill[k], y1 = S.oHead[k], w = F.L / 100, h = y1 - y0;
+      if (w <= 0.01 || h <= 0.01) return;
+      const step = S.opts.apertureCm / 100;
+      list.push({ k, axisN: 3, plane: S.oPlane[k], a0: -w / 2, a1: w / 2, y0, y1, nu: Math.min(10, Math.max(2, Math.ceil(w / step))), nv: Math.min(8, Math.max(2, Math.ceil(h / step))), area: w * h,
+        cx: F.cx / 100, cz: F.cy / 100, ux: F.ux, uz: F.uy, nx: F.nx, nz: F.ny });
+      return;
+    }
     const a0 = (o.axis === 'h' ? o.x : o.y) / 100, a1 = (o.axis === 'h' ? o.x + o.w : o.y + o.h) / 100;
     const y0 = S.oSill[k], y1 = S.oHead[k], w = a1 - a0, h = y1 - y0;
     if (w <= 0.01 || h <= 0.01) return;
@@ -947,6 +1015,7 @@ function apertures(S) {
 }
 const apPoint = (ap, u, v, out) => {                                     // u, v ∈ [0, 1]
   const a = ap.a0 + (ap.a1 - ap.a0) * u, y = ap.y0 + (ap.y1 - ap.y0) * v;
+  if (ap.axisN === 3) { out[0] = ap.cx + ap.ux * a; out[1] = y; out[2] = ap.cz + ap.uz * a; return out; }
   if (ap.axisN === 0) { out[0] = ap.plane; out[1] = y; out[2] = a; } else { out[0] = a; out[1] = y; out[2] = ap.plane; }
   return out;
 };
@@ -1053,7 +1122,7 @@ export function createVisibilityJob(S, { coarse = false, base = null, redo = nul
         dx /= d; dy /= d; dz /= d;
         const cosR = dx * n[0] + dy * n[1] + dz * n[2];
         if (cosR <= 1e-4) continue;
-        const cosA = Math.abs(A.axisN === 0 ? dx : dz);
+        const cosA = Math.abs(A.axisN === 0 ? dx : A.axisN === 3 ? dx * A.nx + dz * A.nz : dz);
         const dOmega = Math.min((cosA * dA) / d2, 1.0);                     // clamp the near-field singularity
         march(S, sx, sy, sz, dx, dy, dz, false, R);
         if (R.exitOpen !== A.k) continue;                                  // blocked, or left through another opening
@@ -1161,7 +1230,9 @@ export function createVisibilityJob(S, { coarse = false, base = null, redo = nul
         facades: Float32Array.from(facades.flatMap((F) => [F.x, F.y, F.z, F.nx, F.nz])), facadeKeys: Float64Array.from(facadeKeys),
         probeInside, incremental: !!base, redone: base ? redo.count || 0 : nRec, occluderCells: S.furHi ? S.occluders.length : 0,
         start: L.start, idx: L.idx, w: L.w, owner, apMask, outdoor: outdoor.pack(), ms: stats.ms,
-        apertures: aps.map((A) => ({ k: A.k, axisN: A.axisN, plane: A.plane, a0: A.a0, a1: A.a1, y0: A.y0, y1: A.y1 })),
+        apertures: aps.map((A) => (A.axisN === 3
+          ? { k: A.k, axisN: 3, plane: A.plane, a0: A.a0, a1: A.a1, y0: A.y0, y1: A.y1, cx: A.cx, cz: A.cz, ux: A.ux, uz: A.uz, nx: A.nx, nz: A.nz }
+          : { k: A.k, axisN: A.axisN, plane: A.plane, a0: A.a0, a1: A.a1, y0: A.y0, y1: A.y1 })),
       };
     },
   };
@@ -1344,7 +1415,17 @@ export function relight(S, vis, L) {
     let beam = false;
     for (let a = 0; a < vis.apertures.length && !beam; a++) {
       if (!(mask & (1 << (a & 31)))) continue;
-      const A = vis.apertures[a], dn = A.axisN === 0 ? sunDir[0] : sunDir[2];
+      const A = vis.apertures[a];
+      if (A.axisN === 3) {                                                // a window in a slant: its oblique glass plane
+        const px = S.patch.pos[p3], pz = S.patch.pos[p3 + 2], dn = sunDir[0] * A.nx + sunDir[2] * A.nz;
+        if (Math.abs(dn) < 1e-6) continue;
+        const t = (A.plane - (px * A.nx + pz * A.nz)) / dn;
+        if (t <= 0) continue;
+        const y = S.patch.pos[p3 + 1] + sunDir[1] * t, al = (px + sunDir[0] * t - A.cx) * A.ux + (pz + sunDir[2] * t - A.cz) * A.uz;
+        beam = y > A.y0 - 0.4 && y < A.y1 + 0.4 && al > A.a0 - 0.4 && al < A.a1 + 0.4;
+        continue;
+      }
+      const dn = A.axisN === 0 ? sunDir[0] : sunDir[2];
       if (Math.abs(dn) < 1e-6) continue;
       const t = (A.plane - S.patch.pos[p3 + A.axisN]) / dn;
       if (t <= 0) continue;
@@ -1676,6 +1757,18 @@ export function chartFor(S, x, y, z, nx, ny, nz) {
     }
     const ch = ny > 0 ? S.floorChart[c] : S.ceilChart[c];
     return ch >= 0 ? ch : avg(c);
+  }
+  if (S.input.slants) {
+    // a level with angled walls (stage A4 fallback, no chart type of their own until A7): an angled face (normal more
+    // than 8° off both axes), or a face whose front cell the rasterised slants thickened, reads the average chart of
+    // the room (or opening) in front of it — the first air cell within 15 cm along its normal
+    const nh = Math.hypot(nx, nz) || 1, ux = nx / nh, uz = nz / nh;
+    const air = (q) => q >= 0 && (S.kind[q] === ROOM || S.kind[q] === OPEN);
+    const angled = Math.abs(ux) > 0.139 && Math.abs(uz) > 0.139;
+    if (angled || !air(cell(x + (Math.abs(nx) >= Math.abs(nz) ? Math.sign(nx) : 0) * 0.012, z + (Math.abs(nx) >= Math.abs(nz) ? 0 : Math.sign(nz)) * 0.012))) {
+      for (let d = 0.012; d <= 0.15; d += 0.02) { const q = cell(x + ux * d, z + uz * d); if (air(q)) return avg(q); }
+      return -1;
+    }
   }
   const side = Math.abs(nx) >= Math.abs(nz) ? (nx > 0 ? 0 : 1) : (nz > 0 ? 2 : 3);
   const n = [side === 0 ? 1 : side === 1 ? -1 : 0, side === 2 ? 1 : side === 3 ? -1 : 0];

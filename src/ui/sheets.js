@@ -169,8 +169,9 @@ function angledGroup(app) {
   paintNote();
   return h('div', { class: 'settings__sub settings__sub--angled' },
     sw,
-    h('p', { class: 'setnote' }, 'Works: drawing walls at any angle in the plan (15° steps, parallel and perpendicular guides, typed length and angle), angling a straight wall by dragging its end, doors and windows in angled walls, the rooms and their areas, dimensions, and the checks that already handle them.'),
-    h('p', { class: 'setnote' }, 'Not yet: angled walls in 3D, the daylight simulation, the regulation and carpentry checks along angled walls, and importing them from a drawing.'),
+    h('p', { class: 'setnote' }, 'Works: drawing walls at any angle in the plan (15° steps, parallel and perpendicular guides, typed length and angle), angling a straight wall by dragging its end, doors and windows in angled walls, the rooms and their areas, dimensions, the checks that already handle them, and angled walls in 3D (walls, doors, windows, floors, roofs, cut-away, finishes, walking).'),
+    h('p', { class: 'setnote' }, 'Approximate: the light simulation. Angled walls block daylight and let it in through their windows, but each angled wall surface shows its room’s average light, not its own.'),
+    h('p', { class: 'setnote' }, 'Not yet: the regulation and carpentry checks along angled walls, and importing them from a drawing.'),
     note);
 }
 

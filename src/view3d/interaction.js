@@ -29,8 +29,15 @@ export function wallRuns(plan) {
   const hit = _runs.get(plan);
   if (hit && hit.walls === plan.walls && hit.openings === plan.openings && hit.outline === plan.wallOutline) return hit.runs;
   const solid = (x, y) => inWallOrOpening(x, y, plan);
-  const lines = new Map();
+  const lines = new Map(), diag = new Map();
   for (const f of wallFaces(plan)) {
+    if (Math.abs(f.nx) > 1e-9 && Math.abs(f.ny) > 1e-9) {               // an angled wall's face (stage A4): a diagonal run
+      const ux = -f.ny, uy = f.nx, c = f.x1 * f.nx + f.y1 * f.ny, p = f.x1 * ux + f.y1 * uy, q = f.x2 * ux + f.y2 * uy;
+      const key = `${f.nx.toFixed(6)}|${f.ny.toFixed(6)}|${c.toFixed(2)}`;
+      if (!diag.has(key)) diag.set(key, { nx: f.nx, ny: f.ny, ux, uy, c, segs: [] });
+      diag.get(key).segs.push([Math.min(p, q), Math.max(p, q)]);
+      continue;
+    }
     const vertical = f.nx !== 0;
     const c = vertical ? f.x1 : f.y1;
     const a0 = vertical ? Math.min(f.y1, f.y2) : Math.min(f.x1, f.x2), a1 = vertical ? Math.max(f.y1, f.y2) : Math.max(f.x1, f.x2);
@@ -49,6 +56,18 @@ export function wallRuns(plan) {
       else { cur = { nx, ny, c, a0, a1 }; runs.push(cur); }
     }
   }
+  // diagonal runs (angled walls): collinear faces merged across their openings; { diag: true, nx, ny, ux, uy, c, a0, a1 }
+  // — the face is the line p·n = c, a0..a1 its extent along u = (−ny, nx). Kept out of `runs` (axis-only consumers).
+  runs.diag = [];
+  for (const { nx, ny, ux, uy, c, segs } of diag.values()) {
+    segs.sort((p, q) => p[0] - q[0]);
+    let cur = null;
+    for (const [a0, a1] of segs) {
+      const mid = cur ? (cur.a1 + a0) / 2 : 0;
+      if (cur && (a0 - cur.a1 <= 1 || solid(nx * (c - 2) + ux * mid, ny * (c - 2) + uy * mid))) cur.a1 = Math.max(cur.a1, a1);
+      else { cur = { diag: true, nx, ny, ux, uy, c, a0, a1 }; runs.diag.push(cur); }
+    }
+  }
   _runs.set(plan, { walls: plan.walls, openings: plan.openings, outline: plan.wallOutline, runs });
   return runs;
 }
@@ -56,14 +75,26 @@ export function wallRuns(plan) {
 /** Slide a wall-mounted item along the wall run nearest to (x, y): back against the wall, centred within the run. */
 function slideOnWall(item, x, y, plan) {
   let best = null;
-  for (const r of wallRuns(plan)) {
+  const runs = wallRuns(plan);
+  for (const r of runs) {
     const along = r.nx ? y : x, across = r.nx ? x : y;
+    const a = Math.max(r.a0, Math.min(r.a1, along));
+    const dist = Math.hypot(along - a, across - r.c);
+    if (!best || dist < best.dist) best = { r, dist, along: a };
+  }
+  for (const r of runs.diag) {                                          // the face of an angled wall (any direction)
+    const along = x * r.ux + y * r.uy, across = x * r.nx + y * r.ny;
     const a = Math.max(r.a0, Math.min(r.a1, along));
     const dist = Math.hypot(along - a, across - r.c);
     if (!best || dist < best.dist) best = { r, dist, along: a };
   }
   if (!best) return { x, y };
   const { r } = best, half = item.w / 2;
+  if (r.diag) {
+    const a = r.a1 - r.a0 >= item.w ? Math.max(r.a0 + half, Math.min(r.a1 - half, best.along)) : (r.a0 + r.a1) / 2, off = r.c + item.d / 2;
+    const rot = ((Math.round(Math.atan2(-r.nx, r.ny) / Math.PI * 1800) / 10) % 360 + 360) % 360;
+    return { x: r.nx * off + r.ux * a, y: r.ny * off + r.uy * a, rot: rot >= 360 ? 0 : rot };
+  }
   const a = r.a1 - r.a0 >= item.w ? Math.max(r.a0 + half, Math.min(r.a1 - half, best.along)) : (r.a0 + r.a1) / 2;
   const off = item.d / 2;
   return r.nx

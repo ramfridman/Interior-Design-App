@@ -1,7 +1,8 @@
 /**
  * Geometry helpers for the regulation checks. Pure functions; plan space (cm, +x east, +y south).
  */
-import { polygonBounds, pointInPolygon, DEG, openingFrame, openingPoint, openingBox, openingHinge, openingPoly, wallPolys } from '../core/geometry.js';
+import { polygonBounds, pointInPolygon, DEG, openingFrame, openingPoint, openingBox, openingHinge, openingPoly, wallPolys, slantSolids, openingFaceSign } from '../core/geometry.js';
+import { intersection, offset } from '../core/polykernel.js';
 
 export const rectPoly = (r) => [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]];
 export const m = (cm, digits = 2) => (cm / 100).toFixed(digits);
@@ -147,6 +148,19 @@ export function freeDepth(frame, max, obstacles, { inset = 3, a0 = -frame.hw, a1
 export const rectObstacle = (r, extra) => ({ poly: rectPoly(r), bb: { x: r.x, y: r.y, w: r.w, h: r.h }, ...extra });
 /** Obstacle record for wall `i` of a plan: its polygon (wallPolys) and bounding box. */
 export const wallObstacle = (plan, i, extra) => ({ ...rectObstacle(plan.walls[i], extra), poly: wallPolys(plan)[i] });
+/**
+ * Obstacle records of the angled walls (stage A5): one per solid piece of each slant (its footprint minus the gaps of
+ * its openings — a door in a slant is passable like a door in a rect wall, a window is an obstacle of its own), with
+ * `wall` = a wall-like record { id, kind, cls, slant: true, t, x, y, w, h (AABB) } for the callers' texts. [] without slants.
+ */
+export function slantObstacles(plan, extra = (w) => ({ wall: w })) {
+  const out = [];
+  for (const s of slantSolids(plan)) {
+    const k = s.slant.kind, w = { id: s.id, kind: k, cls: k === 'interior' && s.slant.t < 15 ? 'partition' : k, slant: true, t: s.slant.t, ...s.bb };
+    for (const ring of s.rings) out.push({ poly: ring, bb: polygonBounds(ring), ...extra(w) });
+  }
+  return out;
+}
 /** Obstacle record for an opening's gap. */
 export const openingObstacle = (o, extra) => ({ ...rectObstacle(o, extra), poly: openingPoly(o) });
 
@@ -172,9 +186,29 @@ export function openingSides(o, depth = 60, dist = 20) {
   for (const sgn of [-1, 1]) {
     const n = [sgn * F.nx + 0, sgn * F.ny + 0];
     const [fx, fy] = openingPoint(F, F.L / 2, sgn < 0 ? 0 : F.T);               // centre of the face
-    sides.push({ n, probe: [fx + n[0] * dist, fy + n[1] * dist], rect: openingBox(F, 0, F.L, sgn < 0 ? -depth : F.T, depth) });
+    const v0 = sgn < 0 ? -depth : F.T, side = { n, probe: [fx + n[0] * dist, fy + n[1] * dist], rect: openingBox(F, 0, F.L, v0, depth) };
+    // an opening in an angled wall: the exact approach zone (its `rect` is only the bounding box)
+    if (o.axis === 'a') side.poly = [openingPoint(F, 0, v0), openingPoint(F, F.L, v0), openingPoint(F, F.L, v0 + depth), openingPoint(F, 0, v0 + depth)];
+    sides.push(side);
   }
   return sides;
+}
+/** The approach zone of an opening side as a polygon: exact for any wall (the rect for 'h' / 'v' openings, as before). */
+export const sideZone = (side) => side.poly || rectPoly(side.rect);
+
+const POINTS8 = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+/**
+ * Which way an exterior opening looks (stage A5: from its wall's true normal, so a window in an angled wall gets its own
+ * bearing): { n: [x, y] unit outward normal on the plan, bearing (deg clockwise from north, plan.meta.northAngle
+ * respected), name ('north' … 'north-west') }, or null when its outdoor side is unknown.
+ */
+export function openingFacing(o, plan) {
+  if (!o.outside) return null;
+  const F = openingFrame(o, plan), sg = openingFaceSign(o, o.outside), n = [sg * F.nx + 0, sg * F.ny + 0];
+  const nA = (((plan && plan.meta && plan.meta.northAngle) || 0) * Math.PI) / 180;
+  const north = [Math.sin(nA), -Math.cos(nA)], east = [Math.cos(nA), Math.sin(nA)];
+  const bearing = ((Math.atan2(n[0] * east[0] + n[1] * east[1], n[0] * north[0] + n[1] * north[1]) * 180) / Math.PI + 360) % 360;
+  return { n, bearing, name: POINTS8[Math.round(bearing / 45) % 8] };
 }
 
 // ───────────────────────── raster grid for route checks ─────────────────────────
@@ -285,11 +319,141 @@ export function cellsNear(g, x, y, r = 20) {
 }
 
 /**
- * Largest axis-aligned rectangle (by its shorter side, then area) inside a rectilinear polygon.
- * Works on the coordinate grid of the polygon's vertices, so a zero-width slit (free-standing wall inside the room)
- * costs nothing and the hole it leads to is excluded. O(nx² · ny) for nx × ny grid cells.
+ * Largest rectangle (by its shorter side, then area) inside a room polygon.
+ * A rectilinear polygon (every edge on an axis — every room of an orthogonal plan) takes the exact axis-aligned search
+ * below, unchanged. Any other polygon (a room with an angled wall, stage A5) is searched in the frame of each distinct
+ * edge direction (and the axes): rotated into that frame, rasterised at 5 cm, the maximal rectangle of inside cells,
+ * then each side pushed outwards exactly (bisection on the true polygon). The result then also carries `angle` (deg,
+ * the frame's x axis; 0 = east) and `poly` (its four corners in plan cm); `x, y` is the corner `poly[0]`.
  */
 export function largestInnerRect(poly) {
+  if (isRectilinear(poly)) return largestAxisRect(poly);
+  return largestOrientedRect(poly);
+}
+const isRectilinear = (poly) => poly.every((p, i) => { const q = poly[(i + 1) % poly.length]; return p[0] === q[0] || p[1] === q[1]; });
+
+/** Distinct edge directions of a polygon modulo 90° (degrees in [0, 90)), plus 0. */
+export function edgeDirections(poly, tolDeg = 0.25) {
+  const out = [0];
+  for (let i = 0; i < poly.length; i++) {
+    const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % poly.length];
+    if (Math.hypot(x2 - x1, y2 - y1) < 5) continue;                  // rounding jogs / slits
+    const a = ((Math.atan2(y2 - y1, x2 - x1) / DEG) % 90 + 90) % 90;
+    if (!out.some((b) => Math.min(Math.abs(a - b), 90 - Math.abs(a - b)) < tolDeg)) out.push(a);
+  }
+  return out;
+}
+
+function largestOrientedRect(poly) {
+  let best = { x: 0, y: 0, w: 0, h: 0, angle: 0, poly: [] };
+  for (const angle of edgeDirections(poly)) {
+    const c = Math.cos(angle * DEG), s = Math.sin(angle * DEG);
+    // frame: X = p·(c, s), Y = p·(−s, c)
+    const rp = poly.map(([x, y]) => [x * c + y * s, -x * s + y * c]);
+    const r = squareRect(rp) || rasterRect(rp, 5);
+    if (!r) continue;
+    refineRect(r, rp);
+    const a = Math.min(r.w, r.h), b = Math.min(best.w, best.h);
+    if (a > b + 1e-6 || (Math.abs(a - b) <= 1e-6 && r.w * r.h > best.w * best.h)) {
+      const P = (X, Y) => [X * c - Y * s, X * s + Y * c];
+      const pts = [P(r.x, r.y), P(r.x + r.w, r.y), P(r.x + r.w, r.y + r.h), P(r.x, r.y + r.h)];
+      best = { x: pts[0][0], y: pts[0][1], w: r.w, h: r.h, angle, poly: pts };
+    }
+  }
+  return best;
+}
+/**
+ * The largest axis square (polygon frame) by bisection on its side S: the corners where an S × S square fits lie in the
+ * intersection of the polygon translated by its four corners (exact for a convex polygon); each candidate corner (the
+ * vertices and centroids of those pieces) is confirmed with the exact containment test. 0.05 cm resolution.
+ */
+function squareRect(rp) {
+  const bb = polygonBounds(rp);
+  let lo = 0, hi = Math.min(bb.w, bb.h), found = null;
+  const fits = (S) => {
+    let cur = [{ outer: rp, holes: [] }];
+    for (const [dx, dy] of [[0, 0], [S, 0], [S, S], [0, S]]) {
+      cur = intersection(cur, [rp.map(([x, y]) => [x - dx, y - dy])]);
+      if (!cur.length) return null;
+    }
+    for (const piece of cur) {
+      const o = piece.outer, cx = o.reduce((t, q) => t + q[0], 0) / o.length, cy = o.reduce((t, q) => t + q[1], 0) / o.length;
+      for (const [x, y] of [[cx, cy], ...o]) { const r = { x, y, w: S, h: S }; if (rectInPoly(r, rp)) return r; }
+    }
+    return null;
+  };
+  while (hi - lo > 0.05) {
+    const mid = (lo + hi) / 2, r = fits(mid);
+    if (r) { lo = mid; found = r; } else hi = mid;
+  }
+  return found;
+}
+/** Maximal rectangle of 5 cm cells (cell centre inside the polygon) — by shorter side, then area. In the polygon's frame. */
+function rasterRect(rp, cell) {
+  const bb = polygonBounds(rp), nx = Math.max(1, Math.ceil(bb.w / cell)), ny = Math.max(1, Math.ceil(bb.h / cell));
+  if (nx * ny > 4e6) return null;
+  const down = new Int32Array(nx * ny);
+  for (let j = ny - 1; j >= 0; j--) {
+    const y = bb.y + (j + 0.5) * cell, xs = [];
+    for (let i = 0; i < rp.length; i++) {
+      const [x1, y1] = rp[i], [x2, y2] = rp[(i + 1) % rp.length];
+      if ((y1 > y) !== (y2 > y)) xs.push(x1 + ((y - y1) / (y2 - y1)) * (x2 - x1));
+    }
+    xs.sort((a, b) => a - b);
+    for (let k = 0; k + 1 < xs.length; k += 2) {
+      const i0 = Math.max(0, Math.ceil((xs[k] - bb.x) / cell - 0.5)), i1 = Math.min(nx - 1, Math.floor((xs[k + 1] - bb.x) / cell - 0.5));
+      for (let i = i0; i <= i1; i++) down[j * nx + i] = 1 + (j < ny - 1 ? down[(j + 1) * nx + i] : 0);
+    }
+  }
+  let best = null;
+  for (let j0 = 0; j0 < ny; j0++) for (let i0 = 0; i0 < nx; i0++) {
+    let rows = Infinity;
+    for (let i1 = i0; i1 < nx; i1++) {
+      const d = down[j0 * nx + i1];
+      if (!d) break;
+      if (d < rows) rows = d;
+      const w = (i1 - i0 + 1) * cell, h = rows * cell, a = Math.min(w, h), b = best ? Math.min(best.w, best.h) : -1;
+      if (a > b || (a === b && w * h > best.w * best.h)) best = { x: bb.x + i0 * cell, y: bb.y + j0 * cell, w, h };
+    }
+  }
+  if (!best) return null;
+  // cell edges may stick out by up to half a cell: start from the cell-centre rectangle (inside by construction)
+  best.x += cell / 2; best.y += cell / 2; best.w -= cell; best.h -= cell;
+  return best.w > 0 && best.h > 0 ? best : null;
+}
+/** Is the axis-aligned rect (polygon frame) inside the polygon? Corners inside, no polygon vertex inside, no edge crossing. */
+function rectInPoly(r, rp) {
+  const x0 = r.x, x1 = r.x + r.w, y0 = r.y, y1 = r.y + r.h, e = 1e-7;
+  for (const [x, y] of [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]) if (!pointInPolygon(x, y, rp) && pointPolyEdgeDist(x, y, rp) > 1e-6) return false;
+  for (const [x, y] of rp) if (x > x0 + e && x < x1 - e && y > y0 + e && y < y1 - e) return false;
+  const R = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+  for (let i = 0; i < rp.length; i++) {
+    const a = rp[i], b = rp[(i + 1) % rp.length];
+    for (let j = 0; j < 4; j++) if (properCross(a, b, R[j], R[(j + 1) % 4])) return false;
+  }
+  return pointInPolygon(x0 + r.w / 2, y0 + r.h / 2, rp);
+}
+const properCross = (a, b, c, d) => {
+  const o = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  const d1 = o(a, b, c), d2 = o(a, b, d), d3 = o(c, d, a), d4 = o(c, d, b), e = 1e-6;
+  return ((d1 > e && d2 < -e) || (d1 < -e && d2 > e)) && ((d3 > e && d4 < -e) || (d3 < -e && d4 > e));
+};
+/** Push each side of the rect outwards as far as it stays inside (bisection up to the polygon's size, two rounds). */
+function refineRect(r, rp) {
+  const bb = polygonBounds(rp), far = Math.max(bb.w, bb.h);
+  for (let round = 0; round < 2; round++) {
+    for (const side of ['l', 'r', 't', 'b']) {
+      let lo = 0, hi = far;
+      const grow = (d) => (side === 'l' ? { ...r, x: r.x - d, w: r.w + d } : side === 'r' ? { ...r, w: r.w + d } : side === 't' ? { ...r, y: r.y - d, h: r.h + d } : { ...r, h: r.h + d });
+      if (rectInPoly(grow(hi), rp)) lo = hi;
+      else for (let k = 0; k < 32; k++) { const m = (lo + hi) / 2; if (rectInPoly(grow(m), rp)) lo = m; else hi = m; }
+      Object.assign(r, grow(lo));
+    }
+  }
+}
+
+/** Largest axis-aligned rectangle of a RECTILINEAR polygon (exact, on the coordinate grid of its vertices). */
+function largestAxisRect(poly) {
   const xs = [...new Set(poly.map((p) => p[0]))].sort((a, b) => a - b);
   const ys = [...new Set(poly.map((p) => p[1]))].sort((a, b) => a - b);
   const nx = xs.length - 1, ny = ys.length - 1;
@@ -322,11 +486,12 @@ export function largestInnerRect(poly) {
  * @returns {{ H: Array<{ c, a, b }>, V: Array<{ c, a, b }> }} c = the fixed coordinate, a..b = the extent
  */
 export function polyEdges(poly) {
-  const groups = { H: new Map(), V: new Map() };
+  const groups = { H: new Map(), V: new Map() }, diag = [];
   for (let i = 0; i < poly.length; i++) {
     const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % poly.length];
     if (y1 === y2 && x1 !== x2) add(groups.H, y1, x1, x2);
     else if (x1 === x2 && y1 !== y2) add(groups.V, x1, y1, y2);
+    else if (x1 !== x2 || y1 !== y2) diag.push([x1, y1, x2, y2]);
   }
   function add(map, c, p, q) {
     if (!map.has(c)) map.set(c, []);
@@ -349,7 +514,29 @@ export function polyEdges(poly) {
     }
     return out;
   };
-  return { H: resolve(groups.H), V: resolve(groups.V) };
+  const out = { H: resolve(groups.H), V: resolve(groups.V) };
+  if (diag.length) out.A = diagonalEdges(diag, resolve);
+  return out;
+}
+/**
+ * Angled edges (stage A5), grouped by direction (within 0.1°) and line: [{ ux, uy, nx, ny, c, a, b }] — u along the edge,
+ * n = its normal in the fixed orientation of edgeNormal (nx + ny > 0), c = p·n of the line, a..b = the extent along u.
+ * Coincident opposite stretches (slits) cancel as for H / V.
+ */
+function diagonalEdges(list, resolve) {
+  const dirs = [], out = [];
+  for (const [x1, y1, x2, y2] of list) {
+    const L = Math.hypot(x2 - x1, y2 - y1);
+    let nx = (y2 - y1) / L, ny = (x1 - x2) / L;
+    if (nx + ny < 0 || (nx + ny === 0 && nx < 0)) { nx = -nx; ny = -ny; }
+    let d = dirs.find((q) => Math.abs(q.nx - nx) < 0.0018 && Math.abs(q.ny - ny) < 0.0018);   // ≈ 0.1°
+    if (!d) { d = { nx, ny, ux: ny, uy: -nx, lines: new Map() }; dirs.push(d); }
+    const c = Math.round((x1 * d.nx + y1 * d.ny) * 100) / 100, p = x1 * d.ux + y1 * d.uy, q = x2 * d.ux + y2 * d.uy;
+    if (!d.lines.has(c)) d.lines.set(c, []);
+    d.lines.get(c).push({ a: Math.min(p, q), b: Math.max(p, q), dir: q > p ? 1 : -1 });
+  }
+  for (const d of dirs) for (const e of resolve(d.lines)) out.push({ ux: d.ux, uy: d.uy, nx: d.nx, ny: d.ny, ...e });
+  return out;
 }
 
 /**
@@ -357,7 +544,7 @@ export function polyEdges(poly) {
  * with free floor between them. Returns [{ width, length, x, y }] (x, y = centre). Slits are ignored (polyEdges).
  */
 export function narrowPassages(poly, maxWidth = 150) {
-  const { H, V } = polyEdges(poly);
+  const E = polyEdges(poly), { H, V } = E;
   const out = [];
   const scan = (edges, horizontal) => {
     for (let i = 0; i < edges.length; i++) for (let j = i + 1; j < edges.length; j++) {
@@ -376,5 +563,30 @@ export function narrowPassages(poly, maxWidth = 150) {
     }
   };
   scan(H, true); scan(V, false);
+  if (E.A) {
+    // angled walls (stage A5): facing parallel edges of any direction, measured across (perpendicular to) them
+    const groups = new Map();
+    for (const e of E.A) { const k = `${e.nx.toFixed(4)},${e.ny.toFixed(4)}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(e); }
+    for (const edges of groups.values()) for (let i = 0; i < edges.length; i++) for (let j = i + 1; j < edges.length; j++) {
+      const e = edges[i], f = edges[j], width = Math.abs(e.c - f.c);
+      if (width < 30 || width > maxWidth) continue;
+      const a = Math.max(e.a, f.a), b = Math.min(e.b, f.b);
+      if (b - a < width) continue;
+      const mid = (a + b) / 2, c = (e.c + f.c) / 2, px = e.ux * mid + e.nx * c, py = e.uy * mid + e.ny * c;
+      if (!pointInPolygon(px, py, poly)) continue;
+      const lo = Math.min(e.c, f.c), hi = Math.max(e.c, f.c);
+      if (edges.some((g) => g !== e && g !== f && g.c > lo && g.c < hi && g.a < mid && g.b > mid)) continue;
+      out.push({ width, length: b - a, x: px, y: py, angle: (Math.atan2(e.uy, e.ux) / DEG + 360) % 180 });
+    }
+  }
   return out.sort((p, q) => p.width - q.width);
+}
+
+/**
+ * Is any part of the polygon narrower than `w` cm? The polygon shrunk by w / 2 (polygon kernel, mitred) is empty or falls
+ * into more pieces than the polygon shrunk by 0.5 cm — the same test the plan engine applies for its 60 cm rule.
+ */
+export function narrowerThan(poly, w) {
+  const base = offset([poly], -0.5).length, shrunk = offset([poly], -w / 2).length;
+  return shrunk === 0 || shrunk > base;
 }

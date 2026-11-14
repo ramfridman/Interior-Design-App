@@ -12,7 +12,7 @@
  * Plan units inside this module are METRES (x east, y south); the public API speaks plan centimetres.
  */
 import * as THREE from 'three';
-import { walkBoxes, spaceAt, openingFrame, pointInPolygon } from '../core/geometry.js';
+import { walkBoxes, spaceAt, openingFrame, openingFaceSign, pointInPolygon } from '../core/geometry.js';
 import { groundY } from './items.js';
 import { validLevel, viewOf, itemLevel, elevationM, GROUND } from './levels.js';
 import { sideVec, sideHeading } from './camera.js';
@@ -56,6 +56,13 @@ export function defaultWalkStart(plan) {
   }
   const door = plan.openings.find((o) => o.id === 'door-entry') || plan.openings.find((o) => o.kind === 'door' && o.exterior);
   if (!door) return { x: plan.bounds.x + plan.bounds.w / 2, y: plan.bounds.y + plan.bounds.h / 2, heading: 0 };
+  if (door.axis === 'a') {
+    // an entrance in an angled wall (stage A5): into the house along the wall's true normal — the swing side, else the
+    // side opposite the outdoors ('l' / 'r' name the faces of its frame)
+    const F = openingFrame(door, plan), side = door.swing || (door.outside === 'l' ? 'r' : door.outside === 'r' ? 'l' : 'r');
+    const sg = openingFaceSign(door, side), vx = sg * F.nx, vy = sg * F.ny, depth = F.T / 2 + 55;
+    return { x: F.cx + vx * depth, y: F.cy + vy * depth, heading: ((Math.atan2(vx, -vy) * 180) / Math.PI + 360) % 360 };
+  }
   const inward = door.swing || { n: 's', s: 'n', e: 'w', w: 'e' }[door.outside] || 'w';
   const F = openingFrame(door, plan), v = sideVec(inward), depth = F.T / 2 + 55;
   return { x: F.cx + v[0] * depth, y: F.cy + v[1] * depth, heading: sideHeading(inward) };

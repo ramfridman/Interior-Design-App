@@ -4,6 +4,7 @@
 import { PLAN } from './plan.js';
 import { slantFrame } from './slant-geom.js';
 import { joinLevelSlants } from './slants.js';
+import { difference, intersectArea } from './polykernel.js';
 
 export const DEG = Math.PI / 180;
 
@@ -257,11 +258,48 @@ export function edgeNormal(x1, y1, x2, y2) {
   return [nx + 0, ny + 0];
 }
 
-/** Walls (and optionally closed openings) that an item footprint intersects. */
+/**
+ * Walls an item footprint intersects: the rect walls of `plan.walls` (as before), then — on a plan with angled walls —
+ * the slants (`plan.slants` entries) whose solid part (slantSolids: footprint minus the gaps of its openings) the
+ * footprint enters by more than 0.5 cm (the same tolerance convexOverlap gives the rect walls). Openings are not walls.
+ */
 export function wallsHitByItem(it, plan = PLAN) {
   const poly = itemCorners(it);
   const bb = polygonBounds(poly), polys = wallPolys(plan);
-  return plan.walls.filter((w, i) => rectsOverlap(bb, w) && convexOverlap(poly, polys[i]));   // w.x/y/w/h = bounding box (culling)
+  const hits = plan.walls.filter((w, i) => rectsOverlap(bb, w) && convexOverlap(poly, polys[i]));   // w.x/y/w/h = bounding box (culling)
+  if (hasAngled(plan)) {
+    let inner = null;
+    for (const s of slantSolids(plan)) {
+      if (!rectsOverlap(bb, s.bb)) continue;
+      inner = inner || itemCorners({ ...it, w: Math.max(0, it.w - 1), d: Math.max(0, it.d - 1) });   // 0.5 cm tolerance all round
+      if (s.rings.some((r) => intersectArea([inner], [r]) > 0.01)) hits.push(s.slant);
+    }
+  }
+  return hits;
+}
+
+let _slantSolids = new WeakMap();
+/**
+ * The solid part of every slant (stage A5): its joined footprint (slantPolys) minus the gap quads of the openings in it,
+ * as [{ id, slant (the plan.slants entry), rings: [[x, y]…][] (one ring per piece), bb (AABB of the footprint) }] in
+ * `plan.slants` order. [] for a plan without slants. Cached per footprint list and openings array.
+ */
+export function slantSolids(plan = PLAN) {
+  if (!hasAngled(plan)) return [];
+  const polys = slantPolys(plan);
+  const hit = _slantSolids.get(polys);
+  if (hit && hit.openings === plan.openings) return hit.list;
+  const list = plan.slants.map((s, i) => {
+    // each gap quad reaches 1 cm past both faces, so the cut is clean however the kernel rounds the faces
+    const fp = polys[i], gaps = plan.openings.filter((o) => o.axis === 'a' && o.wall === s.id && o.width > 0).map((o) => {
+      const F = openingFrame(o, plan);
+      return [openingPoint(F, 0, -1), openingPoint(F, F.L, -1), openingPoint(F, F.L, F.T + 1), openingPoint(F, 0, F.T + 1)];
+    });
+    const rings = gaps.length ? difference([fp], gaps).map((p) => p.outer) : [fp];
+    return { id: s.id, slant: s, rings, bb: polygonBounds(fp) };
+  });
+  _slantSolids.set(polys, { openings: plan.openings, list });
+  return list;
 }
 
 /** Do two items' footprints overlap? (ignores elevation — callers decide whether that matters) */
@@ -277,7 +315,7 @@ export function itemsOverlap(a, b) {
  */
 let _faces = new WeakMap();
 /** Drop everything cached from PLAN. Called by core/plan-edit.js whenever walls / openings / rooms change. */
-export function invalidatePlanCaches() { _faces = new WeakMap(); _wallPolys = new WeakMap(); _slantPolys = new WeakMap(); }
+export function invalidatePlanCaches() { _faces = new WeakMap(); _wallPolys = new WeakMap(); _slantPolys = new WeakMap(); _slantSolids = new WeakMap(); }
 export function wallFaces(plan = PLAN) {
   const hit = _faces.get(plan.walls);
   if (hit && hit.openings === plan.openings && hit.outline === plan.wallOutline) return hit.faces;

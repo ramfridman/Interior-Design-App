@@ -16,7 +16,8 @@
  * visible, cut parts stop casting and one invisible full-height copy casts instead, so the sun patches stay true.
  */
 import * as THREE from 'three';
-import { openingFrame as wallFrame, openingFaceName } from '../core/geometry.js';
+import { openingFrame as wallFrame, openingFaceName, openingFaceSign, openingJambSign } from '../core/geometry.js';
+import { PLAN } from '../core/plan.js';
 
 const DEG = Math.PI / 180;
 const DOOR_OPEN_ANGLE = 85 * DEG;
@@ -143,6 +144,21 @@ const LOCAL_X = { s: 'e', n: 'w', e: 'n', w: 's' };                   // world s
 const OPPOSITE = { n: 's', s: 'n', e: 'w', w: 'e' };
 
 const isHinged = (o) => o.kind === 'door';
+// Openings in angled walls (axis 'a', stage A4): the sides are 'l' / 'r', the jambs 'a' / 'b' — the tables above are
+// compass-only, so these go through the opening's frame (geometry.js openingFrame: u along the wall, n = the 'r' normal).
+/** Sign (−1 / +1) of a face letter along the frame normal: the compass table for 'h' / 'v', the frame otherwise. */
+const faceSign = (o, side) => (o.axis === 'a' ? openingFaceSign(o, side) : SIGN[side]);
+/** The face opposite `side`. */
+const oppositeOf = (o, side) => (o.axis === 'a' ? openingFaceName(o, -openingFaceSign(o, side)) : OPPOSITE[side]);
+/**
+ * Is the jamb `letter` (a hinge) on the canonical +X side when canonical +Z points to face `front`?
+ * Canonical +X in plan = (fy, −fx) for the front direction (fx, fy) (rotation about Y, see openingPlacement).
+ */
+function onLocalX(o, front, letter, plan) {
+  if (o.axis !== 'a') return letter === LOCAL_X[front];
+  const F = wallFrame(o, plan), s = openingFaceSign(o, front), fx = s * F.nx, fy = s * F.ny, j = openingJambSign(o, letter);
+  return j * (F.ux * fy - F.uy * fx) > 0;
+}
 
 /** The plan side that canonical +Z (the opening's front) points to. */
 function frontOf(o) {
@@ -165,15 +181,16 @@ function framePlaneOffset(o, t, front) {
  * inner (room finish) and outer (exterior render) part exactly at the frame.
  * @returns {{ front: 'n'|'s'|'e'|'w', t: number, mid: number, plane: number }}
  */
-export function openingFrame(o) {
-  const front = frontOf(o), W = wallFrame(o);
+export function openingFrame(o, plan = PLAN) {
+  const front = frontOf(o), W = wallFrame(o, plan);
   const t = W.T;
   const mid = W.cx * W.nx + W.cy * W.ny;                            // centre plane, as a coordinate across the wall
-  return { front, t, mid, plane: mid + SIGN[front] * framePlaneOffset(o, t, front) };
+  return { front, t, mid, plane: mid + faceSign(o, front) * framePlaneOffset(o, t, front) };
 }
 
 /** Free solid wall length (cm) next to a jamb, on the canonical ±X side — decides where the mamad shutter parks. */
 export function wallRunBeside(o, plan, dirName) {
+  if (o.axis === 'a') return 0;                                     // angled wall: no rect run (the shutter parks to +X)
   const s = SIGN[dirName], F = wallFrame(o, plan);
   // rect pieces (walls and the gap itself) in the opening's frame: start / length along the wall, start / depth across it
   const along = (r) => r.x * F.ux + r.y * F.uy, len = (r) => r.w * Math.abs(F.ux) + r.h * Math.abs(F.uy);
@@ -189,10 +206,17 @@ export function wallRunBeside(o, plan, dirName) {
   return run;
 }
 
-/** Rigid transform (metres) that puts an opening's canonical frame in the wall with canonical +Z towards `side`. */
-export function openingPlacement(o, side) {
-  const F = wallFrame(o);
-  return new THREE.Matrix4().makeRotationY(YAW[side]).setPosition(F.cx / 100, 0, F.cy / 100);
+/**
+ * Rigid transform (metres) that puts an opening's canonical frame in the wall with canonical +Z towards `side`.
+ * 'h' / 'v': a quarter turn from the compass table; 'a' (angled wall): the rotation about Y that turns +Z to the face's
+ * normal (fx, fy) — θ = atan2(fx, fy) — so +X runs along the wall. Pure: from the opening (+ its plan for 'a' openings
+ * without derived fields).
+ */
+export function openingPlacement(o, side, plan = PLAN) {
+  const F = wallFrame(o, plan);
+  let yaw = YAW[side];
+  if (o.axis === 'a') { const s = openingFaceSign(o, side); yaw = Math.atan2(s * F.nx, s * F.ny); }
+  return new THREE.Matrix4().makeRotationY(yaw).setPosition(F.cx / 100, 0, F.cy / 100);
 }
 
 // ───────────────────────── builders (metres, canonical frame) ─────────────────────────
@@ -237,7 +261,7 @@ function buildWindow(P, o, m, G) {
     sash(P, 'frame', m, -w / 2 + 0.07, w / 2 - 0.07, y0 + 0.07, y1 - 0.07, zf - 0.02, 0.05, 0.05);
     // external sliding blast shutter on rails, drawn half open towards the longer wall run
     const px = LOCAL_X[G.front];
-    const dir = wallRunBeside(o, G.plan, px) >= wallRunBeside(o, G.plan, OPPOSITE[px]) ? 1 : -1;
+    const dir = o.axis === 'a' || wallRunBeside(o, G.plan, px) >= wallRunBeside(o, G.plan, OPPOSITE[px]) ? 1 : -1;
     const sw = w + 0.08, zs = outer + out * 0.035, shift = dir * w * 0.5;
     const r0 = Math.min(-w / 2 - 0.06, -w / 2 - 0.06 + dir * (w + 0.1)), r1 = Math.max(w / 2 + 0.06, w / 2 + 0.06 + dir * (w + 0.1));
     for (const ry of [y0 - 0.075, y1 + 0.035]) P.box('steel', m, r0, r1, ry, ry + 0.04, outer, outer + out * 0.075);
@@ -293,7 +317,7 @@ function lever(P, m, x, y, zFace, side, dirX) {
  */
 function buildHingedDoor(P, o, m, G, open) {
   const { w, y1, t, front, half } = G;
-  const hingeSign = o.hinge === LOCAL_X[front] ? 1 : -1;
+  const hingeSign = onLocalX(o, front, o.hinge, G.plan) ? 1 : -1;
   const out = o.exterior && o.outside ? (o.outside === front ? 1 : -1) : 0;
   const st = o.style;
   const zMin = half ? Math.max(G.zMin || 0, -t / 2) : -t / 2;         // back limit of everything fixed to the wall
@@ -421,8 +445,8 @@ export function buildOpenings(plan, opts) {
     const P = new Parts(cut);
     for (const o of plan.openings || []) {
       try {
-        const F = openingFrame(o), front = F.front;
-        const place = (side) => openingPlacement(o, side);
+        const F = openingFrame(o, plan), front = F.front;
+        const place = (side) => openingPlacement(o, side, plan);
         const G = {
           plan, front, w: o.width / 100, t: F.t / 100, y0: (o.sill || 0) / 100, y1: ((o.sill || 0) + o.height) / 100,
           zf: framePlaneOffset(o, F.t, front) / 100, out: o.exterior && o.outside ? (o.outside === front ? 1 : -1) : 1,
@@ -435,9 +459,10 @@ export function buildOpenings(plan, opts) {
           // two doors in one doorway: the main frame keeps to the front 0.5 cm+ of the wall centre, the inner one to the back
           buildHingedDoor(P, o, place(front), inner ? { ...G, half: true, zMin: 0.005 } : G, doorsOpen);
           if (inner) {
-            const back = OPPOSITE[front];                               // hung on the other wall face, swings away from the main leaf
+            const back = oppositeOf(o, front);                          // hung on the other wall face, swings away from the main leaf
             const w = Math.min(Number(inner.width) || o.width, o.width) / 100, h = Math.min(Number(inner.height) || o.height, o.height) / 100;
             const second = { id: o.id + ':inner', kind: 'door', style: inner.style || 'interior', axis: o.axis, hinge: inner.hinge || o.hinge, swing: back };
+            if (o.axis === 'a') Object.assign(second, { wall: o.wall, at: o.at, width: o.width, cx: o.cx, cy: o.cy, angle: o.angle, t: o.t });
             buildHingedDoor(P, second, place(back), { plan, front: back, w, t: G.t, y0: 0, y1: h, zf: 0, out: 0, half: true, zMin: 0.005, openW: G.w, openH: G.y1 }, doorsOpen);
           }
         }

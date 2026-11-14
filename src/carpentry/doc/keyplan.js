@@ -2,7 +2,7 @@
  * Key plan of the house (walls from plan.walls) with the carpentry runs' unit footprints highlighted and coded.
  * Page ops in mm, fitted into a box; north arrow from plan.meta.northAngle.
  */
-import { itemCorners } from '../../core/geometry.js';
+import { itemCorners, slantPolys } from '../../core/geometry.js';
 import { textOp, r2 } from './prims.js';
 import { tr } from './strings.js';
 
@@ -41,6 +41,8 @@ export function keyPlanOps({ plan, items, runs, box, highlight = null, labels = 
     }
   }
   for (const w of plan.walls || []) { const [x, y] = P(w.x, w.y); ops.push({ t: 'rect', x, y, w: r2(w.w * k), h: r2(w.h * k), fill: 'ink2', role: 'wall' }); }
+  // angled walls (stage A5): their joined footprints at their true angle
+  if (plan && Array.isArray(plan.slants) && plan.slants.length) for (const fp of slantPolys(plan)) ops.push({ t: 'poly', pts: fp.map(([x, y]) => P(x, y)), close: true, fill: 'ink2', role: 'wall' });
   if (rooms && labels) {
     const sz = Math.max(4.6, Math.min(6, k * 50));
     for (const r of plan.rooms || []) {

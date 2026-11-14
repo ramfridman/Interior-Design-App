@@ -31,6 +31,12 @@
  * A plan without `levels` takes exactly the old path (tests/levels-3d.test.mjs hashes every House 98 mesh).
  * Daylight (stage F6): every storey gets the hooks of its own level's solve (`dl.level(id)`: lightmap atlas, materials).
  *
+ * Angled walls (stage A4)
+ * -----------------------
+ * A level with slants is built, as a whole, by the general polygon builder (shell-poly.js): the same soups, mesh names,
+ * materials, skirting, contact strips and plinth, from the union of the wall solids instead of the grid; its roof comes
+ * from the polygon footprint (as for several levels). A level without slants never touches it.
+ *
  * Live plan edits
  * ---------------
  * Nothing derived from the plan outlives `rebuildPlan()`: grid, opening sides, footprint, floors, ceilings, shell,
@@ -48,6 +54,7 @@ import { levelPlan } from '../core/plan-edit.js';
 import { difference, offset, union, pointInPolys } from '../core/polykernel.js';
 import { stairArrivalDir, stairGeometry, stairSides } from '../core/stairs.js';
 import { buildStairMesh, stairMaterials } from './stairs.js';
+import { hasSlants, preparePolyLevel, buildPolyShell, buildPolyFloors } from './shell-poly.js';
 
 const OUT = 0, WALL = 1, OPENING = 2, ROOM = 3;
 const SKIRT_H = 0.07, SKIRT_T = 0.012;        // skirting board (m)
@@ -80,6 +87,8 @@ class ShadeStrips {
   }
 }
 const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3();
+/** What the polygon builder (shell-poly.js) shares with the grid builder: strips, shading and trim sizes. */
+const POLY_K = { Strips: ShadeStrips, wallShade: (y, c) => wallShade(y, c), SKIRT_H, SKIRT_T, AO_FLOOR, AO_CEILING, WALL_FADE };
 
 /** Baked brightness of an interior wall at height y: a little darker at the floor and under the ceiling. */
 function wallShade(y, ceiling) {
@@ -471,17 +480,26 @@ function buildStorey(ctx, opts) {
 
   // everything derived from the plan — refreshed by readPlan(), never kept across a plan edit
   let grid, sides, outline, dryRooms, floorHoles = null, ceilingHoles = null, viewChanged = false;
+  let mixed = false, polyGeo = null;                                   // a level with angled walls: shell-poly.js
   function readPlan() {
     const next = opts.view();
     if (next && next !== plan) { plan = next; viewChanged = true; }
     if (!ground) floorHoles = (plan.voids || []).map((v) => v && v.polygon).filter((p) => Array.isArray(p) && p.length >= 3);
     const above = opts.ceilingHoles ? opts.ceilingHoles() : null;
     ceilingHoles = above && above.length ? above : null;
-    const extra = [...(floorHoles || []), ...(ceilingHoles || [])];
-    grid = extra.length ? makeGrid(plan, extra) : makeGrid(plan);
-    if (floorHoles && !floorHoles.length) floorHoles = null;
-    sides = openingSides(grid, plan);
-    outline = traceFootprint(grid)[0] || null;
+    mixed = hasSlants(plan);
+    if (mixed) {
+      grid = null; sides = null; outline = null;
+      polyGeo = preparePolyLevel(plan);
+      if (floorHoles && !floorHoles.length) floorHoles = null;
+    } else {
+      polyGeo = null;
+      const extra = [...(floorHoles || []), ...(ceilingHoles || [])];
+      grid = extra.length ? makeGrid(plan, extra) : makeGrid(plan);
+      if (floorHoles && !floorHoles.length) floorHoles = null;
+      sides = openingSides(grid, plan);
+      outline = traceFootprint(grid)[0] || null;
+    }
     dryRooms = new Set(plan.rooms.filter((r) => !r.wet).map((r) => r.id));
   }
   readPlan();
@@ -532,7 +550,8 @@ function buildStorey(ctx, opts) {
   // floors + ceilings: geometry depends on the plan only
   const floorMeshes = [];
   function rebuildFloors() {
-    const fc = floorHoles || ceilingHoles ? buildFloorSoups(grid, plan, floorHoles, ceilingHoles) : buildFloorSoups(grid, plan);
+    const fc = mixed ? buildPolyFloors(polyGeo, floorHoles, ceilingHoles)
+      : floorHoles || ceilingHoles ? buildFloorSoups(grid, plan, floorHoles, ceilingHoles) : buildFloorSoups(grid, plan);
     const ids = new Set(plan.rooms.map((r) => r.id));
     for (const [name, mesh] of [...meshes]) {                           // rooms that no longer exist
       if (!name.startsWith('floor:') || ids.has(name.slice(6))) continue;
@@ -550,8 +569,12 @@ function buildStorey(ctx, opts) {
 
   /** Shadow casting of the visible shell: off while invisible full-height walls cast in its place. */
   const wallsCast = () => !(state.sunStudy && state.cut != null);
+  /** Wall soups up to `top` (m): the grid builder, or the polygon builder on a level with angled walls. */
+  const shellSoups = (top) => (mixed
+    ? buildPolyShell(polyGeo, { top, ceiling: state.H, plinthDepth, dryRooms, K: POLY_K })
+    : buildShellSoups(grid, plan, sides, top, state.H, plinthDepth, dryRooms));
   function rebuildShell() {
-    const { soups, aoFloor, aoCeiling } = buildShellSoups(grid, plan, sides, topH(), state.H, plinthDepth, dryRooms);
+    const { soups, aoFloor, aoCeiling } = shellSoups(topH());
     for (const [name, strips, parent] of [['ao:floor', aoFloor, shell], ['ao:ceiling', aoCeiling, roof]]) {
       const mesh = setMesh(name, strips.idx.length ? { empty: false, toGeometry: () => strips.toGeometry() } : null, parent, false, false);
       if (mesh) { mesh.material = own.shade; mesh.renderOrder = 1; if (mesh.visible) mesh.visible = fakeShading; }
@@ -608,7 +631,7 @@ function buildStorey(ctx, opts) {
     }
     const fullWalls = state.sunStudy && state.cut != null;
     if (fullWalls && (wallCasterStale || !casterMeshes.get('walls'))) {
-      const { soups } = buildShellSoups(grid, plan, sides, state.H, state.H, plinthDepth, dryRooms);
+      const { soups } = shellSoups(state.H);
       setCaster('walls', mergeSoups([...soups].filter(([key]) => key !== 'skirting').map(([, soup]) => soup)), false);
       wallCasterStale = false;
     } else setCaster('walls', fullWalls ? casterMeshes.get('walls').geometry : null, false);
@@ -807,7 +830,7 @@ export function buildHouse(ctx) {
     return Math.max(2, (levelElevation(plan, up) - (levelHeights(plan, up).slab || 0) - levelElevation(plan, id)) / 100);
   }
   function roofShape(id) {
-    if (!multi()) return undefined;                                     // one level: the classic roof over the traced outline
+    if (!multi() && !hasSlants(viewOf(id))) return undefined;          // one orthogonal level: the classic roof over the traced outline
     const v = viewOf(id), fp = footprintOf(v).polygons, up = above(id);
     const upFp = up ? footprintOf(viewOf(up)).polygons : [];
     // what the level above covers; for the coping also its overhang next to the upper walls, outside this footprint
@@ -843,7 +866,7 @@ export function buildHouse(ctx) {
   const keysOf = (id) => {
     const v = viewOf(id), up = above(id);
     return {
-      shell: [idOf(v.walls), idOf(v.openings), idOf(v.rooms), idOf(v.wallOutline), JSON.stringify(v.heights), v.elevation || 0,
+      shell: [idOf(v.walls), idOf(v.openings), idOf(v.rooms), idOf(v.wallOutline), idOf(v.slants), JSON.stringify(v.heights), v.elevation || 0,
         JSON.stringify(v.voids || []), up ? JSON.stringify(voidsOf(up)) : '', multi() ? stackedCeiling(id) : '-', id === GROUND ? '' : JSON.stringify(stairsKey())].join('|'),
       roof: JSON.stringify(roofShape(id) || null),
     };

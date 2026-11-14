@@ -10,7 +10,7 @@ export { bindStore, view, emptyCarpentry, planOf, runLevel, itemFloor, currentLe
 export { wallSpanAt, spanOfRun, openingConflicts, toPlan, toLocal, frame } from './walls.js';
 export { geometryOf, positions, unitCodes, rowExtents, levelOf, itemFields } from './layout.js';
 export { computeWorktops, cutoutOf } from './worktop.js';
-export { KIND_LEVELS, toCustom, createRun, updateRun, removeRun, duplicateRun, layoutRun, addUnit, updateUnit, setUnitWidth, removeUnit, moveUnit, fitRun, moveRun, moveRunToLevel, isFreeRun } from './runs.js';
+export { KIND_LEVELS, toCustom, createRun, updateRun, removeRun, duplicateRun, layoutRun, addUnit, updateUnit, setUnitWidth, removeUnit, moveUnit, fitRun, moveRun, moveRunToLevel, isFreeRun, cornerInsets } from './runs.js';
 export { adoptArchitectLayout } from './adopt.js';
 export { applyOperation, OPERATION_HARDWARE, BY_CARPENTER, cornerShape, validateCustomLayout, layoutGrid, customLayoutTemplate, CUSTOM_TEMPLATES, frontsToLayout } from './bespoke.js';
 export { addFeature, updateFeature, removeFeature, listFeatures, featureImage, circled } from './features.js';

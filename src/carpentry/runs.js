@@ -8,14 +8,14 @@ import { mutate, view, newId, clone, planOf, runLevel, currentLevel } from './st
 import { GROUND, levelOf as levelObj, levelName } from '../core/levels.js';
 import { MODULES } from './modules.js';
 import { defaultSpec, deepMerge, RULES, VOCAB } from './spec.js';
-import { wallSpanAt, spanOfRun, openingConflicts, toPlan, frame } from './walls.js';
+import { wallSpanAt, spanOfRun, openingConflicts, toPlan, frame, cornerAt } from './walls.js';
 import { layoutInDraft, unitsOf, positions, levelOf, geometryOf, isFloorLevel } from './layout.js';
 import { computeWorktops } from './worktop.js';
 import { spaceAt } from '../core/geometry.js';
 import { validateCustomLayout, frontsToLayout } from './bespoke.js';
 import { toLocal } from './walls.js';
 import { PLAN } from '../core/plan.js';
-import { itemAABB, itemCorners, pointInPolygon, rectsOverlap } from '../core/geometry.js';
+import { itemAABB, itemCorners, pointInPolygon, rectsOverlap, wallsHitByItem, convexOverlap, openingPoly } from '../core/geometry.js';
 import { runFootprint, doorSwingHit, stairConflicts } from './checks.js';
 
 const L = (en, he) => ({ en, he });
@@ -30,6 +30,23 @@ export const KIND_LEVELS = {
 };
 const KIND_CODE = { kitchen: 'K', island: 'KI', wardrobe: 'WR', pantry: 'PN', vanity: 'VN', utility: 'UT', media: 'MW', entry: 'EN', shelving: 'SH', desk: 'DK', custom: 'CU' };
 const SIDE = { 0: L('north wall', 'קיר צפוני'), 90: L('east wall', 'קיר מזרחי'), 180: L('south wall', 'קיר דרומי'), 270: L('west wall', 'קיר מערבי') };
+const ANGLED_SIDE = L('angled wall', 'קיר אלכסוני');
+/** How deep the run's units reach from the wall (cm) — what must clear an acute corner (stage A5). */
+function cornerDepth(spec, levels) {
+  const d = spec.depths || {};
+  const ds = levels.map((lv) => (lv === 'base' ? (spec.worktop && spec.worktop.depth) || 60 : lv === 'island' ? 0 : (d[lv] || 56) + 2));
+  return Math.max(60, ...ds);
+}
+/**
+ * How far a run of `kind` must stay back from each end of a wall stretch (wallSpanAt) so its units' front corners clear
+ * an angled wall meeting it at an acute corner (stage A5): { left, right } cm (0 at square / obtuse / open ends).
+ */
+export function cornerInsets(span, kind, { spec = defaultSpec(kind), levels = KIND_LEVELS[kind] || ['base'] } = {}) {
+  const c = span && span.corners, dep = cornerDepth(spec, levels);
+  return { left: c && c.left ? c.left.inset(dep) : 0, right: c && c.right ? c.right.inset(dep) : 0 };
+}
+/** Corner modules (they assume a 90° corner): blind / carousel / corner wall units, corner pantries. */
+const isCornerModule = (mod) => !!mod && (!!mod.corner || !!mod.cornerLeg);
 
 function nextCode(carpentry, kind) {
   const p = KIND_CODE[kind] || 'CU', used = new Set(Object.values(carpentry.runs).map((r) => r.code));
@@ -117,9 +134,25 @@ function hardConflicts(run, draft, unitIds) {
     return { id: u.id, level: levelOf(u), at: pos.get(u.id).at, w: u.carp.width, elev: g.elev, h: g.h, virtual: !!g.mod.virtual };
   });
   const stairs = stairConflicts(run, units.filter((u) => unitIds.includes(u.id))).map((c) => ({ code: 'stair', ...c }));   // stage F4b
-  return [...openingConflicts(run, list).filter((c) => c.code === 'door-crossing' || c.code === 'window-tall'), ...stairs];
+  // stage A5: a corner module at an end where the wall meets the next one at an angle other than 90°
+  const angled = [];
+  const span = !isFreeRun(run) && list.length ? spanOfRun(run) : null;
+  if (span && span.corners) for (const x of list) {
+    const u = units.find((y) => y.id === x.id), mod = MODULES[u.carp.module];
+    if (!isCornerModule(mod)) continue;
+    // the first / last unit of its row stands at that end of the run
+    const row = units.filter((y) => isFloorLevel(levelOf(y)) === isFloorLevel(x.level)), first = row[0] === u, last = row[row.length - 1] === u;
+    for (const sd of ['left', 'right']) {
+      const c = cornerAt(run, sd, span);
+      if (c && (sd === 'left' ? first : last)) { angled.push({ code: 'corner-angle', unitId: x.id, side: sd, angle: c.angle, module: mod }); break; }
+    }
+  }
+  return [...openingConflicts(run, list).filter((c) => c.code === 'door-crossing' || c.code === 'window-tall'), ...stairs, ...angled];
 }
-const conflictReason = (c) => (c.code === 'stair' ? (c.kind === 'stair' ? L(`A unit cannot stand on the stair ${c.ref}.`, `ארון אינו יכול לעמוד על המדרגות ${c.ref}.`) : L(`A unit cannot stand over the opening in the floor (${c.ref}).`, `ארון אינו יכול לעמוד מעל הפתח ברצפה (${c.ref}).`))
+const conflictReason = (c) => (c.code === 'corner-angle'
+  ? L(`${c.module.name.en} needs a square (90°) corner, but the ${c.side} end of this run meets the wall at ${c.angle}°. End the run with a scribed filler or panel instead.`,
+    `${c.module.name.he} דורש פינה ישרה (90°), אך הקצה ה${c.side === 'left' ? 'שמאלי' : 'ימני'} של הקו פוגש את הקיר בזווית ${c.angle}°. יש לסיים את הקו בפילר או בדופן מותאמים לקיר.`)
+  : c.code === 'stair' ? (c.kind === 'stair' ? L(`A unit cannot stand on the stair ${c.ref}.`, `ארון אינו יכול לעמוד על המדרגות ${c.ref}.`) : L(`A unit cannot stand over the opening in the floor (${c.ref}).`, `ארון אינו יכול לעמוד מעל הפתח ברצפה (${c.ref}).`))
   : c.code === 'door-crossing'
   ? L(`A unit cannot cross the doorway ${c.opening.id}.`, `ארון אינו יכול לחסום את הפתח ${c.opening.id}.`)
   : L(`A tall unit cannot cover the window ${c.opening.id} (sill ${c.opening.sill} cm).`, `ארון גבוה אינו יכול לכסות את החלון ${c.opening.id} (אדן ${c.opening.sill} ס״מ).`));
@@ -169,6 +202,10 @@ export function createRun(opts = {}, mopts) {
     else {
       from = Math.max(0, ...blocks.filter((o) => o.to <= span.at + 0.01).map((o) => o.to));
       to = Math.min(span.length, ...blocks.filter((o) => o.from >= span.at - 0.01).map((o) => o.from));
+      // an end at an acute (non-square) corner (stage A5): stay back so the units' front corner clears the angled wall
+      const ins = cornerInsets(span, kind, { spec, levels });
+      if (from < 0.5) from = Math.max(from, ins.left);
+      if (to > span.length - 0.5) to = Math.min(to, span.length - ins.right);
     }
     if (from < -0.5 || to > span.length + 0.5) return FAIL('The run is longer than the wall.', 'אורך הקו ארוך מהקיר.');
     if (to - from < 10) return FAIL('Not enough free wall here.', 'אין מספיק קיר פנוי כאן.');
@@ -180,8 +217,12 @@ export function createRun(opts = {}, mopts) {
     anchor = { x: r1(ax), y: r1(ay), dir: span.anchor.dir };
     length = r1(to - from);
     ends = { left: { type: from < 0.5 ? span.ends.left : 'open' }, right: { type: to > span.length - 0.5 ? span.ends.right : 'open' } };
+    if (span.corners) for (const sd of ['left', 'right']) {          // stage A5: an end at an angled corner keeps 'wall' and its angle
+      const c = span.corners[sd], gap = sd === 'left' ? from : span.length - to;
+      if (c && gap <= c.inset(cornerDepth(spec, levels)) + 0.5) ends[sd] = { type: span.ends[sd], angle: c.angle };
+    }
     roomId = roomId ?? span.roomId;
-    side = SIDE[span.anchor.dir];
+    side = SIDE[span.anchor.dir] || (span.anchor.dir % 90 ? ANGLED_SIDE : null);
   }
   if (opts.ends) for (const s of ['left', 'right']) if (opts.ends[s]) ends[s] = typeof opts.ends[s] === 'string' ? { type: opts.ends[s] } : clone(opts.ends[s]);
   if (!roomId) {
@@ -275,9 +316,9 @@ function placementError(run, d, roomId) {
       return FAIL(`${run.code} would leave the ${room.name}: keep it inside the room.`, `${run.code} יוצא מגבולות ${room.nameHe || room.name}: יש להשאירו בתוך החדר.`);
     }
     const b = itemAABB(u);
-    const wall = plan.walls.find((w) => rectsOverlap(b, w, 0.5));
+    const wall = plan.walls.find((w) => rectsOverlap(b, w, 0.5)) || (plan.slants && plan.slants.length && wallsHitByItem(u, plan).find((w) => !plan.walls.includes(w)));
     if (wall) return FAIL(`${run.code} would run into a wall.`, `${run.code} נכנס לתוך קיר.`);
-    const op = plan.openings.find((o) => rectsOverlap(b, o, 0.5));
+    const op = plan.openings.find((o) => (o.axis === 'a' ? rectsOverlap(b, o, 0.5) && convexOverlap(itemCorners(u), openingPoly(o, plan), 0.5) : rectsOverlap(b, o, 0.5)));
     if (op) return FAIL(`${run.code} would block the ${op.kind === 'window' ? 'window' : 'doorway'} ${op.id}.`, `${run.code} חוסם את ${op.kind === 'window' ? 'החלון' : 'הפתח'} ${op.id}.`);
     const door = doorSwingHit(u, plan);
     if (door) return FAIL(`${run.code} would stand in the swing of the door ${door.id}.`, `${run.code} נמצא בתחום הפתיחה של הדלת ${door.id}.`);

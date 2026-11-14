@@ -24,7 +24,7 @@ import { unitCodes as codesOf, unitsOf as unitsOfRun } from './layout.js';
 import { unitsOf, positions, geometryOf, unitCodes, isFloorLevel } from './layout.js';
 import { spanOfRun, toLocal } from './walls.js';
 import { computeWorktops } from './worktop.js';
-import { itemCorners, openingHinge } from '../core/geometry.js';
+import { itemCorners, openingHinge, openingPoly, slantSolids } from '../core/geometry.js';
 
 const L = (en, he) => ({ en, he });
 export const LW = { heavy: 0.5, medium: 0.35, thin: 0.18, hair: 0.13 };
@@ -389,13 +389,40 @@ function plan(run, G, v) {
     return x1 - x0 > 0.1 && y1 - y0 > 0.1 ? [x0, y0, x1 - x0, y1 - y0] : null;
   };
   const rectPts = (r) => [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]].map(([a, b]) => P(a, b));
+  // stage A5: a run along an angled wall sees the other walls turned, and angled walls are drawn by their true outline —
+  // both as polygons clipped to the drawing window (a run on an axis keeps the rectangles exactly as before)
+  const clipPoly = (pts) => {
+    let out = pts;
+    for (const [k, lim, keepGreater] of [[0, win.x0, true], [0, win.x1, false], [1, win.y0, true], [1, win.y1, false]]) {
+      const next = [];
+      for (let i = 0; i < out.length; i++) {
+        const p = out[i], q = out[(i + 1) % out.length], pin = keepGreater ? p[k] >= lim : p[k] <= lim, qin = keepGreater ? q[k] >= lim : q[k] <= lim;
+        if (pin) next.push(p);
+        if (pin !== qin) { const t = (lim - p[k]) / (q[k] - p[k]); next.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]); }
+      }
+      out = next;
+      if (out.length < 3) return null;
+    }
+    return out;
+  };
+  const turned = (run.anchor.dir || 0) % 90 !== 0;
   if (run.kind !== 'island') {
     const fplan = planOf(run);
-    for (const w of fplan.walls) { const c = clipRect(rectPts(w)); if (c) D.rect(...c, LW.heavy, { fill: 'wall', role: 'wall' }); }
+    for (const w of fplan.walls) {
+      if (turned) { const c = clipPoly(rectPts(w)); if (c) D.poly(c, true, LW.heavy, { fill: 'wall', role: 'wall' }); continue; }
+      const c = clipRect(rectPts(w)); if (c) D.rect(...c, LW.heavy, { fill: 'wall', role: 'wall' });
+    }
+    for (const sw of slantSolids(fplan)) for (const ring of sw.rings) { const c = clipPoly(ring.map(([a, b]) => P(a, b))); if (c) D.poly(c, true, LW.heavy, { fill: 'wall', role: 'wall' }); }
     for (const o of fplan.openings) {
-      const c = clipRect(rectPts(o));
-      if (!c) continue;
-      D.rect(...c, LW.thin, { role: 'opening', fill: o.kind === 'window' ? 'glass' : undefined });
+      if (turned || o.axis === 'a') {
+        const c = clipPoly(openingPoly(o, fplan).map(([a, b]) => P(a, b)));
+        if (!c) continue;
+        D.poly(c, true, LW.thin, { role: 'opening', ...(o.kind === 'window' ? { fill: 'glass' } : {}) });
+      } else {
+        const c = clipRect(rectPts(o));
+        if (!c) continue;
+        D.rect(...c, LW.thin, { role: 'opening', fill: o.kind === 'window' ? 'glass' : undefined });
+      }
       if (o.kind === 'door' && o.hinge && o.swing) {
         const hg = openingHinge(o), sw = { hx: hg.x, hy: hg.y, ex: hg.open[0], ey: hg.open[1], cx: hg.closed[0], cy: hg.closed[1] };
         const h = P(sw.hx, sw.hy), open = P(sw.hx + sw.ex * o.width, sw.hy + sw.ey * o.width), closed = P(sw.hx + sw.cx * o.width, sw.hy + sw.cy * o.width);
