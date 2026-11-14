@@ -56,6 +56,69 @@ const mapDir = (L, d) => {
 };
 
 const r6 = (v) => Math.round(v * 1e6) / 1e6;
+const r1 = (v) => Math.round(v * 10) / 10 || 0;
+const FLIP = { l: 'r', r: 'l', a: 'b', b: 'a' };
+
+/**
+ * Slants (frame cm) and their openings → plan cm: endpoints mapped by L and shifted to the house corner, rounded to
+ * 0.1 cm; a mirror swaps left and right (swing, outside); then every slant (chain: the whole chain) is turned so it
+ * starts at its northern end (west on a tie) — `at` measured from the new start, hinge a ↔ b, sides l ↔ r — and ids
+ * are re-given north-west first (s01…, chains c1…), the openings following their wall.
+ */
+function mapSlants(slants, sops, L, ox, oy) {
+  const det = L[0] * L[3] - L[1] * L[2];
+  const pts = slants.map((s) => { const a = affApply(L, s.x1, s.y1), b = affApply(L, s.x2, s.y2); return { ...s, x1: r1(a[0] - ox), y1: r1(a[1] - oy), x2: r1(b[0] - ox), y2: r1(b[1] - oy) }; });
+  const ops = sops.map((o) => {
+    const q = { ...o };
+    if (det < 0) for (const k of ['swing', 'outside']) if (q[k]) q[k] = FLIP[q[k]];
+    if (det < 0 && q.innerDoor) q.innerDoor = { ...q.innerDoor, swing: FLIP[q.innerDoor.swing] };
+    return q;
+  });
+  // units: a single slant, or every piece of a chain in order
+  const units = [];
+  for (const s of pts) { const u = s.chain && units.find((v) => v.chain === s.chain); if (u) u.list.push(s); else units.push({ chain: s.chain || null, list: [s] }); }
+  const before = (a, b) => a[1] < b[1] || (a[1] === b[1] && a[0] < b[0]);
+  for (const u of units) {
+    const first = u.list[0], last = u.list[u.list.length - 1];
+    if (!before([last.x2, last.y2], [first.x1, first.y1])) continue;
+    u.list.reverse();
+    for (const s of u.list) {
+      [s.x1, s.y1, s.x2, s.y2] = [s.x2, s.y2, s.x1, s.y1];
+      const len = Math.hypot(s.x2 - s.x1, s.y2 - s.y1);
+      for (const o of ops) if (o.wall === s.id) {
+        o.at = len - o.at;
+        for (const k of ['hinge', 'swing', 'outside']) if (o[k]) o[k] = FLIP[o[k]];
+        if (o.innerDoor) o.innerDoor = { ...o.innerDoor, hinge: FLIP[o.innerDoor.hinge], swing: FLIP[o.innerDoor.swing] };
+      }
+    }
+  }
+  const key = (u) => [Math.min(...u.list.flatMap((s) => [s.y1, s.y2])), Math.min(...u.list.flatMap((s) => [s.x1, s.x2]))];
+  units.sort((a, b) => { const p = key(a), q = key(b); return p[0] - q[0] || p[1] - q[1]; });
+  const rename = new Map(), out = [];
+  let n = 0, c = 0;
+  for (const u of units) {
+    const cid = u.chain ? 'c' + (++c) : null;
+    for (const s of u.list) {
+      const id = 's' + String(++n).padStart(2, '0');
+      rename.set(s.id, id);
+      const o = { id, x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, t: s.t, kind: s.kind };
+      if (cid) o.chain = cid;
+      out.push(o);
+    }
+  }
+  const openings = ops.map((o) => {
+    const q = { id: o.id, kind: o.kind, style: o.style, width: r1(o.width), height: o.height, sill: o.sill, wall: rename.get(o.wall), axis: 'a', at: r1(o.at) };
+    if (o.hinge) { q.hinge = o.hinge; q.swing = o.swing; }
+    if (o.leaves) q.leaves = o.leaves;
+    if (o.innerDoor) q.innerDoor = o.innerDoor;
+    if (o.outside) q.outside = o.outside;
+    q.exterior = !!o.exterior;
+    if (o.assumed) q.assumed = o.assumed.slice();
+    q.confidence = o.confidence;
+    return q;
+  }).sort((a, b) => (a.wall < b.wall ? -1 : a.wall > b.wall ? 1 : a.at - b.at));
+  return { slants: out, openings };
+}
 
 export function normalise(result, { rotate = 0, mirror = false } = {}) {
   const W = result.walls || {}, OP = result.openings || {};
@@ -80,7 +143,9 @@ export function normalise(result, { rotate = 0, mirror = false } = {}) {
   const reoriented = !!((rotate % 360) || mirror);
   if (reoriented) shifted = recut(shifted.map((w) => ({ ...w, kind: 'wall' })), snap || 5);
   const walls0 = shifted;
-  const openings = openList.map((o) => {
+  // slants option: centre lines through the same mirror / rotation / shift (not snapped; 0.1 cm)
+  const SL = Array.isArray(W.slants) ? mapSlants(W.slants, openList.filter((o) => o.axis === 'a'), L, ox, oy) : null;
+  const openings = openList.filter((o) => o.axis !== 'a').map((o) => {
     const r = shift(mapRect(o));
     const out = { id: o.id, kind: o.kind, style: o.style, axis: swap ? (o.axis === 'h' ? 'v' : 'h') : o.axis, ...r,
       width: o.width, height: o.height, sill: o.sill, exterior: !!o.exterior };
@@ -93,7 +158,7 @@ export function normalise(result, { rotate = 0, mirror = false } = {}) {
     out.confidence = o.confidence;
     return out;
   }).sort((a, b) => a.y - b.y || a.x - b.x);
-  if (reoriented) classifyKinds(walls0, outsideMask(walls0, openings, { snap: snap || 5 }));
+  if (reoriented) classifyKinds(walls0, SL && SL.slants.length ? outsideMask(walls0, openings, { snap: snap || 5 }, SL.slants) : outsideMask(walls0, openings, { snap: snap || 5 }));
   const walls = walls0
     .sort((a, b) => a.y - b.y || a.x - b.x)
     .map((w, i) => ({ id: 'w' + String(i + 1).padStart(2, '0'), x: w.x, y: w.y, w: w.w, h: w.h, kind: w.kind }));
@@ -110,16 +175,17 @@ export function normalise(result, { rotate = 0, mirror = false } = {}) {
   const wConf = W.confidence != null ? W.confidence : 0.5;
   const area = walls.reduce((t, w) => t + w.w * w.h, 0);
   const bounds = walls.length ? { x: 0, y: 0, w: Math.max(...walls.map((w) => w.x + w.w)), h: Math.max(...walls.map((w) => w.y + w.h)) } : null;
+  const out = SL && SL.slants.length ? { walls, openings: openings.concat(SL.openings), slants: SL.slants } : { walls, openings };
   return {
-    walls, openings, scale, pageBox: result.pageBox || null, transform, rotate, mirror: mirror || false,
+    ...out, scale, pageBox: result.pageBox || null, transform, rotate, mirror: mirror || false,
     // every separate wall drawing found on the sheet, in plan cm relative to the chosen one (for a chooser in the UI)
     drawings: (W.drawings || []).map((d) => ({ index: d.index, walls: d.walls, area: d.area, bbox: shift(mapRect(d.bbox)) })),
     drawing: W.drawing ?? 0,
     warnings, unsupported,
     stats: { walls: walls.length, exterior: walls.filter((w) => w.kind === 'exterior').length, wallArea: area, bounds,
-      openings: openings.length, doors: openings.filter((o) => o.kind === 'door').length, windows: openings.filter((o) => o.kind === 'window').length,
+      openings: out.openings.length, doors: out.openings.filter((o) => o.kind === 'door').length, windows: out.openings.filter((o) => o.kind === 'window').length,
       deskew: frame.angle || 0, ...(W.stats || {}) },
-    confidence: { scale: sConf, walls: wConf, openings: openings.length ? +(openings.reduce((t, o) => t + o.confidence, 0) / openings.length).toFixed(2) : null,
+    confidence: { scale: sConf, walls: wConf, openings: out.openings.length ? +(out.openings.reduce((t, o) => t + o.confidence, 0) / out.openings.length).toFixed(2) : null,
       overall: +(wConf * (0.5 + 0.5 * sConf)).toFixed(2) },
   };
 }
