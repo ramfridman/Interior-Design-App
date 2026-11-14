@@ -1,23 +1,36 @@
 /**
- * Tracing underlay: the imported sketch (store.underlay, see docs/CONTRACT.md § 12) drawn under the walls, placed by
+ * Tracing underlay: the imported sketch (store.underlay — on an upper floor store.underlays[level], see docs/CONTRACT.md
+ * § 12) drawn under the walls of the floor shown, placed by
  * its image px → plan cm transform. Never drawn in exports (env.exporting), 3D or thumbnails.
  * The data URL is decoded once into an <img> (cached by string identity); `onReady` repaints when it has loaded.
  */
-let cached = { src: null, img: null, ready: false };
+// decoded pictures by data URL (one per floor of a project imported with several floors; the oldest is dropped)
+const cache = new Map();
 
 function imageFor(src, onReady) {
-  if (cached.src === src) return cached.ready ? cached.img : null;
+  const hit = cache.get(src);
+  if (hit) return hit.ready ? hit.img : null;
   const img = new Image();
-  cached = { src, img, ready: false };
-  const mine = cached;
-  img.onload = () => { mine.ready = true; if (cached === mine) onReady && onReady(); };
+  const mine = { img, ready: false };
+  cache.set(src, mine);
+  while (cache.size > 4) cache.delete(cache.keys().next().value);
+  img.onload = () => { mine.ready = true; if (cache.get(src) === mine) onReady && onReady(); };
   img.onerror = () => { mine.ready = false; };
   img.src = src;
   return null;
 }
 
+/** The underlay of the floor shown: store.underlay on the ground floor, store.underlays[level] above (stage F8). */
+export function shownUnderlay(env) {
+  const st = env.store;
+  if (!st) return null;
+  const lv = env.level;
+  if (!lv || lv === 'L0') return st.underlay || null;
+  return (st.underlays && st.underlays[lv]) || null;
+}
+
 /** True when the underlay would be painted (and the plan should leave room for it under the floors). */
-export const underlayShown = (env) => !!(env.store && env.store.underlay && env.store.underlay.visible !== false && !env.exporting);
+export const underlayShown = (env) => { const u = shownUnderlay(env); return !!(u && u.visible !== false && !env.exporting); };
 
 /**
  * Paint the underlay (device space in, device space out). Light themes multiply it into the paper so white page
@@ -25,7 +38,7 @@ export const underlayShown = (env) => !!(env.store && env.store.underlay && env.
  */
 export function drawUnderlay(G, env) {
   if (!underlayShown(env)) return;
-  const u = env.store.underlay;
+  const u = shownUnderlay(env);
   const img = imageFor(u.image, env.onUnderlayReady);
   if (!img || !Array.isArray(u.transform)) return;
   const [a, b, c, d, e, f] = u.transform;

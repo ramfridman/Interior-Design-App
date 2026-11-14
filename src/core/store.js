@@ -149,6 +149,15 @@ const DEFAULT_PROJECT = {
 /** Project defaults for the plan that is open now (DEFAULT_PROJECT is the built-in house's). */
 const defaultProject = () => ({ ...DEFAULT_PROJECT, name: PLAN.meta.name, ceilingHeight: PLAN.heights.ceiling });
 
+
+/** A project's upper-floor underlays ({ L1: underlay, … }) as stored, or null: only entries with a picture are kept. */
+function upperUnderlays(map) {
+  if (!map || typeof map !== 'object') return null;
+  const out = {};
+  for (const [k, u] of Object.entries(map)) if (/^L[1-9]\d*$/.test(k) && u && typeof u.image === 'string') out[k] = { ...u };
+  return Object.keys(out).length ? out : null;
+}
+
 class Store {
   constructor() {
     this.items = [];            // array of item objects (see docs/CONTRACT.md § Item)
@@ -168,6 +177,12 @@ class Store {
      * part of the design, the undo history or exports. Change it with setUnderlay().
      */
     this.underlay = null;
+    /**
+     * Tracing underlays of the upper floors (stage F8, a project imported with several floors): { L1: underlay, … } in
+     * the same shape as `underlay` (which stays the ground floor's), or null. Read one with underlayOf(levelId); change
+     * it with setUnderlay(…, { level }). Saved with the project record (`underlays`) only when there is one.
+     */
+    this.underlays = null;
     /**
      * The project's own products ("Add your own product", CONTRACT § 16): catalogue-shaped products with ids 'own-…',
      * kept in canonical order (createdAt, id). Part of the design (saved only when there is at least one) and of the
@@ -594,13 +609,14 @@ class Store {
    * per-session UI state (structure / carpentry selection, active room, walk mode). Emits 'plan' { reason: 'base' }, the
    * usual 'load' events, then 'base'. Never autosaves by itself.
    */
-  openProject({ basePlan, phase = 'fixed', design, name, underlay = null } = {}) {
+  openProject({ basePlan, phase = 'fixed', design, name, underlay = null, underlays = null } = {}) {
     clearTimeout(this._saveTimer); this._saveTimer = null;
     const persist = this.persist;
     this.persist = false;
     try {
       this._undo = []; this._redo = []; this._batch = null;
       this.underlay = underlay && typeof underlay.image === 'string' ? { ...underlay } : null;
+      this.underlays = upperUnderlays(underlays);
       if (basePlan) setBasePlan(basePlan, { phase });
       const data = design && Array.isArray(design.items) ? design : { items: [] };
       const project = { ...(data.project || {}), ...(name ? { name } : {}) };
@@ -631,10 +647,29 @@ class Store {
    * autosaves unless `opts.transient` (e.g. while an opacity slider is dragged). Emits 'underlay' { reason }.
    */
   setUnderlay(next, opts = {}) {
+    const lv = opts.level && opts.level !== 'L0' ? String(opts.level) : null;
+    if (lv) {
+      // an upper floor's underlay (stage F8): the same rules on store.underlays[level]
+      const cur = this.underlays && this.underlays[lv] ? this.underlays[lv] : null;
+      let val;
+      if (next == null) val = null;
+      else if (opts.replace || !cur) val = typeof next.image === 'string' ? { opacity: 0.5, visible: true, ...next } : cur;
+      else val = { ...cur, ...next };
+      const map = { ...(this.underlays || {}) };
+      if (val) map[lv] = val; else delete map[lv];
+      this.underlays = Object.keys(map).length ? map : null;
+      this.emit('underlay', { reason: next == null ? 'remove' : 'change', transient: !!opts.transient, level: lv });
+      return;
+    }
     if (next == null) this.underlay = null;
     else if (opts.replace || !this.underlay) this.underlay = typeof next.image === 'string' ? { opacity: 0.5, visible: true, ...next } : this.underlay;
     else this.underlay = { ...this.underlay, ...next };
     this.emit('underlay', { reason: next == null ? 'remove' : 'change', transient: !!opts.transient });
+  }
+  /** The tracing underlay of floor `levelId` ('L0' / absent = `underlay`, an upper floor from `underlays`) or null. */
+  underlayOf(levelId) {
+    if (!levelId || levelId === 'L0') return this.underlay;
+    return (this.underlays && this.underlays[levelId]) || null;
   }
   saveLocal() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.serialize())); } catch (e) { /* storage unavailable — design still works in memory */ } }
   /** Returns true if a saved design was restored. */

@@ -8,11 +8,13 @@
  *   await projects.create({ name, from: 'blank', lot: { width: 2500, depth: 2000 } });
  *   await projects.create({ name, fromPlan: buildPlan({ walls, openings }).plan });   // the sketch-import wizard
  *
- * A project = { id, name, createdAt, updatedAt, phase: 'draft' | 'fixed', builtin: boolean, basePlan, design, thumbnail?, underlay? }
+ * A project = { id, name, createdAt, updatedAt, phase: 'draft' | 'fixed', builtin: boolean, basePlan, design, thumbnail?, underlay?, underlays? }
  *   basePlan  complete PLAN-shaped object (plan.js shape; House 98 = the built-in plan)
  *   design    what store.serialize() returns (items, finishes, plan edits relative to basePlan, carpentry, ui…)
  *   underlay  the tracing underlay of an imported sketch (store.underlay: a JPEG / WebP data URL + image px → plan cm
  *             transform, opacity, visible) — kept beside the design, out of the undo history (CONTRACT § 12)
+ *   underlays the upper floors' tracing underlays { L1: …, … } (stage F8; only when a floor has one; `underlay` stays
+ *             the ground floor's)
  *
  * STORAGE goes through an adapter — async { list() → summaries, get(id) → project | null, put(project), remove(id) } —
  * so an online backend can replace the local one without touching callers. `createLocalAdapter()` uses IndexedDB, falls
@@ -160,6 +162,7 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
     const { online: _o, role: _r, ...open } = current || online;   // an online project can be exported / duplicated as a local copy too
     const rec = { ...open, name: store.project.name || open.name, updatedAt: now(), phase: planPhase(), builtin: isBuiltinBase(), basePlan: clone(BASE_PLAN), design };
     if (store.underlay) rec.underlay = store.underlay;   // immutable once set (setUnderlay replaces the object): no copy needed
+    if (store.underlays && Object.keys(store.underlays).length) rec.underlays = store.underlays;   // upper floors' underlays (F8)
     return rec;
   }
   /** Save the open project now (autosave calls this). Resolves when stored; storage errors are reported, not thrown. */
@@ -244,7 +247,8 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
      *   location?: { name?, latitude, longitude, timeZone? }, northAngle?: number, ceiling?: number,   // 'blank' only (ceiling: also 'house98')
      *   file?: string | object,     // 'file': a project file (or an old design file)
      *   design?: object, open?: boolean,
-     *   underlay?: object }} opts   // tracing underlay (store.underlay shape), e.g. the imported sketch
+     *   underlay?: object,          // tracing underlay (store.underlay shape), e.g. the imported sketch
+     *   underlays?: object }} opts  // the upper floors' underlays { L1: underlay, … } (a sketch imported with several floors)
      * @returns {Promise<{ ok: boolean, project?: object, reason?: string }>}
      */
     async create(opts = {}) {
@@ -273,6 +277,12 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
       design = { ...design, project: { ...(design.project || {}), name } };
       const rec = { id: newId(), name, createdAt: now(), updatedAt: now(), phase, builtin: from === 'house98', basePlan, design };
       if (opts.underlay && typeof opts.underlay.image === 'string') rec.underlay = { opacity: 0.5, visible: true, ...opts.underlay };
+      if (opts.underlays && typeof opts.underlays === 'object') {
+        // upper floors' underlays ({ L1: underlay, … }, stage F8): only those with a picture
+        const ups = {};
+        for (const [k, u] of Object.entries(opts.underlays)) if (/^L[1-9]\d*$/.test(k) && u && typeof u.image === 'string') ups[k] = { opacity: 0.5, visible: true, ...u };
+        if (Object.keys(ups).length) rec.underlays = ups;
+      }
       try { await put(rec); } catch (e) { if (opts.open === false) return { ok: false, reason: 'The project could not be stored in this browser.' }; }
       if (opts.open !== false) { await flush(); await openRecord(rec); }
       emit('list');
@@ -383,7 +393,7 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
     emit('closing', {});            // an online session (src/collab/) lets go of the store before it is replaced
     online = null;
     current = summaryOf(rec);
-    store.openProject({ basePlan: rec.basePlan, phase: rec.phase === 'draft' ? 'draft' : 'fixed', design: restoreUI ? design : { ...design, ui: undefined }, name: rec.name, underlay: rec.underlay || null });
+    store.openProject({ basePlan: rec.basePlan, phase: rec.phase === 'draft' ? 'draft' : 'fixed', design: restoreUI ? design : { ...design, ui: undefined }, name: rec.name, underlay: rec.underlay || null, underlays: rec.underlays || null });
     writeCurrent(rec.id);
     emit('open', { project: api.current() });
   }

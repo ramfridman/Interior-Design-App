@@ -1,6 +1,7 @@
 /**
  * Structure guide card for the tracing underlay (store.underlay): show / hide, strength, "Re-align…" (scale from a
  * known length, move by matching a point, nudge) and "Remove sketch". Hidden when the project has no underlay.
+ * A project imported with several floors (stage F8) has one underlay per floor: the card controls the floor shown.
  */
 import { h, setKids } from '../dom.js';
 import { icon } from '../icons.js';
@@ -9,23 +10,31 @@ import { openDialog, confirmDialog, toast } from '../dialogs.js';
 import { field, numInput, readNum } from '../projects.js';
 import { createSheet } from './sheet.js';
 import { affThen, affInv, affApply } from './affine.js';
+import { levelPlan } from '../../core/plan-edit.js';
+
+/** The floor shown in the plan ('L0' = ground) — a project imported with several floors has one underlay per floor. */
+const shownLevel = (store) => (store.ui && store.ui.level && store.ui.level !== 'L0' ? store.ui.level : 'L0');
+const underlayOn = (store, lv) => (store.underlayOf ? store.underlayOf(lv) : lv === 'L0' ? store.underlay : null);
+/** setUnderlay for floor `lv` (the ground floor's call is exactly today's). */
+const setOn = (store, lv, patch, opts = {}) => store.setUnderlay(patch, lv === 'L0' ? opts : { ...opts, level: lv });
 
 export function underlayCard(app) {
   const { store } = app;
   const el = h('div', { class: 'iunder', hidden: true });
   let slider = null, vis = null;
   const render = () => {
-    const u = store.underlay;
+    const lv = shownLevel(store), u = underlayOn(store, lv);
     if (!u) { el.hidden = true; setKids(el); return; }
+    const floorName = store.underlays ? ` — ${(app.levels && app.levels.name && app.levels.name(lv)) || (lv === 'L0' ? 'Ground floor' : lv)}` : '';
     el.hidden = false;
     const pct = Math.round((u.opacity == null ? 0.5 : u.opacity) * 100);
     slider = h('input', { type: 'range', class: 'range', min: '10', max: '100', step: '5', value: String(pct), 'aria-label': 'Strength of the sketch under the plan', style: `--fill:${(pct - 10) / 0.9}%`,
-      onInput: () => { const v = Number(slider.value); slider.style.setProperty('--fill', `${(v - 10) / 0.9}%`); store.setUnderlay({ opacity: v / 100 }, { transient: true }); },
-      onChange: () => store.setUnderlay({ opacity: Number(slider.value) / 100 }) });
-    vis = toggle({ label: 'Show the sketch', checked: u.visible !== false, onChange: (v) => store.setUnderlay({ visible: v }) });
+      onInput: () => { const v = Number(slider.value); slider.style.setProperty('--fill', `${(v - 10) / 0.9}%`); setOn(store, lv, { opacity: v / 100 }, { transient: true }); },
+      onChange: () => setOn(store, lv, { opacity: Number(slider.value) / 100 }) });
+    vis = toggle({ label: 'Show the sketch', checked: u.visible !== false, onChange: (v) => setOn(store, lv, { visible: v }) });
     const src = u.source || {};
     setKids(el,
-      h('p', { class: 'phase__title' }, icon('image', { size: 16 }), 'Sketch underlay'),
+      h('p', { class: 'phase__title' }, icon('image', { size: 16 }), `Sketch underlay${floorName}`),
       h('p', { class: 'phase__text' }, `${src.name ? `“${src.name}”${src.page ? `, page ${src.page}` : ''}` : 'Your drawing'} lies under the plan to trace over. It is not printed, exported or shown in 3D.`),
       vis,
       h('label', { class: 'iunder__row' }, h('span', { class: 'iunder__label' }, 'Strength'), slider),
@@ -35,6 +44,7 @@ export function underlayCard(app) {
   };
   store.on('underlay', (e) => { if (e && e.transient) return; render(); });
   store.on('base', render);
+  store.on('ui', (e) => { if (store.underlays && e && e.keys && e.keys.includes('level')) render(); });
   render();
   return el;
 }
@@ -43,7 +53,7 @@ async function remove(app) {
   const ok = await confirmDialog({ title: 'Remove the sketch?', confirmLabel: 'Remove sketch', danger: true,
     message: 'The drawing under the plan is removed from this project. The walls, doors and windows stay. To get the drawing back you would have to import it again.' });
   if (!ok) return;
-  app.store.setUnderlay(null);
+  setOn(app.store, shownLevel(app.store), null);
   toast('Sketch removed');
 }
 
@@ -52,9 +62,11 @@ async function remove(app) {
  * stays put); (2) move — click a point on the drawing, then the wall corner where it belongs; (3) nudge east / south.
  */
 export function openRealign(app) {
-  const { store, plan } = app;
-  const u0 = store.underlay;
+  const { store } = app;
+  const lv = shownLevel(store);
+  const u0 = underlayOn(store, lv);
   if (!u0) return null;
+  const plan = lv === 'L0' ? app.plan : (levelPlan(app.plan, lv) || app.plan);   // the walls of the floor this sketch belongs to
   let T = u0.transform.slice();             // image px → plan cm (working copy)
   let mode = null, pts = [];
   const img = new Image();
@@ -151,10 +163,10 @@ export function openRealign(app) {
     actions: [btn('Cancel', { variant: 'quiet', onClick: () => dlg.close() }),
       btn('Reset', { variant: 'quiet', onClick: () => { T = u0.transform.slice(); mode = null; pts = []; status.textContent = ''; sync(); } }),
       btn('Apply', { variant: 'primary', onClick: () => {
-        const before = store.underlay && store.underlay.transform;
-        store.setUnderlay({ transform: T.map((v) => +v.toFixed(6)) }); dlg.close();
+        const cur = underlayOn(store, lv), before = cur && cur.transform;
+        setOn(store, lv, { transform: T.map((v) => +v.toFixed(6)) }); dlg.close();
         // the underlay is outside the undo history (CONTRACT § 12): offer the way back here
-        toast('Sketch re-aligned', { kind: 'success', action: before && { label: 'Undo', fn: () => { if (store.underlay) store.setUnderlay({ transform: before }); } } });
+        toast('Sketch re-aligned', { kind: 'success', action: before && { label: 'Undo', fn: () => { if (underlayOn(store, lv)) setOn(store, lv, { transform: before }); } } });
       } })],
     onClose: () => sheet.destroy() });
   dlg.el._realign = { sheet, get transform() { return T.slice(); }, get mode() { return mode; }, get points() { return pts.length; } };   // for tests
