@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 10): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 11): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -31,8 +31,12 @@ Small follow-ups noted: island stools do not travel with the island; overlap of 
 ## Done in version 10 (13–14 Nov 2026, night)
 - [x] **Projects**: several projects, each with its own plan, location and design; project switcher (click the project name, or ⋯ → Projects… on a phone); New project (empty lot or copy of House 98); rename, duplicate, delete, export / import a project file; the earlier saved design becomes the first project. A new house is drawn in a "draft" phase (everything editable, rooms follow the walls) and then confirmed as "the house as built", after which the permission levels and the changes list apply. Storage sits behind an adapter so an online backend can replace it later. Known limits: no project thumbnails; the boot splash always shows House 98; not tested on a real phone.
 
-## In progress now
-- [ ] **Sketch import** — engine that reads walls, doors and windows from a vector PDF (tested against the House 98 drawings) [Opus, running]; then the import screen: choose a PDF or image → set / confirm the scale → review and correct with the Structure tools → new project. Scope chosen while the owner was away (to confirm): vector PDFs read exactly, photos / scans traced with guidance, straight right-angled walls, one floor.
+## Done in version 11 (14 Nov 2026, night)
+- [x] **Import a sketch** (project name → Import a sketch…, or New project → From a sketch): choose a PDF or image (read on the device, nothing is uploaded) → confirm the scale (measure a known length, a scale stated on the drawing, type 1 : N, or the engine's labelled guess) → orientation, mirror, north → review what was found over the drawing → new draft project with the drawing as a tracing underlay (show / hide, strength, re-align, remove) → correct with the Structure tools → "This is the house as built".
+  - Vector PDFs: tested on the two House 98 drawings — all 55 walls within 5 cm and 23 of 23 openings found; the underlay lines up within 1 cm. The scale could not be read from those drawings (their text is drawn as strokes), so it is inferred and the user is always asked to confirm it.
+  - Photos / scans: a rough starting point only (about three quarters of the wall area, openings mostly not found) — the user traces over the underlay.
+  - Limits: straight right-angled walls and one floor (angled / curved pieces are flagged for redrawing by hand); the safe room cannot be recognised from a drawing (set the room type by hand); the lot of an imported house is a default 3 m margin, not the lot drawn on the sheet; window heights / sills and door styles are defaults; not tried inside the real viewer on the owner's device; encrypted PDFs and the two-point re-align modes are untested.
+- [x] Scope chosen while the owner was away (to confirm): vector PDF + image, orthogonal walls, one floor first. DXF / DWG, angled walls and several floors would be later extensions.
 
 ## Next
 - [x] **Stretched display on a phone** — fixed in version 6 (13 Nov): off-screen sheets made the page itself scrollable, so the app could slide up and out of view. The root and the app shell are now clipped and page scroll is reset; the top bar fits down to 360 px wide (at 320 px the File menu is still cut off).
