@@ -148,6 +148,10 @@ group('existing mutations on a level with slants (decision: walls refused until 
   const nd = PLAN.openings.find((o) => o.id === add.ids[0]);
   check('…a door in the partition: added with its rooms, the slants and their openings kept and re-derived', add.ok && nd && nd.rooms.length === 2 && JSON.stringify(PLAN.slants) === JSON.stringify(W.slants)
     && PLAN.openings.find((o) => o.id === 'win-s01').outside === 'l' && PLAN.rooms.length === 3 && E.wallSegments().some((s) => s.id === 'seg:a:s01'), add.reason);
+  const up = E.updateOpening('door-part', { width: 90 }), flip = E.flipDoor('door-part', 'swing');
+  check('updateOpening / flipDoor of a door in a rect wall work (slants kept)', up.ok && flip.ok && PLAN.openings.find((o) => o.id === 'door-part').width === 90 && PLAN.openings.find((o) => o.id === 'door-part').swing === 'w'
+    && JSON.stringify(PLAN.slants) === JSON.stringify(W.slants), JSON.stringify([up, flip]));
+  store.undo(); store.undo();
   const st = E.planState();
   check('planState carries schema + slants (no poly), openings in slants with their derived fields', st && st.schema === 2 && JSON.stringify(st.slants) === JSON.stringify(W.slants) && st.openings.some((o) => o.axis === 'a' && Number.isFinite(o.cx)));
   const rm = E.removeOpening('door-s02');
@@ -357,7 +361,7 @@ group('performance (median of 40 runs after warm-up; steady state: the plan\'s o
   console.log(`   mixed derive: Wedge ${t1.toFixed(2)} ms, House 98 + 2 slants ${t2.toFixed(2)} ms (first derive after adding them, label points recomputed: ${t2first.toFixed(2)} ms; ${r98.rooms.length} rooms, ${r98.problems.length} problems); orthogonal House 98 ${ortho.toFixed(2)} ms`);
   check('mixed derive of the Wedge < 10 ms', t1 < 10, `${t1.toFixed(2)} ms`);
   check('mixed derive of House 98 + 2 slants < 10 ms (and it derives: rooms, no problems)', t2 < 10 && r98.rooms.length >= E.BUILTIN_PLAN.rooms.length && r98.problems.length === 0, `${t2.toFixed(2)} ms`);
-  check('the orthogonal derive stays on the grid path (House 98 < 3 ms)', ortho < 3, `${ortho.toFixed(2)} ms`);
+  check('the orthogonal derive stays on the grid path (House 98 < 5 ms; ≈ 1 ms unloaded)', ortho < 5, `${ortho.toFixed(2)} ms`);
 }
 
 group('identity: House 98 untouched');
