@@ -11,7 +11,7 @@ import { canPrint } from './exporter.js';
 import { fmtPrice } from './format.js';
 import { shoppingTotal, onCarpentryBudget } from './shopping.js';
 import { WALL_THICKNESSES } from './structure.js';
-import { STRUCTURE_TOOL_LIST, planChip } from './structure-panels.js';
+import { STRUCTURE_TOOL_LIST, planChip, stairOptions } from './structure-panels.js';
 import { projectSwitcher, openProjectMenu } from './projects.js';
 import { isBuiltinBase, planPhase } from '../core/plan-edit.js';
 import { FEATURES, onFeatureChange } from '../core/features.js';
@@ -89,6 +89,8 @@ export function initTopbar(root, app) {
 
   const sTools = segmented({ options: STRUCTURE_TOOL_LIST.map((t) => ({ value: t.value, label: t.long, icon: t.icon, kbd: t.kbd })), value: store.ui.tool, iconOnly: true, iconSize: 18,
     label: 'Structure tool', cls: 'seg--tools seg--stools', onChange: (tool) => structure.setTool(tool) });
+  for (const t of STRUCTURE_TOOL_LIST) if (t.levelsOnly) sTools.querySelector(`[data-value="${t.value}"]`)?.classList.add('levels-only');   // Stairs: several floors only
+  const stairBar = stairOptions(app, { compact: true });
   // While the plan is a draft, exterior and safe-room walls (25, 30 cm) can be drawn too.
   const makeThickness = (draft) => segmented({ options: [...WALL_THICKNESSES, ...(draft ? [25, 30] : [])].map((v) => ({ value: v, label: String(v), tip: `Draw ${v} cm walls` })), value: store.ui.wallThickness,
     label: 'Thickness of new walls, in centimetres', cls: 'seg--thick', onChange: (v) => { store.setUI({ wallThickness: v }); structure.setTool('wall'); } });
@@ -99,6 +101,7 @@ export function initTopbar(root, app) {
   const structureBar = h('div', { class: 'sbar', role: 'group', 'aria-label': 'Structure tools' },
     sTools,
     h('div', { class: 'sbar__thick', 'data-tip': 'Thickness of new walls' }, icon('wall', { size: 16 }), thickness, h('span', { class: 'sbar__unit' }, 'cm')),
+    stairBar,
     h('span', { class: 'sbar__sep', 'aria-hidden': 'true' }),
     h('div', { class: 'sbar__plan' }, showChanges, resetPlanBtn));
   const structureHost = h('div', { class: 'topbar__group topbar__structure' });
@@ -216,6 +219,7 @@ export function initTopbar(root, app) {
     tools.set(on || carpentry.isActive() ? null : store.ui.tool);
     sTools.set(on ? store.ui.tool : null);
     thickness.set(store.ui.wallThickness);
+    structureBar.dataset.tool = on ? store.ui.tool : '';      // Stairs: the stair options replace the wall thickness
     showChanges.setPressed(!!store.ui.showPlanChanges);
     views.set(store.ui.mode);
     toggleBtns.forEach((b) => b.setPressed(!!store.ui[b.dataset.key]));

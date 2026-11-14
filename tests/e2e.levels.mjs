@@ -1,8 +1,10 @@
 // End-to-end: several floors in the 2D plan (stage F2 of docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md), with `?levels=1`.
 // An empty-lot project, a small house, a floor added above (outer walls copied), a partition, a door and a bed on it,
 // switching floors (the bed and the ghost of the ground floor), undo across the floor change, and removing the floor
-// with "move everything to the floor below". No console errors.
-//   node tests/e2e.levels.mjs [--shots]      (screenshots go to dev/screens/e2e-levels-*.png)
+// with "move everything to the floor below". Stairs (stage F4b): a two-level house, the Stairs tool (one level: it offers
+// to add a floor), a straight stair placed with the ghost, its symbol on both floors, the inspector's rule hints, Checks
+// under the right floor, 3D, move by drag, undo, remove; the stair inspector on a phone. No console errors.
+//   node tests/e2e.levels.mjs [--shots]      (screenshots go to dev/screens/e2e-levels-*.png, e2e-stairs-*.png)
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -288,6 +290,147 @@ async function main() {
   check('switch on again: the floor controls are back', on2.on && on2.switcher, JSON.stringify(on2));
   await page.getByRole('button', { name: 'Done' }).click();
   await sleep(200);
+
+  // ── stairs (stage F4b): a two-level house, the Stairs tool, the symbol on both floors, 3D, inspector, Checks, move, undo, remove ──
+  {
+    const house = await page.evaluate(async () => {
+      const { projects, store } = window.app;
+      await projects.create({ name: 'E2E stairs', from: 'blank', lot: { width: 2400, depth: 1800 } });
+      const E = await import('/src/core/plan-edit.js');
+      const X0 = 600, Y0 = 500, X1 = 1600, Y1 = 1300, t = 20;
+      const r = [E.addWall({ x1: X0, y1: Y0, x2: X1, y2: Y0, thickness: t }), E.addWall({ x1: X1, y1: Y0, x2: X1, y2: Y1, thickness: t }), E.addWall({ x1: X1, y1: Y1, x2: X0, y2: Y1, thickness: t }),
+        E.addWall({ x1: X0, y1: Y1, x2: X0, y2: Y0, thickness: t }), E.addWall({ x1: 1100, y1: Y0, x2: 1100, y2: Y1, thickness: 10 })];
+      store.setUI({ mode: '2d', tool: 'select', level: 'L0' });
+      window.app.view2d.fit('house', { animate: false });
+      return r.every((x) => x.ok) && window.app.plan.rooms.length === 2;
+    });
+    check('stairs: a one-level house (two rooms)', house);
+    // one level: the Stairs tool explains that a stair needs a floor above and offers to add one
+    await page.keyboard.press('b'); await sleep(200);
+    await page.keyboard.press('t'); await sleep(400);
+    const offer = page.locator('.toast').filter({ hasText: 'needs a floor above' });
+    check('stairs: on a one-level house the Stairs tool says a stair needs a floor above', await offer.isVisible() && (await page.evaluate(() => window.app.store.ui.tool)) === 'stairs');
+    await offer.getByRole('button', { name: 'Add floor above…' }).click();
+    await sleep(300);
+    await page.getByRole('button', { name: 'Add floor', exact: true }).click();
+    await sleep(500);
+    await page.evaluate(() => window.app.store.setUI({ level: 'L0' }));
+    await sleep(300);
+    // the Stairs tool: hover → a ghost that fits, click → a stair and the opening above
+    await page.keyboard.press('t'); await sleep(200);
+    const at = await page.evaluate(() => window.app.view2d.planToScreen(1350, 900));
+    const before = await page.evaluate(() => window.app.view2d._debug.renderNow() && true);
+    await page.mouse.move(at.x - 40, at.y); await sleep(100);
+    await page.mouse.move(at.x, at.y); await sleep(250);
+    const ghost = await page.evaluate(() => { const g = window.app.view2d._debug.state.struct.stairGhost; return g && { ok: g.ok, reason: g.reason }; });
+    check('stairs: the ghost follows the pointer and fits (green)', before && ghost && ghost.ok, JSON.stringify(ghost));
+    await page.mouse.click(at.x, at.y); await sleep(500);
+    const placed = await page.evaluate(async () => {
+      const { plan, store } = window.app, E = await import('/src/core/plan-edit.js');
+      const info = E.stairInfo('st1');
+      return { stairs: (plan.stairs || []).map((s) => s.id), voids: (plan.levels[0].voids || []).map((v) => ({ id: v.id, stair: v.stair })), covers: info && info.covers, sel: store.ui.structureSel, tool: store.ui.tool };
+    });
+    check('stairs: a click places a straight stair on the ground floor and its opening in the floor above', placed.stairs.join() === 'st1' && placed.voids.length === 1 && placed.voids[0].stair === 'st1' && placed.covers
+      && placed.sel && placed.sel.type === 'stair' && placed.tool === 'structure', JSON.stringify(placed));
+    // the symbol on both floors: the drawn pixels inside the stair's box change with the stair (sampled from the plan canvas)
+    const sample = () => page.evaluate(async () => {
+      const v = window.app.view2d, E = await import('/src/core/plan-edit.js'), info = E.stairInfo('st1');
+      v._debug.renderNow();
+      const c = document.querySelector('.view2d-canvas'), ctx = c.getContext('2d'), r = c.getBoundingClientRect(), dpr = c.width / r.width;
+      const xs = info.geo.footprint.map((p) => p[0]), ys = info.geo.footprint.map((p) => p[1]);
+      const a = v.planToScreen(Math.min(...xs), Math.min(...ys)), b = v.planToScreen(Math.max(...xs), Math.max(...ys));
+      const d = ctx.getImageData(Math.round((a.x - r.left) * dpr), Math.round((a.y - r.top) * dpr), Math.round((b.x - a.x) * dpr), Math.round((b.y - a.y) * dpr)).data;
+      const cols = new Set();
+      for (let i = 0; i < d.length; i += 4) cols.add((d[i] >> 4) + ',' + (d[i + 1] >> 4) + ',' + (d[i + 2] >> 4));
+      return cols.size;
+    });
+    await page.evaluate(() => window.app.store.setUI({ structureSel: null }));
+    const colsL0 = await sample();
+    if (shots) {
+      const box = await page.evaluate(() => { const v = window.app.view2d, a = v.planToScreen(1150, 560), b = v.planToScreen(1560, 1240); return { x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y }; });
+      await page.screenshot({ path: path.join(shotDir, 'e2e-stairs-ground.png'), clip: box });
+    }
+    await page.keyboard.press('PageUp'); await sleep(400);
+    const colsL1 = await sample();
+    const up1 = await page.evaluate(async () => {
+      const { stairsOfLevel } = await import('/src/view2d/stairs.js');
+      const s = stairsOfLevel(window.app.plan, 'L1');
+      return { level: window.app.store.ui.level, top: s.top.map((x) => x.stair.id), bottom: s.bottom.length, voids: window.app.view2d._debug.env.plan.voids.length };
+    });
+    check('stairs: drawn on the ground floor (treads, walking line, UP) and on the first floor (dashed opening, DN)', colsL0 >= 4 && colsL1 >= 4 && up1.level === 'L1' && up1.top.join() === 'st1' && up1.bottom === 0 && up1.voids === 1, `${colsL0} / ${colsL1} colours, ${JSON.stringify(up1)}`);
+    if (shots) {
+      const box = await page.evaluate(() => { const v = window.app.view2d, a = v.planToScreen(1150, 560), b = v.planToScreen(1560, 1240); return { x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y }; });
+      await page.screenshot({ path: path.join(shotDir, 'e2e-stairs-upper.png'), clip: box });
+    }
+    await page.keyboard.press('PageDown'); await sleep(300);
+    // the inspector: shape, sizes and the rule hints with their sourced limits
+    await page.evaluate(() => { window.app.store.setUI({ structureSel: { type: 'stair', id: 'st1' } }); window.app.openPanel && window.app.openPanel('inspector'); });
+    await sleep(400);
+    const insp = await page.evaluate(() => {
+      const el = document.querySelector('.sinsp__rules');
+      return { rules: el ? [...el.querySelectorAll('dt')].map((d) => d.textContent) : [], tags: el ? [...el.querySelectorAll('.tag')].map((t) => t.textContent) : [], fit: !![...document.querySelectorAll('button')].find((b) => /Fit to the rules/.test(b.textContent)) };
+    });
+    check('stairs: the inspector shows riser, going, 2R + G, width, headroom with pass hints and "Fit to the rules"', ['Riser height', 'Going', '2R + G', 'Width', 'Headroom'].every((r) => insp.rules.includes(r)) && insp.tags.length >= 5 && insp.tags.every((t) => t === 'OK') && insp.fit, JSON.stringify(insp));
+    if (shots) {
+      const box = await page.locator('.side-right').boundingBox();
+      if (box) await page.screenshot({ path: path.join(shotDir, 'e2e-stairs-inspector.png'), clip: { x: box.x, y: box.y, width: box.width, height: Math.min(box.height, 760) } });
+    }
+    // Checks: the stair findings are filed under the ground floor
+    await page.evaluate(() => window.app.openPanel && window.app.openPanel('checks'));
+    await page.locator('[role="tab"]', { hasText: 'Checks' }).first().click().catch(() => {});
+    await sleep(1500);
+    const chk = await page.evaluate(() => {
+      const groups = [...document.querySelectorAll('.floorgroup')];
+      const where = (re) => groups.filter((g) => [...g.querySelectorAll('.checkrow__title')].some((t) => re.test(t.textContent))).map((g) => g.dataset.floor);
+      return { stairs: where(/^Stair st1/), floors: groups.map((g) => g.dataset.floor) };
+    });
+    check('stairs: Checks lists the stair findings under the ground floor', chk.stairs.length === 1 && chk.stairs[0] === 'L0', JSON.stringify(chk));
+    // 3D: the stair mesh, and at its top one continuous railing (the stair's guard stops where the void railing begins)
+    await page.keyboard.press('2'); await sleep(2500);
+    const d3 = await page.evaluate(() => {
+      const dbg = window.app.view3d && window.app.view3d.debug, sc = dbg && dbg.scene, m = sc && sc.getObjectByName('stair:st1');
+      return { mesh: !!m, visible: !!(m && m.visible), level: m && m.userData.levelId };
+    });
+    check('stairs: in 3D the stair stands on the ground floor', d3.mesh && d3.visible && d3.level === 'L0', JSON.stringify(d3));
+    if (shots) {
+      await page.evaluate(async () => {
+        window.app.store.setUI({ level: 'L1', showRoof: false, wallsCutaway: true });
+        const dbg = window.app.view3d.debug, m = dbg.scene.getObjectByName('stair:st1');
+        m.geometry.computeBoundingBox();
+        const box = new m.geometry.boundingBox.constructor().setFromObject(m), c = box.getCenter(dbg.camera.position.clone());
+        c.y = 2.9; c.z = box.min.z + 1.2;                                   // the top of the stair, from the north-west, above
+        dbg.rig.setPose({ ...dbg.rig.getPose(), target: c, theta: -2.5, phi: 0.6, radius: 4.5 }, { animate: false });
+        dbg.renderNow();
+      });
+      await sleep(4000);
+      await page.evaluate(() => window.app.view3d.debug.renderNow());
+      await sleep(300);
+      const box = await page.locator('#view3d, .view3d').first().boundingBox().catch(() => null);
+      await page.screenshot({ path: path.join(shotDir, 'e2e-stairs-3d.png'), clip: box ? { x: box.x + box.width * 0.05, y: box.y + box.height * 0.08, width: box.width * 0.6, height: box.height * 0.8 } : undefined });
+      await page.evaluate(() => window.app.store.setUI({ level: 'L0', wallsCutaway: false }));
+    }
+    await page.keyboard.press('1'); await sleep(600);
+    // move it by dragging (it snaps; the opening above follows), then undo
+    await page.evaluate(() => window.app.store.setUI({ tool: 'structure', structureSel: { type: 'stair', id: 'st1' } }));
+    await sleep(200);
+    const p0 = await page.evaluate(() => window.app.view2d.planToScreen(1350, 950));
+    const p1 = await page.evaluate(() => window.app.view2d.planToScreen(1250, 950));
+    await page.mouse.move(p0.x, p0.y); await page.mouse.down();
+    for (let i = 1; i <= 8; i++) { await page.mouse.move(p0.x + ((p1.x - p0.x) * i) / 8, p0.y); await sleep(30); }
+    await page.mouse.up(); await sleep(400);
+    const moved = await page.evaluate(() => ({ x: window.app.plan.stairs[0].x, v: window.app.plan.levels[0].voids[0].polygon[0][0] }));
+    check('stairs: dragged 1 m west, it moves with its opening above', Math.abs(moved.x - 1250) <= 15 && Math.abs(moved.v - (moved.x - 45)) < 0.01, JSON.stringify(moved));
+    await page.keyboard.press('Control+z'); await sleep(400);
+    const undone = await page.evaluate(() => ({ x: window.app.plan.stairs[0].x, v: window.app.plan.levels[0].voids[0].polygon[0][0] }));
+    check('stairs: one undo puts it (and the opening) back', undone.x === 1350 && undone.v === 1305, JSON.stringify(undone));
+    // remove it with Delete: the opening goes with it
+    await page.evaluate(() => window.app.store.setUI({ structureSel: { type: 'stair', id: 'st1' } }));
+    await page.locator('.view2d-canvas').focus().catch(() => {});
+    await page.keyboard.press('Delete'); await sleep(400);
+    const gone = await page.evaluate(() => ({ stairs: (window.app.plan.stairs || []).length, voids: (window.app.plan.levels[0].voids || []).length }));
+    check('stairs: Delete removes the stair and its opening', gone.stairs === 0 && gone.voids === 0, JSON.stringify(gone));
+    await page.evaluate(() => window.app.store.setUI({ tool: 'select' }));
+  }
 
   // ── phone: the floors are in the mode menu ──
   await page.setViewportSize({ width: 390, height: 800 });

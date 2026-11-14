@@ -7,12 +7,15 @@
  * Everything is recomputed lazily when the engine hands out a new `wallSegments()` array — nothing is kept
  * across plan revisions.
  */
-import { wallSegments, openingPolicy, planDiff, isPlanModified, BASE_PLAN, levelPlan } from '../core/plan-edit.js';
+import { wallSegments, openingPolicy, planDiff, isPlanModified, BASE_PLAN, levelPlan, planPhase, REASONS } from '../core/plan-edit.js';
 import { polygonBounds } from '../core/geometry.js';
 import { css } from './color.js';
 import { chainSignatures } from './annotations.js';
+import { PLAN } from '../core/plan.js';
+import { stairsSnapshot, stairsOfLevel, stairHandles, voidHandles } from './stairs.js';
+import { voidsOf } from '../core/levels.js';
 
-export const STRUCTURE_TOOLS = ['structure', 'wall', 'door', 'window', 'passage'];
+export const STRUCTURE_TOOLS = ['structure', 'wall', 'door', 'window', 'passage', 'stairs'];
 /** Is `tool` one of the wall / door / window editing tools? */
 export const isStructureTool = (tool) => STRUCTURE_TOOLS.includes(tool);
 /** Engine opening kind placed by each opening tool. */
@@ -84,9 +87,17 @@ export function structureOf(plan) {
 export function policyOfTarget(plan, target) {
   if (!target) return { level: 'locked', reason: '' };
   if (target.type === 'opening') return openingPolicy(target.id);
+  if (target.type === 'stair' || target.type === 'void') return stairPolicy();
   const s = structureOf(plan).byId.get(target.id);
   return s ? s.policy : { level: 'locked', reason: '' };
 }
+
+/** Stairs and openings in floors (stage F4b): a structural change — 'permit' in a fixed plan, free while drafting. */
+export const stairPolicy = () => (planPhase() === 'draft' ? { level: 'free', reason: '' } : { level: 'permit', reason: REASONS.stair });
+/** The stair `id` that starts on the level view `plan` (with its geometry), or null. */
+export const stairOn = (plan, id) => stairsOfLevel(PLAN, plan.levelId || 'L0').bottom.find((s) => s.stair.id === id) || null;
+/** The void `id` of the level view `plan`, or null. */
+export const voidOn = (plan, id) => voidsOf(plan).find((v) => v.id === id) || null;
 
 /**
  * Screen-space (CSS px) grips of the selected wall segment / opening:
@@ -105,6 +116,12 @@ export function selectionHandles(plan, sel, cam) {
     if ((a1 - a0) * cam.scale >= 30 || !(s.freeEnds[0] || s.freeEnds[1])) out.push({ kind: 'move', axis: s.axis, ...P((a0 + a1) / 2) });
     if (s.freeEnds[0]) out.push({ kind: 'end0', axis: s.axis, ...P(a0) });
     if (s.freeEnds[1]) out.push({ kind: 'end1', axis: s.axis, ...P(a1) });
+  } else if (sel.type === 'stair') {
+    const st = stairOn(plan, sel.id);
+    if (st) out.push(...stairHandles(st.geo, cam));
+  } else if (sel.type === 'void') {
+    const v = voidOn(plan, sel.id);
+    if (v) out.push(...voidHandles(v, cam));
   } else if (sel.type === 'opening') {
     const o = plan.openings.find((q) => q.id === sel.id);
     if (!o || openingPolicy(o.id).level === 'locked') return out;
@@ -239,7 +256,7 @@ export function planSnapshot(plan) {
   for (const o of plan.openings) openings.set(o.id, { sig: JSON.stringify(o), rect: grow(o, Math.max(o.w, o.h) + 12) });
   for (const r of plan.rooms) rooms.set(r.id, { sig: JSON.stringify(r), rect: polygonBounds(r.polygon) });
   for (const s of wallSegments(plan)) segs.set(s.id, { sig: `${s.policy.level}|${s.isNew}|${s.x},${s.y},${s.w},${s.h}|${s.openingIds}`, rect: s });
-  return { walls, openings, rooms, segs, chains: chainSignatures(plan) };
+  return { walls, openings, rooms, segs, stairs: stairsSnapshot(PLAN, plan, plan.levelId || 'L0'), chains: chainSignatures(plan) };
 }
 
 /**
@@ -252,7 +269,7 @@ export function planDirt(a, b) {
   const add = (r) => { x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y); x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h); };
   for (const [k, w] of a.walls) if (!b.walls.has(k)) add(w);
   for (const [k, w] of b.walls) if (!a.walls.has(k)) add(w);
-  for (const name of ['openings', 'rooms', 'segs']) {
+  for (const name of ['openings', 'rooms', 'segs', 'stairs']) {
     for (const [k, v] of a[name]) { const o = b[name].get(k); if (!o || o.sig !== v.sig) { add(v.rect); if (o) add(o.rect); } }
     for (const [k, v] of b[name]) if (!a[name].has(k)) add(v.rect);
   }

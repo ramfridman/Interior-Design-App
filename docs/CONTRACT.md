@@ -197,7 +197,7 @@ Both views show the same store state live (move in 2D → moves in 3D, and vice-
 * **Walk**: starts on the shown level (`walk.start({ level })`; an upper level: the middle of its largest room) and
   stays there — floor height = the level's elevation (eye 1.65 m above it), walls and furniture of that level only.
   `'walk-position'` carries `level` when it is not L0. Stairs: stage F5.
-* **Lighting of upper levels in this stage** (the solver is L0-only until F6): while an upper level is shown (not the
+* **Lighting of upper levels in this stage** (superseded by stage F6 — "Daylight on every floor" below; kept for the record) (the solver is L0-only until F6): while an upper level is shown (not the
   whole house) or walked, the daylight display is suppressed (`suppress`), i.e. the standard "realistic daylight off"
   lighting: sun with shadows, sky fill, the interior fill lights of the walker's / camera's level (environment anchors
   per level), and the baked contact-shading strips, which upper levels always keep. Furniture above the ground-floor
@@ -231,6 +231,51 @@ Both views show the same store state live (move in 2D → moves in 3D, and vice-
   `createVisibilityJob(S, { base, redo })` (incremental pass), `relight(S, vis, { …, lamps: [{ x, y, z, lm, color, lobe?, down? }] })`
   → adds `lamp` (direct lamp irradiance per patch) and `lampStats`; engine message `{ type: 'occluders', boxes }`.
   Daylight controller: `setLampsLit(bool)`, `solvesLamp(id)`, `onItems()`; `debug.state()` adds lamp / occluder / gain fields.
+
+#### Daylight on every floor (stage F6, additive; one-level plans: byte-identical solve, `tests/daylight-levels.test.mjs` hashes)
+* **One solve per level.** `sceneInputFromPlan(plan, { level })` (solver.js; ignored for a plan without levels) builds the
+  scene of one level from its `levelPlan` view in **level-local metres** (finished floor y = 0, ceiling `H` =
+  `levelCeilingCm(plan, id)` = the wall height `house.js` builds: up to the next level's slab, the top level its own
+  ceiling), `drop` = floor above ground + elevation, `level`, `elev`, and `lv` = the massing of the other storeys:
+  `caps [{ polys, lo, hi }]` (storeys above: slab underside → roof, + parapet band), `raise [{ polys, y }]` (storeys
+  below: their roof, + parapet band), `band` (own parapet band), `voids` / `voidsAbove` (stair voids, rings cm).
+  Level grids share one origin (`plan.bounds` is the union), so cells match across levels.
+* **Massing per column** (`scene.lv`: `top[c]`, `gY[c]`, `cLo[c]` / `cHi[c]`, `skyTop`): a building column is closed
+  from its ceiling up to `top` (own roof, + parapet only on the band; under an upper storey: that storey's roof), an
+  outdoor column is solid below `gY` (the real ground / outdoor slabs, or a lower storey's roof / parapet — a terrace is
+  the ground of the windows above it) and between `cLo` and `cHi` where an upper storey overhangs (a cantilever over a
+  lower window takes its sky; its soffit is a facade element facing down). Rays (sky, sun shadow, aperture, lamp,
+  outdoor-element) are marched by `marchLv`; ground elements carry their own height (`ground.y`, kind 3 = a roof).
+  Plans without levels keep the old one-roof-height / one-ground-drop path (`scene.lv` null).
+* **Stair voids pass light both ways.** In a level scene the floor cells over its voids (`SURF.VOID_FLOOR`) and the
+  ceiling cells under the voids of the level above (`SURF.VOID_CEILING`) are portal patches (albedo 0, `scene.portal`);
+  `relight()` returns `portalE` (everything that reached them, sun included) and takes `emit` (per-patch exitance);
+  `portalEmit(to, from, portalE, 'down' | 'up')` maps one level's portal irradiance cell by cell onto the other's
+  portals as a Lambertian emitter (flux-conserving: never more out than in). The engine runs two exchange rounds per
+  light change (active level first in each). Limits: the transmitted light is diffuse (a sun beam through the void
+  arrives below as soft light — the lightmap masks the real-time sun there), the slab thickness and the stair itself
+  are not occluders, two rounds (Duplex: ≥ 97 % of the converged lightmap flux on each floor after one round, > 99.9 % after two).
+* **Engine** (`engine.js`): per-level contexts; messages `{ type: 'levels', ids, active }`, `{ type: 'active', level }`,
+  `scene` / `occluders` with `level`, `light` with `lighting.lampsByLevel` (each level's lamps, local m); `vis` / `result`
+  carry `level` (and `round`). Order: the active level's relight, its visibility, the other relights, the other levels'
+  visibility (coarse before fine), in ≤ 40 ms slices with several levels. `memoryOf(ctx)`; `engine.debug()`.
+* **Controller** (`daylight/index.js`): a layout, lightmap atlas, uniforms and material clones per level; the probe
+  field texture stacks the levels (2 · nz rows each; shader uniforms `dlLevelA` / `dlLevelB` = floors of levels 0–7,
+  `dlLevels`; furniture picks its level by world height); `dlFieldBox.w` = top of the top storey (0 for one level). A
+  level shows solved light once its own first result is in (until then the standard look on that level). The level
+  walked / shown (`view.level` from `daylightView()`; walk: by camera height) is solved first and sets the dollhouse gain;
+  under a void the eye also adapts to the storey above. Lamps and occluder boxes go to the solve of `itemLevel()` in
+  local heights. `onPlan(e)` re-solves only the levels whose solver input changed (an L1 edit leaves L0's visibility
+  unless the massing L0 sees changed). `debug.state().levels` (per level: ready, timings, patches, portals, memory),
+  `debug.sampleAt(x, y, h, level)`, `debug.scene(level)`.
+* **House hooks**: `setDaylight(dl)` gives every storey `dl.level(id)` (a `dl` without `level`: L0 only, as before);
+  `forEachInterior(fn(name, mesh, levelId), only?)`, `setFakeShading(on, levelId?)`. Upper slabs get their own render
+  material clone (field-patched, `fieldMaterial(m, { outside: true })`); void railings and stairs read the probe field.
+  All F3 stop-gaps for the L0-only solve are gone (no `suppress` for upper floors, no field cut-off at the L0 ceiling,
+  upper items are occluders and lamps of their level, upper-level edits re-solve their level).
+* Tests: `node tests/daylight-levels.test.mjs` (House 98 hashes; Duplex per level, cantilever sky loss vs geometry,
+  terrace as ground, sun-patch position on L1, void exchange + energy, L1 furniture, edit → re-solve rules, engine
+  priority); `node tests/daylight-levels.e2e.mjs [--shots]` (browser, `?levels=1`).
 
 ## 5. UI (`index.html`, `src/styles/*`, `src/ui/*`) — UX/UI team
 `index.html` provides the shell with mount points `#view2d` and `#view3d`, a boot splash `#boot` containing

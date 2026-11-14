@@ -6,7 +6,12 @@
  * While a wall or opening is dragged in the plan, or nudged from here, the panel is patched in place (same "shape"
  * → only the numbers change), so nothing jumps and a focused field keeps its focus.
  */
-import { flipDoor, updateOpening, openingPolicy } from '../core/plan-edit.js';
+import { flipDoor, updateOpening, openingPolicy, stairInfo, voidInfo } from '../core/plan-edit.js';
+import { STAIR_LIMITS, checkStairs } from '../regulations/stairs.js';
+import { levelName } from '../core/levels.js';
+import { polygonArea, polygonBounds } from '../core/geometry.js';
+import { segmented } from './components.js';
+import { STAIR_SHAPE_OPTIONS, STAIR_TURN_OPTIONS } from './structure-panels.js';
 import { viewPlan } from './levels.js';
 import { h } from './dom.js';
 import { icon } from './icons.js';
@@ -39,6 +44,8 @@ export function createStructureInspector(app) {
 
   const shapeOf = (cur) => {
     if (!cur) return `none|${structure.isModified()}`;
+    if (cur.type === 'stair') return ['stair', cur.id, JSON.stringify(cur.info.data), cur.info.covers, cur.policy.level, units()].join('|');
+    if (cur.type === 'void') return ['void', cur.id, JSON.stringify(cur.info.void), cur.info.covers, cur.policy.level, units()].join('|');
     if (cur.type === 'segment') { const s = cur.seg; return ['seg', s.axis, s.cls, s.thickness, s.policy.level, s.isNew, s.openingIds.join(','), s.freeEnds.join(','), units()].join('|'); }
     const o = cur.opening;
     return ['op', o.id, o.kind, o.style, o.axis, cur.policy.level, cur.seg ? cur.seg.cls : '', units()].join('|');
@@ -205,13 +212,95 @@ export function createStructureInspector(app) {
     ];
   }
 
+  /* ───────── Stair (stage F4b) ───────── */
+  const SHAPE_NAME = { straight: 'Straight stair', L: 'L-shaped stair', U: 'U-shaped stair' };
+  const cm1 = (v) => `${(Math.round(v * 10) / 10).toString()} cm`;
+  /** A rule line: the value and whether the sourced limit is met (numbers from regulations/stairs.js STAIR_LIMITS). */
+  const ruleRow = (label, value, ok, need) => [h('dt', null, label), h('dd', { class: 'num sinsp__rule' }, value, ' ', h('span', { class: `tag tag--${ok ? 'pass' : 'fail'}` }, ok ? 'OK' : need))];
+  function renderStair(cur) {
+    const { info, policy } = cur, st = info.data, geo = info.geo, level = policy.level;
+    const err = errorLine(), removeError = errorLine();
+    const upd = (p) => run(err, () => structure.updateStair(cur.id, p));
+    const from = levelName(app.plan, info.levelId) || info.levelId, to = info.to ? levelName(app.plan, info.to) || info.to : '—';
+    const L = STAIR_LIMITS;
+    const shapeCtl = segmented({ options: STAIR_SHAPE_OPTIONS, value: st.shape, label: 'Stair shape', cls: 'seg--stair', onChange: (v) => { if (!upd({ shape: v })) shapeCtl.set(st.shape); } });
+    const turnCtl = st.shape !== 'straight' ? segmented({ options: STAIR_TURN_OPTIONS, value: st.turn || 'right', label: 'Turn', cls: 'seg--stair', onChange: (v) => { if (!upd({ turn: v })) turnCtl.set(st.turn); } }) : null;
+    const field = (label, key, o = {}) => numField({ label, value: o.value != null ? o.value : st[key], digits: o.digits || 0, step: o.step || 1, min: o.min, max: o.max, suffix: o.suffix, title: o.title,
+      onCommit: (v) => { if (!upd(o.patch ? o.patch(v) : { [key]: v })) force(fields[key], o.value != null ? o.value : st[key], o.digits || 0); } });
+    const fields = {
+      width: field('Width', 'width', { step: 5, min: 60, max: 200, suffix: 'cm', title: 'Clear width of every flight' }),
+      risers: field('Risers', 'risers', { step: 1, min: 2, max: 40, title: 'Number of risers from floor to floor' }),
+      going: field('Going', 'going', { step: 0.5, digits: 1, min: 15, max: 40, suffix: 'cm', title: 'Tread depth, nosing to nosing' }),
+    };
+    if (st.landing) fields.landing = field('Landing', 'landing', { value: st.landing.size, step: 5, min: 60, max: 300, suffix: 'cm', title: 'Depth of the landing along the first flight', patch: (v) => ({ landing: { ...st.landing, size: v } }) });
+    const facts = [];
+    if (geo) {
+      const R = geo.riser, c = 2 * R + geo.going, most = Math.max(...geo.flights.map((f) => f.risers));
+      facts.push(...ruleRow('Riser height', cm1(R), R <= L.riserMax + 1e-9 && R >= L.riserMin, `≤ ${L.riserMax}`));
+      facts.push(...ruleRow('Going', cm1(geo.going), geo.going >= L.goingMin - 1e-9, `≥ ${L.goingMin}`));
+      facts.push(...ruleRow('2R + G', cm1(c), c >= L.comfortMin - 0.05 && c <= L.comfortMax + 0.05, `${L.comfortMin}–${L.comfortMax}`));
+      facts.push(...ruleRow('Width', cm1(geo.width), geo.width >= L.widthMin - 1e-9, `≥ ${L.widthMin}`));
+      facts.push(...ruleRow('Longest flight', `${most} risers`, most <= L.flightMax, `≤ ${L.flightMax}`));
+      if (geo.landings.length) facts.push(...ruleRow('Landing', cm1(geo.landings[0].size), geo.landings[0].size >= L.landingMin - 1e-9, `≥ ${L.landingMin}`));
+      facts.push(...ruleRow('Headroom', info.covers ? `${(L.headroom / 100).toFixed(2)} m` : 'too low', info.covers, 'enlarge the opening'));
+    }
+    const findings = checkStairs({ plan: app.plan, store }).filter((f) => f.stairId === cur.id && (f.severity === 'fail' || f.severity === 'warn' || f.severity === 'info'));
+    const voidRows = info.voids.map((v) => { const b = polygonBounds(v.polygon); return h('li', null, h('button', { type: 'button', class: 'oprow', onClick: () => { if (info.to && app.levels) app.levels.set(info.to); structure.select('void', v.id); } },
+      h('span', { class: 'oprow__icon' }, icon('floor-void', { size: 18 })),
+      h('span', { class: 'oprow__text' }, h('span', { class: 'oprow__name truncate' }, `Opening in the floor of the ${String(to).toLowerCase()}`), h('span', { class: 'oprow__meta num' }, `${fmtLen(b.w, units())} × ${fmtLen(b.h, units())}`)),
+      icon('chevron-right', { size: 14 }))); });
+    patch = () => {};
+    return [
+      head(level, 'stairs', SHAPE_NAME[st.shape] || 'Stair', h('p', { class: 'insp__meta' }, `${from} → ${to}${geo ? ` · ${geo.risers} risers of ${cm1(geo.riser)}` : ''}`)),
+      levelBanner(level, policy.reason),
+      h('div', { class: 'insp__actions' }, h('div', { class: 'actrow', role: 'group', 'aria-label': 'Stair actions' },
+        iconBtn('target', 'Show on the plan', { variant: 'outlined', onClick: () => structure.focusPoint({ x: st.x, y: st.y }) }),
+        iconBtn('rotate-cw', 'Turn a quarter clockwise', { variant: 'outlined', onClick: () => upd({ rot: ((st.rot || 0) + 90) % 360 }) }),
+        btn('Fit to the rules', { small: true, icon: 'pass', tip: 'Risers, going and landing from the stair rules for this floor height, keeping its place', onClick: () => upd({ fit: true }) }),
+        iconBtn('trash', 'Remove stair', { kbd: 'Delete', variant: 'danger', onClick: () => { const res = structure.removeStair(cur.id, { quiet: true }); show(removeError, res.ok ? '' : res.reason); } })),
+      removeError),
+      section('Shape', h('div', { class: 'sinsp__stairshape' }, shapeCtl, turnCtl), err),
+      section('Size', { aside: geo ? h('span', { class: 'sec__note num' }, `${fmtLen(geo.size.w, units())} × ${fmtLen(geo.size.d, units())}`) : null },
+        h('div', { class: 'grid3' }, fields.width, fields.risers, fields.going), fields.landing || null,
+        geo ? h('p', { class: 'sec__note' }, `${geo.risers} risers of ${cm1(geo.riser)} over ${fmtLen(geo.rise, 'm')}; walking line ${fmtLen(geo.walkLength, 'm')}.`) : null),
+      section('Rules', { aside: h('span', { class: 'sec__note' }, 'Planning & Building Regulations') }, h('dl', { class: 'facts facts--wide sinsp__rules' }, facts),
+        findings.length ? h('ul', { class: 'sinsp__findings' }, findings.map((f) => h('li', { class: `sinsp__finding sinsp__finding--${f.severity}` }, icon(f.severity === 'fail' ? 'fail' : f.severity === 'warn' ? 'warn' : 'info', { size: 14 }), h('span', null, h('strong', null, f.title), ' ', f.detail))))
+          : h('p', { class: 'sec__empty' }, 'Every stair rule is met.')),
+      section('Opening in the floor above', voidRows.length ? h('ul', { class: 'oplist' }, voidRows)
+        : h('p', { class: 'sec__empty' }, info.need.length ? 'None yet — the stair needs one.' : 'None needed: nothing of the floor above is over the stair.')),
+    ];
+  }
+
+  /* ───────── Opening in a floor (void, stage F4b) ───────── */
+  function renderVoid(cur) {
+    const { info, policy } = cur, v = info.void, b = polygonBounds(v.polygon), removeError = errorLine();
+    const area = Math.abs(polygonArea(v.polygon)) / 1e4;
+    const below = info.stairId ? stairInfo(info.stairId) : null;
+    return [
+      head(policy.level, 'floor-void', 'Opening in the floor', h('p', { class: 'insp__meta' }, `${fmtLen(b.w, units())} × ${fmtLen(b.h, units())} · ${area.toFixed(2)} m²`)),
+      levelBanner(policy.level, policy.reason),
+      h('div', { class: 'insp__actions' }, h('div', { class: 'actrow', role: 'group', 'aria-label': 'Opening actions' },
+        iconBtn('target', 'Show on the plan', { variant: 'outlined', onClick: () => structure.focusPoint({ x: b.x + b.w / 2, y: b.y + b.h / 2 }) }),
+        below ? btn('Select its stair', { small: true, icon: 'stairs', onClick: () => { if (app.levels) app.levels.set(below.levelId); structure.select('stair', below.stair.id); } }) : null,
+        iconBtn('trash', 'Close the opening', { kbd: 'Delete', variant: 'danger', disabled: !!info.stairId, onClick: () => { const res = structure.removeVoid(v.id, { quiet: true }); show(removeError, res.ok ? '' : res.reason); } })),
+      removeError),
+      section('Opening', h('dl', { class: 'facts facts--wide' },
+        h('dt', null, 'Size'), h('dd', { class: 'num' }, `${fmtLen(b.w, units())} × ${fmtLen(b.h, units())}`),
+        h('dt', null, 'Area'), h('dd', { class: 'num' }, `${area.toFixed(2)} m²`),
+        h('dt', null, 'For'), h('dd', null, info.stairId ? `Stair ${info.stairId}` : 'No stair (a plain opening)'),
+        h('dt', null, 'Headroom'), h('dd', null, !info.stairId ? '—' : h('span', { class: `tag tag--${info.covers ? 'pass' : 'fail'}` }, info.covers ? `Covers what the stair needs (${(STAIR_LIMITS.headroom / 100).toFixed(2)} m)` : 'Too small for the stair'))),
+        h('p', { class: 'sec__note' }, info.stairId ? 'Drag its corners or edges in the plan to enlarge it. It can never be smaller than its stair needs; a railing runs round it except where the stair arrives.'
+          : 'Drag its corners or edges in the plan to reshape it, or close it. A railing runs round it.')),
+    ];
+  }
+
   return {
     /** Build the panel for the current structure selection. */
     render() {
       const cur = structure.selected();
       shape = shapeOf(cur);
       patch = null;
-      const nodes = !cur ? renderNothing() : cur.type === 'segment' ? renderSegment(cur.seg) : renderOpening(cur);
+      const nodes = !cur ? renderNothing() : cur.type === 'stair' ? renderStair(cur) : cur.type === 'void' ? renderVoid(cur) : cur.type === 'segment' ? renderSegment(cur.seg) : renderOpening(cur);
       if (patch && cur) patch(cur);
       return nodes;
     },

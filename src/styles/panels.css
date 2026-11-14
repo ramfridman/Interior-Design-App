@@ -500,3 +500,15 @@ html:not([data-levels]) .levels-only { display: none !important; }
 .budget-floors { margin-top: var(--s-2); }
 .budget-floors[hidden] { display: none; }
 .bgroup__floor { font-weight: 400; color: var(--ink-3); }
+
+/* Stairs and openings in floors in the Structure inspector (stage F4b) */
+.tag--fail { background: var(--fail-soft); color: var(--fail); }
+.sinsp__stairshape { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.sinsp__rules dd .tag { margin-left: 4px; }
+.sinsp__findings { display: grid; gap: var(--s-2); margin: var(--s-3) 0 0; padding: 0; list-style: none; font-size: var(--fs-12); color: var(--ink-2); }
+.sinsp__finding { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: var(--s-2); align-items: start; }
+.sinsp__finding > .icon { margin-top: 2px; }
+.sinsp__finding--fail > .icon { color: var(--fail); }
+.sinsp__finding--warn > .icon { color: var(--warn); }
+.sinsp__finding--info > .icon { color: var(--info); }
+.sinsp__finding strong { color: var(--ink); font-weight: 600; }

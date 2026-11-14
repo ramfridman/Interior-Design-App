@@ -66,7 +66,8 @@ export function initStatusbar(root, app) {
       const cur = app.structure.selected();
       if (!cur) { selection.textContent = 'Structure: select a wall, door or window'; return; }
       const level = cur.type === 'segment' ? cur.seg.policy.level : cur.policy.level;
-      const what = cur.type === 'segment' ? `${segmentTitle(cur.seg)}, ${fmtLen(cur.seg.length, store.ui.units)}` : `${openingTitle(cur.opening)}, ${cur.opening.width} × ${cur.opening.height} cm`;
+      const stairText = () => { const g = cur.info.geo, d = cur.info.data; return `${{ straight: 'Straight', L: 'L-shaped', U: 'U-shaped' }[d.shape] || ''} stair, ${d.risers} risers${g ? ` of ${(Math.round(g.riser * 10) / 10)} cm` : ''}`; };
+      const what = cur.type === 'stair' ? stairText() : cur.type === 'void' ? 'Opening in the floor' : cur.type === 'segment' ? `${segmentTitle(cur.seg)}, ${fmtLen(cur.seg.length, store.ui.units)}` : `${openingTitle(cur.opening)}, ${cur.opening.width} × ${cur.opening.height} cm`;
       selection.textContent = `${what} — ${LEVELS[level] ? LEVELS[level].title : ''}`;
       return;
     }

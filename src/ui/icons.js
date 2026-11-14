@@ -29,6 +29,9 @@ const ICONS = {
   door: P('M2.500 19.500H7M19 19.500h2.500') + P('M7 19.500v-12') + P('M7 7.500a12 12 0 0 1 12 12'),
   window: P('M2.500 12h4M17.500 12h4') + '<rect x="6.500" y="8.500" width="11" height="7"/>' + P('M6.500 12h11'),
   passage: '<rect x="2.500" y="9" width="5.500" height="6" rx="0.500"/><rect x="16" y="9" width="5.500" height="6" rx="0.500"/>' + P('M12 4.500v15M9.500 7 12 4.500 14.500 7M9.500 17l2.500 2.500 2.500-2.500'),
+  // stairs (plan symbol: a run of treads with the walking line and its arrow) and an opening in a floor
+  stairs: '<rect x="6.500" y="2.500" width="11" height="19" rx="0.500"/>' + P('M6.500 6.500h11M6.500 10.300h11M6.500 14.100h11M6.500 17.900h11') + P('M12 20v-14.500M9.800 7.700 12 5.500l2.200 2.200'),
+  'floor-void': '<rect x="4" y="4" width="16" height="16" rx="0.500" stroke-dasharray="3 2.400"/>' + P('M4 4l16 16M20 4 4 20'),
   'flip-h': P('M12 4v16') + P('M9 12H4M6.500 9.500 4 12l2.500 2.500') + P('M15 12h5M17.500 9.500 20 12l-2.500 2.500'),
   'flip-v': P('M4 12h16') + P('M12 9V4M9.500 6.500 12 4l2.500 2.500') + P('M12 15v5M9.500 17.500 12 20l2.500-2.500'),
   changes: '<rect x="4.500" y="3.500" width="15" height="17" rx="1.500"/>' + P('M12 7v5M9.500 9.500h5M9.500 16h5'),

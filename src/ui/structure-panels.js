@@ -4,7 +4,7 @@
  */
 import { h, setKids } from './dom.js';
 import { icon } from './icons.js';
-import { btn, iconBtn, section, kbd } from './components.js';
+import { btn, iconBtn, section, kbd, segmented } from './components.js';
 import { openPopover } from './dialogs.js';
 import { LEVELS, LEVEL_ORDER, levelTag, basePlanName } from './structure.js';
 import { phaseCard } from './projects.js';
@@ -20,7 +20,35 @@ export const STRUCTURE_TOOL_LIST = [
   { value: 'door', label: 'Door', long: 'Place a door', icon: 'door', kbd: 'D', how: 'Click a wall. Flip the hinge and swing in the Inspector.' },
   { value: 'window', label: 'Window', long: 'Place a window', icon: 'window', kbd: 'N', how: 'Click an exterior wall. Every new window needs a permit.' },
   { value: 'passage', label: 'Passage', long: 'Place an open passage', icon: 'passage', kbd: 'P', how: 'Click an interior wall for a doorway without a door.' },
+  // several floors only (FEATURES.levels): the entry carries `levelsOnly` and its controls the class .levels-only
+  { value: 'stairs', label: 'Stairs', long: 'Place a stair to the floor above', icon: 'stairs', kbd: 'T', levelsOnly: true, how: 'Pick a shape, then click to place it. The opening in the floor above is made for you.' },
 ];
+/** Stair shapes offered by the Stairs tool (store.ui.stairShape / stairTurn / stairRot). */
+export const STAIR_SHAPE_OPTIONS = [
+  { value: 'straight', label: 'Straight', tip: 'Straight flight' },
+  { value: 'L', label: 'L', tip: 'L-shaped: a quarter landing' },
+  { value: 'U', label: 'U', tip: 'U-shaped: a half landing' },
+];
+export const STAIR_TURN_OPTIONS = [{ value: 'left', label: 'Left', tip: 'The second flight turns left' }, { value: 'right', label: 'Right', tip: 'The second flight turns right' }];
+
+/**
+ * The Stairs tool's options (shape, turn, a quarter turn of the ghost) — one control shared by the top bar and the guide.
+ * @returns {HTMLElement & { sync(): void }}
+ */
+export function stairOptions(app, { compact = false } = {}) {
+  const { store } = app;
+  const shape = segmented({ options: STAIR_SHAPE_OPTIONS, value: store.ui.stairShape || 'straight', label: 'Stair shape', cls: 'seg--stair',
+    onChange: (v) => { store.setUI({ stairShape: v }); app.structure.setTool('stairs'); } });
+  const turn = segmented({ options: STAIR_TURN_OPTIONS, value: store.ui.stairTurn || 'right', label: 'Turn of the stair', cls: 'seg--stair',
+    onChange: (v) => { store.setUI({ stairTurn: v }); app.structure.setTool('stairs'); } });
+  const rot = iconBtn('rotate-cw', 'Turn the stair a quarter', { kbd: 'R', onClick: () => { store.setUI({ stairRot: ((Number(store.ui.stairRot) || 0) + 90) % 360 }); app.structure.setTool('stairs'); } });
+  const turnWrap = h('span', { class: 'stairopts__turn' }, turn);
+  const el = h('div', { class: `stairopts${compact ? ' stairopts--compact' : ''} levels-only`, role: 'group', 'aria-label': 'Stair to place' }, icon('stairs', { size: 16 }), shape, turnWrap, rot);
+  el.sync = () => { shape.set(store.ui.stairShape || 'straight'); turn.set(store.ui.stairTurn || 'right'); turnWrap.hidden = (store.ui.stairShape || 'straight') === 'straight'; };
+  store.on('ui', (e) => { if (e.keys.some((k) => /^stair/.test(k))) el.sync(); });
+  el.sync();
+  return el;
+}
 
 /** Highest level among diff items: 'free' < 'warn' < 'permit'. */
 export const topLevel = (items) => items.reduce((top, it) => (LEVEL_ORDER.indexOf(it.level) > LEVEL_ORDER.indexOf(top) ? it.level : top), 'free');
@@ -54,8 +82,22 @@ export function initStructureGuide(root, app) {
       h('span', { class: 'gtool__body' }, h('span', { class: 'gtool__name' }, t.label), h('span', { class: 'gtool__how' }, t.how)),
       kbd(t.kbd));
     toolRows.set(t.value, row);
-    return h('li', null, row);
+    return h('li', t.levelsOnly ? { class: 'levels-only' } : null, row);
   }));
+  // Stairs (several floors): the shape to place, and — when the floor shown is the top one — the way to add a floor above
+  const stairNote = h('p', { class: 'guide__stairnote sec__note' });
+  const addAbove = app.levels ? btn('Add floor above…', { small: true, icon: 'levels', onClick: () => app.levels.openAdd() }) : null;
+  const stairBox = h('div', { class: 'guide__stairs levels-only', hidden: true }, stairOptions(app), stairNote, addAbove);
+  const paintStairs = () => {
+    const on = store.ui.tool === 'stairs', above = structure.floorAbove();
+    stairBox.hidden = !on;
+    stairNote.textContent = above ? 'Click in a room to place the stair. R turns it a quarter; Shift keeps the tool. Green: it fits — red: the reason is shown.'
+      : 'A stair needs a floor above the one shown. Add a floor, then place the stair on this one.';
+    if (addAbove) addAbove.hidden = !!above;
+  };
+  store.on('ui', (e) => { if (e.keys.includes('tool') || e.keys.includes('level')) paintStairs(); });
+  store.on('plan', (e) => { if (!e || !e.transient) paintStairs(); });
+  paintStairs();
   const el = h('div', { class: 'guide', 'aria-label': 'Structure guide' },
     h('header', { class: 'side__head' }, h('h2', { class: 'cat__title display truncate' }, 'Structure'),
       iconBtn('panel-left', 'Hide this guide', { onClick: () => app.setPanelOpen('left', false) })),
@@ -65,9 +107,10 @@ export function initStructureGuide(root, app) {
       h('p', { class: 'guide__lead' }, 'Change the walls, doors and windows of your house, within what is allowed. Every wall and opening is one of four levels.'),
       floorNote,
       legend,
-      section('Tools', tools),
+      section('Tools', tools, stairBox),
       h('ul', { class: 'guide__notes' },
         h('li', null, kbd('Delete'), ' removes the selected wall or opening. ', kbd('Esc'), ' puts the tool down, then leaves Structure.'),
+        h('li', { class: 'levels-only' }, 'A stair is drawn on the floor it starts from; its opening shows dashed on the floor above. Drag a stair to move it (it snaps flush to walls), its round grip turns it, the side grip sets its width.'),
         h('li', null, 'Every edit snaps to 5 cm and can be undone. Furniture is not moved for you: look at the rooms after changing a wall.')),
       btn('Back to furnishing', { block: true, icon: 'sofa', tip: 'Leave Structure mode', kbd: 'B', onClick: () => structure.exit() })));
   root.append(el);

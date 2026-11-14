@@ -257,3 +257,16 @@
   .topbar .lvlswitch { display: none; }   /* the floors are in the mode menu */
   .topbar .modebtn.only-compact { display: none; }
 }
+
+/* Stairs tool (stage F4b, several floors only): its options replace the wall thickness in the structure bar. */
+.stairopts { display: flex; align-items: center; gap: 5px; color: var(--ink-3); }
+.stairopts > .icon { flex: none; }
+.stairopts .seg__btn { min-width: 0; padding-inline: 8px; }
+.sbar .stairopts { margin-left: var(--s-1); }
+.sbar:not([data-tool='stairs']) .stairopts { display: none; }
+.sbar[data-tool='stairs'] .sbar__thick { display: none; }
+.sbar-float .stairopts > .icon { display: none; }
+.guide__stairs { display: grid; gap: var(--s-2); margin-top: var(--s-2); padding: var(--s-2); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--sunken); }
+.guide__stairs[hidden] { display: none; }
+.guide__stairs .stairopts { flex-wrap: wrap; }
+.guide__stairnote { margin: 0; }

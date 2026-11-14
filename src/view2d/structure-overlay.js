@@ -6,7 +6,9 @@
  */
 import { css } from './color.js';
 import { drawOpening } from './openings.js';
-import { isStructureTool, structureOf, selectionHandles, policyOfTarget, spanOf } from './structure.js';
+import { isStructureTool, structureOf, selectionHandles, policyOfTarget, spanOf, stairOn, voidOn } from './structure.js';
+import { drawStairSymbol } from './stairs.js';
+import { polygonBounds } from '../core/geometry.js';
 import { fmtDim, pill, pillWidth, drawGuides, drawClearances, drawTip, lockIcon } from './readouts.js';
 
 const GHOST_STYLE = { door: 'interior', window: 'sliding', opening: 'open' };
@@ -55,6 +57,18 @@ function drawHandles(G, pal, handles, color, active) {
       triangle(ctx, x - ux * gap, y - uy * gap, -ux, -uy, 4 * d);
       ctx.fillStyle = color; ctx.fill();
       ctx.strokeStyle = pal.handle; ctx.lineWidth = 1; ctx.stroke();
+    } else if (h.kind === 'stair-rot') {
+      // turning grip: a round button with a quarter-turn arrow
+      ctx.beginPath(); ctx.arc(x, y, 8 * d, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, 4.2 * d, -Math.PI * 0.9, Math.PI * 0.35); ctx.strokeStyle = hot ? pal.handle : color; ctx.lineWidth = G.px(1.4); ctx.stroke();
+      const ax = x + Math.cos(Math.PI * 0.35) * 4.2 * d, ay = y + Math.sin(Math.PI * 0.35) * 4.2 * d;
+      ctx.beginPath(); ctx.moveTo(ax + 2.6 * d, ay - 1.2 * d); ctx.lineTo(ax - 0.6 * d, ay + 2.6 * d); ctx.lineTo(ax - 2.2 * d, ay - 1.6 * d); ctx.closePath();
+      ctx.fillStyle = hot ? pal.handle : color; ctx.fill();
+    } else if (h.kind === 'stair-width' || h.kind.startsWith('ve')) {
+      // a bar along the side it moves: across the stair's side / along the void's edge
+      const along = h.kind === 'stair-width' ? h.axis !== 'h' : h.axis === 'h';
+      const w = (along ? 15 : 5) * d, hh = (along ? 5 : 15) * d;
+      ctx.beginPath(); ctx.rect(Math.round(x - w / 2) + 0.5, Math.round(y - hh / 2) + 0.5, Math.round(w), Math.round(hh)); ctx.fill(); ctx.stroke();
     } else if (h.kind === 'w0' || h.kind === 'w1') {
       // jamb grip: a short bar across the wall
       const w = (horiz ? 5 : 15) * d, hh = (horiz ? 15 : 5) * d;
@@ -115,7 +129,12 @@ function drawSelection(G, V, d) {
   if (!sel) return;
   const policy = policyOfTarget(plan, sel), color = pal.level[policy.level] || pal.accent;
   const onColor = policy.level === 'free' ? pal.onAccent : (pal.dark ? '#16181b' : '#ffffff');
-  const g = st.gesture, dragging = g && /^s-(move-wall|resize-wall|slide|width)$/.test(g.type);
+  const g = st.gesture, dragging = g && /^s-(move-wall|resize-wall|slide|width|move-stair|stair-rot|stair-width|void)$/.test(g.type);
+  if (sel.type === 'stair' || sel.type === 'void') {
+    drawStairSelection(G, V, sel, color, onColor, dragging);
+    if (!dragging || g.type === 's-stair-width' || g.type === 's-void') drawHandles(G, pal, selectionHandles(plan, sel, cam), color, dragging ? { kind: g.handle } : S.hoverHandle);
+    return;
+  }
   if (sel.type === 'segment') {
     const s = d.byId.get(sel.id);
     if (!s) return;
@@ -144,12 +163,74 @@ function drawSelection(G, V, d) {
   }
 }
 
+/** Outline of a plan ring, `grow` device px wide. */
+function ringPath(G, ring) {
+  const { ctx } = G;
+  ctx.beginPath();
+  ring.forEach((p, i) => (i ? ctx.lineTo(G.X(p[0]), G.Y(p[1])) : ctx.moveTo(G.X(p[0]), G.Y(p[1]))));
+  ctx.closePath();
+}
+const metres = (cm) => `${(cm / 100).toFixed(2)} m`;
+/** A selected stair (outline, read-out, clearances while dragging) or a selected opening in the floor (outline, size). */
+function drawStairSelection(G, V, sel, color, onColor, dragging) {
+  const { env, state: st } = V, { pal, plan, ui } = env, S = st.struct, { ctx } = G, dpr = G.dpr;
+  if (sel.type === 'stair') {
+    const s = stairOn(plan, sel.id);
+    if (!s) return;
+    ringPath(G, s.geo.footprint); ctx.strokeStyle = pal.halo; ctx.lineWidth = G.px(4); ctx.stroke();
+    ringPath(G, s.geo.footprint); ctx.fillStyle = css(color, 0.1); ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = G.px(2); ctx.stroke();
+    const b = polygonBounds(s.geo.footprint), geo = s.geo;
+    const text = `${geo.risers} × ${(geo.riser).toFixed(1)} cm  ·  going ${geo.going}  ·  ${geo.width} wide`;
+    pill(G, text, G.RX(b.x + b.w) + 16 * dpr + pillWidth(G, text, 10) / 2, G.Y(b.y + b.h / 2), pal.ink, pal.paper, 10);
+    const live = S.live && S.live.stair === sel.id && dragging ? S.live : null;
+    if (live) drawStairReadouts(G, pal, ui.units, live, color, onColor);
+    return;
+  }
+  const v = voidOn(plan, sel.id);
+  if (!v) return;
+  ringPath(G, v.polygon); ctx.strokeStyle = pal.halo; ctx.lineWidth = G.px(4); ctx.stroke();
+  ringPath(G, v.polygon); ctx.fillStyle = css(color, 0.12); ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = G.px(2); ctx.stroke();
+  const b = polygonBounds(v.polygon);
+  pill(G, `Opening ${metres(b.w)} × ${metres(b.h)}`, G.X(b.x + b.w / 2), G.RY(b.y + b.h) + 18 * dpr, pal.ink, pal.paper, 10);
+}
+/** Free width beside a stair being moved / placed (to the walls) and the distance to the nearest door swing. */
+function drawStairReadouts(G, pal, units, r, color, onColor) {
+  if (r.clear) drawClearances(G, pal, r.clear.filter((c) => c.dist <= 300), units, color, onColor);
+  if (r.door) {
+    const { ctx } = G, d = G.dpr, [ax, ay, bx, by] = r.door.pts;
+    ctx.beginPath(); ctx.moveTo(G.X(ax), G.Y(ay)); ctx.lineTo(G.X(bx), G.Y(by));
+    ctx.setLineDash([3 * d, 2 * d]); ctx.strokeStyle = pal.warn; ctx.lineWidth = G.px(1.5); ctx.stroke(); ctx.setLineDash([]);
+    const text = r.door.d < 0.5 ? 'In a door swing' : `Door swing ${fmtDim(r.door.d, units)}`;
+    pill(G, text, (G.X(ax) + G.X(bx)) / 2, (G.Y(ay) + G.Y(by)) / 2 - 12 * d, r.door.d < 0.5 ? pal.danger : pal.warn, '#ffffff', 9.5);
+  }
+}
+/** The stair being placed with the Stairs tool: green-ish (the level colour) when it fits, red with the reason when not. */
+function drawStairGhost(G, V) {
+  const { env, state: st } = V, { pal, ui } = env, gh = st.struct.stairGhost, { ctx } = G;
+  if (!gh || !gh.geo) return;
+  const color = gh.ok ? (pal.level[gh.level] || pal.accent) : pal.danger;
+  ctx.save(); ctx.globalAlpha = 0.9;
+  drawStairSymbol(G, pal, gh.geo, { color, cut: false, fill: css(color, 0.12) });
+  ctx.restore();
+  // the opening it needs in the floor above, dashed
+  for (const ring of gh.need || []) {
+    ringPath(G, ring); ctx.setLineDash([5 * G.dpr, 4 * G.dpr]); ctx.strokeStyle = css(color, 0.8); ctx.lineWidth = G.px(1.25); ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (gh.ok) drawStairReadouts(G, pal, ui.units, gh, color, gh.level === 'free' ? pal.onAccent : '#ffffff');
+}
+
 function drawHover(G, V, d) {
   const { env, state: st } = V, { pal, plan, ui } = env, hv = st.struct.hover;
   if (!hv || st.gesture) return;
   const sel = ui.structureSel;
   if (sel && sel.type === hv.type && sel.id === hv.id) return;
   const color = pal.level[hv.level] || pal.accent;
+  if (hv.type === 'stair' || hv.type === 'void') {
+    const ring = hv.type === 'stair' ? (stairOn(plan, hv.id) || {}).geo?.footprint : (voidOn(plan, hv.id) || {}).polygon;
+    if (!ring) return;
+    ringPath(G, ring); G.ctx.fillStyle = css(color, 0.14); G.ctx.fill(); G.ctx.strokeStyle = color; G.ctx.lineWidth = G.px(1.5); G.ctx.stroke();
+    return;
+  }
   const r = hv.type === 'segment' ? d.byId.get(hv.id) : plan.openings.find((o) => o.id === hv.id);
   if (!r) return;
   if (hv.type === 'segment') fillRects(G, d.pieces.get(hv.id) || [], css(color, hv.level === 'locked' ? 0.5 : 0.8));
@@ -224,10 +305,12 @@ export function drawStructureOverlay(G, V) {
   drawSelection(G, V, d);
   drawDraft(G, V);
   drawGhost(G, V, d);
+  drawStairGhost(G, V);
   // the reason, next to the cursor
   const g = st.gesture, at = S.pointer;
   if (S.tip) drawTip(G, pal, S.tip.text, S.tip.tone, at);
   else if (S.draft && !S.draft.ok && S.draft.reason && S.draft.length >= 5) drawTip(G, pal, S.draft.reason, 'refused', at);
   else if (!g && S.ghost && !S.ghost.ok && S.ghost.reason) drawTip(G, pal, S.ghost.reason, S.ghost.lock ? 'locked' : 'note', at);
+  else if (ui.tool === 'stairs' && S.stairGhost && !S.stairGhost.ok && S.stairGhost.reason) drawTip(G, pal, S.stairGhost.reason, S.stairGhost.lock ? 'locked' : 'note', at);
   else if (!g && ui.tool === 'structure' && S.hover && S.hover.level === 'locked') drawTip(G, pal, S.hover.reason, 'locked', at);
 }

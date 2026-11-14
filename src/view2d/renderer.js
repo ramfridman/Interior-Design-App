@@ -20,6 +20,7 @@ import { drawRoomLabels, drawExteriorDims, drawInteriorDims, dimBandRect } from 
 import { isStructureTool, drawRemovedWalls, drawChangeMarkers } from './structure.js';
 import { drawUnderlay } from './underlay.js';
 import { drawGhostBelow, drawLotReference } from './levels.js';
+import { drawStairs } from './stairs.js';
 
 const MARGIN = 192;   // device px of slack around the view in the caches
 const ITEMS_DIMMED = 0.35;
@@ -63,11 +64,13 @@ export function paintUnder(G, env, skip = null, furniture = null) {
   if (isStructureTool(ui.tool) && !env.exporting) {
     // the furniture steps back: dimmed, not pickable, and under the walls and door swings being edited
     if (ui.showItems) step('items', () => { if (furniture) { G.deviceSpace(); ctx.drawImage(furniture, 0, 0); } else paintFurniture(G, env, skip); });
+    step('stairs', () => drawStairs(G, env));        // stairs and openings in floors (stage F4b; nothing without them)
     step('walls', () => drawWalls(G, env));
     step('openings', () => drawOpenings(G, env));
     step('changes', () => drawRemovedWalls(G, env));
     return;
   }
+  step('stairs', () => drawStairs(G, env));
   if (ui.showItems) step('itemsBelow', () => drawItems(G, env, 'below', skip));
   step('walls', () => drawWalls(G, env));
   step('openings', () => drawOpenings(G, env));

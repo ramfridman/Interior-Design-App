@@ -53,7 +53,8 @@ export function resolveFinish(spaceId, kind /* 'floor' | 'wall' */, store, catal
   return { params: base, product: null };
 }
 
-export const floorAreaM2 = (space) => areaM2(space.polygon);
+/** Floor area of a room (m²): its outline less the openings in its floor (`room.voids`, stage F4b — absent elsewhere). */
+export const floorAreaM2 = (space) => areaM2(space.polygon) - (Array.isArray(space.voids) ? space.voids.reduce((t, v) => t + (v.area || 0), 0) / 1e4 : 0);
 
 /** Net wall area of a room in m² (perimeter × ceiling height minus door/window openings touching the room). */
 export function wallAreaM2(space, ceilingHeightCm, plan = PLAN) {

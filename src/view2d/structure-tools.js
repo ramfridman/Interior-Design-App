@@ -9,9 +9,11 @@
  * each result. The engine's own words are shown whenever it refuses, and sent to the UI as 'structure' events:
  *   { type: 'done' | 'refused' | 'locked' | 'warning', op, level, text, clientX, clientY }
  */
-import { canAddWall, canAddOpening, addWall, addOpening, moveWallSegment, resizeWallSegment, updateOpening, REASONS } from '../core/plan-edit.js';
-import { spaceAt, snapTo, clamp, pointInRect } from '../core/geometry.js';
-import { structureOf, policyOfTarget, rectDist, spanOf, rectOf, selectionHandles, OPENING_TOOL_KIND } from './structure.js';
+import { canAddWall, canAddOpening, addWall, addOpening, moveWallSegment, resizeWallSegment, updateOpening, REASONS, canAddStair, addStair, updateStair, updateVoid } from '../core/plan-edit.js';
+import { spaceAt, snapTo, clamp, pointInRect, polygonBounds } from '../core/geometry.js';
+import { structureOf, policyOfTarget, rectDist, spanOf, rectOf, selectionHandles, OPENING_TOOL_KIND, stairOn, voidOn } from './structure.js';
+import { hitStair, hitVoid, snapStairBox, wallFacesOf, moveVoidVertex, moveVoidEdge, doorSwingRects, boxGap } from './stairs.js';
+import { PLAN } from '../core/plan.js';
 
 const GRID = 5;                 // cm — the engine's grid
 const TRANSIENT = { transient: true };
@@ -39,14 +41,14 @@ export function createStructureTools(V, io) {
   const { cam, env, state: st, snapper } = V;
   const { store } = env;   // env.plan = the level shown (read it at use: switching floors changes it)
   /** Live state read by the overlay. */
-  const S = st.struct = { hover: null, hoverHandle: null, pointer: null, draft: null, ghost: null, tip: null, live: null, marker: null };
+  const S = st.struct = { hover: null, hoverHandle: null, pointer: null, draft: null, ghost: null, tip: null, live: null, marker: null, stairGhost: null };
   let anchor = null;            // where the selected segment / opening was, to find it again after a plan change
   let lastEvent = { clientX: 0, clientY: 0 };
 
   const call = (fn, ...args) => { V.selfWrite = true; try { return fn(...args); } finally { V.selfWrite = false; } };
-  const emit = (type, op, level, text, e) => {
+  const emit = (type, op, level, text, e, extra) => {
     const at = e || lastEvent;
-    V.emit('structure', { type, op, level: level || 'free', text: text || '', clientX: at.clientX, clientY: at.clientY });
+    V.emit('structure', { type, op, level: level || 'free', text: text || '', clientX: at.clientX, clientY: at.clientY, ...(extra || {}) });
   };
   const data = () => structureOf(env.plan);
   const selected = () => store.ui.structureSel || null;
@@ -64,6 +66,7 @@ export function createStructureTools(V, io) {
     const sel = selected(), d = data();
     anchor = null;
     if (!sel) return;
+    if (sel.type === 'stair' || sel.type === 'void') return;          // stair / void ids never change
     if (sel.type === 'segment') {
       const s = d.byId.get(sel.id);
       if (s) anchor = { type: 'segment', id: s.id, axis: s.axis, thickness: s.thickness, core: { ...s.core } };
@@ -83,8 +86,7 @@ export function createStructureTools(V, io) {
   function resolveSelection(reason) {
     const sel = selected(), d = data();
     if (!sel) { anchor = null; return; }
-    const exists = sel.type === 'segment' ? d.byId.has(sel.id) : env.plan.openings.some((o) => o.id === sel.id);
-    if (exists) { remember(); return; }
+    if (exists(sel)) { remember(); return; }
     let next = null;
     if (anchor && anchor.type === sel.type && anchor.id === sel.id) {
       if (sel.type === 'opening') {
@@ -109,7 +111,12 @@ export function createStructureTools(V, io) {
     remember();
   }
 
-  const exists = (t) => (t.type === 'segment' ? data().byId.has(t.id) : env.plan.openings.some((o) => o.id === t.id));
+  function exists(t) {
+    if (t.type === 'segment') return data().byId.has(t.id);
+    if (t.type === 'stair') return !!stairOn(env.plan, t.id);
+    if (t.type === 'void') return !!voidOn(env.plan, t.id);
+    return env.plan.openings.some((o) => o.id === t.id);
+  }
 
   // ───────────── hit testing ─────────────
   function hitTarget(pp) {
@@ -126,6 +133,12 @@ export function createStructureTools(V, io) {
         const dist = rectDist(pp.x, pp.y, s);
         if (dist <= tol && (!best || dist < best.dist)) best = { type: 'segment', id: s.id, dist };
       }
+    }
+    if (!best) {
+      // stairs (on their bottom level), then openings in the floor (stage F4b)
+      const stv = hitStair(PLAN, env.level, pp.x, pp.y);
+      if (stv) best = { type: 'stair', id: stv.stair.id };
+      else { const v = hitVoid(env.plan, pp.x, pp.y); if (v) best = { type: 'void', id: v.id }; }
     }
     if (!best) return null;
     const policy = policyOfTarget(env.plan, best);
@@ -155,6 +168,9 @@ export function createStructureTools(V, io) {
       const changed = (S.hoverHandle ? S.hoverHandle.kind : null) !== (h ? h.kind : null) || (S.hover ? S.hover.id : null) !== (hit ? hit.id : null);
       S.hoverHandle = h; S.hover = hit;
       if (changed || S.tip || (hit && hit.level === 'locked')) V.invalidate();
+    } else if (tool === 'stairs') {
+      updateStairGhost(p, e);
+      V.invalidate();
     } else if (tool === 'wall') {
       if (S.draft) updateDraft(p, e);
       else S.marker = snapper.snapWallPoint(pp, { scale: cam.scale, enabled: io.snapOn(e) });
@@ -168,6 +184,7 @@ export function createStructureTools(V, io) {
     if (st.gesture) return;
     S.hover = null; S.hoverHandle = null; S.marker = null; S.pointer = null;
     if (S.ghost) S.ghost = null;
+    S.stairGhost = null;
     V.invalidate();
   }
 
@@ -280,6 +297,104 @@ export function createStructureTools(V, io) {
     if (!e.shiftKey) store.setUI({ tool: 'structure' });
   }
 
+  // ───────────── placing a stair (tool 'stairs', stage F4b) ─────────────
+  /** Snap tolerance for stairs against wall faces (cm): about 12 CSS px, at most 25 cm. */
+  const stairTol = () => clamp(12 / cam.scale, 3, 25);
+  /** Shift the bounding box of a geometry to the walls / grid: the (dx, dy) to apply to the stair's centre. */
+  function stairSnap(geo, e) {
+    if (!geo || !io.snapOn(e)) return { dx: 0, dy: 0, faces: null };
+    const box = polygonBounds(geo.footprint), sn = snapStairBox(box, wallFacesOf(env.plan), stairTol());
+    return { dx: sn.x - box.x, dy: sn.y - box.y, faces: [sn.snapX, sn.snapY] };
+  }
+  /** Free width beside a stair (to the walls) and the distance to the nearest door swing (≤ 1.5 m), for the read-outs. */
+  function stairReadouts(geo) {
+    if (!geo) return { clear: [], door: null };
+    const box = polygonBounds(geo.footprint);
+    let door = null;
+    for (const r of doorSwingRects(env.plan)) { const g = boxGap(box, r); if (g.d <= 150 && (!door || g.d < door.d)) door = { ...g, id: r.id }; }
+    return { clear: snapper.clearances(box, 400), door, box };
+  }
+  function stairInput(x, y) {
+    const ui = store.ui;
+    return { level: env.level, shape: ui.stairShape || 'straight', turn: ui.stairTurn === 'left' ? 'left' : 'right', rot: Number(ui.stairRot) || 0, x, y };
+  }
+  function updateStairGhost(p, e) {
+    const pp = io.toPlan(p);
+    let input = stairInput(pp.x, pp.y), chk = canAddStair(input);
+    if (chk.geo) {
+      const sn = stairSnap(chk.geo, e);
+      if (sn.dx || sn.dy) { input = stairInput(Math.round((pp.x + sn.dx) * 1000) / 1000, Math.round((pp.y + sn.dy) * 1000) / 1000); chk = canAddStair(input); }
+    }
+    const ro = chk.geo ? stairReadouts(chk.geo) : { clear: [], door: null };
+    S.stairGhost = { ok: chk.ok, reason: chk.ok ? '' : chk.reason, code: chk.code || '', lock: chk.code === 'locked', geo: chk.geo || null, need: chk.need || [], level: chk.ok ? chk.level : 'locked', input, ...ro };
+  }
+  function placeStair(e) {
+    const g = S.stairGhost;
+    if (!g) return;
+    if (!g.ok) {
+      if (g.reason) { emit(g.lock ? 'locked' : 'refused', 'add-stair', 'locked', g.reason, e, { code: g.code }); setTip(g.reason, g.lock ? 'locked' : 'refused'); }
+      return;
+    }
+    const res = call(addStair, g.input);
+    if (!res.ok) {
+      emit(res.code === 'locked' ? 'locked' : 'refused', 'add-stair', 'locked', res.reason, e, { code: res.code }); setTip(res.reason, 'refused');
+      return;
+    }
+    S.stairGhost = null; setTip(null);
+    select({ type: 'stair', id: res.ids[0] });
+    emit('done', 'add-stair', res.level, res.warnings[0] || '', e);
+    if (res.warnings.length) emit('warning', 'add-stair', res.level, res.warnings[0], e);
+    if (!e.shiftKey) store.setUI({ tool: 'structure' });
+  }
+
+  // ───────────── drags of a stair / an opening in the floor ─────────────
+  function dragMoveStair(g, p, e) {
+    const pp = io.toPlan(p), st = stairOn(env.plan, g.id);
+    if (!st) return;
+    // the geometry at the start of the drag, shifted by the pointer — then snapped to the walls / the grid
+    const dx0 = pp.x - g.startPlan.x, dy0 = pp.y - g.startPlan.y;
+    const moved = { ...g.geo0, footprint: g.geo0.footprint.map((q) => [q[0] + dx0, q[1] + dy0]) };
+    const sn = stairSnap(moved, e);
+    const x = Math.round((g.orig.x + dx0 + sn.dx) * 1000) / 1000, y = Math.round((g.orig.y + dy0 + sn.dy) * 1000) / 1000;
+    if (x === g.at.x && y === g.at.y) { if (S.tip && S.tip.tone === 'refused') setTip(null); liveStair(g); return; }
+    const res = call(updateStair, g.id, { x, y }, TRANSIENT);
+    if (res.ok) { g.at = { x, y }; accepted(g, res, e); setTip(null); } else blocked(g, res.reason, e);
+    liveStair(g);
+  }
+  function liveStair(g) {
+    const st = stairOn(env.plan, g.id);
+    S.live = st ? { op: g.op, stair: g.id, ...stairReadouts(st.geo) } : null;
+  }
+  function dragRotateStair(g, p, e) {
+    const pp = io.toPlan(p), st = stairOn(env.plan, g.id);
+    if (!st) return;
+    const deg = (Math.atan2(pp.x - st.stair.x, -(pp.y - st.stair.y)) * 180) / Math.PI;
+    const rot = ((Math.round((deg + 180) / 90) * 90) % 360 + 360) % 360;       // the grip sits behind the start
+    if (rot === (st.stair.rot || 0)) return;
+    const res = call(updateStair, g.id, { rot }, TRANSIENT);
+    if (res.ok) { accepted(g, res, e); setTip(null); } else blocked(g, res.reason, e);
+    liveStair(g);
+  }
+  function dragStairWidth(g, p, e) {
+    const pp = io.toPlan(p), f = g.geo0.flights[0];
+    const across = Math.abs((pp.x - f.origin[0]) * f.right[0] + (pp.y - f.origin[1]) * f.right[1]);
+    const width = clamp(snapTo(2 * across, GRID), 60, 200);
+    const st = stairOn(env.plan, g.id);
+    if (!st || width === st.stair.width) return;
+    const res = call(updateStair, g.id, { width }, TRANSIENT);
+    if (res.ok) { accepted(g, res, e); setTip(null); } else blocked(g, res.reason, e);
+    liveStair(g);
+  }
+  function dragVoid(g, p, e) {
+    const pp = io.toPlan(p), k = +g.handle.slice(2);
+    const x = io.snapOn(e) ? snapTo(pp.x, GRID) : Math.round(pp.x), y = io.snapOn(e) ? snapTo(pp.y, GRID) : Math.round(pp.y);
+    const ring = g.handle.startsWith('vc') ? moveVoidVertex(g.ring0, k, x, y) : moveVoidEdge(g.ring0, k, x, y);
+    const key = JSON.stringify(ring);
+    if (key === g.last) return;
+    const res = call(updateVoid, g.id, { polygon: ring }, TRANSIENT);
+    if (res.ok) { g.last = key; accepted(g, res, e); setTip(null); } else blocked(g, res.reason, e);
+  }
+
   // ───────────── drags in the structure tool ─────────────
   function beginBatch(g) { call(() => store.begin()); g.batch = true; }
   function blocked(g, reason, e) {
@@ -316,6 +431,25 @@ export function createStructureTools(V, io) {
     }
     g.refused = new Set(); g.warned = false; g.changed = false; g.level = policy.level;
     g.orig = { type: g.target.type, id: g.target.id };
+    if (g.target.type === 'stair') {
+      const stv = stairOn(env.plan, g.target.id);
+      if (!stv) { g.type = 'noop'; return; }
+      g.id = stv.stair.id; g.geo0 = stv.geo; g.orig = { type: 'stair', id: g.id, x: stv.stair.x, y: stv.stair.y }; g.at = { x: stv.stair.x, y: stv.stair.y };
+      if (g.handle === 'stair-rot') { g.type = 's-stair-rot'; g.op = 'rotate-stair'; }
+      else if (g.handle === 'stair-width') { g.type = 's-stair-width'; g.op = 'update-stair'; }
+      else { g.type = 's-move-stair'; g.op = 'move-stair'; }
+      beginBatch(g);
+      S.hover = null; S.hoverHandle = null;
+      return;
+    }
+    if (g.target.type === 'void') {
+      const v = voidOn(env.plan, g.target.id);
+      if (!v || !/^v[ce]\d+$/.test(g.handle)) { g.type = 'noop'; return; }
+      g.id = v.id; g.ring0 = v.polygon.map((q) => q.slice()); g.last = JSON.stringify(g.ring0); g.type = 's-void'; g.op = 'update-void';
+      beginBatch(g);
+      S.hover = null; S.hoverHandle = null;
+      return;
+    }
     if (g.target.type === 'segment') {
       const s = d.byId.get(g.target.id);
       if (!s) { g.type = 'noop'; return; }
@@ -415,10 +549,9 @@ export function createStructureTools(V, io) {
   function endDrag(g, e) {
     S.live = null;
     if (g.batch) {
-      // back where it started: restore the snapshot exactly instead of recording a no-op step
-      if (g.type === 's-move-wall' && g.applied === 0) call(() => store.cancel());
-      else call(() => store.commit());
-      if (g.type === 's-move-wall' && g.applied === 0) g.changed = false;
+      // back where it started (or nothing accepted): restore the snapshot exactly instead of recording a no-op step
+      const none = (g.type === 's-move-wall' && g.applied === 0) || (/^s-(move-stair|stair-|void)/.test(g.type) && !g.changed);
+      if (none) { call(() => store.cancel()); g.changed = false; } else call(() => store.commit());
     }
     if (g.changed) V.renderer.invalidate();                                   // settle on a complete repaint
     if (S.tip && S.tip.tone === 'refused') setTip(S.tip.text, 'refused');     // let the last reason fade out
@@ -440,6 +573,7 @@ export function createStructureTools(V, io) {
       V.invalidate();
       return;
     }
+    if (tool === 'stairs') { updateStairGhost(p, e); st.gesture = { type: 's-place-stair', start: p }; V.invalidate(); return; }
     if (tool !== 'structure') { updateGhost(p, e); st.gesture = { type: 's-place', start: p }; V.invalidate(); return; }
     setTip(null);
     const h = hitHandle(p), sel = selected();
@@ -462,6 +596,11 @@ export function createStructureTools(V, io) {
       case 's-resize-wall': dragResizeWall(g, p, e); break;
       case 's-slide': dragSlide(g, p, e); break;
       case 's-width': dragWidth(g, p, e); break;
+      case 's-move-stair': dragMoveStair(g, p, e); break;
+      case 's-stair-rot': dragRotateStair(g, p, e); break;
+      case 's-stair-width': dragStairWidth(g, p, e); break;
+      case 's-void': dragVoid(g, p, e); break;
+      case 's-place-stair': updateStairGhost(p, e); break;
       case 's-empty': if (far) io.startPan(p, { start: g.start, last: g.start }); break;
       case 's-wall': case 's-wall-2': updateDraft(p, e); g.dragged = g.dragged || Math.hypot(p.x - g.start.x, p.y - g.start.y) > 6; break;
       case 's-place': updateGhost(p, e); break;
@@ -474,13 +613,27 @@ export function createStructureTools(V, io) {
     lastEvent = e; S.pointer = p;
     switch (g.type) {
       case 's-press': {
+        // a plain click on a stair's turning grip: a quarter turn clockwise
+        if (g.target.type === 'stair' && g.handle === 'stair-rot') {
+          const stv = stairOn(env.plan, g.target.id);
+          if (stv) {
+            const res = call(updateStair, stv.stair.id, { rot: ((stv.stair.rot || 0) + 90) % 360 });
+            if (!res.ok) { emit('refused', 'rotate-stair', 'locked', res.reason, e); setTip(res.reason, 'refused'); }
+            else { emit('done', 'rotate-stair', res.level, '', e); if (res.warnings.length) emit('warning', 'rotate-stair', res.level, res.warnings[0], e); }
+          }
+          break;
+        }
         // a plain click: the selection was made on press; a locked target explains itself
         const policy = policyOfTarget(env.plan, g.target);
         if (policy.level === 'locked') { emit('locked', 'select', 'locked', policy.reason, e); setTip(policy.reason, 'locked'); }
         break;
       }
       case 's-locked': setTip(S.tip ? S.tip.text : null, 'locked'); break;
-      case 's-move-wall': case 's-resize-wall': case 's-slide': case 's-width': endDrag(g, e); break;
+      case 's-move-wall': case 's-resize-wall': case 's-slide': case 's-width':
+      case 's-move-stair': case 's-stair-rot': case 's-stair-width': case 's-void': endDrag(g, e); break;
+      case 's-place-stair':
+        if (Math.hypot(p.x - g.start.x, p.y - g.start.y) < 12 || e.pointerType === 'touch') placeStair(e);
+        break;
       case 's-empty': {
         const pp = io.toPlan(p), space = spaceAt(pp.x, pp.y, env.plan);
         select(null);
@@ -513,15 +666,15 @@ export function createStructureTools(V, io) {
     return had;
   }
   function toolChanged() {
-    S.hover = null; S.hoverHandle = null; S.draft = null; S.ghost = null; S.marker = null; S.live = null; S.tip = null;
+    S.hover = null; S.hoverHandle = null; S.draft = null; S.ghost = null; S.marker = null; S.live = null; S.tip = null; S.stairGhost = null;
     remember();
   }
   /** The plan changed. `own` = this module made the change (inside a gesture). */
   function planChanged(e, own) {
     if (own) return;
     resolveSelection(e && e.reason);
-    if (S.hover && !(S.hover.type === 'segment' ? data().byId.has(S.hover.id) : env.plan.openings.some((o) => o.id === S.hover.id))) S.hover = null;
-    S.hoverHandle = null; S.ghost = null;
+    if (S.hover && !exists(S.hover)) S.hover = null;
+    S.hoverHandle = null; S.ghost = null; S.stairGhost = null;
     if (S.draft && S.draft.input) { const chk = canAddWall(S.draft.input); S.draft.ok = chk.ok; S.draft.reason = chk.ok ? '' : chk.reason; if (chk.ok) S.draft.rect = chk.rect; }
   }
 
@@ -531,16 +684,26 @@ export function createStructureTools(V, io) {
     if (g) {
       if (g.type === 's-move-wall') return across(g.axis);
       if (g.type === 's-resize-wall' || g.type === 's-width') return along(g.axis);
-      if (g.type === 's-slide') return 'grabbing';
+      if (g.type === 's-slide' || g.type === 's-move-stair' || g.type === 's-stair-rot' || g.type === 's-void') return 'grabbing';
+      if (g.type === 's-stair-width') return g.axis === 'h' ? 'ew-resize' : 'ns-resize';
       if (g.type === 's-locked') return 'not-allowed';
     }
     if (tool === 'wall') return 'crosshair';
+    if (tool === 'stairs') return S.stairGhost && !S.stairGhost.ok && S.stairGhost.reason ? 'not-allowed' : 'crosshair';
     if (tool !== 'structure') return S.ghost && S.ghost.lock ? 'not-allowed' : 'crosshair';
-    if (S.hoverHandle) return S.hoverHandle.kind === 'move' ? across(S.hoverHandle.axis) : S.hoverHandle.kind === 'slide' ? 'grab' : along(S.hoverHandle.axis);
+    if (S.hoverHandle) {
+      const k = S.hoverHandle.kind;
+      if (k === 'stair-rot') return 'grab';
+      if (k === 'stair-width') return S.hoverHandle.axis === 'h' ? 'ew-resize' : 'ns-resize';
+      if (k.startsWith('vc')) return 'move';
+      if (k.startsWith('ve')) return S.hoverHandle.axis === 'h' ? 'ns-resize' : 'ew-resize';
+      return k === 'move' ? across(S.hoverHandle.axis) : k === 'slide' ? 'grab' : along(S.hoverHandle.axis);
+    }
     const hv = S.hover;
     if (!hv) return 'default';
     if (hv.level === 'locked') return 'not-allowed';
-    if (hv.type === 'opening') return 'grab';
+    if (hv.type === 'opening' || hv.type === 'stair') return 'grab';
+    if (hv.type === 'void') return 'pointer';
     const s = data().byId.get(hv.id);
     return s ? across(s.axis) : 'default';
   }

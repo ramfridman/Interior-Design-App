@@ -2618,7 +2618,7 @@ function cleanStair(s) {
   const shape = STAIR_SHAPES.includes(s.shape) ? s.shape : 'straight';
   const out = { id: s.id };
   if (s.to != null) out.to = s.to;
-  Object.assign(out, { shape, x: r01(num(s.x) ? s.x : 0), y: r01(num(s.y) ? s.y : 0), rot: normRot(s.rot), width: s.width, risers: s.risers, going: s.going });
+  Object.assign(out, { shape, x: r001(num(s.x) ? s.x : 0), y: r001(num(s.y) ? s.y : 0), rot: normRot(s.rot), width: s.width, risers: s.risers, going: s.going });
   const L = s.landing && typeof s.landing === 'object' ? s.landing : null;
   if (shape !== 'straight') {
     out.landing = { at: L && num(L.at) ? L.at : Math.ceil(s.risers / 2), size: L && num(L.size) ? L.size : s.width };

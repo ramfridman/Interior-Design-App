@@ -28,6 +28,7 @@ export const SHORTCUTS = [
   { group: 'Structure: walls, doors and windows', rows: [
     [['B'], 'Switch between Furnish and Structure'], [['V'], 'Select walls and openings'], [['W'], 'Draw a wall'],
     [['D'], 'Place a door'], [['N'], 'Place a window'], [['P'], 'Place an open passage'],
+    ...(FEATURES.levels ? [[['T'], 'Place a stair (R turns it)']] : []),
   ] },
   { group: 'Carpentry: runs and units', rows: [
     [['C'], 'Switch Carpentry mode on / off'], [['N'], 'New run'], [['←', '→'], 'Previous / next unit'], [['Alt', '←', '→'], 'Move the unit left / right'],
@@ -81,7 +82,9 @@ export function initKeyboard(app) {
     }
     if (app.structure.isActive()) {
       // Structure mode: the letters pick wall / opening tools, Delete and the arrows act on the selected wall or opening.
-      const tool = { v: 'structure', w: 'wall', d: 'door', n: 'window', p: 'passage' }[key];
+      const tool = { v: 'structure', w: 'wall', d: 'door', n: 'window', p: 'passage', ...(FEATURES.levels ? { t: 'stairs' } : {}) }[key];
+      // Stairs tool: R turns the stair to place by a quarter
+      if ((key === 'r' || key === '®') && store.ui.tool === 'stairs' && !e.ctrlKey && !e.metaKey) { store.setUI({ stairRot: ((Number(store.ui.stairRot) || 0) + (e.shiftKey ? 270 : 90)) % 360 }); return; }
       const arrow = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[key];
       if (tool) { app.structure.setTool(tool); return; }
       if (arrow) { if (app.structure.nudge(arrow[0], arrow[1])) e.preventDefault(); return; }

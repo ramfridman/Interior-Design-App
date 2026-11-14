@@ -11,6 +11,7 @@
 import { GROUND, levelIds } from '../core/levels.js';
 import { levelPlan, wallSegments } from '../core/plan-edit.js';
 import { css } from './color.js';
+import { drawStairsGhost } from './stairs.js';
 
 /** The level an item stands on ('L0' when it has none). */
 export const itemLevel = (it) => (it && typeof it.level === 'string' && it.level ? it.level : GROUND);
@@ -68,6 +69,8 @@ export function structureSelOn(sel, view) {
   if (!sel || !sel.id || !view) return null;
   if (sel.type === 'segment') return wallSegments(view).some((s) => s.id === sel.id) ? sel : null;
   if (sel.type === 'opening') return (view.openings || []).some((o) => o.id === sel.id) ? sel : null;
+  if (sel.type === 'void') return (view.voids || []).some((v) => v && v.id === sel.id) ? sel : null;
+  if (sel.type === 'stair') return (view.stairs || []).some((s) => s && s.id === sel.id) ? sel : null;   // a stair is picked on its bottom level
   return null;
 }
 
@@ -96,6 +99,7 @@ export function drawGhostBelow(G, env) {
     else if (o.axis === 'v') G.seg(o.x + o.w / 2, o.y, o.x + o.w / 2, o.y + o.h, lw);
   }
   ctx.strokeStyle = pal.inkSoft; ctx.stroke();
+  if (g.stairs.length) drawStairsGhost(G, env, g.levelId);     // the stairs of the floor below (stage F4b)
   ctx.restore();
 }
 

@@ -115,7 +115,8 @@ export function drawRoomLabels(G, env, boxes) {
   for (const sp of spaces) {
     if (!sp.label) continue;
     const b = polygonBounds(sp.polygon);
-    const area = { text: `${areaM2(sp.polygon).toFixed(1)} m²`, size: small, weight: 400, color: pal.inkSoft };
+    const floorArea = areaM2(sp.polygon) - (Array.isArray(sp.voids) ? sp.voids.reduce((t, v) => t + (v.area || 0), 0) / 1e4 : 0);   // a void is not floor (F4b)
+    const area = { text: `${floorArea.toFixed(1)} m²`, size: small, weight: 400, color: pal.inkSoft };
     const name = (t) => ({ text: t, size, weight: 600, color: pal.ink });
     const bx0 = G.X(b.x), by0 = G.Y(b.y), bx1 = G.X(b.x + b.w), by1 = G.Y(b.y + b.h);
     const near = obstacles.filter((o) => o.x1 > bx0 && o.x0 < bx1 && o.y1 > by0 && o.y0 < by1);

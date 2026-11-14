@@ -6,12 +6,13 @@
  * through core/plan-edit.js (remove, nudge, reset — with the confirmations the owner asked for) and the toasts for
  * what the plan view reports about its own gestures (`view2d.on('structure', …)`).
  */
-import { wallSegments, openingPolicy, removeWallSegment, removeOpening, moveWallSegment, resizeWallSegment, updateOpening, resetPlan, planDiff, isPlanModified, isBuiltinBase, levelPlan } from '../core/plan-edit.js';
+import { wallSegments, openingPolicy, removeWallSegment, removeOpening, moveWallSegment, resizeWallSegment, updateOpening, resetPlan, planDiff, isPlanModified, isBuiltinBase, levelPlan,
+  stairInfo, voidInfo, updateStair, removeStair, removeVoid, planPhase, REASONS } from '../core/plan-edit.js';
 import { h, call, listen } from './dom.js';
 import { icon } from './icons.js';
 import { confirmDialog, toast } from './dialogs.js';
 
-export const STRUCTURE_TOOLS = ['structure', 'wall', 'door', 'window', 'passage'];
+export const STRUCTURE_TOOLS = ['structure', 'wall', 'door', 'window', 'passage', 'stairs'];
 export const isStructureTool = (tool) => STRUCTURE_TOOLS.includes(tool);
 export const WALL_THICKNESSES = [7, 10, 15, 20];
 /** What plan edits are measured against, in words: the architect's plan (built-in house) or the user's fixed plan. */
@@ -126,7 +127,21 @@ export function createStructure(app) {
       store.setUI(planShown() ? { tool } : { tool, mode: '2d' });
       // Narrow screens keep the guide in a drawer: say what the mode is for and where the rules are.
       if (entering && app.isCompact()) toast('Structure: tap a wall, door or window to change it', { action: { label: 'Guide', fn: () => app.openPanel('catalog') } });
+      if (tool === 'stairs') api.explainStairs();
     },
+    /** Stairs (stage F4b): a stair needs a floor above the one shown — say so and offer to add one. Returns true when there is one. */
+    explainStairs() {
+      if (api.floorAbove()) return true;
+      toast('A stair needs a floor above it. Add a floor first, then place the stair on this one.', app.levels ? { kind: 'warn', duration: 8000, action: { label: 'Add floor above…', fn: () => app.levels.openAdd() } } : { kind: 'warn' });
+      return false;
+    },
+    /** The floor above the one shown, or null. */
+    floorAbove() {
+      const ids = app.levels ? app.levels.ids() : ['L0'], i = ids.indexOf(store.ui.level || 'L0');
+      return i >= 0 && i < ids.length - 1 ? ids[i + 1] : null;
+    },
+    /** Stairs and openings in floors: 'permit' in a fixed plan, free while drafting. */
+    stairPolicy: () => (planPhase() === 'draft' ? { level: 'free', reason: 'Place, move or change it as you like while the plan is a draft.' } : { level: 'permit', reason: REASONS.stair }),
     enter() { if (!api.isActive()) api.setTool('structure'); },
     exit() { if (api.isActive()) store.setUI({ tool: 'select', structureSel: null }); },
     toggle() { if (api.isActive()) api.exit(); else api.enter(); },
@@ -145,6 +160,14 @@ export function createStructure(app) {
     selected() {
       const sel = store.ui.structureSel;
       if (!sel || !sel.id) return null;
+      if (sel.type === 'stair') {
+        const info = stairInfo(sel.id);
+        return info && info.levelId === (store.ui.level || 'L0') ? { type: 'stair', id: sel.id, info, policy: api.stairPolicy() } : null;
+      }
+      if (sel.type === 'void') {
+        const info = voidInfo(sel.id);
+        return info && info.levelId === (store.ui.level || 'L0') ? { type: 'void', id: sel.id, info, policy: api.stairPolicy() } : null;
+      }
       if (sel.type === 'segment') {
         const seg = wallSegments().find((s) => s.id === sel.id);
         return seg ? { type: 'segment', id: seg.id, seg } : null;
@@ -214,7 +237,30 @@ export function createStructure(app) {
     removeSelected() {
       const cur = api.selected();
       if (!cur) return null;
+      if (cur.type === 'stair') return api.removeStair(cur.id);
+      if (cur.type === 'void') return api.removeVoid(cur.id);
       return cur.type === 'segment' ? api.removeSegment(cur.seg) : api.removeOpening(cur.opening);
+    },
+    /** Remove a stair; its opening in the floor above goes too, unless it was enlarged (then the toast says it stays). */
+    removeStair(id, { quiet = false } = {}) {
+      const res = removeStair(id);
+      if (res.ok) {
+        api.select(null);
+        toast(res.keptVoid ? 'Stair removed — the enlarged opening in the floor above stays (a plain opening with its railing)' : 'Stair removed', { action: undo, duration: res.keptVoid ? 8000 : undefined });
+      } else if (!quiet) toast(res.reason, { kind: 'warn' });
+      return res;
+    },
+    /** Close an opening in a floor (refused while a stair needs it). */
+    removeVoid(id, { quiet = false } = {}) {
+      const res = removeVoid(id);
+      if (res.ok) { api.select(null); toast('Opening in the floor closed', { action: undo }); }
+      else if (!quiet) toast(res.reason, { kind: 'warn' });
+      return res;
+    },
+    /** Change the selected stair: patch as core updateStair (x, y, rot, shape, turn, width, risers, going, landing, fit). */
+    updateStair(id, patch) {
+      const res = updateStair(id, patch);
+      return res;
     },
 
     /** Move a wall sideways by `delta` cm and keep it selected under its new id. */
@@ -247,6 +293,13 @@ export function createStructure(app) {
     nudge(dx, dy) {
       const cur = api.selected();
       if (!cur) return false;
+      if (cur.type === 'void') return false;
+      if (cur.type === 'stair') {
+        const st = cur.info.data, res = updateStair(cur.id, { x: st.x + dx * STEP, y: st.y + dy * STEP });
+        const refusal = api.report(res);
+        if (refusal) toast(refusal, { kind: 'warn' });
+        return true;
+      }
       const axis = cur.type === 'segment' ? cur.seg.axis : cur.opening.axis;
       const d = cur.type === 'segment' ? (axis === 'v' ? dx : dy) : (axis === 'h' ? dx : dy);
       if (!d) return false;
@@ -292,6 +345,8 @@ export function createStructure(app) {
       app.selectingFromPanel = true;
       if (wallSegments().some((s) => s.id === item.ref)) api.select('segment', item.ref);
       else if (view().openings.some((o) => o.id === item.ref)) api.select('opening', item.ref);
+      else if (/^stair-/.test(item.kind) && stairInfo(item.ref)) api.select('stair', item.ref);
+      else if (/^void-/.test(item.kind) && voidInfo(item.ref)) api.select('void', item.ref);
       app.selectingFromPanel = false;
     },
   };
@@ -301,9 +356,11 @@ export function createStructure(app) {
     if (!e || !e.type) return;
     // Selecting a locked wall is explained by the Inspector's banner when that is in view; say it here otherwise.
     if (e.type === 'locked') { if (e.op !== 'select' || !app.isShowing('inspector')) levelToast(e.text || LEVELS.locked.text, 'locked'); }
+    else if (e.type === 'refused' && e.code === 'no-level-above') api.explainStairs();
     else if (e.type === 'refused') toast(e.text || 'That change is not possible here.', { kind: 'warn' });
     else if (e.type === 'warning') levelToast(e.text, e.level);
     else if (e.type === 'done' && /^remove/.test(e.op || '')) toast(/wall/.test(e.op) ? 'Wall removed' : 'Opening removed', { action: undo });
+    else if (e.type === 'done' && e.op === 'add-stair' && !e.text) toast('Stair placed — its opening in the floor above was made for 2.10 m headroom', { action: undo });
   });
 
   /* ───────── Store wiring ───────── */
