@@ -1,6 +1,6 @@
 /**
  * Carpentry workbench — the drawings of the selected run under the plan (a resizable split inside the stage; a
- * full-screen sheet on phones): Elevation · Plan · Internal · Worktop · Section, rendered by the shared SVG renderer
+ * bottom sheet on phones: half / full height, the bottom navigation stays usable): Elevation · Plan · Internal · Worktop · Section, rendered by the shared SVG renderer
  * (`src/carpentry/doc/svg.js`, or svg-fallback.js while that is not there) and edited directly:
  *
  *   click a unit ................ store.ui.carpentrySel.unitId
@@ -50,7 +50,7 @@ export function initWorkbench(app, C) {
   const { store } = app;
   const stage = document.getElementById('stage');
   const S = { runId: null, tab: getPref('carpWbTab') === '3d' ? 'elevation' : getPref('carpWbTab') || 'elevation', drawings: [], drawing: null, scale: 1, ox: 0, oy: 0, fitted: '', userView: false,
-    rects: [], hover: null, gesture: null, drop: null, paletteModule: null, tip: null, svgEl: null };
+    fitWhole: false, noReveal: false, rects: [], hover: null, gesture: null, drop: null, paletteModule: null, tip: null, svgEl: null };
 
   /* ───────── DOM ───────── */
   const tabBtns = new Map();
@@ -78,10 +78,24 @@ export function initWorkbench(app, C) {
   ], { placement: 'bottom-end' }) }, icon('chevron-down', { size: 14 }));
   const fitGroup = h('div', { class: 'cwb__fitgrp', role: 'group', 'aria-label': 'Fit' }, fitMain, fitMore);
   const zoomOut = iconBtn('minus', 'Zoom out', { size: 16, onClick: () => zoomAt(null, 1 / 1.25) });
-  const zoomFit = iconBtn('fit', 'Fit the drawing', { size: 16, onClick: () => { S.userView = false; fit(); } });
+  const zoomFit = iconBtn('fit', 'Fit the drawing', { size: 16, onClick: () => { S.userView = false; S.fitWhole = true; fit(); } });
   const zoomIn = iconBtn('plus', 'Zoom in', { size: 16, onClick: () => zoomAt(null, 1.25) });
   const collapse = iconBtn('chevron-down', 'Hide the drawings', { size: 16, class: 'hide-phone', onClick: () => setCollapsed(!collapsed) });
   const close = iconBtn('close', 'Close the drawings', { size: 18, class: 'cwb__close', onClick: () => setSheet(false) });
+  // Phone: a grab handle at the sheet's top edge — tap (or drag up / down) switches between the half and the full height.
+  const handle = h('button', { type: 'button', class: 'cwb__handle', 'aria-expanded': 'false', 'aria-label': 'Make the drawings taller', onClick: () => { if (handleDragged) { handleDragged = false; return; } setFull(!full); } }, h('span', { class: 'cwb__pill' }));
+  let handleDragged = false;
+  handle.addEventListener('pointerdown', (e) => {
+    const y0 = e.clientY;
+    handleDragged = false;
+    try { handle.setPointerCapture(e.pointerId); } catch (err) { /* gone */ }
+    const up = (ev) => {
+      handle.removeEventListener('pointerup', up); handle.removeEventListener('pointercancel', up);
+      const dy = ev.clientY - y0;
+      if (ev.type === 'pointerup' && Math.abs(dy) > 24) { handleDragged = true; setFull(dy < 0); }
+    };
+    handle.addEventListener('pointerup', up); handle.addEventListener('pointercancel', up);
+  });
   const grip = h('div', { class: 'cwb__grip', role: 'separator', 'aria-orientation': 'horizontal', 'aria-label': 'Resize the drawings', tabindex: '0', 'data-tip': 'Drag to resize' });
   const sheet = h('div', { class: 'cwb__sheet' });
   const ov = document.createElementNS(SVGNS, 'svg');
@@ -93,12 +107,12 @@ export function initWorkbench(app, C) {
   const view = h('div', { class: 'cwb__view', tabindex: '0', 'aria-label': 'Drawing of the selected run. Click a unit to select it; drag it to reorder; drag its edge to change its width.' }, sheet, ov, tip, empty, p3d);
   const title = h('div', { class: 'cwb__title' });
   const el = h('section', { class: 'cwb', 'aria-label': 'Carpentry drawings' },
-    grip,
+    grip, handle,
     h('header', { class: 'cwb__bar' }, title, tablist, strip, fitGroup,
       h('div', { class: 'cwb__zoom', role: 'group', 'aria-label': 'Zoom' }, zoomOut, zoomFit, zoomIn), collapse, close),
     view);
   stage.append(el);
-  // Phone: the workbench is a full-screen sheet opened from a button over the plan.
+  // Phone: the workbench is a bottom sheet opened from a button over the plan (half height first).
   const openBtn = h('button', { type: 'button', class: 'cwb-open', onClick: () => setSheet(true) }, icon('carpentry', { size: 16 }), h('span', null, 'Drawings'));
   document.getElementById('ov2d')?.append(openBtn);
 
@@ -116,11 +130,24 @@ export function initWorkbench(app, C) {
     requestAnimationFrame(() => { app.view2d && app.view2d.resize && app.view2d.resize(); layout(); });
   }
   setCollapsed(collapsed);
+  let full = false;
+  const isPhone = () => window.matchMedia('(max-width: 699px)').matches;
+  /** Phone sheet height: half (about 46% of the screen, the plan stays in sight above) or full (up to the top bar). */
+  function setFull(v) {
+    full = !!v;
+    el.classList.toggle('is-full', full);
+    handle.setAttribute('aria-expanded', String(full));
+    handle.setAttribute('aria-label', full ? 'Make the drawings shorter' : 'Make the drawings taller');
+    requestAnimationFrame(fitPhone3d);                              // the view resizes → its observer refits the drawing
+  }
   function setSheet(open) {
     el.classList.toggle('is-open', open);
+    setFull(false);
     if (!open) leave3d();                                          // phone: closing the sheet gives the plan back
     if (open) { requestAnimationFrame(() => { S.userView = false; render(true); }); }
   }
+  // Picking a run in the Runs sheet shows its drawings (half height).
+  C.on('show-drawings', () => { if (C.isActive() && isPhone()) setSheet(true); });
   grip.addEventListener('pointerdown', (e) => {
     if (collapsed) setCollapsed(false);
     e.preventDefault();
@@ -254,7 +281,13 @@ export function initWorkbench(app, C) {
     } else { sheet.replaceChildren(); S.svgEl = null; }
     computeRects();
     const key = `${runId}|${S.tab}`;
-    if (refit || changedRun || S.fitted !== key || !S.userView) { if (refit || changedRun || S.fitted !== key) S.userView = false; if (!S.userView) fit(); S.fitted = key; }
+    if (refit || changedRun || S.fitted !== key || !S.userView) { const refitted = refit || changedRun || S.fitted !== key;
+      if (refitted) { S.userView = false; S.fitWhole = false; }
+      if (!S.userView) fit();
+      S.fitted = key;
+      const sel = store.ui.carpentrySel;
+      if (refitted && sel && sel.unitId && sel.runId === runId) reveal(sel.unitId);
+    }
     layout();
   }
 
@@ -273,14 +306,35 @@ export function initWorkbench(app, C) {
     fitMain.classList.toggle('is-hot', Math.abs(free) >= 0.05 && floor.length > 0);
   }
 
+  /** Phone: Elevation / Internal / Section open fitted to the sheet's height (readable units), starting at the run's left end. */
+  const PHONE_TALL = new Set(['elevation', 'internal', 'section']);
   function fit() {
     const d = S.drawing;
     const W = view.clientWidth, H = view.clientHeight;
     if (!d || W < 20 || H < 20) return;
     const b = d.bounds, pad = Math.min(28, Math.max(10, Math.min(W, H) * 0.05));
+    if (isPhone() && !S.fitWhole && PHONE_TALL.has(d.kind)) {
+      S.scale = Math.max(0.05, (H - 2 * pad) / b.h);
+      S.ox = b.w * S.scale + 2 * pad <= W ? W / 2 - (b.x + b.w / 2) * S.scale : pad - b.x * S.scale;
+      S.oy = H / 2 + (b.y + b.h / 2) * S.scale;
+      layout();
+      return;
+    }
     S.scale = Math.max(0.05, Math.min((W - 2 * pad) / b.w, (H - 2 * pad) / b.h));
     S.ox = W / 2 - (b.x + b.w / 2) * S.scale;
     S.oy = H / 2 + (b.y + b.h / 2) * S.scale;
+    layout();
+  }
+  /** Phone: scroll a unit that is (partly) out of sight into view. */
+  function reveal(unitId) {
+    if (!isPhone() || !S.drawing) return;
+    const r = S.rects.find((q) => q.id === unitId);
+    const W = view.clientWidth, pad = 12;
+    if (!r || W < 20) return;
+    const L = toX(r.x0), R = toX(r.x1);
+    if (L >= pad && R <= W - pad) return;
+    S.ox += (R - L > W - 2 * pad) ? pad - L : W / 2 - (L + R) / 2;
+    S.userView = true;
     layout();
   }
   function zoomAt(p, factor) {
@@ -403,7 +457,12 @@ export function initWorkbench(app, C) {
       return;
     }
     const r = unitAt(p, e.target);
-    if (r) {
+    if (r && e.pointerType === 'touch' && isPhone()) {
+      // Phone: one finger drags the drawing; a tap selects; press and hold arms the reorder drag.
+      const g = { type: 'press', unitId: r.id, start: p, row: r.row, touch: true, armed: false, last: p };
+      g.timer = setTimeout(() => { g.armed = true; if (S.gesture === g && EDITABLE.has(S.drawing && S.drawing.kind)) showTip(g.start, 'Drag to move this unit'); }, 380);
+      S.gesture = g;
+    } else if (r) {
       if (!store.ui.carpentrySel || store.ui.carpentrySel.unitId !== r.id) C.select(S.runId, r.id);
       S.gesture = { type: 'press', unitId: r.id, start: p, row: r.row };
     } else {
@@ -430,6 +489,13 @@ export function initWorkbench(app, C) {
       S.ox += p.x - g.last.x; S.oy += p.y - g.last.y; g.last = p; S.userView = true;
       view.classList.add('is-panning');
       layout();
+    } else if (g.type === 'press' && g.touch && !g.armed) {
+      if (!far) return;
+      clearTimeout(g.timer);
+      g.type = 'pan'; g.moved = true; g.empty = false;
+      S.ox += p.x - g.last.x; S.oy += p.y - g.last.y; g.last = p; S.userView = true;
+      view.classList.add('is-panning');
+      layout();
     } else if (g.type === 'press') {
       if (far && EDITABLE.has(S.drawing.kind) && Math.abs(p.x - g.start.x) > SLOP) beginReorder(g, p);
     } else if (g.type === 'reorder') updateReorder(g, p);
@@ -443,6 +509,8 @@ export function initWorkbench(app, C) {
     S.gesture = null;
     view.classList.remove('is-panning', 'is-reordering');
     if (!g) return;
+    if (g.timer) { clearTimeout(g.timer); hideTip(); }
+    if (g.touch && g.type === 'press' && !cancelled) { S.noReveal = true; try { C.select(S.runId, g.unitId); } finally { S.noReveal = false; } }
     if (cancelled) { if (g.type === 'resize' && g.began) store.cancel(); hideTip(); drawOverlay(); return; }
     if (g.type === 'pan' && g.empty && !g.moved) { const sel = store.ui.carpentrySel; if (sel && sel.unitId) C.select(sel.runId, null); }
     else if (g.type === 'resize') { if (g.began) store.commit(); hideTip(); }
@@ -458,7 +526,7 @@ export function initWorkbench(app, C) {
   view.addEventListener('dblclick', (e) => {
     const r = unitAt(local(e), e.target);
     if (r) { store.setUI({ carpentryTab: 'unit' }); app.setPanelOpen('right', true); }
-    else { S.userView = false; fit(); }
+    else { S.userView = false; S.fitWhole = true; fit(); }
   });
   view.addEventListener('wheel', (e) => {
     if (!S.drawing) return;
@@ -629,8 +697,9 @@ export function initWorkbench(app, C) {
   function fitPhone3d() {
     const vp = stageEl();
     if (!vp) return;
+    if (!T3.on || !el.classList.contains('is-open') || !isPhone()) { vp.style.removeProperty('max-height'); return; }
+    if (full) return;                                              // full height: the 3D view hides behind the sheet, keep its size
     vp.style.removeProperty('max-height');
-    if (!T3.on || !el.classList.contains('is-open') || !window.matchMedia('(max-width: 699px)').matches) return;
     const over = vp.getBoundingClientRect().bottom - el.getBoundingClientRect().top;
     if (over > 1) vp.style.maxHeight = `calc(100% - ${Math.round(over)}px)`;   // the stage is a flex column in Carpentry mode
   }
@@ -660,11 +729,11 @@ export function initWorkbench(app, C) {
     } else if (e.keys.includes('carpentrySel')) {
       const sel = store.ui.carpentrySel;
       if ((sel ? sel.runId : null) !== S.runId) schedule(true);
-      else drawOverlay();
+      else { drawOverlay(); if (sel && sel.unitId && !S.noReveal) reveal(sel.unitId); }
     }
   });
   C.on('flash', drawOverlay);
-  C.on('focus', () => { S.userView = false; fit(); });
+  C.on('focus', () => { S.userView = false; S.fitWhole = false; fit(); });
   rendererReady.then(() => { if (C.isActive()) render(false); });
   if (C.isActive()) requestAnimationFrame(() => render(true));
   return { render, fit };

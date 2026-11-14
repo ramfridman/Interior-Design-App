@@ -227,8 +227,9 @@
 .cdraw .fill-splashback { fill: rgba(128, 128, 128, 0.1); }
 .cwb__view [data-unit-id] { cursor: inherit; }
 
-/* phone: open button + full-screen sheet */
+/* phone: open button + bottom sheet */
 .cwb-open { display: none; }
+.cwb__handle { display: none; }
 
 /* ───────── Right: inspector ───────── */
 .cinsp { flex: 1 1 auto; flex-direction: column; min-height: 0; min-width: 0; }
@@ -381,10 +382,19 @@
 }
 @media (max-width: 699px) {
   .app.is-carpentry .cwb { display: none; }
+  /* Phone: the drawings are a bottom sheet INSIDE the stage (the bottom navigation stays usable below it; the Inspector
+     and Runs sheets, z-index 20, open above it). Two heights: half (about 46% of the screen) and full (up to the top bar). */
   .app.is-carpentry .cwb.is-open {
-    display: flex; position: fixed; inset: 0; z-index: 40; flex-basis: auto !important; border: 0;
-    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    display: flex; position: absolute; left: 0; right: 0; bottom: 0; top: auto; z-index: 12; flex-basis: auto !important; border: 0;
+    height: 46vh; height: 46dvh; max-height: 100%;
+    border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; box-shadow: var(--shadow-2);
   }
+  .app.is-carpentry .cwb.is-open.is-full { height: 100%; }
+  .cwb.is-collapsed.is-open .cwb__view { display: block; }
+  .cwb.is-collapsed.is-open .cwb__strip, .cwb.is-collapsed.is-open .cwb__fitgrp, .cwb.is-collapsed.is-open .cwb__zoom { display: flex; }
+  .cwb__handle { display: flex; align-items: center; justify-content: center; flex: none; width: 100%; height: 40px; margin-bottom: -4px; touch-action: none; cursor: ns-resize; border-radius: 12px 12px 0 0; }
+  .cwb__pill { width: 44px; height: 5px; border-radius: 3px; background: var(--line-strong); transition: background var(--t-fast); }
+  .cwb__handle:active .cwb__pill, .cwb__handle:focus-visible .cwb__pill { background: var(--accent); }
   .cwb__grip { display: none; }
   .cwb__bar { flex-wrap: wrap; height: auto; padding: 6px var(--s-2); row-gap: 4px; }
   .cwb__tabs { order: 3; flex-basis: 100%; overflow-x: auto; height: 34px; }
@@ -422,9 +432,9 @@
    dropped and the stage is shortened by the sheet's overlap (workbench.js fitPhone3d), so the run is framed in sight. */
 @media (max-width: 699px) {
   .app.is-carpentry .cwb.is-open.is-3d {
-    top: auto; height: min(46vh, 380px); height: min(46dvh, 380px); max-height: calc(100% - 140px);
-    border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; box-shadow: var(--shadow-2);
+    height: 46vh; height: 46dvh;      /* the same two-height sheet as the drawings; the 3D view above is shortened to match */
   }
+  .app.is-carpentry .cwb.is-open.is-3d.is-full { height: 100%; }
   .cwb.is-open.is-3d .cwb__strip { display: none; }
   .c3d { padding: var(--s-2) var(--s-3); gap: var(--s-2); overscroll-behavior: contain; }
   .c3d__bar .chip, .c3d__bar .btn { min-height: 40px; }

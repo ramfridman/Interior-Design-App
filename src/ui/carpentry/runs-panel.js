@@ -78,7 +78,12 @@ export function initRunsPanel(root, app, C) {
       : h('span', { class: 'crun__name truncate', onDblclick: () => { renaming = run.id; render(); } }, run.name);
     return h('li', { class: `crun${selected ? ' is-selected' : ''}` },
       h('button', { type: 'button', class: 'crun__main', 'aria-pressed': String(selected), 'aria-label': `${run.code}, ${run.name}, ${metres(run.length)}, ${n} units`,
-        onClick: () => { if (renaming === run.id) return; C.select(run.id); C.focusRun(run.id); } },
+        onClick: () => {
+          if (renaming === run.id) return;
+          C.select(run.id); C.focusRun(run.id);
+          // Phone: the Runs sheet gives way to the run's drawings (half height, the plan stays in sight above).
+          if (app.isPhone && app.isPhone()) { app.closePanels(); C.emit('show-drawings'); }
+        } },
       h('span', { class: 'crun__icon' }, icon(k.icon, { size: 18 })),
       h('span', { class: 'crun__code num' }, run.code)),
       h('span', { class: 'crun__body' }, nameEl,
