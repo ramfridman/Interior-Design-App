@@ -19,10 +19,11 @@ export const affInvert = (m) => {
   return [m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, (m[2] * m[5] - m[3] * m[4]) / det, (m[1] * m[4] - m[0] * m[5]) / det];
 };
 
-/** Key of a pen: width class (2 significant digits, 0 = hairline), colour, dashed. */
+/** Key of a pen: width class (2 significant digits, 0 = hairline), colour, dashed (and, for DXF primitives, the layer). */
 export function penKey(p) {
   const lw = p.lw > 0 ? Number(p.lw.toPrecision(2)) : 0;
-  return `${lw}|${p.color}|${p.dash && p.dash.length && p.dash.some((d) => d > 0) ? 'dash' : 'solid'}`;
+  const k = `${lw}|${p.color}|${p.dash && p.dash.length && p.dash.some((d) => d > 0) ? 'dash' : 'solid'}`;
+  return p.layer == null ? k : k + '|' + p.layer;   // DXF: a pen never spans two layers (PDF / raster paths have no layer)
 }
 
 // per-primitives caches (the same page is analysed by several detectors; the data is never mutated)
@@ -76,7 +77,7 @@ export function penStats(segs) {
   const by = new Map();
   for (const s of segs) {
     let st = by.get(s.pen);
-    if (!st) by.set(s.pen, st = { pen: s.pen, lw: s.lw, color: s.pen.split('|')[1], dashed: s.pen.endsWith('dash'), n: 0, len: 0, axisLen: 0, curvedLen: 0, segs: [] });
+    if (!st) by.set(s.pen, st = { pen: s.pen, lw: s.lw, color: s.pen.split('|')[1], dashed: s.pen.split('|')[2] === 'dash', n: 0, len: 0, axisLen: 0, curvedLen: 0, segs: [] });
     st.n++; st.len += s.len;
     if (s.curved) st.curvedLen += s.len; else st.segs.push(s);
   }

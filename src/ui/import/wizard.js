@@ -1,9 +1,10 @@
 /**
- * "Import a sketch…" — the guided flow that turns a drawing (vector PDF, scanned PDF, PNG / JPG) into a new DRAFT
+ * "Import a sketch…" — the guided flow that turns a drawing (vector PDF, AutoCAD DXF, scanned PDF, PNG / JPG) into a new DRAFT
  * project with the drawing kept as a tracing underlay. Five steps in one large dialog; nothing is created before the
  * last one. See docs/CONTRACT.md § 12.
  *
- *   1 Drawing      file picker / drag-and-drop (read locally), page thumbnails, which drawing on the sheet
+ *   1 Drawing      file picker / drag-and-drop (read locally), page thumbnails, which drawing on the sheet;
+ *                  DXF: the layer list (walls / doors / windows / other, proposed, with a highlight); DWG: how to get a DXF
  *   2 Scale        measure a known length (loupe, snaps to line ends) · stated scale · 1 : N · the engine's guess
  *   3 Orientation  rotate / mirror, north, location, ceiling height
  *   4 Review       walls / doors / windows / unsupported pieces over the page, counts, warnings
@@ -21,8 +22,10 @@ import { buildPlan } from '../../core/plan-build.js';
 import { createSheet } from './sheet.js';
 import { runTask } from './engine-client.js';
 import { sniff, plainError, pdfInfo, renderPage, pagePrims, decodeImage, pixelsOf, encodeUnderlay, affThen, affInv, affApply, ImportError } from './source.js';
+import { renderPrims } from '../../import/dxf-render.js';
 
 const PT_CM = 2.54 / 72;            // one PDF point on paper, in cm
+const ROLES_ORDER = { wall: 0, door: 1, window: 2, other: 3 };
 const STEPS = [
   { id: 'file', label: 'Drawing' },
   { id: 'scale', label: 'Scale' },
@@ -33,6 +36,8 @@ const STEPS = [
 const confWords = (c) => (c >= 0.85 ? 'confident' : c >= 0.65 ? 'fairly confident' : c >= 0.45 ? 'unsure' : 'a rough guess');
 const m2 = (cm) => (cm / 100).toFixed(2);
 const fmtLen = (cm) => (cm >= 100 ? `${m2(cm)} m` : `${Math.round(cm)} cm`);
+const DXF_UNITS = [['millimetres', 'mm', 0.1], ['centimetres', 'cm', 1], ['metres', 'm', 100], ['inches', 'inch', 2.54], ['feet', 'foot', 30.48]];
+const ROLE_LABEL = { wall: 'Walls', door: 'Doors', window: 'Windows', other: 'Other' };
 const baseName = (name) => String(name || '').replace(/\.[a-z0-9]+$/i, '').replace(/[_]+/g, ' ').trim().slice(0, 60);
 
 /**
@@ -42,7 +47,8 @@ const baseName = (name) => String(name || '').replace(/\.[a-z0-9]+$/i, '').repla
 export function openImportWizard(app, opts = {}) {
   const S = {
     step: 0, busy: null, error: '', gen: 0,      // gen: bumped by Cancel / a new file — stale async work stops
-    file: null, fileName: '', kind: null,           // kind: 'pdf' (vector page) | 'image' (picture or scanned page)
+    file: null, fileName: '', kind: null,           // kind: 'pdf' (vector page) | 'dxf' | 'image' (picture or scanned page) | 'dwg' (explained only)
+    dxf: null,                                      // { layers (proposal), candidates, roles (user overrides), highlight, unit }
     bytes: null, pdf: null, page: 1,                // pdf: { pageCount, pages: [{ page, w, h }] }
     thumbs: new Map(),
     prims: null, snapIndex: null,                   // vector page
@@ -91,6 +97,7 @@ export function openImportWizard(app, opts = {}) {
     if (f && !S.busy) { if (S.step !== 0) go(0); chooseFile(f); }
   });
 
+  const vector = () => S.kind === 'pdf' || S.kind === 'dxf';
   // ── state helpers ──
   function setError(text) { S.error = text || ''; errorBox.hidden = !text; setKids(errorBox, text ? [icon('warn', { size: 16 }), h('span', null, text)] : []); }
   function setBusy(text, cancellable = true) {
@@ -158,6 +165,7 @@ export function openImportWizard(app, opts = {}) {
   }
   function go(i) {
     S.step = Math.max(0, Math.min(STEPS.length - 1, i));
+    if (S.dxf && S.dxf.highlight && S.prims) { S.dxf.highlight = null; drawDxfSheet(); }   // the other steps show every layer
     setError('');
     render();
   }
@@ -174,7 +182,7 @@ export function openImportWizard(app, opts = {}) {
   }
 
   // ════════════════════════ 1. the drawing ════════════════════════
-  const fileInput = h('input', { type: 'file', accept: '.pdf,application/pdf,.png,image/png,.jpg,.jpeg,image/jpeg', class: 'sr-only', id: 'import-sketch-file',
+  const fileInput = h('input', { type: 'file', accept: '.pdf,application/pdf,.dxf,image/vnd.dxf,application/dxf,.dwg,.png,image/png,.jpg,.jpeg,image/jpeg', class: 'sr-only', id: 'import-sketch-file',
     onChange: () => { const f = fileInput.files && fileInput.files[0]; fileInput.value = ''; if (f) chooseFile(f); } });
 
   function renderFile() {
@@ -185,28 +193,37 @@ export function openImportWizard(app, opts = {}) {
       onKeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } } }, icon('open', { size: 16 }), h('span', { class: 'btn__label' }, S.file ? 'Choose another file' : 'Choose a file'));
     const drop = h('div', { class: `idrop${S.sheet ? ' idrop--compact' : ''}` },
       h('div', { class: 'idrop__icon' }, icon('plan', { size: 28 })),
-      h('p', { class: 'idrop__title display' }, S.file ? S.fileName : 'Drop a PDF, PNG or JPG here'),
-      h('p', { class: 'idrop__text' }, S.file ? fileFacts() : 'A PDF straight from the architect’s drawing program gives exact walls. A scan or a photo works too — as a starting point to trace over.'),
+      h('p', { class: 'idrop__title display', dir: 'auto' }, S.file ? S.fileName : 'Drop a DXF, PDF, PNG or JPG here'),
+      h('p', { class: 'idrop__text' }, S.file ? fileFacts() : 'A DXF or a PDF straight from the architect’s drawing program gives exact walls (a DXF also knows its units and layers). A scan or a photo works too — as a starting point to trace over.'),
       pick, fileInput,
       h('p', { class: 'idrop__private' }, icon('lock', { size: 14 }), 'Your drawing stays on this device: it is read in this browser and never uploaded.'));
     const kids = [drop];
+    if (S.kind === 'dwg') kids.push(dwgHelp());
     if (S.pdf && S.pdf.pageCount > 1) kids.push(pagePicker());
     if (S.sheet) {
       const many = S.first && S.first.drawings && S.first.drawings.length > 1;
       kids.push(h('div', { class: 'isplit' },
         h('div', { class: 'isplit__main' }, sheet.el),
         h('div', { class: 'isplit__side' },
-          h('p', { class: 'iside__title' }, many ? 'Which drawing?' : 'The page'),
+          h('p', { class: 'iside__title' }, many ? 'Which drawing?' : S.kind === 'dxf' ? 'The drawing' : 'The page'),
           h('p', { class: 'iside__text' }, many
             ? `This sheet holds ${S.first.drawings.length} separate drawings. Click the one to import on the page — drawing ${S.drawing + 1} is chosen.`
-            : S.kind === 'image' ? (S.sheet.fromPdf ? 'This PDF page is a scanned picture: it is read like a photo.' : 'The picture you chose. Next, set its scale.') : 'This is the page that will be read. Next, confirm its scale.'),
+            : S.kind === 'image' ? (S.sheet.fromPdf ? 'This PDF page is a scanned picture: it is read like a photo.' : 'The picture you chose. Next, set its scale.')
+              : S.kind === 'dxf' ? 'The drawing’s model space. Check which layers hold the walls, doors and windows below; then confirm the scale.' : 'This is the page that will be read. Next, confirm its scale.'),
           many ? h('ol', { class: 'idrawings' }, S.first.drawings.map((d, i) => h('li', null, h('button', { type: 'button', class: `idrawings__btn${i === S.drawing ? ' is-on' : ''}`, onClick: () => pickDrawing(i) },
-            `Drawing ${i + 1}`, h('span', { class: 'faint' }, ` · ${d.walls} wall pieces`))))) : null)));
+            `Drawing ${i + 1}`, h('span', { class: 'faint' }, ` · ${d.walls} wall pieces`))))) : null,
+          S.kind === 'dxf' ? layerPanel() : null)));
     }
     setKids(content, kids);
     if (S.sheet) requestAnimationFrame(() => sheet.resize());
   }
   function fileFacts() {
+    if (S.kind === 'dwg') return 'AutoCAD DWG — not readable here (see below)';
+    if (S.kind === 'dxf' && S.prims) {
+      const u = S.prims.dxf.units;
+      return ['AutoCAD DXF', u.cmPerUnit ? `drawn in ${u.name}` : 'units not stated', `${S.prims.layers.length} layer${S.prims.layers.length === 1 ? '' : 's'}`,
+        S.prims.layouts && S.prims.layouts.length ? `model space read (${S.prims.layouts.length} paper layout${S.prims.layouts.length === 1 ? '' : 's'} not used)` : null].filter(Boolean).join(' · ');
+    }
     const parts = [S.kind === 'pdf' ? 'Vector PDF' : S.sheet && S.sheet.fromPdf ? 'Scanned PDF page' : 'Picture'];
     if (S.pdf) parts.push(`${S.pdf.pageCount} page${S.pdf.pageCount === 1 ? '' : 's'}${S.pdf.pageCount > 1 ? ` · page ${S.page} chosen` : ''}`);
     if (S.image) parts.push(`${S.image.originalWidth || S.image.width} × ${S.image.originalHeight || S.image.height} px`);
@@ -226,7 +243,7 @@ export function openImportWizard(app, opts = {}) {
   async function chooseFile(f) {
     S.gen++;
     if (task) task.cancel();
-    Object.assign(S, { file: f, fileName: f.name || 'Drawing', kind: null, bytes: null, pdf: null, page: 1, thumbs: new Map(), prims: null, snapIndex: null, sheet: null, image: null, first: null, drawing: 0,
+    Object.assign(S, { file: f, fileName: f.name || 'Drawing', kind: null, bytes: null, pdf: null, dxf: null, page: 1, thumbs: new Map(), prims: null, snapIndex: null, sheet: null, image: null, first: null, drawing: 0,
       scale: { method: null, cmPerUnit: null, label: '' }, measure: { pts: [], cm: '' }, ratio: '', result: null, resultKey: '', built: null });
     if (!S.name) S.nameFromFile = true;
     if (S.nameFromFile) S.name = baseName(f.name);
@@ -235,6 +252,8 @@ export function openImportWizard(app, opts = {}) {
     await work('Opening the file…', async () => {
       const kind = await sniff(f);
       if (gen !== S.gen) throw { cancelled: true };
+      if (kind === 'dwg') { S.kind = 'dwg'; return; }
+      if (kind === 'dxf') { await loadDxf(f, gen); return; }
       if (kind === 'pdf') {
         S.bytes = new Uint8Array(await f.arrayBuffer());
         S.pdf = await pdfInfo(S.bytes);
@@ -298,6 +317,92 @@ export function openImportWizard(app, opts = {}) {
     const text = (res.scaleCandidates || []).find((c) => c.source === 'text' || c.source === 'dimensions');
     if (text && text.confidence >= 0.6) S.scale = { method: 'text', cmPerUnit: text.cmPerUnit, label: text.label };
   }
+  // ── DXF ──
+  /** Read the DXF in the worker, draw it, and run the first analysis (units, layer roles, drawings). */
+  async function loadDxf(f, gen) {
+    const live = (v) => { if (gen !== S.gen) throw { cancelled: true }; return v; };
+    setBusy('Reading the DXF…');
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const read = live(await engine('dxf-read', { bytes }));
+    S.kind = 'dxf';
+    S.prims = read.prims;
+    S.dxf = { layers: read.look.layers, candidates: read.look.candidates, roles: {}, highlight: null, unit: null };
+    drawDxfSheet();
+    S.snapIndex = buildSnapIndex(S.prims);
+    await dxfFirst(gen);
+    const best = S.dxf.candidates[0];
+    if (best && (best.source === 'units' || best.source === 'dimensions') && best.confidence >= 0.6) S.scale = { method: 'text', cmPerUnit: best.cmPerUnit, label: best.label };
+  }
+  function dxfHidden() { return new Set(S.prims.layers.filter((L) => !L.visible).map((L) => L.name)); }
+  function drawDxfSheet() {
+    const long = Math.max(S.prims.pageBox.w, S.prims.pageBox.h) || 1000;
+    const hl = S.dxf.highlight ? new Set([S.dxf.highlight]) : null;
+    const canvas = S.sheet && S.sheet.fromDxf ? S.sheet.canvas : document.createElement('canvas');
+    const r = renderPrims(S.prims, { pxPerUnit: Math.max(0.05, Math.min(6, 2600 / long)), canvas, hide: dxfHidden(), highlight: hl });
+    const keep = S.sheet && S.sheet.fromDxf;
+    S.sheet = { canvas: r.canvas, ppu: r.pxPerUnit, w: S.prims.pageBox.w, h: S.prims.pageBox.h, fromPdf: false, fromDxf: true };
+    if (keep) sheet.redraw(); else sheet.setImage(r.canvas, r.pxPerUnit);
+  }
+  /** The first analysis at the best scale with the current layer roles (drawings on the sheet, size read-out). */
+  async function dxfFirst(gen = S.gen) {
+    const best = S.dxf.candidates[0];
+    setBusy('Looking for walls on the wall layers…');
+    const res = await engine('dxf-analyse', { prims: S.prims, opts: { candidates: S.dxf.candidates, layers: S.dxf.layers, roles: S.dxf.roles, scale: best ? { cmPerUnit: best.cmPerUnit } : undefined } });
+    if (gen !== S.gen) throw { cancelled: true };
+    S.first = res;
+    S.drawing = Math.min(S.drawing, Math.max(0, (res.drawings || []).length - 1));
+    if (!res.drawings || res.drawings.length < 2) S.drawing = res.drawing || 0;
+  }
+  function roleOf(L) { return S.dxf.roles[L.name] || L.role; }
+  async function setRole(name, role) {
+    const L = S.dxf.layers.find((x) => x.name === name);
+    if (!L) return;
+    if (role === L.role) delete S.dxf.roles[name]; else S.dxf.roles[name] = role;
+    S.result = null; S.resultKey = '';
+    await work('Looking for walls on the wall layers…', () => dxfFirst());
+    render();
+  }
+  let hlFrame = 0;
+  function setHighlight(name) {
+    if (!S.dxf || S.dxf.highlight === name) return;
+    S.dxf.highlight = name;
+    if (!hlFrame) hlFrame = requestAnimationFrame(() => { hlFrame = 0; if (S.dxf && S.prims) drawDxfSheet(); });
+    content.querySelectorAll('.ilayers__row').forEach((row) => row.classList.toggle('is-hl', row.dataset.layer === name));
+  }
+  function layerPanel() {
+    const layers = S.dxf.layers.filter((L) => L.count > 0).slice().sort((a, b) => (ROLES_ORDER[roleOf(a)] - ROLES_ORDER[roleOf(b)]) || b.count - a.count);
+    const rows = layers.map((L) => {
+      const sel = h('select', { class: 'ilayers__role', 'aria-label': `Use of layer ${L.name}`, onChange: () => setRole(L.name, sel.value) },
+        ['wall', 'door', 'window', 'other'].map((r) => h('option', { value: r, selected: roleOf(L) === r }, ROLE_LABEL[r])));
+      const what = [L.lines ? `${L.lines} line${L.lines === 1 ? '' : 's'}` : null, L.arcs ? `${L.arcs} arc${L.arcs === 1 ? '' : 's'}` : null, L.fills ? `${L.fills} hatch${L.fills === 1 ? '' : 'es'}` : null,
+        L.inserts ? `${L.inserts} block${L.inserts === 1 ? '' : 's'}` : null, L.texts ? `${L.texts} text${L.texts === 1 ? '' : 's'}` : null, L.dims ? `${L.dims} dim.` : null].filter(Boolean).join(', ');
+      const why = S.dxf.roles[L.name] ? 'your choice' : L.reason;
+      return h('li', { class: `ilayers__row${S.dxf.highlight === L.name ? ' is-hl' : ''}${L.visible ? '' : ' is-hidden'}`, dataset: { layer: L.name },
+        onPointerenter: () => setHighlight(L.name), onFocusin: () => setHighlight(L.name) },
+        h('span', { class: 'ilayers__sw', style: `background:${L.colour}` }),
+        h('span', { class: 'ilayers__text' },
+          h('span', { class: 'ilayers__name', dir: 'auto', title: L.name }, L.name),
+          h('span', { class: 'ilayers__meta' }, `${what || `${L.count} items`}${why ? ' · ' + why : ''}${L.visible ? '' : ' · hidden in the file'}`)),
+        sel);
+    });
+    const list = h('ul', { class: 'ilayers', 'aria-label': 'Layers', onPointerleave: () => setHighlight(null) }, rows);
+    const lay = S.prims.layouts || [];
+    return h('div', { class: 'ilayersbox' },
+      h('p', { class: 'iside__title' }, 'Layers'),
+      h('p', { class: 'iside__text' }, 'Walls are read only from the wall layers; doors and windows from their layers. Point at a layer to highlight it on the drawing; change its use if the guess is wrong.'),
+      list,
+      lay.length ? h('p', { class: 'iside__text faint' }, `Paper-space layouts (not read): ${lay.join(', ')}.`) : null);
+  }
+  function dwgHelp() {
+    return h('div', { class: 'callout idwg' }, icon('info', { size: 16 }), h('div', null,
+      h('p', { class: 'callout__title' }, 'DWG files cannot be read here — please send a DXF'),
+      h('p', { class: 'callout__text' }, 'DWG is AutoCAD’s own closed format. Getting a DXF takes a minute:'),
+      h('ul', { class: 'idwg__list' },
+        h('li', null, h('b', null, 'AutoCAD, BricsCAD, ArchiCAD, Revit, DraftSight and most CAD programs: '), 'open the drawing, choose File → Save As (or Export), pick “DXF” as the file type (AutoCAD 2018 DXF or any version is fine) and save.'),
+        h('li', null, h('b', null, 'No CAD program? '), 'The free ODA File Converter (from the Open Design Alliance) turns DWG files into DXF: choose the folder, output “DXF”, and run it.'),
+        h('li', null, 'Or ask the architect to send the plan as DXF — or as a PDF printed from the CAD program.')),
+      h('p', { class: 'callout__text' }, 'Then choose the DXF file here.')));
+  }
   function pickDrawing(i) {
     if (!S.first || !S.first.drawings || i === S.drawing) return;
     S.drawing = i;
@@ -338,6 +443,11 @@ export function openImportWizard(app, opts = {}) {
       if (!(cm > 0) || !(d > 0)) return null;
       return { cmPerUnit: cm / d, label: `${fmtLen(cm)} measured`, source: 'user' };
     }
+    if (sc.method === 'unit' && S.kind === 'dxf') {
+      const u = DXF_UNITS.find((x) => x[0] === S.dxf.unit);
+      if (!u) return null;
+      return { cmPerUnit: S.prims.dxf.duPerPageUnit * u[2], label: `1 unit = 1 ${u[1]}`, source: 'user' };
+    }
     if (sc.method === 'ratio') {
       const n = readNum({ value: S.ratio });
       if (!(n >= 1 && n <= 5000)) return null;
@@ -362,7 +472,7 @@ export function openImportWizard(app, opts = {}) {
       if (doors.length) lines.push(`a typical door ${Math.round(doors[Math.floor(doors.length / 2)] * f)} cm wide`);
     } else {
       const w = S.sheet.w * sc.cmPerUnit, hh = S.sheet.h * sc.cmPerUnit;
-      lines.push(`This makes the whole ${S.kind === 'pdf' ? 'sheet' : 'picture'} ${m2(w)} × ${m2(hh)} m`);
+      lines.push(`This makes the whole ${S.kind === 'pdf' ? 'sheet' : S.kind === 'dxf' ? 'drawing' : 'picture'} ${m2(w)} × ${m2(hh)} m`);
     }
     return lines.join('; ') + '.';
   }
@@ -379,8 +489,8 @@ export function openImportWizard(app, opts = {}) {
     sheet.setOverlay(measureOverlay);
     sheet.setHint(S.scale.method === 'measure' ? (S.measure.pts.length === 0 ? 'Click the first end of a length you know (a wall, a dimension line).' : S.measure.pts.length === 1 ? 'Click the other end.' : '') : '');
     const cands = S.first ? S.first.scaleCandidates || [] : [];
-    const text = cands.find((c) => c.source === 'text') || cands.find((c) => c.source === 'dimensions');
-    const guess = S.kind === 'pdf' ? cands.find((c) => c.source === 'geometry') || (S.first && S.first.scale && S.first.scale.source === 'geometry' ? S.first.scale : null) : null;
+    const text = S.kind === 'dxf' ? cands.find((c) => c.source === 'units' || c.source === 'dimensions') : cands.find((c) => c.source === 'text') || cands.find((c) => c.source === 'dimensions');
+    const guess = S.kind === 'dxf' ? (!text ? cands.find((c) => c.source === 'geometry') : null) : S.kind === 'pdf' ? cands.find((c) => c.source === 'geometry') || (S.first && S.first.scale && S.first.scale.source === 'geometry' ? S.first.scale : null) : null;
     const opt = (method, title, desc, extra) => {
       const on = S.scale.method === method;
       return h('div', { class: `iopt${on ? ' is-on' : ''}` },
@@ -401,8 +511,18 @@ export function openImportWizard(app, opts = {}) {
     dpiInput = numInput(S.dpi, { 'aria-label': 'Scan resolution in dots per inch', onInput: () => { S.dpi = dpiInput.value; syncScaleInfo(); } });
     const ratioExtra = h('div', { class: 'iopt__rows' }, field('1 :', ratioInput),
       S.kind === 'image' && !S.image.pdfPxPerUnit ? field('Scanned at', dpiInput, 'dpi') : null,
-      h('p', { class: 'iopt__text' }, S.kind === 'pdf' || S.image.pdfPxPerUnit ? 'Only right when the PDF is at true paper size (not “fit to page”).' : 'Only right for a flat scan at a known resolution — not for a photo.'));
-    const opts = [
+      h('p', { class: 'iopt__text' }, vector() || (S.image && S.image.pdfPxPerUnit) ? 'Only right when the PDF is at true paper size (not “fit to page”).' : 'Only right for a flat scan at a known resolution — not for a photo.'));
+    const unitSel = S.kind === 'dxf' ? h('select', { class: 'iunit', 'aria-label': 'Drawing unit', onChange: () => { S.dxf.unit = unitSel.value; syncScaleInfo(); } },
+      h('option', { value: '' }, 'Choose…'), DXF_UNITS.map(([name, short]) => h('option', { value: name, selected: S.dxf.unit === name }, `1 unit = 1 ${short} (${name})`))) : null;
+    const dxfText = text && S.kind === 'dxf' ? (text.source === 'units'
+      ? [`The file is drawn in ${text.unit} (${text.label})`, `The DXF says so ($INSUNITS)${text.evidence && text.evidence.dimensions && text.evidence.dimensions.agree ? `, and ${text.evidence.dimensions.agree} of its ${text.evidence.dimensions.of} dimensions agree` : ''}.`]
+      : [`The drawing is in ${text.unit} (${text.label})`, `The file does not say; its ${text.evidence.dimensions ? text.evidence.dimensions.of : ''} dimension figures and the wall sizes fit ${text.unit} — ${confWords(text.confidence)}.`]) : null;
+    const opts = S.kind === 'dxf' ? [
+      text ? opt('text', dxfText[0], dxfText[1]) : null,
+      opt('measure', 'Measure a known length', 'Click both ends of something whose real length you know, then type it.', measureExtra),
+      opt('unit', 'Choose the drawing unit', null, h('div', { class: 'iopt__rows' }, field('Unit', unitSel), h('p', { class: 'iopt__text' }, 'A DXF has no paper scale: every length is in its drawing unit.'))),
+      guess ? opt('guess', `Best guess: ${guess.label} (${guess.unit})`, `A guess from the drawing’s proportions (wall thickness, doors, size) — ${confWords(guess.confidence)}. Check the size below before using it.`) : null,
+    ] : [
       opt('measure', 'Measure a known length', 'Most reliable: click both ends of something whose real length you know, then type it.', measureExtra),
       text ? opt('text', `The drawing says ${text.label}`, text.source === 'text' ? 'Found in the drawing’s text.' : 'Worked out from the dimension figures written on the drawing.') : null,
       opt('ratio', 'Type the scale (1 : N)', null, ratioExtra),
@@ -424,9 +544,11 @@ export function openImportWizard(app, opts = {}) {
     S.scale.method = method;
     if (method === 'text' && S._text) { S.scale.cmPerUnit = S._text.cmPerUnit; S.scale.label = S._text.label; }
     else if (method === 'guess' && S._guess) { S.scale.cmPerUnit = S._guess.cmPerUnit; S.scale.label = S._guess.label; }
+    else if (method === 'unit' && S.kind === 'dxf' && !S.dxf.unit) { const c = S.dxf.candidates[0]; S.dxf.unit = c ? (DXF_UNITS.find((u) => u[0] === c.unit) || [null])[0] : null; S.scale.cmPerUnit = null; S.scale.label = ''; }
     else { S.scale.cmPerUnit = null; S.scale.label = ''; }
     renderScale(); syncFoot();
     if (method === 'ratio') setTimeout(() => ratioInput && ratioInput.focus(), 20);
+    if (method === 'unit') setTimeout(() => { const u = content.querySelector('.iunit'); if (u) u.focus(); }, 20);
   }
   function syncScaleInfo() {
     const info = content.querySelector('.isanity');
@@ -565,9 +687,15 @@ export function openImportWizard(app, opts = {}) {
   async function analyse() {
     const sc = currentScale();
     if (!sc) return false;
-    const key = JSON.stringify([S.kind, S.page, sc.cmPerUnit, S.drawing, S.rotate, S.mirror]);
+    const key = JSON.stringify([S.kind, S.page, sc.cmPerUnit, S.drawing, S.rotate, S.mirror, S.dxf ? S.dxf.roles : null]);
     if (S.result && S.resultKey === key) return true;
-    const res = await work(S.kind === 'pdf' ? 'Finding walls, doors and windows…' : 'Looking for walls in the picture…', async () => {
+    const res = await work(vector() ? 'Finding walls, doors and windows…' : 'Looking for walls in the picture…', async () => {
+      if (S.kind === 'dxf') {
+        const r = await engine('dxf-analyse', { prims: S.prims, opts: { candidates: S.dxf.candidates, layers: S.dxf.layers, roles: S.dxf.roles, scale: { cmPerUnit: sc.cmPerUnit }, walls: { drawing: S.drawing }, rotate: S.rotate, mirror: S.mirror } });
+        if (!r) return null;
+        r.sheetTransform = r.walls.length ? r.transform : null;
+        return r;
+      }
       if (S.kind === 'pdf') {
         const r = await engine('analyse', { prims: S.prims, opts: { scale: { cmPerUnit: sc.cmPerUnit }, walls: { drawing: S.drawing }, rotate: S.rotate, mirror: S.mirror } });
         if (!r) return null;
@@ -791,7 +919,7 @@ export function openImportWizard(app, opts = {}) {
     const r = S.result;
     const T = affThen(r.sheetTransform, [1, 0, 0, 1, shift.x, shift.y]);         // sheet units → plan cm
     let src = S.sheet.canvas, ppu = S.sheet.ppu, crop;
-    if (S.kind === 'pdf') {
+    if (vector()) {
       // the page around the house with a generous margin (keeps the stored image compact), rendered sharper
       const b = r.walls.length && r.stats && r.stats.bounds ? r.stats.bounds : null;
       let box = { x: 0, y: 0, w: S.sheet.w, h: S.sheet.h };
@@ -802,6 +930,15 @@ export function openImportWizard(app, opts = {}) {
         const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
         const x0 = Math.max(0, Math.min(...xs)), y0 = Math.max(0, Math.min(...ys));
         box = { x: x0, y: y0, w: Math.min(S.sheet.w, Math.max(...xs)) - x0, h: Math.min(S.sheet.h, Math.max(...ys)) - y0 };
+      }
+      if (S.kind === 'dxf') {
+        // a fresh rendering of just that part of the drawing (all visible layers), sharp enough to trace over
+        const want = Math.min(6, 2400 / Math.max(box.w, box.h));
+        const hi = renderPrims(S.prims, { pxPerUnit: want, crop: box, hide: dxfHidden() });
+        const enc = encodeUnderlay(hi.canvas);
+        const toSheet = [1 / (enc.k * hi.pxPerUnit), 0, 0, 1 / (enc.k * hi.pxPerUnit), box.x + enc.x / hi.pxPerUnit, box.y + enc.y / hi.pxPerUnit];
+        return { image: enc.image, width: enc.width, height: enc.height, transform: affThen(toSheet, T).map((v) => +v.toFixed(6)), opacity: 0.55, visible: true,
+          source: { kind: 'dxf', name: S.fileName, page: null, lowConfidence: !!r.lowConfidence, units: S.prims.dxf.units.name } };
       }
       try {
         const want = Math.min(4, 2600 / Math.max(box.w, box.h), 4800 / Math.max(S.sheet.w, S.sheet.h));

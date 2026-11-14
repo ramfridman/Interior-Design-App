@@ -8,6 +8,7 @@ import { openPdf } from '../../import/pdfjs-loader.js';
 
 export const MAX_PDF_BYTES = 80 * 1024 * 1024;
 export const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
+export const MAX_DXF_BYTES = 150 * 1024 * 1024;
 const ANALYSE_MAX_PX = 3200;      // raster analysis: long side of the image the engine reads
 const UNDERLAY_MAX_PX = 2400;     // stored underlay: long side (≈ 1–2 cm per pixel on a house drawing)
 
@@ -15,22 +16,29 @@ export class ImportError extends Error {
   constructor(message) { super(message); this.name = 'ImportError'; this.plain = true; }
 }
 
-/** 'pdf' | 'image' from the bytes (magic numbers), falling back to the name / type. Throws ImportError otherwise. */
+/** 'pdf' | 'image' | 'dxf' | 'dwg' from the bytes (magic numbers), falling back to the name / type. Throws ImportError
+ *  otherwise. 'dwg' is only recognised so the dialog can explain how to get a DXF (DWG is not read). */
 export async function sniff(file) {
   if (!file) throw new ImportError('No file was chosen.');
-  const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  const head = new Uint8Array(await file.slice(0, 256).arrayBuffer());
   const ascii = String.fromCharCode(...head.slice(0, 5));
+  const text = String.fromCharCode(...head).replace(/^\uFEFF|^\u00EF\u00BB\u00BF/, '');
   let kind = null;
   if (ascii.startsWith('%PDF')) kind = 'pdf';
+  else if (/^AC10\d\d/.test(ascii)) kind = 'dwg';
+  else if (text.startsWith('AutoCAD Binary DXF') || /^\s*(0\s*\r?\n\s*SECTION|999\s*\r?\n)/.test(text)) kind = 'dxf';
   else if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) kind = 'image';    // PNG
   else if (head[0] === 0xff && head[1] === 0xd8) kind = 'image';                                         // JPEG
   else if (/\.(pdf)$/i.test(file.name || '') || file.type === 'application/pdf') kind = 'pdf';
   else if (/^image\/(png|jpeg)$/.test(file.type || '')) kind = 'image';
+  else if (/\.dxf$/i.test(file.name || '')) kind = 'dxf';
+  else if (/\.dwg$/i.test(file.name || '')) kind = 'dwg';
   if (!kind) {
-    if (/\.(heic|heif|tiff?|gif|bmp|svg|webp|dwg|dxf)$/i.test(file.name || '')) throw new ImportError(`“${file.name}” is not a PDF, PNG or JPG. Save or export the drawing as one of those (a PDF straight from the drawing program is best) and choose it again.`);
-    throw new ImportError(`“${file.name || 'This file'}” is not a PDF, PNG or JPG file.`);
+    if (/\.(heic|heif|tiff?|gif|bmp|svg|webp)$/i.test(file.name || '')) throw new ImportError(`“${file.name}” is not a PDF, DXF, PNG or JPG. Save or export the drawing as one of those (a DXF or a PDF straight from the drawing program is best) and choose it again.`);
+    throw new ImportError(`“${file.name || 'This file'}” is not a PDF, DXF, PNG or JPG file.`);
   }
   if (kind === 'pdf' && file.size > MAX_PDF_BYTES) throw new ImportError(`This PDF is ${mb(file.size)} — too large to read in the browser (up to ${mb(MAX_PDF_BYTES)}). Save just the plan page as its own PDF and import that.`);
+  if (kind === 'dxf' && file.size > MAX_DXF_BYTES) throw new ImportError(`This DXF is ${mb(file.size)} — too large to read in the browser (up to ${mb(MAX_DXF_BYTES)}). In the CAD program, copy just the floor plan into a new drawing (WBLOCK) and save that as DXF.`);
   if (kind === 'image' && file.size > MAX_IMAGE_BYTES) throw new ImportError(`This image is ${mb(file.size)} — too large (up to ${mb(MAX_IMAGE_BYTES)}). Save it smaller (about 3000 pixels across is plenty) and import that.`);
   return kind;
 }

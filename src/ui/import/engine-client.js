@@ -4,10 +4,19 @@
  * Where workers are unavailable (a sandbox that forbids them) the same code runs on the main thread after a frame,
  * so the progress state is painted first; cancelling then only discards the result.
  *
- *   const task = runTask('analyse', { prims, opts });   // or runTask('image', { image, opts })
+ *   const task = runTask('analyse', { prims, opts });   // or 'image' { image, opts }, 'dxf-read' { bytes }, 'dxf-analyse' { prims, opts }
  *   task.promise.then(result => …);  task.cancel();     // a cancelled task rejects with { cancelled: true }
  */
 let workersBroken = false;
+
+/** The engine call behind each task type (shared by the worker and the main-thread fallback). */
+export function runEngine(eng, type, p) {
+  if (type === 'analyse') return eng.analysePrims(p.prims, p.opts || {});
+  if (type === 'image') { const r = eng.readImage(p.image, p.opts || {}); if (r) r.prims = null; return r; }
+  if (type === 'dxf-read') { const prims = eng.readDxf(p.bytes); return { prims, look: eng.firstLook(prims) }; }
+  if (type === 'dxf-analyse') return eng.analyseDxf(p.prims, p.opts || {});
+  throw new Error('unknown task ' + type);
+}
 let seq = 0;
 
 /** @returns {{ promise: Promise<object>, cancel(): void, mode: 'worker' | 'main-thread' }} */
@@ -23,8 +32,7 @@ export function runTask(type, payload) {
         try {
           const eng = await import('../../import/index.js');
           ranIn = 'main-thread';
-          const result = type === 'analyse' ? eng.analysePrims(payload.prims, payload.opts || {}) : eng.readImage(payload.image, payload.opts || {});
-          if (type === 'image' && result) result.prims = null;
+          const result = runEngine(eng, type, payload);
           if (!cancelled) resolve(result);
         } catch (err) { if (!cancelled) reject(err); }
       }, 30));
@@ -38,7 +46,7 @@ export function runTask(type, payload) {
       if (m.id !== id) return;
       worker.terminate(); worker = null; ranIn = 'worker';
       if (cancelled) return;
-      if (m.ok) resolve(m.result); else reject(new Error(m.error));
+      if (m.ok) resolve(m.result); else reject(Object.assign(new Error(m.error), { plain: !!m.plain, code: m.code }));
     };
     worker.onerror = (e) => {
       // the worker could not start (blocked by the page's sandbox / policy): run here instead

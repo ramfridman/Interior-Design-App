@@ -9,6 +9,9 @@ export { detectOpenings } from './openings.js';
 export { normalise } from './normalise.js';
 export { readImage, imageToPrims, scaleFromImagePoints } from './raster.js';
 export { loadPdfjs } from './pdfjs-loader.js';
+export { readDxf, mtextPlain, aciColor, INSUNITS, DXF_PAGE_RATIO } from './dxf-read.js';
+export { analyseDxf, dxfScaleCandidates, proposeLayers, firstLook, rolesOf, doorBlockWidths, ROLES } from './dxf.js';
+export { renderPrims } from './dxf-render.js';
 
 import { readPdf } from './pdf-read.js';
 import { detectScale } from './scale.js';

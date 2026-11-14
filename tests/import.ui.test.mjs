@@ -5,6 +5,8 @@
 //      a reload keeps the project and its underlay.
 //   2. a PNG rendering of the same page: the flow completes with the low-confidence banner and an underlay.
 //   3. a broken file and a password-protected PDF give plain messages; re-align is exercised with real clicks.
+//   3b. a DXF of the built-in house (Hebrew layers, code page 1255): DWG explained, binary DXF refused, layer panel
+//       pre-ticked, units read, project created with walls within 1 cm and a DXF rendering as the underlay.
 //      node tests/import.ui.test.mjs [--shots]      (screenshots → $SHOTS_DIR or dev/screens/import-*.png)
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -13,6 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { houseDxf } from './dxf-fixtures.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -360,6 +363,86 @@ try {
   await page.waitForFunction(() => !document.querySelector('.importdlg') && window.app.projects.current().name === 'Blank trace', null, { timeout: 30000 }).catch(() => {});
   const blank = await page.evaluate(() => ({ name: window.app.projects.current().name, phase: window.app.projects.current().phase, walls: window.app.plan.walls.length, underlay: !!(window.app.store.underlay && window.app.store.underlay.image), lot: window.app.plan.site.bounds }));
   check('…an empty draft with the underlay, the lot covering the picture', blank.name === 'Blank trace' && blank.phase === 'draft' && blank.walls === 0 && blank.underlay && blank.lot.w > 1500, JSON.stringify(blank));
+
+  // ─────────── 3b. AutoCAD DXF (Hebrew layer names, code page 1255): layer panel, units, create, underlay ───────────
+  {
+    const DXF = path.join(tmp, 'house-he.dxf'), DWG = path.join(tmp, 'house.dwg'), BIN = path.join(tmp, 'binary.dxf');
+    fs.writeFileSync(DXF, houseDxf({ unit: 1, insunits: 5, version: 'AC1015', codepage: 'ANSI_1255', names: { wall: 'קירות', door: 'דלתות', window: 'חלונות', dim: 'מידות', furn: 'ריהוט' }, title: 'תכנית קומת קרקע' }).bytes());
+    fs.writeFileSync(DWG, Buffer.concat([Buffer.from('AC1032'), Buffer.alloc(64)]));
+    fs.writeFileSync(BIN, Buffer.concat([Buffer.from('AutoCAD Binary DXF\r\n\x1a\0', 'latin1'), Buffer.alloc(64)]));
+    await page.locator('.inext .btn--primary').click().catch(() => {});
+    await page.evaluate(() => window.app.store.setUI({ tool: 'select' }));
+    await sleep(300);
+    await page.locator('.projname--switch').click();
+    await page.getByRole('menuitem', { name: /Import a sketch/ }).click();
+    await page.waitForSelector('.importdlg');
+    check('DXF: the file picker accepts .dxf and .dwg', await page.evaluate(() => /\.dxf/.test(document.querySelector('#import-sketch-file').accept) && /\.dwg/.test(document.querySelector('#import-sketch-file').accept)));
+    await page.setInputFiles('#import-sketch-file', DWG);
+    await sleep(600);
+    const dwg = await page.locator('.idwg').textContent().catch(() => '');
+    check('DWG: explained (closed format, Save As → DXF, ODA File Converter), not parsed', /closed format/.test(dwg) && /Save As/.test(dwg) && /ODA File Converter/.test(dwg) && await nextBtn().isDisabled(), dwg.slice(0, 80));
+    await page.setInputFiles('#import-sketch-file', BIN);
+    st = await until((s) => !s.busy && s.error, 20000);
+    check('binary DXF: plain message', st && /binary DXF/.test(st.error), st && st.error);
+    await page.setInputFiles('#import-sketch-file', DXF);
+    st = await until((s) => s.sheet && s.first && !s.busy, 60000);
+    check('DXF read in the worker, drawn and analysed', st && st.kind === 'dxf' && !st.error && st.ranIn === 'worker', JSON.stringify(st));
+    const layers = await page.evaluate(() => [...document.querySelectorAll('.ilayers__row')].map((r) => ({ name: r.dataset.layer, role: r.querySelector('select').value, dir: getComputedStyle(r.querySelector('.ilayers__name')).direction, text: r.querySelector('.ilayers__name').textContent })));
+    const role = (n) => (layers.find((l) => l.name === n) || {}).role;
+    check('DXF: layer panel with the proposal pre-ticked (walls / doors / windows / other)', role('קירות') === 'wall' && role('דלתות') === 'door' && role('חלונות') === 'window' && role('ריהוט') === 'other', JSON.stringify(layers));
+    check('DXF: Hebrew layer names shown as they are', layers.some((l) => l.text === 'קירות'));
+    await page.locator('.ilayers__row', { hasText: 'דלתות' }).hover();
+    await sleep(300);
+    check('DXF: pointing at a layer highlights it on the drawing', await page.evaluate(() => document.querySelector('.importdlg')._import.state.dxf.highlight === 'דלתות' && !!document.querySelector('.ilayers__row.is-hl')));
+    if (shots) await page.screenshot({ path: path.join(shotDir, 'import-dxf-layers.png') });
+    await nextBtn().click();
+    await page.waitForSelector('.iopts');
+    const first = (await page.locator('.iopt__title').first().textContent()).trim();
+    const on = await page.locator('.iopt.is-on .iopt__title').textContent().catch(() => '');
+    const sanityDxf = await page.locator('.isanity').textContent();
+    check('DXF scale: first option reads the file\'s units, chosen, with the live read-out', first === 'The file is drawn in centimetres (1 unit = 1 cm)' && on.trim() === first && /15\.35 × 13\.80 m/.test(sanityDxf), `${first} | ${sanityDxf.trim()}`);
+    await nextBtn().click();
+    await page.waitForSelector('.inorth');
+    await nextBtn().click();
+    st = await until((s) => s.step === 3 && s.result && !s.busy, 60000);
+    check('DXF review: walls and 23 openings', st && st.result && st.result.walls > 40 && st.result.openings === 23, JSON.stringify(st && st.result));
+    await nextBtn().click();
+    await page.waitForSelector('.icreate');
+    await page.getByLabel('Project name').fill('Imported DXF');
+    await nextBtn().click();
+    await page.waitForFunction(() => !document.querySelector('.importdlg') && window.app.projects.current().name === 'Imported DXF', null, { timeout: 30000 }).catch(() => {});
+    await sleep(600);
+    const dx = await page.evaluate(() => {
+      const a = window.app, u = a.store.underlay;
+      return { name: a.projects.current().name, walls: a.plan.walls.map(({ x, y, w, h }) => ({ x, y, w, h })), openings: a.plan.openings.length, rooms: a.plan.rooms.length,
+        underlay: u ? { kind: u.source.kind, width: u.width, height: u.height, transform: u.transform, mime: u.image.slice(5, 15) } : null };
+    });
+    // every coordinate is on the 5 cm grid, so "within 1 cm" means the same wall area cell for cell
+    const cwd = compareWalls(dx.walls, before.walls, 5), fu = cells(dx.walls), pu = cells(before.walls);
+    const symd = [...fu].filter((k) => !pu.has(k)).length + [...pu].filter((k) => !fu.has(k)).length;
+    check('DXF project: walls = the built-in house within 1 cm (identical wall area)', dx.name === 'Imported DXF' && cwd.within === cwd.plan && cwd.stickOut === 0 && symd === 0, JSON.stringify({ ...cwd, symDiffCells: symd }));
+    check('DXF project: 23 openings, 9 rooms', dx.openings === 23 && dx.rooms === 9, `${dx.openings} / ${dx.rooms}`);
+    check('DXF project: underlay is a rendering of the DXF', dx.underlay && dx.underlay.kind === 'dxf' && /image\/(webp|jpeg)/.test(dx.underlay.mime) && Math.max(dx.underlay.width, dx.underlay.height) <= 2400, JSON.stringify(dx.underlay));
+    // the underlay's ink sits on the wall faces: across the longest north wall, dark pixels at y ≈ 0 and y ≈ thickness
+    const ink = await page.evaluate(async () => {
+      const { affInv, affApply } = await import('/src/ui/import/affine.js');
+      const u = window.app.store.underlay, img = new Image(); img.src = u.image; await img.decode();
+      const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img, 0, 0);
+      const M = affInv(u.transform), g = c.getContext('2d');
+      const w = window.app.plan.walls.filter((q) => q.w > q.h && q.y < 50).sort((a, b) => b.w - a.w)[0];
+      const out = [];
+      for (const fx of [0.3, 0.5, 0.7]) {
+        const x = w.x + w.w * fx;
+        if (window.app.plan.openings.some((o) => x >= o.x - 10 && x <= o.x + o.w + 10)) continue;
+        const dark = [];
+        for (let y = w.y - 30; y <= w.y + w.h + 30; y += 0.5) { const [px, py] = affApply(M, x, y); const d = g.getImageData(Math.round(px), Math.round(py), 1, 1).data; if (255 - (d[0] + d[1] + d[2]) / 3 > 90) dark.push(y); }
+        out.push({ x, top: dark.length ? Math.min(...dark) : null, bottom: dark.length ? Math.max(...dark) : null, wy: w.y, wh: w.h });
+      }
+      return out;
+    });
+    check('DXF underlay aligned with the walls (ink on both faces within 3 cm)', ink.length >= 2 && ink.every((s) => s.top != null && Math.abs(s.top - s.wy) <= 3 && Math.abs(s.bottom - (s.wy + s.wh)) <= 3), JSON.stringify(ink));
+    if (shots) await page.screenshot({ path: path.join(shotDir, 'import-dxf-draft.png') });
+  }
 
   // ─────────── 4. phone (390 × 800, touch): pinch zooms, two fingers pan, one finger picks a snapped corner ───────────
   {
