@@ -495,6 +495,79 @@ updateLevel(id, { name, nameHe, heights: { ceiling, slab, parapet } })   // not 
   the floor they are on.
 * Tests: `node tests/levels-2d.test.mjs`, `node tests/e2e.levels.mjs [--shots]`.
 
+### Angled walls: derive (stage A1, additive; creating slants is behind `FEATURES.angledWalls`)
+A level (L0 or an upper one) may carry `slants: [{ id: 's01'…, x1, y1, x2, y2, t, kind: 'interior' | 'exterior' |
+'mamad', chain? }]` — centre line + thickness, cm (docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md § 2). A plan that HAS slants is
+always derived correctly, whatever the switch; only the entry points that CREATE slants read it (UI, the importer's
+default, `buildPlan`'s default).
+* **Two paths.** A level without slants (and without openings in slants) runs exactly the grid engine — House 98 and every
+  orthogonal plan are byte-identical (ids, rooms, outline, segments; House 98 derive ≈ 1.0 ms before and after). A level
+  with ≥ 1 slant runs the **mixed derive** (`plan-edit.js` `deriveMixed`; polygon half in `src/core/slants.js`), per level
+  inside the usual level swap:
+  - solids = wall rects ∪ rect openings ∪ the slants' joined footprints (`slant-geom` `joinSlants`, recomputed every time
+    — a saved `poly` is never trusted, and the engine never writes one) ∪ the gap quads of the openings in slants;
+  - rooms / outdoors = the faces of the complement inside the grid frame (bbox + 100 cm): the face touching the frame is
+    outdoors, every bounded face a room (openings are solid, so they separate rooms). Room polygons are exact (vertices on
+    the kernel's 0.001 cm grid; rounding jogs < 0.0015 cm removed), areas exact; a free-standing wall makes a hole joined
+    by a zero-width slit as before. Matching to the previous rooms (ids, names, type, wet, labels, zones, drawnArea; ids
+    global across levels) follows the grid engine's rules, by exact overlap area;
+  - rect walls keep the grid (cores, classes, jambs, `PLAN.walls` and their ids); free cells under a slant are neither free
+    nor bar, so a rect wall ending on a slant has a joined (not free) end; outdoors / sides come from the faces;
+  - `wallOutline` = boundary of the wall material (union minus the gaps): diagonal `[x1, y1, x2, y2]` entries appear, each
+    written from its west (then north) end, sorted as before; jamb lines included.
+* **Slant segments** (one per slant, after the rect segments in `wallSegments()`): `id: 'seg:a:<slantId>'` (upper levels
+  `'L1|seg:a:s01'`), `axis: 'a'`, `slantId`, `x1, y1, x2, y2, t`, `angle` (deg of x1→x2, y down), `poly` (joined footprint),
+  `x, y, w, h` (its AABB — culling / dirty rects only), `core` (= the AABB; not something to move), `thickness` (= t),
+  `length` (centre line), `cls`, `kind`, `policy: { level, reason }` (same table as rects; exterior if a face borders an
+  outdoor face anywhere, mamad if the footprint enters the safe-room shell, else thick (t ≥ 15 and on the base plan) /
+  partition), `isNew` (< 50 % of its footprint on the base plan's solids), `openingIds`, `between: [l, r]` (spaces on its
+  left / right face relative to x1→x2: the most frequent one, sampled every ≤ 20 cm along the free stretches of each
+  face), `freeEnds: [start, end]` (no join at that end), `faces: { l: [[a0, a1]…], r }` (stretches, cm from (x1, y1), where
+  that face borders open space). Rect segments keep their shape; on a mixed level their `openingIds` never list openings
+  in slants, and a `between` side whose middle neighbour is under a slant is taken from the first free neighbour along it.
+* **Openings in slants** (`{ id, kind, style, width, height, sill, wall: <slant id>, axis: 'a', at, hinge: 'a' | 'b',
+  swing: 'l' | 'r', … }`; `at` = cm from (x1, y1) to the gap centre; 'r' = the right-hand normal (−uy, ux) on screen) get
+  derived `cx, cy` (gap centre), `angle` (deg, the slant's), `t`, `x, y, w, h` (AABB of the gap quad — culling only, never
+  gap geometry), `rooms` ([indoor side first], as rect openings), `exterior`, `outside: 'l' | 'r'`. Checks (reported in
+  `problems` like rect openings: `jamb` / `overlap` / `blocked`): the wall exists; ≥ 10 cm of wall on BOTH faces beside the
+  gap (so on the shorter face after mitres; parts of the footprint inside rects / other slants do not count); no overlap
+  and ≥ 10 cm between two openings of one slant. Policy as rect openings (exterior → `'permit'`, safe-room shell → `'locked'`).
+* **Queries.** `wallSegments(plan)` returns both kinds; `segmentAt(x, y, tol)` = the rect segment containing the point, else
+  the slant footprint containing it, else the nearest rect / footprint edge within `tol`.
+* **Geometry helpers** (`geometry.js`): `openingFrame(o, plan)` has the `'a'` entry (from the derived `cx, cy, angle, t`;
+  without them from `plan.slants`): u = x1→x2, n = right normal, faces `['l', 'r']` (−n, +n), jambs `['a', 'b']` — so
+  `openingPoint`, `openingBox`, `openingHinge`, `openingFaceSign / Name`, `openingJambSign` work as for 'h' / 'v';
+  `openingPoly(o, plan)` = the gap quad. `slantPolys(plan)` = the joined footprints (the segments' `poly` numbers; cached).
+  `wallPolys(plan)` = the rect polys in `plan.walls` order, THEN the slant footprints (id = slant id). `inWall` (footprint
+  minus its gaps) and `inWallOrOpening` see slants; `wallFaces(plan)` gets the diagonal faces with true unit normals,
+  split at openings. `walkBoxes(plan)` adds each slant as rotated boxes along its centre line, cut at its doors /
+  passages, plus one box per window in a slant; `walkBlockers` (axis-aligned) never lists an opening in a slant.
+  `levels.footprintOf(level)` counts the slants (recomputed footprints + gap quads).
+* **State.** `planState()` carries `slants` (and `schema: 2`) with the other optional keys; `applyPlanState` accepts slants
+  and `axis: 'a'` openings (`wall` string, numeric `at`, `width` > 0), derives them, and in a fixed plan refuses a state
+  that moves / removes a locked slant (same centre line and thickness required; upper levels too) or changes the built
+  footprint (union of walls + openings + rooms, ± 2 cm²). Undo / redo, `isPlanModified`, store files, project files and
+  the collab doc carry them unchanged; a plan whose slants are all removed is byte-identical to its schema-1 form again.
+  `planDiff()` adds `{ kind: 'slant-added' | 'slant-removed' | 'slant-changed', level, text, at, ref: <segment id> }`
+  (removed / changed: the base wall's level, `'locked'` given as `'permit'`); an opening in a slant moved along it reads
+  "moved N cm", one in a removed slant is not listed as closed.
+* **Existing mutations on a level with slants** (until stage A2): `addWall`, `canAddWall`, `removeWallSegment`,
+  `moveWallSegment`, `resizeWallSegment` are refused with `REASONS.angledWalls` (that level only). `addOpening` /
+  `canAddOpening` work in rect walls (refused with `REASONS.angledOpening` when the nearest wall is a slant);
+  `updateOpening` / `flipDoor` work on openings in rect walls and are refused with `REASONS.angledOpening` for openings in
+  slants; `removeOpening` (both kinds), `updateRoom`, `resetPlan`, `addLevel` (an exterior slant and its windows are copied
+  up), `removeLevel`, `updateLevel` work. Every successful call re-derives the level with its slants kept.
+* **For the next stages:** rely on the segment fields `id, axis, slantId, x1…y2, t, angle, poly, x y w h, length, cls, kind,
+  policy, isNew, openingIds, between [l, r], freeEnds, faces`; the opening fields `wall, at, width, hinge 'a'|'b',
+  swing 'l'|'r', outside 'l'|'r', cx, cy, angle, t, rooms, exterior` (`x y w h` = AABB only); `openingFrame`,
+  `openingPoly`, `slantPolys`, `wallPolys`, `wallFaces`, `walkBoxes`; diagonal `wallOutline` entries; room polygons with
+  non-integer vertices. A2 (editing): slots / jambs from `faces`; 'seg:a:' ids are stable by slant id. A3 (2D): draw
+  `slantPolys(plan)` (or `seg.poly`), hit-test with `segmentAt`, sides from `between`. A4 (3D): `wallOutline` +
+  `slantPolys` + `openingFrame`. A5: regulations / carpentry / walk through `wallPolys`, `wallFaces`, `walkBoxes`,
+  `openingFrame` (slant-aware now); `largestInnerRect`, `roomSides` etc. still treat rooms as rectilinear.
+* Performance (Node, unloaded): mixed derive of the Wedge ≈ 1.4 ms, House 98 + two slants ≈ 3.3 ms (the first derive
+  after adding them, label points recomputed, ≈ 5.4 ms). Tests: `node tests/slants.test.mjs`.
+
 ### Notes for the view / UI teams
 * New opening kind `'opening'` (style `'open'`): draw it as a clear gap with jambs — no leaf, no swing arc; it is
   walkable (`walkBlockers()` only blocks walls and windows).
@@ -1037,6 +1110,17 @@ const { ok, plan, warnings } = buildPlan({ walls, openings, meta, heights, site,
   `elevation` is computed (below's elevation + its ceiling + this slab; a different given value is a warning), the origin
   is the NW corner of all levels, `bounds` their union, `meta.floors` = 1 + levels. Without the option or the flag,
   floors stay an `error` as before. With `passThrough: true` the optional data is now moved with the origin too.
+* **Angled walls (stage A1).** `buildPlan(input, { slants: true })` (or while `FEATURES.angledWalls` is on; `{ slants:
+  false }` forces today's behaviour) accepts non-orthogonal walls: diagonal centre lines `{ x1, y1, x2, y2, thickness }` in
+  `walls`, and the reader's `slants` (§ 11 "the `slants` option": `{ id, x1, y1, x2, y2, t, kind, chain? }`) with their
+  openings `{ kind, axis: 'a', wall, at, width, hinge: 'a'|'b', swing: 'l'|'r', … }` in `openings`. They become `plan.slants`
+  `{ id: 's01'…, x1, y1, x2, y2, t, kind }` (input order; centre lines on 0.1 cm; kind from the derive; openings re-pointed
+  to the new ids): within 0.5° of an axis → a rect wall (its openings → rect openings with compass hinge / swing); free
+  ends within 1.5 t of another free end meet at their mean point, other free ends within 1.5 t of a wall face (along the
+  centre line) are extended to it (`at` of their openings re-measured, so they keep their place). The whole plan is derived
+  with the mixed derive (§ 7 "Angled walls: derive"); the origin includes the slants (whole cm) and moves them too;
+  `bounds` include their footprints; `schema: 2`. Upper floors (`levels`) take `slants` the same way. Without the option /
+  flag a diagonal wall is still an `error` ("…orthogonal…") and left out.
 
 ### Projects (`projects.js`)
 ```js
@@ -1194,8 +1278,9 @@ orthogonal-only result** (byte for byte; angled / curved pieces only in `unsuppo
   rectangle are left there (the plan engine's joins extend / clip them). With the option on, straight orthogonal runs
   inside a curved PDF path feed the orthogonal fill, so a drawing with such paths can differ from the default run
   even without slants. Tested on generated drawings only.
-* **Not for `buildPlan` yet**: the plan engine does not take slants until stage A1; the import dialog keeps treating
-  angled / curved walls as "redraw by hand" (it does not pass the option).
+* **`buildPlan`** takes this output with `{ slants: true }` since stage A1 (§ 10; tested: the Wedge drawing → the same 3 rooms,
+  openings and classes as the designed plan); the import dialog keeps treating angled / curved walls as "redraw by hand"
+  (it does not pass the option) until the switch is on.
 * Measured (tests/import.test.mjs, tests/import.dxf.test.mjs; fixtures in tests/import-slant-fixtures.mjs): the design's
   "Wedge" drawn as the union outline of its walls with door swings and glass lines, as PDF-like primitives and as DXF —
   both slants on the design centre lines (end points ≤ 0.05 cm off the lines), thickness exact, kinds right; the window
@@ -1536,8 +1621,9 @@ Errors: 401 no identity · 403 role / cross-site · 404 not a member (indistingu
 
 ## 14. Polygon kernel and slant geometry (`src/core/polykernel.js`, `src/core/slant-geom.js`) — core, pure logic
 
-Stage A0 of `docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md`. New files only; **nothing in the app imports them yet** (A1 wires
-them into the mixed derive), so the initial load is unchanged. Library: `vendor/clipper/clipper.js` (Clipper 6.4.2,
+Stage A0 of `docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md`. Since stage A1 they are used by the mixed derive (`plan-edit.js`
+through `src/core/slants.js`), `geometry.js` (slant footprints, frames) and `levels.js` (footprints) — see § 7 "Angled
+walls: derive". Library: `vendor/clipper/clipper.js` (Clipper 6.4.2,
 Boost licence; ES module, pure ASCII, no `eval`, no globals — see `vendor/clipper/README.md`). Tests:
 `node tests/polykernel.test.mjs`; shared test houses (Wedge, Duplex) in `tests/fixtures/houses.mjs`.
 

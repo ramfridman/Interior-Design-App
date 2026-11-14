@@ -22,6 +22,9 @@
  *   4. classes   mamad (inside the shelter shell), exterior (touches outdoors), thick (≥ 15 cm), partition.
  *   5. rooms     connected components of indoor free cells → clockwise polygons, matched to the previous rooms by
  *                largest overlap so ids / names / finishes survive.
+ *   A level with ANGLED WALLS (`slants`, stage A1) takes the mixed derive instead (deriveMixed below): rooms, outdoors
+ *   and the outline come from exact polygons (polykernel), the rect walls keep the grid. Without slants the code path
+ *   is exactly the one above.
  */
 import { PLAN } from './plan.js';
 import { pointInPolygon, polygonArea, invalidatePlanCaches } from './geometry.js';

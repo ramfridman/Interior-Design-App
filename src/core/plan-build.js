@@ -8,8 +8,17 @@
  * INPUT (plan space as everywhere: cm, +x east, +y south, origin = the house's outer north-west corner)
  *   walls     [{ x, y, w, h, kind?, id? }] or [[x, y, w, h, kind?]] — the exact shapes of PLAN.walls (axis-aligned
  *             rectangles of solid wall; door / window gaps are NOT wall). An axis-aligned centre line
- *             { x1, y1, x2, y2, thickness } is accepted too. The engine is ORTHOGONAL and has ONE FLOOR: diagonal or
- *             curved walls, polygons and upper floors are reported as errors and left out.
+ *             { x1, y1, x2, y2, thickness } is accepted too. Without the `slants` option (and FEATURES.angledWalls off)
+ *             the plan is ORTHOGONAL and has ONE FLOOR: diagonal or curved walls, polygons and upper floors are reported
+ *             as errors and left out.
+ *   slants    ANGLED WALLS (stage A1) with the option `slants: true` or while FEATURES.angledWalls is on: diagonal centre
+ *             lines in `walls` and the reader's `slants` [{ id?, x1, y1, x2, y2, t, kind?, chain? }] (src/import, § 11)
+ *             become plan slants { id: 's01'…, x1, y1, x2, y2, t, kind } (centre lines on 0.1 cm; kind from the derive;
+ *             no `poly` is stored). Within 0.5° of an axis → a rect wall. Free ends within 1.5 t of another free end
+ *             meet at their mean point; other free ends within 1.5 t of a wall face (along the centre line) are extended
+ *             to it. Openings in them: { kind, axis: 'a', wall, at, width, height?, sill?, style?, hinge: 'a'|'b',
+ *             swing: 'l'|'r', id?, assumed? } (exterior / outside / rooms derived). Derived with the mixed derive; the
+ *             origin shift moves them too. Upper floors take `slants` the same way (with `levels`).
  *   openings  [{ kind: 'door' | 'window' | 'sliding-door' | 'opening', x, y, w, h, axis?, width?, height?, sill?, style?,
  *             hinge?, swing?, id? }] — the shapes of PLAN.openings; the rectangle is the gap through the wall.
  *   meta      { name, location, latitude, longitude, timeZone, northAngle (clockwise degrees from plan "up" to true
@@ -30,7 +39,7 @@
  *             heights default to L0's; elevation = level below's elevation + its ceiling + this level's slab (a different
  *             given elevation is reported); the origin is the north-west corner of all levels together.
  *
- * OPTIONS  { passThrough?: boolean, levels?: boolean }
+ * OPTIONS  { passThrough?: boolean, levels?: boolean, slants?: boolean }   (false forces today's behaviour)
  *
  * OUTPUT  { ok, plan, warnings }  — never throws on user data.
  *   ok        false when any warning has level 'error' (something was left out); `plan` is still complete and usable.
