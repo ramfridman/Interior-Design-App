@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 18): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 19): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -67,11 +67,15 @@ Order of work:
   - [ ] later: F4 stairs · F5 walk across floors · F6 daylight per level · F7 regulations / carpentry per level · F8 import per floor
   - [x] A1 mixed derive (`tests/slants.test.mjs`)
   - [x] A2 editing angled walls: add, move, resize, rotate an end, remove, doors and windows in angled walls (`tests/slants-edit.test.mjs`, incl. 300 random operations)
+  - [ ] A3 drawing / editing angled walls in the plan [running]
   - [ ] later: A2 editing angled walls · A3 2D tools · A4 3D shell · A5 regulations / carpentry / walk · A6b import dialog · A7 exact daylight on angled faces
   - Will still not be supported afterwards: true curves (short straight pieces within 2 cm), sloped roofs / attics, basements, split levels, spiral stairs.
 
 ## Version 16 (14 Nov 2026) — floors can be tried
 Settings → Experimental → "Several floors (in development)" switches floors on: floor switcher, add / rename / remove a floor (outer walls and windows copied up), walls / doors / furniture / carpentry / checks per floor, floors stacked in 3D with slabs and cut-away, "Show whole house". Not yet in this version: placing stairs in the plan (stage F4b, running), realistic light on upper floors (F6, running), walking between floors (F5), importing several floors (F8). Angled walls are complete in the engine (derive + editing) but have no drawing tools yet (A3) and no 3D (A4), so they stay off.
+
+## Version 19 (14 Nov 2026) — floors complete behind the Settings switch
+Stairs tool in the plan (straight / L / U, move, turn, resize, opening above follows, rule hints), the light simulation on every floor with light through stair openings, walking up and down stairs in the walk-through. Remaining for floors: importing a multi-floor sketch (F8); then the switch can become the default. Known: the two-storey test house looks very dark while walking with realistic daylight on (to judge on a real device); stairs cannot be picked in 3D; a wall can still be drawn through a placed stair (checks report it).
 
 ## Version 18 (14 Nov 2026) — more suppliers
 - [x] Catalogue 1,108 products from 59 suppliers: +126 indoor (Habitat, KARE, StudioKnob, Tollman's DOT, Kado Home, Kkids, Design4You, Home 26, Zilber, Shpitzer, Tzemer Rugs, Beitili) and +104 outdoor / kitchen / bath / finishes (Argaman4U, Rocking Chair, Canopia, Izraela, Bol Parket, Bath Boutique, Golan Westline, Porcelanita and others). Evidence for every supplier and every skipped one is in `docs/CATALOG-RESEARCH.md`.
