@@ -52,6 +52,8 @@ async function boot() {
   window.app = { store, plan: PLAN, catalog, models, projects, view2d, view3d, ui, resetToArchitectLayout() { store.load({ items: initialLayout() }, { recordUndo: true }); } };
   document.documentElement.classList.add('app-ready');
   document.getElementById('boot')?.remove();
+  // Live collaboration (CONTRACT § 13): only when a backend answers /api/health — otherwise nothing changes.
+  import('./collab/online.js').then((m) => m.initCollaboration(window.app)).catch(() => { /* no collaboration */ });
 }
 
 /**

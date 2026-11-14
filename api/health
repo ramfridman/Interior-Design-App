@@ -1,0 +1,1 @@
+{"ok":false,"static":true,"note":"No collaboration server on this host: the app runs locally in the browser. A backend answers /api/health itself."}

@@ -143,6 +143,7 @@ export const builtinDesign = () => ({ items: initialLayout() });
  */
 export function createProjects({ store, adapter = createMemoryAdapter(), legacyKey = STORAGE_KEY } = {}) {
   let current = null;            // the open project's record without design (basePlan / design live in the store)
+  let online = null;             // summary of the open ONLINE project (live collaboration, CONTRACT § 13) — never saved here
   let saving = Promise.resolve();
   let lastError = null;
   const listeners = new Set();
@@ -176,7 +177,7 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
   const api = {
     adapter,
     /** Summary of the open project ({ id, name, createdAt, updatedAt, phase, builtin }) or null. */
-    current: () => (current ? { ...current } : null),
+    current: () => (current ? { ...current } : online ? { ...online } : null),
     /** Last storage problem (plain English) or null. */
     lastError: () => lastError,
     /** Subscribe: { type: 'open' | 'list' | 'error' | 'saved', … }. Returns unsubscribe. */
@@ -351,6 +352,18 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
       return { ok: true, project: summaryOf(rec) };
     },
 
+    /**
+     * Live collaboration (src/collab/online.js, CONTRACT § 13): an online project is about to be opened into the store by
+     * its room. Local saving stops (the room keeps it) until a local project is opened again. Emits 'closing' then 'open'.
+     */
+    detachForOnline(summary) {
+      clearTimeout(store._saveTimer); store._saveTimer = null;
+      emit('closing', {});
+      current = null; online = { ...summary, online: true };
+    },
+    /** Announce the online project once its room has opened it. */
+    onlineOpened(summary) { online = { ...(online || {}), ...summary, online: true }; emit('open', { project: api.current() }); },
+
     /** Save the open project now. */
     save,
     flush,
@@ -358,6 +371,8 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
 
   async function openRecord(rec, { restoreUI = true } = {}) {
     const design = rec.design && Array.isArray(rec.design.items) ? rec.design : { items: [] };
+    emit('closing', {});            // an online session (src/collab/) lets go of the store before it is replaced
+    online = null;
     current = summaryOf(rec);
     store.openProject({ basePlan: rec.basePlan, phase: rec.phase === 'draft' ? 'draft' : 'fixed', design: restoreUI ? design : { ...design, ui: undefined }, name: rec.name, underlay: rec.underlay || null });
     writeCurrent(rec.id);

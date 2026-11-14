@@ -1047,6 +1047,88 @@ thickness; ≥ the minimum wall thickness at that scale → a solid wall), then 
 * Cost (Node, lot 98, 51 k paths): readPdf ≈ 0.7 s, scale ≈ 1 s (geometry path), walls + openings ≈ 0.2 s;
   `analysePrims` is synchronous plain-data work — run it in a worker.
 
+### 11.1 DXF (`src/import/dxf-read.js`, `dxf.js`, `dxf-render.js`) — AutoCAD drawings with true units and layers
+
+```js
+import { readDxf, firstLook, analyseDxf, dxfScaleCandidates, proposeLayers, renderPrims } from './import/index.js';
+const prims = readDxf(bytes);                     // sync, pure JS, no dependency: Node, worker or page
+const { candidates, layers } = firstLook(prims);  // unit candidates + proposed layer roles
+const result = analyseDxf(prims, { candidates, layers, roles: { 'A-WALL': 'wall', … }, scale: { cmPerUnit }, walls: { drawing }, rotate, mirror });
+renderPrims(prims, { pxPerUnit, canvas?, crop?, hide?: Set<layer>, highlight?: Set<layer> });   // browser / worker canvas
+```
+
+**`readDxf(bytes | string, { cmPerUnit? })`** reads **ASCII DXF R12 … 2018** (binary DXF and DWG are refused with a
+plain message) and returns the **same primitive structure as `readPdf`** — `{ pageBox, paths, texts, images: [] }`, every
+path / text with its `layer` — plus `kind: 'dxf'`, `dims`, `inserts`, `blocks`, `layers`, `layouts`, `extents`,
+`skipped`, `warnings` and `dxf: { units: { code ($INSUNITS), name, cmPerUnit | null, measurement, dimlfac, version,
+codepage }, unitGuess, duPerPageUnit, cmPerPageUnit, toPage (drawing units → page units) }`.
+* **Page units**: the model space laid out as if printed at 1 : 50 (one page unit = 50 × 2.54 / 72 cm of building),
+  y flipped to the engine's +y-down convention, a 20-unit margin — so every PDF-tuned threshold of the detectors works
+  unchanged. Line weights (code 370, by layer / block, default 0.25 mm) become paper points; linetypes with gaps → `dash`.
+* Read: HEADER (`$ACADVER`, `$INSUNITS`, `$MEASUREMENT`, `$EXTMIN/MAX`, `$DIMLFAC`, `$DWGCODEPAGE`), TABLES (LAYER colour
+  ACI / true colour, off, frozen, linetype, line weight; LTYPE dash pattern), BLOCKS, OBJECTS (LAYOUT names), ENTITIES:
+  LINE, LWPOLYLINE / POLYLINE + VERTEX (bulges → arcs, split from the straight runs; wide polylines → filled bands; mesh
+  polylines skipped), ARC, CIRCLE, ELLIPSE, SPLINE (NURBS, de Boor, flattened; fit points when no control points),
+  INSERT (nested to depth 16 with cycle guard, scale, rotation, MINSERT arrays, mirroring by negative scale or OCS
+  extrusion (0, 0, −1), ATTRIBs, layer 0 / BYBLOCK / BYLAYER inheritance), TEXT / ATTRIB (alignment), MTEXT (formatting
+  codes stripped, paragraphs → lines, `\U+XXXX`, `%%c/%%d/%%p`), DIMENSION (its *D block drawn; definition points 13 / 14
+  give the measured length, code 42 / the text override the value shown → `dims`), HATCH boundary loops (polyline
+  and edge loops: line, arc, ellipse, spline) and SOLID / TRACE as fills, 3DFACE outlines, LEADER lines. Entity
+  extrusions other than ±Z are not transformed.
+* Encoding: R2007+ UTF-8; older files by `$DWGCODEPAGE` (ANSI_1255 Hebrew, ANSI_125x, DOS862 Hebrew, ISO 8859-x, CJK
+  pages); none stated → UTF-8 if valid, else Windows-1255 when the high bytes are Hebrew letters, else Windows-1252.
+* Model space only; paper-space entities are counted and the layouts listed (`dxf-paper-space` warning); a file whose
+  drawing is only in paper space gets a plain error. Not drawn and reported (`dxf-skipped`, `dxf-xref`): 3D solids /
+  regions / meshes (ACIS), images, wipeouts, proxies, tables, XREFs (not bound), XLINE / RAY.
+* Plain errors (`err.plain`, `err.code`): `dxf-binary`, `dxf-truncated` (no EOF, the file stops inside a section),
+  `dxf-damaged` (a group code that is not a number), `dxf-not-dxf`, `dxf-empty`, `dxf-too-big`.
+* Streaming: the bytes are scanned in place (no whole-text decode, no array of lines) and each entity is interpreted as
+  soon as it ends; 20 MB (≈ 180 k entities) reads in ≈ 1.3 s in Node with ≈ 130 MB of heap during the read and ≈ 50 MB
+  held by the result (tests/import.dxf.test.mjs). In the app it runs in the import worker.
+
+**Units → scale** (`dxfScaleCandidates`): one candidate per plausible unit (mm, cm, m, inch, foot, dm; the declared one
+if unusual), `cmPerUnit` in page units, `cmPerDrawingUnit`, `label` "1 unit = 1 cm", `source` `units` (declared) /
+`dimensions` / `geometry`, `confidence`, `evidence { declared, dimensions: { agree, of }, extentM, wallThickness, doorArcs,
+doorSized }`. Scored by the declared unit (×4), DIMENSION values (the number shown, read as cm / mm / m, must equal the
+measured length in that unit, ±1.5 %), and plausibility (building 2.5–150 m, wall pairs 7–45 cm, ~90° arcs 55–130 cm).
+A declared unit that the dimensions and proportions contradict (the common `$INSUNITS` = mm on a cm drawing) loses,
+with a `dxf-units-doubt` warning. Unitless → `dxf-unitless` warning, the candidates come from dimensions / geometry and
+the UI asks for confirmation.
+
+**Layers** (`proposeLayers`, `firstLook`): role `wall` | `door` | `window` | `other` with `reason`, from (1) names, Hebrew
+and English and a few European (WALL(S), A-WALL*, S-WALL, MUR, WAND, PARED, קיר, קירות / DOOR, A-DOOR, דלת, דלתות, PORTE,
+TÜR / WINDOW, GLAZ, A-GLAZ, חלון, חלונות, FENSTER, FENÊTRE), (2) block content (layers whose inserts are door / window
+blocks: by block name, or a block with a ~90° arc and a line), (3) wall hatches (≥ 4 fills of wall thickness), (4)
+geometry (the layer whose lines pair up at a wall thickness, by `scoreWallPens`). Hidden layers default to `other`.
+`firstLook` = names → candidates with the wall layers' extent / thickness → roles again at the best scale.
+
+**`analyseDxf`** runs the unchanged `analysePrims` on the layers that matter: wall / door / window layers (and, when no
+door / window layer is known, every visible layer whose name is not dimensions / text / furniture …); fills only from
+the wall layers. The wall pens are passed as `walls.pens` (the existing override): all pens of the wall layers, or —
+when a wall layer also holds door swings — the engine's own pick among them. Walls drawn only as hatches / solids
+(little line work on the wall layers) are turned into the boundary of their union (even–odd per hatch, union across
+hatches) so rectilinear poché of any shape reads exactly (`hatchOutlines`). Openings carry `evidence.block` (the block
+inserted there). Result = `analysePrims` result + `scaleCandidates` (DXF), `layers` (with roles), DXF warnings.
+`penKey` gains the layer for DXF paths (`lw|colour|dash|layer`); PDF / raster paths have no layer and keep their keys,
+so the PDF results are unchanged byte for byte.
+
+**Accuracy** (tests/import.dxf.test.mjs, fixtures generated from `PLAN` by tests/dxf-writer.mjs / dxf-fixtures.mjs:
+walls as closed LWPOLYLINEs, doors as a leaf + arc block inserted rotated / mirrored (negative scale and OCS), the
+safe-room inner leaf dashed, windows as a block scaled into the gaps): in cm (R2018), in cm with Hebrew layer names
+(R2000, ANSI_1255) and in mm — scale exact from the units, wall area identical to plan.js (symmetric difference 0), all
+23 openings with the right kind, width, hinge and swing (inner leaf included), no extras. Also exact: walls only as one
+hatch per wall piece, or one ANSI31 hatch with the rooms as holes; walls on a layer whose name says nothing (found by
+geometry); two plans side by side (`drawings`, either chosen); R12 POLYLINE / VERTEX without units (mm worked out from
+dimension texts written in cm). A bulged wall and a 30° wall on the wall layer are reported (`curved-wall`,
+`angled-wall`, `unsupported`) with the orthogonal walls unchanged.
+
+**Honest limits.** Tested only on generated files, not on real architects' DXFs: dynamic blocks (anonymous `*U`
+blocks are expanded as written, their parameters ignored), annotative scaling, MLEADER / TABLE content, multileader
+text, field codes, non-planar entities, OCS extrusions other than ±Z, very old R12 files without TABLES (layers then
+default to colour 7), and DXF written by non-Autodesk tools may hold surprises. Doors are found from their drawn arcs
+(block geometry included) — a door block drawn without a swing arc gives a passage; window blocks must draw lines
+along the wall. Curved and angled walls are reported, not converted (the engine is orthogonal).
+
 ## 12. Sketch import UI and tracing underlay (`src/ui/import/`, `src/view2d/underlay.js`) — UI on top of § 10 / § 11
 
 **Entry points:** project menu (top-bar switcher and File → "Projects…") → "Import a sketch…"; New project dialog →
@@ -1096,3 +1178,113 @@ store.openProject({ …, underlay })                                // projects.
 Tested by `tests/import.ui.test.mjs` (lot-98 PDF through the dialog → walls within 5 cm, 23 openings, 9 rooms, the
 underlay's ink within 3 cm of the page rendered with the engine's own transform, built-in project untouched, reload;
 a PNG rendering; a broken file; a blank picture).
+
+**DXF in the dialog** (additive). The picker and the drop zone accept `.dxf` (and `.dwg`); `source.js sniff` →
+`'dxf'` (text starting with `0 / SECTION` or `999`, binary DXF sentinel, or the extension) / `'dwg'` (`AC10xx` magic or
+the extension). Step 1 for a DXF: `engine-client.js` task `dxf-read` (worker: `readDxf` + `firstLook`), the drawing
+rendered with `renderPrims` (layer colours on white, too-light colours darkened) into the same viewer, then
+`dxf-analyse` (worker: `analyseDxf`) for the drawings and the size read-out; the side column shows **Layers**: colour,
+name (as written, `dir="auto"` — Hebrew right-to-left), what it holds and why it was proposed, and a Walls / Doors /
+Windows / Other select pre-set by the proposal; pointing at (or focusing) a row highlights that layer on the drawing;
+changing a role re-runs the first analysis. Several plans in model space → the existing "Which drawing?" chooser.
+Paper-space layouts are listed as not read. Step 2: the first option reads "The file is drawn in centimetres (1 unit =
+1 cm)" (or "The drawing is in millimetres …" from dimensions when the file has no units), pre-chosen when confident;
+"Measure a known length"; "Choose the drawing unit" (mm / cm / m / inch / foot); a geometry guess when nothing better
+exists; the same live sanity read-out. Steps 3–5 as for a PDF (`dxf-analyse` with the confirmed scale, roles, drawing,
+rotation, mirror). The stored underlay is a fresh `renderPrims` rendering of the house + margin (all visible layers,
+≤ 2400 px) with `source: { kind: 'dxf', name, units }`. **DWG**: never parsed (no DWG library — licensing is the owner's
+decision); the dialog explains that DWG is AutoCAD's closed format and how to get a DXF in a minute (Save As → DXF in
+AutoCAD and most CAD programs, the free ODA File Converter, or ask the architect), and Next stays disabled. Worker
+errors keep `plain` / `code`, so DXF problems show their plain message. Tested by the DXF part of
+`tests/import.ui.test.mjs` (DWG explained, binary DXF refused, Hebrew layer panel pre-ticked and highlighted, units
+option first and chosen, project walls identical to the built-in house, 23 openings, 9 rooms, the DXF underlay's ink on
+both faces of the north wall within 3 cm).
+
+## 13. Live collaboration (`src/collab/`, `dev/collab-server.mjs`) — core
+
+Several invited people edit one **online** project at the same time. A project is *local* (§ 10, unchanged) or
+*online* (lives in a **room** on the server; `projects.openOnline(id)`). Without a backend (`GET /api/health` fails
+within 1.5 s: artifact preview, plain static host) nothing of this section is visible and the app behaves as before.
+
+### Synchronised data model — `Doc = { e: { [key]: Entity }, v: { [key]: [seq, cid] } }`
+| key | entity | from the store |
+| --- | --- | --- |
+| `item:<id>` | the item (§ 2) + `@z` (number: drawing order; store order = ascending `@z`, ties by id) | `store.items` |
+| `finish:<spaceId>` | `{ floor?, wall?, … }` | `store.finishes` |
+| `project` | `store.project` fields | |
+| `plan` | `{ phase, base, edits }` — base plan (§ 10), `'draft'`/`'fixed'`, `planState()` (§ 7) | plan engine |
+| `run:<id>` | a carpentry Run (§ 8) | `store.carpentry.runs` |
+| `carp` | `store.carpentry.settings` | |
+| `cimg:<id>` | `{ url }` — large carpentry reference image (≤ 1 MB) | `store.carpentryImages` |
+| `underlay` | `store.underlay` without `image`; `img` = asset id, the picture itself goes through REST | `store.underlay` |
+
+`v[key]` = server sequence number and client id of the last change of that entity (tombstones kept after delete).
+**Not synchronised:** `store.ui`, selection, undo stacks, presence; everything the engines derive when a value is applied
+(`PLAN.wallOutline`, bounds, segments, opening sides, 3D / 2D caches). Derived values that are *stored* inside an
+entity (rooms of a plan, a run's worktops, unit item positions) travel only as part of a **guarded** entity (below), so
+they are always exactly what an engine computed from the state they replace — never a field-by-field mix.
+
+### Operations
+`Op = { k, p: Entity }` (put: create / replace) `| { k, s: { field: value }, u: [field] }` (set / unset fields; a value
+replaces the whole field) `| { k, d: 1 }` (delete). A **group** = the ops of ONE user action (one store undo step / one
+`begin…commit`), captured by diffing the entities the store's events named (`src/collab/ops.js`).
+Transient ops (`tx`, while dragging an item) are broadcast only: never logged, persisted or acknowledged; `tx-end`
+tells the others to drop them (the drag's group follows, or nothing on cancel).
+
+### Ordering and conflict rules (applied by the room; clients apply the room's *effective* ops verbatim)
+1. The room orders groups: `seq` = previous + 1. Per entity field, **last writer by `seq` wins**.
+2. **Deletes win**: a set on a missing entity is dropped; a put on an entity someone else deleted after the group's
+   `base` (the last `seq` the author had seen) is dropped.
+3. **Guards** (derived by the room, never sent by clients): a group touching `plan` guards `plan`; touching `run:R`, or an
+   item whose `carp.runId` is R (before or after), guards `run:R`. If a guarded entity was changed by another client after
+   `base`, the **whole group is rejected** (`conflict`). The author's client then: plan edits → re-runs the recorded
+   plan-engine calls (`addWall(…)` etc.) on the new plan; if the engine refuses (the wall the door was in is gone) the
+   edit is dropped and the author is told why. Carpentry → dropped and told. So a plan / run only ever holds a state an
+   engine computed from its exact predecessor.
+4. Validation: schema per key, size (group ≤ 1 MB, entity ≤ 1 MB, doc ≤ 32 MB), role (`viewer` → `role`), rate.
+   A refused group is rolled back on its author's screen with a toast.
+5. Client: optimistic local apply; ONE group in flight; later local groups queue (also offline). A remote group is
+   applied with the pending local ops laid over it (pending fields win locally — they will be ordered later). On
+   `ack` / `reject` the touched keys are reconciled to `confirmed + pending`. Remote groups are held back while a local
+   `begin…commit` is open and applied right after it.
+
+### Wire protocol (JSON text frames, `v: 1`)
+Client → room: `hello { cid, since? }` · `ops { gid, base, ops, label? }` · `tx { ops }` · `tx-end {}` ·
+`presence { p }` · `versions {}` · `version-create { name }` · `version-restore { id }` · `ping {}`.
+Room → client: `welcome { you: { cid, email, name, role, color }, seq, doc? | ops?, peers }` (ops since `since` when
+still in the log, else the full doc = **resync**) · `ops { seq, gid, cid, by, ops, label }` · `ack { gid, seq, ops }` ·
+`reject { gid, code: 'conflict' | 'invalid' | 'role' | 'size' | 'rate', reason, keys? }` · `tx { cid, ops }` ·
+`tx-end { cid }` · `peer { cid, email, name, color, role, left? }` · `presence { cid, p }` · `versions { list }` ·
+`role { role }` · `error { code, reason }` · `pong {}`.
+Identity (`email`, `role`) comes from the server (Cloudflare Access header `Cf-Access-Authenticated-User-Email`); a name
+sent by a client is ignored.
+
+### Presence (never stored, ≤ 15 messages / s per person, the client sends at most every 66 ms)
+`p = { pointer: { x, y } | null, sel: itemIds, mode, room, lock: entityKey | null }`. Shown: initials + colour in the
+top bar (list on click), named pointers in the 2D plan, others' selections outlined in their colour (2D, 3D), their
+mode / room. **Soft lock**: while someone drags an item or edits a wall their presence holds `lock`; the others see
+"being edited by …" and cannot grab it until it is released or 5 s pass without a presence message from them.
+
+### Undo / redo per person
+Each local group keeps its inverse ops. Ctrl+Z applies the inverse of *my* last group as a new group; an entity that
+someone else changed or deleted since (per `v`) is skipped and a toast says so. Other people's groups never enter my
+stacks. A rejected group leaves the stacks.
+
+### Restore points
+Named (`version-create`) and automatic (first change after 10 min of quiet or every 200 groups; the last 20 automatic
+ones are kept). Restoring sends the difference to the saved doc as ONE group by the restorer, received by everyone
+(and undoable by them like any of their groups).
+
+### Room (`src/collab/room.js`, pure JS: runs in Node and a Durable Object unchanged)
+`createRoom({ id, storage, now, limits })` → `await room.load()`, `room.join(conn)` with
+`conn = { id, email, name, role, send(text) }`, `await room.receive(connId, text)`, `room.leave(connId)`,
+`room.setRole(email, role)`, `room.record()` (project record, § 10 shape), `room.putUnderlay(asset)`.
+`storage` = async key–value `{ get(key), put(key, value), delete(key) }` (JSON values): `head`, `snap`, `log:<seq>`,
+`versions`, `version:<id>`, `asset:underlay`. No timers: everything happens on a message. The log keeps the last 500
+groups; a client further behind gets the doc.
+
+### REST (dev server; the Worker exposes the same) — identity from the Access header (dev: `?as=` or `X-Dev-User`)
+`GET /api/health` → `{ ok, user }` · `GET /api/projects` → summaries the user is a member of ·
+`POST /api/projects` `{ record }` → `{ id }` (creator = owner) · `GET /api/projects/:id` → record ·
+`DELETE /api/projects/:id` (owner) · `GET|PUT /api/projects/:id/members` `{ [email]: role }` (owner) ·
+`GET|PUT /api/projects/:id/underlay` (picture, ≤ 4 MB; PUT = editor) · WebSocket `GET /api/rooms/:id`.

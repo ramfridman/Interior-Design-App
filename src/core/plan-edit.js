@@ -567,12 +567,26 @@ function derive(solids, openings, prevRooms, prevWalls) {
 }
 
 // ---------------------------------------------------------------- live state
-let host = { record() {}, changed() {} };
+let host = { record() {}, changed() {}, intent() {} };
 let modified = false, analysis = null, stateKey = null;
 let foreign = new WeakMap();
 
 /** Called once by the store: `record(opts)` takes the undo snapshot BEFORE a change, `changed(payload)` announces it. */
-export function bindPlanHost(h) { host = { record: h.record || (() => {}), changed: h.changed || (() => {}) }; }
+export function bindPlanHost(h) { host = { record: h.record || (() => {}), changed: h.changed || (() => {}), intent: h.intent || (() => {}) }; }
+
+/**
+ * Live collaboration (CONTRACT § 13): every successful top-level mutation is reported as `host.intent(name, args)` so a
+ * concurrent edit can be re-run on a newer plan. Calls made by another mutation (flipDoor → updateOpening) are not.
+ */
+let intentDepth = 0;
+function tracked(name, impl, args) {
+  intentDepth++;
+  try {
+    const r = impl(...args);
+    if (intentDepth === 1 && r && r.ok) { try { host.intent(name, JSON.parse(JSON.stringify(args))); } catch (e) { /* not recorded */ } }
+    return r;
+  } finally { intentDepth--; }
+}
 
 const solidsOf = (plan) => [...plan.walls, ...plan.openings];
 const current = () => analysis || (analysis = derive(solidsOf(PLAN), PLAN.openings, PLAN.rooms, PLAN.walls));
@@ -861,7 +875,8 @@ const idsIn = (d, rect, axis) => d.segments.filter((s) => s.axis === axis && ove
  * Draw a new partition from (x1, y1) to (x2, y2) (centre line, cm). Axis-aligned (the smaller delta is dropped),
  * snapped to 5 cm, trimmed / extended (≤ 15 cm) to the faces of the walls it meets.
  */
-export function addWall(input, opts) {
+export function addWall(...args) { return tracked('addWall', addWallImpl, args); }
+function addWallImpl(input, opts) {
   const r = planAddWall(input);
   if (!r.ok) return r;
   return commit(r.d, 'add-wall', { level: 'free', ids: idsIn(r.d, r.rect, r.axis) }, opts);
@@ -878,7 +893,8 @@ const coreSpan = (s) => (s.axis === 'h' ? { c0: s.core.y, c1: s.core.y + s.core.
 const inCore = (s) => (o) => overlapArea(o, s.core) > 0;
 
 /** Remove a wall segment and the openings in it. Junction squares stay with the walls that meet there. */
-export function removeWallSegment(segmentId, opts) {
+export function removeWallSegment(...args) { return tracked('removeWallSegment', removeWallSegmentImpl, args); }
+function removeWallSegmentImpl(segmentId, opts) {
   const q = editableSegment(segmentId);
   if (!q.ok) return q;
   const { s } = q, E = editModel(s.axis, [], []);
@@ -893,7 +909,8 @@ export function removeWallSegment(segmentId, opts) {
  * Move a wall segment sideways by `delta` cm (+ = east / south). Walls that meet its ends stretch or shrink to
  * follow; its doors travel with it.
  */
-export function moveWallSegment(segmentId, delta, opts) {
+export function moveWallSegment(...args) { return tracked('moveWallSegment', moveWallSegmentImpl, args); }
+function moveWallSegmentImpl(segmentId, delta, opts) {
   const q = editableSegment(segmentId);
   if (!q.ok) return q;
   const d0 = snap(num(delta) ? delta : 0), { s } = q;
@@ -1021,7 +1038,8 @@ function planMoveWall(s, d0) {
  * Change where a wall segment starts / ends along its own axis (plan cm; omitted = unchanged). Ends are trimmed /
  * extended to wall faces like addWall. Shortening an end that met another wall leaves a gap of ≥ 60 cm.
  */
-export function resizeWallSegment(segmentId, range, opts) {
+export function resizeWallSegment(...args) { return tracked('resizeWallSegment', resizeWallSegmentImpl, args); }
+function resizeWallSegmentImpl(segmentId, range, opts) {
   const q = editableSegment(segmentId);
   if (!q.ok) return q;
   const { s } = q, { c0, c1, a0, a1 } = coreSpan(s), r = range || {};
@@ -1106,7 +1124,8 @@ const HINGES = { h: ['w', 'e'], v: ['n', 's'] }, SWINGS = { h: ['n', 's'], v: ['
  * Cut a door / window / sliding door / door-less passage into the wall nearest to (x, y).
  * Defaults: door 80 × 210, window 100 × 100 sill 110, sliding door 160 × 210, passage 90 × 210.
  */
-export function addOpening(input, opts) {
+export function addOpening(...args) { return tracked('addOpening', addOpeningImpl, args); }
+function addOpeningImpl(input, opts) {
   const r = planAddOpening(input);
   if (!r.ok) return r;
   const p = input, K = OPENING_KINDS[p.kind], { s } = r, exterior = s.cls === 'exterior';
@@ -1134,7 +1153,8 @@ export function addOpening(input, opts) {
  * Change a door / window. patch: { offset (cm from the start of its wall segment) | x, y (new centre — it slides
  * along its own wall, kept ≥ 10 cm from wall ends and other openings), width, height, sill, style, hinge, swing }.
  */
-export function updateOpening(id, patch, opts) {
+export function updateOpening(...args) { return tracked('updateOpening', updateOpeningImpl, args); }
+function updateOpeningImpl(id, patch, opts) {
   const o = PLAN.openings.find((x) => x.id === id), p = patch || {};
   if (!o) return fail('No such opening.');
   const policy = policyOfOpening(o);
@@ -1171,7 +1191,8 @@ export function updateOpening(id, patch, opts) {
 }
 
 /** Remove a door / window; the gap is filled with wall. */
-export function removeOpening(id, opts) {
+export function removeOpening(...args) { return tracked('removeOpening', removeOpeningImpl, args); }
+function removeOpeningImpl(id, opts) {
   const o = PLAN.openings.find((x) => x.id === id);
   if (!o) return fail('No such opening.');
   const policy = policyOfOpening(o);
@@ -1183,7 +1204,8 @@ export function removeOpening(id, opts) {
 }
 
 /** Re-hang a door: 'hinge' swaps the hinge jamb, 'swing' the side it opens into. */
-export function flipDoor(id, how, opts) {
+export function flipDoor(...args) { return tracked('flipDoor', flipDoorImpl, args); }
+function flipDoorImpl(id, how, opts) {
   const o = PLAN.openings.find((x) => x.id === id);
   if (!o) return fail('No such opening.');
   if (o.kind !== 'door' || (how !== 'hinge' && how !== 'swing')) return fail('Only hinged doors can be flipped (hinge or swing).');
@@ -1192,7 +1214,8 @@ export function flipDoor(id, how, opts) {
 }
 
 /** Rename / re-type a room: patch { name, nameHe, type, wet }. Names follow the room through later edits. */
-export function updateRoom(id, patch, opts) {
+export function updateRoom(...args) { return tracked('updateRoom', updateRoomImpl, args); }
+function updateRoomImpl(id, patch, opts) {
   const room = PLAN.rooms.find((r) => r.id === id), p = patch || {};
   if (!room) return fail('No such room.');
   const next = { ...room };
@@ -1204,7 +1227,8 @@ export function updateRoom(id, patch, opts) {
 }
 
 /** Back to the architect's plan (one undo step). */
-export function resetPlan(opts = {}) {
+export function resetPlan(...args) { return tracked('resetPlan', resetPlanImpl, args); }
+function resetPlanImpl(opts = {}) {
   if (!modified) return { ok: true, level: 'free', warnings: [], ids: [] };
   host.record(opts);
   const res = applyPlanState(null);

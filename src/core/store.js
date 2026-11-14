@@ -152,6 +152,11 @@ class Store {
     this.persist = true;
     /** Autosave target (set by core/projects.js); null = the legacy single-design localStorage key. */
     this.saver = null;
+    /**
+     * Live collaboration hook (src/collab/, CONTRACT § 13) or null: { undo(), redo(), historyState(), batchEnded(),
+     * planIntent(name, args) }. While set, undo / redo are per person (the collaboration client's own stacks).
+     */
+    this.collab = null;
   }
 
   // ---------- events ----------
@@ -193,14 +198,16 @@ class Store {
     const before = this._batch; this._batch = null;
     if (before !== this._snapshot()) this._pushUndo(before);
     this._scheduleSave();
+    if (this.collab) this.collab.batchEnded();
   }
   /** Abort a gesture and restore the state from begin(). */
   cancel() {
     if (!this._batch) return;
     const before = this._batch; this._batch = null;
     this._restore(before);
+    if (this.collab) this.collab.batchEnded();
   }
-  historyState() { return { canUndo: this._undo.length > 0, canRedo: this._redo.length > 0 }; }
+  historyState() { return this.collab ? this.collab.historyState() : { canUndo: this._undo.length > 0, canRedo: this._redo.length > 0 }; }
   _restore(snap) {
     const s = JSON.parse(snap);
     const plan = applyPlanState(s.plan || null);            // no-op unless the snapshot holds a different plan
@@ -216,12 +223,14 @@ class Store {
     this.emit('selection', { ids: this.selection });
   }
   undo() {
+    if (this.collab) { this.collab.undo(); return; }
     if (!this._undo.length) return;
     this._redo.push(this._snapshot());
     this._restore(this._undo.pop());
     this.emit('history', this.historyState());
   }
   redo() {
+    if (this.collab) { this.collab.redo(); return; }
     if (!this._redo.length) return;
     this._undo.push(this._snapshot());
     this._restore(this._redo.pop());
@@ -481,6 +490,6 @@ class Store {
 }
 
 export const store = new Store();
-bindPlanHost({ record: (opts) => store._record(opts), changed: (payload) => store._planChanged(payload) });
-export { DEFAULT_UI, DEFAULT_PROJECT, defaultProject, emptyCarpentry, STORAGE_KEY };
+bindPlanHost({ record: (opts) => store._record(opts), changed: (payload) => store._planChanged(payload), intent: (name, args) => { if (store.collab && store.collab.planIntent) store.collab.planIntent(name, args); } });
+export { DEFAULT_UI, DEFAULT_PROJECT, defaultProject, emptyCarpentry, normalizeItem, STORAGE_KEY };
 export default store;
