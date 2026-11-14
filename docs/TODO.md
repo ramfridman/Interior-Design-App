@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 23): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 24): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -78,6 +78,12 @@ Order of work:
 
 ## Version 16 (14 Nov 2026) — floors can be tried
 Settings → Experimental → "Several floors (in development)" switches floors on: floor switcher, add / rename / remove a floor (outer walls and windows copied up), walls / doors / furniture / carpentry / checks per floor, floors stacked in 3D with slabs and cut-away, "Show whole house". Not yet in this version: placing stairs in the plan (stage F4b, running), realistic light on upper floors (F6, running), walking between floors (F5), importing several floors (F8). Angled walls are complete in the engine (derive + editing) but have no drawing tools yet (A3) and no 3D (A4), so they stay off.
+
+## Version 24 (14 Nov 2026) — catalogue 1,410 products, 71 suppliers
+- [x] The two replica items removed (owner's decision; no replicas in the catalogue).
+- [x] "Price on request" allowed for suppliers that publish no prices (a product must say so explicitly); 137 such products: Karney Tchelet 31, Aqua Creations 54, Hamat 41, Tambour wall colours 9, two Smeg models; plus 9 priced products (Smeg at Golan Westline, SCAB chairs).
+- Shop discovery: Kastiel and KualaStyle have no findable website; Million Chairs blocks automated reading. Still skipped for missing sizes: Waxman, Hezibank, Alony, Negev, Nirlat.
+- [ ] In progress: stone ("שיש") in the kitchen studio — data in (31 suppliers, 140 slabs), picker / 3D / PDF / estimate / supplier directory being built [Opus]; DWG reader with a GPL library, approved by the owner [Opus].
 
 ## Version 22 (14 Nov 2026) — angled walls behind the Settings switch
 Settings → Experimental → "Angled walls (in development)": draw walls at any angle (15° steps, parallel / perpendicular guides, typed length and angle), move / turn / resize them, doors and windows in them, exact rooms and areas, aligned dimensions, furniture snapping; shown in 3D; regulation checks, carpentry runs and the walk-through handle them; a PDF or DXF's angled and curved walls import as walls. Approximate: the light simulation on angled faces (room average). Not done: furniture dragged in 3D does not snap to angled walls; stairs snap only to straight walls; photos / scans do not get angled walls.
