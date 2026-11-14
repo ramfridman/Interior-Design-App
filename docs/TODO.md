@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 15): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 16): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -60,13 +60,16 @@ Order of work:
   - [x] F1 levels in the engine (`tests/levels.test.mjs`)
   - [x] F2 2D per level (`tests/levels-2d.test.mjs`, `tests/e2e.levels.mjs`) · [x] F3 3D stacking (`tests/levels-3d.test.mjs`)
   - [x] F4a stairs: geometry (straight / L / U), 3D model, regulation checks sourced from the Planning and Building Regulations (`tests/stairs.test.mjs`; guard heights are from a secondary source and reported as info)
-  - [ ] F4b stair tool in the plan (also make the Duplex test void regulation-size: y 266–670) 
+  - [ ] F4b stair tool in the plan [running] · F6 light simulation per floor [running] 
   - [x] F7 regulations, carpentry, checks, runs, budget per floor + Settings → Experimental → "Several floors (in development)" (`tests/levels-rules.test.mjs`)
   - [ ] later: F4 stairs · F5 walk across floors · F6 daylight per level · F7 regulations / carpentry per level · F8 import per floor
   - [x] A1 mixed derive (`tests/slants.test.mjs`)
   - [x] A2 editing angled walls: add, move, resize, rotate an end, remove, doors and windows in angled walls (`tests/slants-edit.test.mjs`, incl. 300 random operations)
   - [ ] later: A2 editing angled walls · A3 2D tools · A4 3D shell · A5 regulations / carpentry / walk · A6b import dialog · A7 exact daylight on angled faces
   - Will still not be supported afterwards: true curves (short straight pieces within 2 cm), sloped roofs / attics, basements, split levels, spiral stairs.
+
+## Version 16 (14 Nov 2026) — floors can be tried
+Settings → Experimental → "Several floors (in development)" switches floors on: floor switcher, add / rename / remove a floor (outer walls and windows copied up), walls / doors / furniture / carpentry / checks per floor, floors stacked in 3D with slabs and cut-away, "Show whole house". Not yet in this version: placing stairs in the plan (stage F4b, running), realistic light on upper floors (F6, running), walking between floors (F5), importing several floors (F8). Angled walls are complete in the engine (derive + editing) but have no drawing tools yet (A3) and no 3D (A4), so they stay off.
 
 ## Still waiting for the owner
 1. **Hosting** — a free Cloudflare account, authorising its GitHub app for the repo, the email addresses to invite, and whether the working branch is merged into the default branch first (a pull request). With live collaboration the site becomes a Cloudflare Worker with static files instead of plain Pages; steps will be updated when part C is done.

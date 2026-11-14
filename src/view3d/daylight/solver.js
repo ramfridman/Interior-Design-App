@@ -35,12 +35,15 @@
  * UNITS: linear RGB irradiance in renderer units (1 unit = LUX_PER_UNIT lux, see sky.js). Distances in metres.
  */
 import { SKY_BINS, SKY, binOf, skyRadiance, LUX_PER_UNIT } from './sky.js';
+import { levelIds, levelElevation, levelHeights, footprintOf, hasLevels, GROUND } from '../../core/levels.js';
+import { levelPlan } from '../../core/plan-edit.js';
+import { difference, offset } from '../../core/polykernel.js';
 
 export { LUX_PER_UNIT };
 export const CELL_M = 0.05;
 const CS = CELL_M, CELL_CM = 5;
 const OUT = 0, ROOM = 1, WALL = 2, OPEN = 3;
-export const SURF = { FLOOR: 0, CEILING: 1, WALL: 2, SILL: 3, LINTEL: 4, THRESHOLD: 5, AVERAGE: 6 };
+export const SURF = { FLOOR: 0, CEILING: 1, WALL: 2, SILL: 3, LINTEL: 4, THRESHOLD: 5, AVERAGE: 6, VOID_FLOOR: 7, VOID_CEILING: 8 };   // VOID_*: stair-void portals (several floors)
 const PAD = 1;                                     // atlas padding (texels) around every chart
 const HIT_NONE = 0, HIT_PATCH = 1, HIT_SKY = 2, HIT_GROUND = 3, HIT_FACADE = 4, HIT_EXITED = 5, HIT_FURN = 6, HIT_REACHED = 7;
 export const FURNITURE_ALBEDO = 0.35;              // mean reflectance of furniture (wood, fabric, lacquer) — occluder proxy surface
@@ -99,6 +102,7 @@ class Links {
  * @param {{ ceilingCm?: number, doorsOpen?: boolean, glass?: number }} [o]
  */
 export function sceneInputFromPlan(plan, o = {}) {
+  if (o.level != null && hasLevels(plan)) return levelSceneInput(plan, o.level, o);
   const h = plan.heights || {};
   const ceiling = Number(o.ceilingCm) >= 200 ? Math.min(600, Number(o.ceilingCm)) : (h.ceiling || 300);
   const rect = (r) => ({ x: +r.x, y: +r.y, w: +r.w, h: +r.h });
@@ -119,14 +123,124 @@ export function sceneInputFromPlan(plan, o = {}) {
   };
 }
 
+// ───────────────────────── several floors (stage F6) ─────────────────────────
+const PARAPET_T = 20;                              // cm — parapet thickness (as built by view3d/house.js)
+const expolys = (polys) => (polys || []).filter((p) => p && Array.isArray(p.outer) && p.outer.length >= 3)
+  .map((p) => ({ outer: p.outer.map((q) => [q[0], q[1]]), holes: (p.holes || []).map((r) => r.map((q) => [q[0], q[1]])) }));
+const voidRings = (view) => ((view && view.voids) || []).map((v) => v && v.polygon).filter((p) => Array.isArray(p) && p.length >= 3).map((p) => p.map((q) => [q[0], q[1]]));
+/** Wall height (cm) of a level as view3d/house.js builds it: up to the slab of the level above, else its own ceiling. */
+export function levelCeilingCm(plan, id) {
+  const ids = levelIds(plan), k = ids.indexOf(id), up = k >= 0 && k + 1 < ids.length ? ids[k + 1] : null;
+  if (!up) return levelHeights(plan, id).ceiling;
+  return Math.max(200, levelElevation(plan, up) - (levelHeights(plan, up).slab || 0) - levelElevation(plan, id));
+}
+/**
+ * One level of a plan with several floors, in LEVEL-LOCAL coordinates (finished floor y = 0, ceiling y = H): that
+ * level's walls / openings / rooms (its levelPlan view) + the massing of the other storeys, per column:
+ *   lv.caps   upper storeys over this level's columns: solid from `lo` (their slab underside) to `hi` (their roof /
+ *             parapet top) — they close this level's roof columns higher up and overhang its outdoor columns;
+ *   lv.raise  lower storeys under this level's outdoor columns: the "ground" seen from here is their roof at `y`
+ *             (their parapet band higher), elsewhere the real ground (`drop` = floor above ground + elevation);
+ *   lv.band   this level's own parapet band (open roof edges); lv.voids / voidsAbove: stair voids (light portals).
+ */
+function levelSceneInput(plan, id, o = {}) {
+  const ids = levelIds(plan), k = ids.indexOf(id);
+  if (k < 0) throw new Error(`no level ${id}`);
+  const view = id === GROUND ? plan : levelPlan(plan, id);
+  const elevCm = levelElevation(plan, id), Hcm = levelCeilingCm(plan, id);
+  const up = k + 1 < ids.length ? ids[k + 1] : null;
+  const base = sceneInputFromPlan({ ...view, outdoorAreas: plan.outdoorAreas || [], site: plan.site, bounds: plan.bounds }, { ...o, level: undefined, ceilingCm: Hcm });
+  base.H = Hcm / 100;                                                       // (sceneInputFromPlan clamps to 2–6 m)
+  const own = levelHeights(plan, id);
+  base.slab = ((up ? levelHeights(plan, up).slab : own.slab) || 20) / 100;
+  base.parapet = (own.parapet || 0) / 100;
+  base.drop = ((plan.heights.floorAboveGround || 15) + elevCm) / 100;
+  base.level = id; base.elev = elevCm / 100;
+  const fpOf = (lid) => footprintOf(lid === GROUND ? plan : levelPlan(plan, lid)).polygons;
+  const band = (fp) => (fp.length ? difference(fp, offset(fp, -PARAPET_T)) : []);
+  const caps = [], raise = [];
+  for (let j = k + 1; j < ids.length; j++) {                               // storeys above
+    const lid = ids[j], fp = fpOf(lid), hj = levelHeights(plan, lid), ej = levelElevation(plan, lid);
+    const roofSlab = (j + 1 < ids.length ? levelHeights(plan, ids[j + 1]).slab : hj.slab) || 20;
+    const lo = (ej - (hj.slab || 0) - elevCm) / 100, roof = (ej + levelCeilingCm(plan, lid) + roofSlab - elevCm) / 100;
+    caps.push({ polys: expolys(fp), lo, hi: roof });
+    if (hj.parapet > 0) caps.push({ polys: expolys(band(fp)), lo, hi: roof + hj.parapet / 100 });
+  }
+  for (let j = 0; j < k; j++) {                                             // storeys below: their roof is the ground here
+    const lid = ids[j], fp = fpOf(lid), hj = levelHeights(plan, lid), ej = levelElevation(plan, lid);
+    const roofSlab = (levelHeights(plan, ids[j + 1]).slab || hj.slab) || 20;
+    const roof = (ej + levelCeilingCm(plan, lid) + roofSlab - elevCm) / 100;
+    raise.push({ polys: expolys(fp), y: roof });
+    if (hj.parapet > 0) raise.push({ polys: expolys(band(fp)), y: roof + hj.parapet / 100 });
+  }
+  base.lv = {
+    caps, raise, band: base.parapet > 0 ? expolys(band(fpOf(id))) : [],
+    voids: voidRings(view), voidsAbove: up ? voidRings(levelPlan(plan, up)) : [],
+  };
+  return base;
+}
+
+/**
+ * Per-column massing of a level scene (input.lv): top[c] (solid above this level's ceiling up to here, roof + storeys
+ * above), gY[c] (ground / lower roof under an outdoor column), cLo / cHi (an upper storey overhanging an outdoor
+ * column), skyTop (nothing is higher), void cells (portals) and the clearance classes of the ray marcher.
+ */
+function levelColumns(input, kind, gcls, nx, ny, oxcm, ozcm) {
+  const nc = nx * ny, L = input.lv, elev = input.elev || 0, H = input.H;
+  const top = new Float32Array(nc), gY = new Float32Array(nc), cLo = new Float32Array(nc).fill(Infinity), cHi = new Float32Array(nc).fill(-Infinity);
+  const fill = (polys, fn) => {
+    for (const p of polys) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [x, y] of p.outer) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+      const i0 = Math.max(0, Math.floor((x0 - oxcm) / CELL_CM)), i1 = Math.min(nx - 1, Math.ceil((x1 - oxcm) / CELL_CM));
+      const j0 = Math.max(0, Math.floor((y0 - ozcm) / CELL_CM)), j1 = Math.min(ny - 1, Math.ceil((y1 - ozcm) / CELL_CM));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const x = oxcm + (i + 0.5) * CELL_CM, y = ozcm + (j + 0.5) * CELL_CM;
+        if (pointInPolygon(x, y, p.outer) && !p.holes.some((h) => pointInPolygon(x, y, h))) fn(j * nx + i);
+      }
+    }
+  };
+  for (let c = 0; c < nc; c++) gY[c] = gcls[c] ? -0.02 - elev : -input.drop;
+  for (const r of L.raise) fill(r.polys, (c) => { if (r.y > gY[c]) gY[c] = r.y; });
+  for (const a of L.caps) fill(a.polys, (c) => { if (a.lo < cLo[c]) cLo[c] = a.lo; if (a.hi > cHi[c]) cHi[c] = a.hi; });
+  const roof = H + input.slab, band = new Uint8Array(nc);
+  fill(L.band, (c) => { band[c] = 1; });
+  let skyTop = roof + input.parapet;
+  for (let c = 0; c < nc; c++) {
+    if (kind[c] === OUT) {
+      if (!(cHi[c] > cLo[c]) || cLo[c] <= gY[c]) { if (cHi[c] > gY[c]) gY[c] = cHi[c]; cLo[c] = Infinity; cHi[c] = -Infinity; }   // a cap resting on the ground: raised ground
+      top[c] = Math.max(gY[c], cHi[c]);
+    } else {
+      top[c] = Math.max(band[c] ? roof + input.parapet : roof, cHi[c]);
+      cLo[c] = Infinity; cHi[c] = -Infinity;
+    }
+    if (top[c] > skyTop) skyTop = top[c];
+  }
+  const voidDown = new Uint8Array(nc), voidUp = new Uint8Array(nc);
+  fill(L.voids.map((r) => ({ outer: r, holes: [] })), (c) => { if (kind[c] === ROOM) voidDown[c] = 1; });
+  fill(L.voidsAbove.map((r) => ({ outer: r, holes: [] })), (c) => { if (kind[c] === ROOM) voidUp[c] = 1; });
+  // clearance classes: runs of outdoor columns with the same profile (or room columns with the same roof) may be skipped
+  const cls = new Uint8Array(nc), ids = new Map();
+  for (let c = 0; c < nc; c++) {
+    const k = kind[c];
+    if (k !== OUT && k !== ROOM) continue;
+    const key = k === OUT ? `o${gY[c]}|${cLo[c]}|${cHi[c]}` : `r${top[c]}`;
+    let v = ids.get(key);
+    if (v === undefined) { v = ids.size + 1; ids.set(key, v); }
+    cls[c] = v <= 255 ? v : 0;
+  }
+  return { top, gY, cLo, cHi, skyTop, voidDown, voidUp, cls, yOff: input.drop };
+}
+
 /**
  * Chebyshev clearance (in cells, ≤ 250) of every cell to the nearest cell of another class — empty-space skipping
  * for the ray marcher. Classes: room air, garden, outdoor slab; walls, openings and furniture cells are their own
  * (always "edge") class, so a ray never jumps over them.
  */
-function clearance(kind, gcls, furHi, nx, ny) {
+function clearance(kind, gcls, furHi, nx, ny, base = null) {
   const nc = nx * ny, clear = new Uint8Array(nc), cls = new Uint8Array(nc);
-  for (let c = 0; c < nc; c++) cls[c] = kind[c] === ROOM ? (furHi && furHi[c] > 0 ? 0 : 1) : kind[c] === OUT ? 2 + gcls[c] : 0;
+  if (base) for (let c = 0; c < nc; c++) cls[c] = furHi && furHi[c] > 0 ? 0 : base[c];   // level scenes: profile classes
+  else for (let c = 0; c < nc; c++) cls[c] = kind[c] === ROOM ? (furHi && furHi[c] > 0 ? 0 : 1) : kind[c] === OUT ? 2 + gcls[c] : 0;
   const queue = new Int32Array(nc); let qh = 0, qt = 0;
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
     const c = j * nx + i, k = cls[c];
@@ -205,7 +319,9 @@ export function buildScene(input, opts = {}) {
   }
 
   // empty-space skipping: Chebyshev clearance (in cells) to the nearest cell of another class
-  const clear = O.layoutOnly ? new Uint8Array(nc) : clearance(kind, gcls, null, nx, ny);   // the page only needs the layout (UVs)
+  // several floors: per-column massing of the other storeys, stair-void portals (null for a one-level plan)
+  const lv = input.lv ? levelColumns(input, kind, gcls, nx, ny, oxcm, ozcm) : null;
+  const clear = O.layoutOnly ? new Uint8Array(nc) : clearance(kind, gcls, null, nx, ny, lv && lv.cls);   // the page only needs the layout (UVs)
 
   // ── charts & patches ──
   const nRows = Math.max(4, Math.round((H * 100) / O.rowCm)), rowH = H / nRows;
@@ -244,7 +360,7 @@ export function buildScene(input, opts = {}) {
     const c = j * nx + i, k = kind[c];
     if (k === ROOM) {
       const r = reg[c];
-      const f = hChart(SURF.FLOOR, r, O.tile, 0, 1), cl = hChart(SURF.CEILING, r, O.ceilingTile, H, -1);
+      const f = hChart(lv && lv.voidDown[c] ? SURF.VOID_FLOOR : SURF.FLOOR, r, O.tile, 0, 1), cl = hChart(lv && lv.voidUp[c] ? SURF.VOID_CEILING : SURF.CEILING, r, O.ceilingTile, H, -1);
       floorChart[c] = f.id; ceilChart[c] = cl.id; contribH.push(c, f.id, c, cl.id);
     } else if (k === OPEN) {
       const o = reg[c], r = nR + o;
@@ -421,6 +537,20 @@ export function buildScene(input, opts = {}) {
     const xcm = (gox + a + 0.5) * 100, ycm = (goz + b + 0.5) * 100;
     groundKind[b * gnx + a] = slabAt(xcm, ycm) ? 1 : input.paths.some((pp) => pointInPolygon(xcm, ycm, pp)) || input.parking.some((q) => xcm >= q.x && xcm <= q.x + q.w && ycm >= q.y && ycm <= q.y + q.h) ? 2 : 0;
   }
+  // several floors: every ground element has its own height (the real ground, a lower roof — kind 3 — or this
+  // level's own roof under its footprint), in level-local metres
+  let groundY = null;
+  if (lv) {
+    groundY = new Float32Array(gnx * gnz);
+    for (let b = 0; b < gnz; b++) for (let a = 0; a < gnx; a++) {
+      const e = b * gnx + a, i = Math.floor(((gox + a + 0.5) * 100 - oxcm) / CELL_CM), j = Math.floor(((goz + b + 0.5) * 100 - ozcm) / CELL_CM);
+      const base = groundKind[e] === 1 ? -0.02 - (input.elev || 0) : -input.drop;
+      let y = base;
+      if (i >= 0 && j >= 0 && i < nx && j < ny) { const c = j * nx + i; y = kind[c] === OUT ? lv.gY[c] : lv.top[c]; }
+      if (y > base + 0.05) groundKind[e] = 3;
+      groundY[e] = y;
+    }
+  }
 
   const scene = {
     input, opts: O, H, roofTop, drop, nx, ny, ox, oz, kind, reg, gcls, clear, nR, nO, nRegions,
@@ -428,9 +558,11 @@ export function buildScene(input, opts = {}) {
     oSill, oHead, oGlass, oOpen, oAxisN, oPlane, oExt, nRows, rowH,
     charts, chartByKey, floorChart, ceilChart, faceChart, patch, texelOf, avgTexel,
     atlas: { width: W, height: AH, fillDst: Int32Array.from(fillDst), fillSrcStart: Int32Array.from(fillSrcStart), fillSrc: Int32Array.from(fillSrc) },
-    probes, ground: { ox: gox, oz: goz, nx: gnx, nz: gnz, kind: groundKind },
+    probes, ground: { ox: gox, oz: goz, nx: gnx, nz: gnz, kind: groundKind, y: groundY },
     furLo: null, furHi: null, occluders: [],                               // furniture occluders (setOccluders)
+    lv, level: input.level || null, portal: null,
   };
+  if (lv) scene.portal = portalCells(scene);
   scene.field = fieldLayout(scene);
   return scene;
 }
@@ -480,7 +612,7 @@ export function setOccluders(S, boxes = []) {
     });
   }
   S.furLo = cells ? lo : null; S.furHi = cells ? hi : null; S.occluders = (boxes || []).slice();
-  if (!S.opts.layoutOnly) S.clear = clearance(S.kind, S.gcls, S.furHi, S.nx, S.ny);
+  if (!S.opts.layoutOnly) S.clear = clearance(S.kind, S.gcls, S.furHi, S.nx, S.ny, S.lv && S.lv.cls);
   return { cells, ms: Date.now() - t0 };
 }
 /** True if a point is inside a furniture occluder. */
