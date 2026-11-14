@@ -124,7 +124,7 @@ export function initRunsPanel(root, app, C) {
   /** The bespoke tile: an empty free-layout unit for a row of this run, or one of the engine's starter templates. */
   function bespokeMenu(run, anchor) {
     const empty = (level, label) => ({ label, icon: 'carpentry', onSelect: () => add({ level, internals: { layout: { columns: [{ flex: 1, cells: [{ flex: 1, kind: 'door' }] }] } } }) });
-    const add = (opts) => { const id = C.addUnit(run.id, 'custom', opts); if (id) { store.setUI({ carpentryTab: 'unit' }); app.toast(`Bespoke unit added to ${run.code}: compose it in the Unit tab`, { action: { label: 'Undo', fn: () => store.undo() } }); } };
+    const add = (opts) => { const id = C.addUnit(run.id, 'custom', opts); if (id) { store.setUI({ carpentryTab: 'unit' }); app.toast(`Bespoke unit added to ${run.code}: compose it in the Unit tab`, { action: { label: 'Undo', fn: () => app.actions.undo() } }); } };
     const T = Carp.CUSTOM_TEMPLATES && typeof Carp.customLayoutTemplate === 'function' ? Object.entries(Carp.CUSTOM_TEMPLATES) : [];
     const rows = (run.levels || ['base']).filter((l) => l !== 'island');
     openMenu(anchor, [
@@ -142,7 +142,7 @@ export function initRunsPanel(root, app, C) {
         if (m.id === 'custom') { bespokeMenu(run, e.currentTarget); return; }
         const opts = m.level === 'any' ? { level: run.kind === 'island' ? 'island' : (run.levels.includes('base') ? 'base' : run.levels[0]) } : {};
         const id = C.addUnit(run.id, m.id, opts);
-        if (id) app.toast(`${m.name.en} added to ${run.code}`, { action: { label: 'Undo', fn: () => store.undo() } });
+        if (id) app.toast(`${m.name.en} added to ${run.code}`, { action: { label: 'Undo', fn: () => app.actions.undo() } });
       },
       onDragstart: (e) => { e.dataTransfer.setData(DND_MODULE, m.id); e.dataTransfer.setData('text/plain', m.name.en); e.dataTransfer.effectAllowed = 'copy'; C.emit('palette-drag', { module: m.id }); },
       onDragend: () => C.emit('palette-drag', null) });

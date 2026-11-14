@@ -651,7 +651,7 @@ export function initWorkbench(app, C) {
     if (id === 'custom') opts.internals = { layout: { columns: [{ flex: 1, cells: [{ flex: 1, kind: 'door' }] }] } };
     const got = Carp.getRun(S.runId);
     const unitId = C.addUnit(S.runId, id, opts);
-    if (unitId) app.toast(`${m.name.en} added to ${got.run.code}`, { action: { label: 'Undo', fn: () => store.undo() } });
+    if (unitId) app.toast(`${m.name.en} added to ${got.run.code}`, { action: { label: 'Undo', fn: () => app.actions.undo() } });
     drawOverlay();
   });
 

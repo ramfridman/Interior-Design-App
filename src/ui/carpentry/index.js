@@ -36,7 +36,7 @@ export function createCarpentry(app) {
   const { store, plan, view2d } = app;
   const root = document.getElementById('app');
   const planShown = () => store.ui.mode === '2d' || store.ui.mode === 'split';
-  const undo = { label: 'Undo', fn: () => store.undo() };
+  const undo = { label: 'Undo', fn: () => app.actions.undo() };
   let pick = null;                    // { kind, hover: span|null } while the "click a wall" prompt is up
   let flash = { ids: new Set(), until: 0 };
   let findingsCache = new Map();      // runId → Finding[]

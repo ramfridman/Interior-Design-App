@@ -100,7 +100,7 @@ export function createStructure(app) {
   const view = () => { const id = store.ui.level || 'L0'; return id === 'L0' ? app.plan : levelPlan(app.plan, id) || app.plan; };
   const root = document.getElementById('app');
   const planShown = () => store.ui.mode === '2d' || store.ui.mode === 'split';
-  const undo = { label: 'Undo', fn: () => store.undo() };
+  const undo = { label: 'Undo', fn: () => app.actions.undo() };
   let diff = null;
   let lastWarning = { text: '', at: 0 };
   let toolChangedAt = -1;

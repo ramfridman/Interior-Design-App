@@ -197,7 +197,7 @@ export function initInspector(root, app) {
     const rows = alts.map((p) => h('button', { type: 'button', class: 'altrow', 'aria-label': `Swap for ${p.name}, ${fmtPrice(p.price)}`,
       onClick: () => {
         store.swapItem(item.id, { ...catalog.itemFromProduct(p, {}, store.project.ceilingHeight), generic: false });
-        app.toast(`Swapped for ${p.name}`, { kind: 'success', action: { label: 'Undo', fn: () => store.undo() } });
+        app.toast(`Swapped for ${p.name}`, { kind: 'success', action: { label: 'Undo', fn: () => app.actions.undo() } });
       } },
     h('span', { class: 'altrow__thumb' }, thumbs.el(p, { size: 88 })),
     h('span', { class: 'altrow__text' }, h('span', { class: 'altrow__name truncate' }, p.name),

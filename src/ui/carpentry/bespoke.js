@@ -43,7 +43,7 @@ export function bespokeSection({ app, C, unit, mod, upd }) {
       icon('carpentry', { size: 18 }),
       h('div', null, h('p', { class: 'cbesp-offer__title' }, 'Want something the library doesn’t have?'),
         h('p', { class: 'cbesp-offer__text' }, 'Turn this unit into a bespoke one and divide it freely into doors, drawers, shelves and niches.'),
-        btn('Make this unit bespoke', { small: true, icon: 'carpentry', onClick: () => { const r = C.run(() => Carp.toCustom(unit.id)); if (r.res && r.res.ok) toast('Bespoke unit: compose it below', { action: { label: 'Undo', fn: () => app.store.undo() } }); } })));
+        btn('Make this unit bespoke', { small: true, icon: 'carpentry', onClick: () => { const r = C.run(() => Carp.toCustom(unit.id)); if (r.res && r.res.ok) toast('Bespoke unit: compose it below', { action: { label: 'Undo', fn: () => app.actions.undo() } }); } })));
   }
   const cols = Array.isArray(layout.columns) ? layout.columns : [];
   const sel = selCell.get(unit.id) || { c: 0, r: 0 };

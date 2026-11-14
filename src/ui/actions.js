@@ -47,7 +47,7 @@ export function createActions(app) {
       const free = movable(ids).map((it) => it.id);
       if (!free.length) { if (!carpRefusal(ids)) toast('Unlock the item to remove it', { kind: 'warn' }); return; }
       store.removeItems(free);
-      toast(free.length === 1 ? 'Item removed' : `${free.length} items removed`, { action: { label: 'Undo', fn: () => store.undo() } });
+      toast(free.length === 1 ? 'Item removed' : `${free.length} items removed`, { action: { label: 'Undo', fn: () => actions.undo() } });
     },
     duplicateSelection() {
       if (!store.selection.length) return;
@@ -173,7 +173,7 @@ export function createActions(app) {
         const space = getSpace(id, plan);
         if (!space) return;
         store.setFinish(id, { [kind]: product.id });
-        toast(`${kind === 'wall' ? 'Walls' : 'Floor'} of ${space.name} updated`, { kind: 'success', action: { label: 'Undo', fn: () => store.undo() } });
+        toast(`${kind === 'wall' ? 'Walls' : 'Floor'} of ${space.name} updated`, { kind: 'success', action: { label: 'Undo', fn: () => actions.undo() } });
       };
       if (target && candidates.some((s) => s.id === target)) { apply(target); return; }
       const items = [{ heading: kind === 'wall' ? 'Apply to the walls of' : 'Apply to the floor of' },
@@ -196,7 +196,7 @@ export function createActions(app) {
           const data = JSON.parse(text);
           store.load(data, { recordUndo: true });
           dlg.close();
-          toast('Design opened', { kind: 'success', action: { label: 'Undo', fn: () => store.undo() } });
+          toast('Design opened', { kind: 'success', action: { label: 'Undo', fn: () => actions.undo() } });
         } catch (err) {
           error.textContent = 'This is not a design file saved from this app. Nothing was changed.';
           error.hidden = false;
@@ -231,7 +231,7 @@ export function createActions(app) {
       try {
         const { initialLayout } = await import('../core/initial-layout.js');
         store.load({ items: initialLayout(), planEdits: store.serialize().planEdits }, { recordUndo: true });
-        toast("Back to the architect's layout", { action: { label: 'Undo', fn: () => store.undo() } });
+        toast("Back to the architect's layout", { action: { label: 'Undo', fn: () => actions.undo() } });
       } catch (err) { console.error(err); toast('Could not reset the layout', { kind: 'error' }); }
     },
     async exportPlanPNG() {

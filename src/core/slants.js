@@ -402,17 +402,17 @@ export function bothFaces(faces) {
  * `taken` ([[a0, a1]…] gap extents): ≥ jamb cm of wall on both faces beside it and between it and every other opening.
  */
 export function openingRanges(free, taken, width, jamb) {
-  const out = [];
-  for (const [p, q] of free) {
-    let lo = p + jamb + width / 2;
-    const hiAll = q - jamb - width / 2;
-    for (const [a0, a1] of taken.slice().sort((x, y) => x[0] - y[0])) {
-      if (a1 + jamb + width / 2 <= lo || a0 - jamb - width / 2 >= hiAll) { if (a1 + jamb + width / 2 > lo && a1 <= hiAll + width) lo = Math.max(lo, a1 + jamb + width / 2); continue; }
-      const hi = a0 - jamb - width / 2;
-      if (hi >= lo - EPS) out.push([lo, hi]);
-      lo = Math.max(lo, a1 + jamb + width / 2);
+  const half = width / 2 + jamb;
+  // centre ranges allowed by the free stretches, minus the centres forbidden by each other opening
+  let ranges = free.map(([p, q]) => [p + half, q - half]).filter(([a, b]) => b >= a - EPS);
+  for (const [a0, a1] of taken) {
+    const f0 = a0 - half, f1 = a1 + half, next = [];
+    for (const [a, b] of ranges) {
+      if (f1 <= a + EPS || f0 >= b - EPS) { next.push([a, b]); continue; }
+      if (f0 >= a - EPS) next.push([a, f0]);
+      if (f1 <= b + EPS) next.push([f1, b]);
     }
-    if (hiAll >= lo - EPS) out.push([lo, hiAll]);
+    ranges = next.filter(([a, b]) => b >= a - EPS);
   }
-  return out;
+  return ranges;
 }
