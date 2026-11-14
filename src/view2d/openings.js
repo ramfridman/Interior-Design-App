@@ -13,14 +13,29 @@ import { openingFrame, openingPoint, openingFaceSign, openingJambSign } from '..
 
 function frame(o) {
   const F = openingFrame(o);
-  return { L: F.L, T: F.T, P: (u, v) => openingPoint(F, u, v) };
+  // an opening in an angled wall (axis 'a', stage A3): its local boxes are drawn as rotated quads
+  return { L: F.L, T: F.T, P: (u, v) => openingPoint(F, u, v), rot: o.axis === 'a' };
 }
 /** v coordinate of the wall face on a side (`swing` / `outside` letter). */
 const faceV = (o, T, side) => (openingFaceSign(o, side) < 0 ? 0 : T);
 /** Pure helpers exposed for tests (tests/geometry.test.mjs). */
 export { frame as openingLocalFrame, faceV as openingFaceV };
 
+/** Path of the local box u0…u1 × v0…v1 of a rotated frame (plan → device px, not snapped: the edges are diagonal). */
+function quadPath(G, f, u0, v0, u1, v1) {
+  const { ctx } = G;
+  ctx.beginPath();
+  [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].forEach(([u, v], i) => { const p = f.P(u, v); if (i) ctx.lineTo(G.X(p[0]), G.Y(p[1])); else ctx.moveTo(G.X(p[0]), G.Y(p[1])); });
+  ctx.closePath();
+}
 function localBox(G, f, u0, v0, u1, v1, fill, stroke, lw = 1) {
+  if (f.rot) {
+    const { ctx } = G;
+    quadPath(G, f, u0, v0, u1, v1);
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
+    return;
+  }
   const a = f.P(u0, v0), b = f.P(u1, v1);
   G.box(a[0], a[1], b[0], b[1], fill, stroke, lw);
 }
@@ -85,7 +100,10 @@ function drawLeaf(G, pal, o, f, d, look = {}) {
   ctx.strokeStyle = pal.inkSoft; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
   // leaf, standing open
   const thick = look.heavy ? 7 : 4;
-  if (look.dashed) {
+  if (look.dashed && f.rot) {
+    quadPath(G, f, uh, vs, uh + dir * thick, vs + out * W);
+    ctx.setLineDash(dash); ctx.strokeStyle = pal.frame; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
+  } else if (look.dashed) {
     const a = f.P(uh, vs), b = f.P(uh + dir * thick, vs + out * W);
     const x0 = G.RX(Math.min(a[0], b[0])) + 0.5, y0 = G.RY(Math.min(a[1], b[1])) + 0.5;
     const w = Math.max(2, G.RX(Math.max(a[0], b[0])) - G.RX(Math.min(a[0], b[0])) - 1), h = Math.max(2, G.RY(Math.max(a[1], b[1])) - G.RY(Math.min(a[1], b[1])) - 1);

@@ -1693,6 +1693,7 @@ within 1.5 s: artifact preview, plain static host) nothing of this section is vi
 | `carp` | `store.carpentry.settings` | |
 | `cimg:<id>` | `{ url }` — large carpentry reference image (≤ 1 MB) | `store.carpentryImages` |
 | `underlay` | `store.underlay` without `image`; `img` = asset id, the picture itself goes through REST | `store.underlay` |
+| `cprod:<id>` | an own product (§ 16), id `own-…` | `store.customProducts` |
 
 `v[key]` = server sequence number and client id of the last change of that entity (tombstones kept after delete).
 **Not synchronised:** `store.ui`, selection, undo stacks, presence; everything the engines derive when a value is applied
@@ -2029,3 +2030,67 @@ stairInfo(id) → { stair, data, levelId, to, rise, geo, need, voids, covers } �
 * Blockers on a stair: its open `stairSides` runs (guards, 0.90 m) and the void railing of the upper level; the lower
   level's walls only while h < the upper slab underside.
 
+## 16. Own products — "Add your own product" (additive; designs without own products are byte-identical)
+
+The person adds any product from any shop by hand (the app never reads other shops' pages — the browser cannot, and
+nothing is sent anywhere). It then behaves like a catalogue product in the open **project** only.
+
+### Data (`src/catalog/own.js`, pure)
+Own product = the § 6 product shape + `{ id: 'own-<8 base-36 chars>', own: true, createdAt (ISO), createdBy?: email
+(only in an online project), note?, price: number | null, priceOnRequest?: true }`, `tags: ['own']`, `currency: 'ILS'`.
+`url` is optional (https only — the `safeUrl` rule), `brand` optional. Finishes (`floor-finish` / `wall-finish`) have no
+`dims`; their tile / plank size is `params.tileW / tileH`. Helpers: `validateOwnInput(input) → { ok, errors: { field:
+plain words }, warnings: { size } }` (size far from the type's default → a warning, never a block; limits `LIMITS`),
+`buildOwnProduct(input, { prev, createdBy, products })`, `inputFromProduct(p)`, `normalizeOwnProduct(raw) → p | null`
+(used on every read: file, doc, peer, library), `typesForCategory(zone, category, catalogProducts, { all })` (the model
+types the catalogue uses in that category, in its sub-category order), `subcategoryFor`, `typeOptions(type)` (the type's
+declared params from `types.js` as `enum | bool | number | color`, `main` = what the dialog shows first, the rest under
+"More options"), `shopFromUrl(url)` (`www.kaza.co.il` → `kaza.co.il`), `itemPatchFromProduct`, `GENERIC_PATCH`,
+`ownItemFix(item, byId)`.
+
+### Store (`store.js`, additive)
+`store.customProducts` (canonical order: `createdAt`, then id) · `addCustomProduct(p, { linkItem? })` (with `linkItem`
+the generic item becomes that product in the same undo step) · `updateCustomProduct(id, p)` (every item placed from it
+takes the new name, look, size, price, link; position / rotation / elevation / level stay; rooms using it as a finish
+re-render) · `removeCustomProduct(id) → { items, finishes }` (items stay as **generic** items with their size and
+position, `productId / price / url / retailer / brand` cleared; finishes go back to the built-in default) ·
+`syncOwnItems()` (an item pointing at a missing own product → generic; an item whose product's price / unit / link /
+shop / brand changed → takes them) · `getCustomProduct(id)`, `itemsOfProduct(id)`. Each is one undo step. Event
+`'products' { type, ids }`. `serialize()` writes `customProducts` only when there is at least one; `load()` without it
+clears them; the undo snapshot holds them only when there are any. The store registers the list with the catalogue
+(`setOwnProducts`) on every change, so everything that reads the catalogue (grid, search, rail counts, supplier filter,
+sort, `getProduct`, drag-and-drop, Swap for…, Rooms finishes, 3D finishes, shopping list) sees them. Project records,
+project files, duplicate and export carry them inside `design` unchanged (`projects.js` needs nothing).
+
+### Catalogue (`catalog/index.js`, additive)
+`setOwnProducts(list)` (replace; ignores non-own ids and never shadows a catalogue id), `ownProducts()`,
+`catalogProducts()` (built-in only), `isOwnProduct(p)`; `allProducts()` = catalogue + own; `searchProducts({ own: true })`
+= only own products. Price on request (`price: null`): left out by a min / max price filter, sorted after priced products.
+`itemFromProduct` gives `price: null`, `url: null` when absent. Built-in data files are never modified.
+
+### Price on request
+Placed item: `productId` set, `generic: false`, `price: null`. `buildShopping` lists it as a row with `onRequest: true`,
+`unitPrice: null`, cost 0, never in a total, and returns `onRequest` (pieces + finish rows) for the note "N products with
+price on request are not in the total." (budget panel, print, `shoppingText`). CSV: unit price `price on request`, empty
+cost, and a `Not in the total` line after `Total`. `shoppingTotal()` gains `onRequest`.
+
+### Live collaboration (§ 13, additive)
+Entity `cprod:<id>` = the product (validated: id matches the key, type and name strings, price number | null, https
+link). `TYPE_ORDER` applies `cprod` before `item`. `recordToDoc` / `docToRecord` carry them (no key without any).
+**Concurrent delete / edit rule:** after any remote change the bridge runs `store.syncOwnItems()` (not for viewers, not
+during a drag) and sends the fix as a group of kind `'sys'` — sent, but on nobody's undo stack. Every replica makes the
+same fix, so: A deletes a product while B places it → B's item becomes generic (size kept) on both; A edits the price
+while B places one → B's item takes the new price on both. A's undo of the delete brings the product back (the item B
+placed meanwhile stays generic).
+
+### UI (`src/ui/own-product.js`, `own-library.js`, `src/styles/own-product.css`)
+`ownProductsFor(app)` → `{ openAdd({ zone, category }), openEdit(id), openLink(itemId), openLibrary(), confirmDelete(id) }`;
+`ownMark(withText)` = the "added by you" mark (icon `own`, a person with a pencil) shown through `supplierMarks`.
+Entry points: catalogue header "Add your own" (phone: full-width "Add your own product" above the grid), product detail
+"Add from another shop…" (Edit / Delete for own products; Delete says how many placed items use it), filter "Only
+products I added", Inspector "Link to a product you found…" on a generic item and "Edit product" on an own one.
+Dialog: one screen with a live 3D preview on desktop, three steps on a phone (≤ 699 px); the dialog scrolls inside
+itself. Library: "Keep in my library on this device" (default on) → prefs key `ownLibrary` (localStorage through
+`prefs.js`; in memory when storage is unavailable; no `createdBy` kept); "From my library…" copies one into the project.
+Tests: `node tests/own-product.test.mjs`, `node tests/e2e.own-product.mjs [--shots]`, own-product steps in the
+capture-completeness case of `tests/collab.test.mjs`.

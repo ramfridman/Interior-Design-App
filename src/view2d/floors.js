@@ -2,7 +2,7 @@
  * Floors: room fills derived from the chosen finish (with a faint tile / plank hint at high zoom),
  * paved outdoor areas with a tile hatch, and the adaptive grid.
  */
-import { polygonBounds, clamp } from '../core/geometry.js';
+import { polygonBounds, clamp, openingPoly } from '../core/geometry.js';
 import { resolveFinish } from '../core/finishes.js';
 import { css } from './color.js';
 
@@ -60,7 +60,10 @@ export function drawRoomFloors(G, env) {
   const { plan, pal, store, catalog } = env, { ctx } = G;
   // the house footprint under walls and openings, so no garden shows through door gaps
   ctx.beginPath();
-  for (const o of plan.openings) G.rect(o.x, o.y, o.w, o.h);
+  for (const o of plan.openings) {
+    if (o.axis === 'a') openingPoly(o, plan).forEach(([x, y], i) => (i ? ctx.lineTo(G.RX(x), G.RY(y)) : ctx.moveTo(G.RX(x), G.RY(y))));   // in an angled wall: its gap quad
+    else G.rect(o.x, o.y, o.w, o.h);
+  }
   ctx.fillStyle = pal.opening; ctx.fill();
   for (const room of plan.rooms) {
     const fin = resolveFinish(room.id, 'floor', store, catalog).params;

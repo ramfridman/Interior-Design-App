@@ -152,6 +152,25 @@ function experimentalGroup(app) {
     sw,
     h('p', { class: 'setnote' }, 'Works: adding floors and switching between them in the plan and in 3D, furniture, carpentry and the checks per floor, and stairs (the Stairs tool in Structure, with the opening in the floor above and the stair rules), walking up and down them in the walk-through.'),
     h('p', { class: 'setnote' }, 'Not yet: realistic daylight on the upper floors, and importing a drawing with several floors.'),
+    note,
+    angledGroup(app));
+}
+
+/** Settings → Experimental → angled walls (stage A3): the switch only adds the tools that CREATE angled walls. */
+function angledGroup(app) {
+  const note = h('p', { class: 'setnote setnote--warn', role: 'status', hidden: true });
+  const paintNote = () => {
+    const has = Array.isArray(app.plan.slants) && app.plan.slants.length > 0;
+    note.hidden = !(has && !FEATURES.angledWalls);
+    note.textContent = note.hidden ? '' : 'This plan already has angled walls: they are always drawn and can be selected, moved and changed. The switch adds drawing new ones and angling straight walls.';
+  };
+  const sw = toggle({ label: 'Angled walls (in development)', checked: !!FEATURES.angledWalls, onChange: (on) => { setFeature('angledWalls', on); paintNote(); } });
+  sw.classList.add('setrow--angled');
+  paintNote();
+  return h('div', { class: 'settings__sub settings__sub--angled' },
+    sw,
+    h('p', { class: 'setnote' }, 'Works: drawing walls at any angle in the plan (15° steps, parallel and perpendicular guides, typed length and angle), angling a straight wall by dragging its end, doors and windows in angled walls, the rooms and their areas, dimensions, and the checks that already handle them.'),
+    h('p', { class: 'setnote' }, 'Not yet: angled walls in 3D, the daylight simulation, the regulation and carpentry checks along angled walls, and importing them from a drawing.'),
     note);
 }
 

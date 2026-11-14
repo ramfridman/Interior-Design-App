@@ -9,8 +9,11 @@
  * each result. The engine's own words are shown whenever it refuses, and sent to the UI as 'structure' events:
  *   { type: 'done' | 'refused' | 'locked' | 'warning', op, level, text, clientX, clientY }
  */
-import { canAddWall, canAddOpening, addWall, addOpening, moveWallSegment, resizeWallSegment, updateOpening, REASONS, canAddStair, addStair, updateStair, updateVoid } from '../core/plan-edit.js';
-import { spaceAt, snapTo, clamp, pointInRect, polygonBounds } from '../core/geometry.js';
+import { canAddWall, canAddOpening, addWall, addOpening, moveWallSegment, resizeWallSegment, updateOpening, REASONS, canAddStair, addStair, updateStair, updateVoid, rotateWallEnd, wallSegments } from '../core/plan-edit.js';
+import { spaceAt, snapTo, clamp, pointInRect, polygonBounds, pointInPolygon, openingPoly, wallFaces, inWallOrOpening } from '../core/geometry.js';
+import { FEATURES } from '../core/features.js';
+import { snapWallEnd as snapSlantEnd, snapTargets, lineFrame, shownAngle, segDist, cursorFor } from './slant-tools.js';
+import { fmtDim } from './readouts.js';
 import { structureOf, policyOfTarget, rectDist, spanOf, rectOf, selectionHandles, OPENING_TOOL_KIND, stairOn, voidOn } from './structure.js';
 import { hitStair, hitVoid, snapStairBox, wallFacesOf, moveVoidVertex, moveVoidEdge, doorSwingRects, boxGap } from './stairs.js';
 import { PLAN } from '../core/plan.js';
@@ -26,6 +29,25 @@ const KIND_NAME = { door: 'door', window: 'window', 'sliding-door': 'sliding doo
 const NO_WALL = 'There is no wall here.';
 
 const isLockReason = (text) => !!text && (text.includes(REASONS.mamad) || text.includes(REASONS.exteriorWall));
+/** Distance from a point to a polygon (0 inside). */
+function polyDist(px, py, poly) {
+  if (pointInPolygon(px, py, poly)) return 0;
+  let d = Infinity;
+  for (let i = 0; i < poly.length; i++) { const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % poly.length]; d = Math.min(d, segDist(px, py, x1, y1, x2, y2)); }
+  return d;
+}
+/** Distance from a point to a wall segment: its footprint for an angled wall, its rectangle otherwise. */
+const segmentDist = (px, py, s) => (s.axis === 'a' ? polyDist(px, py, s.poly) : rectDist(px, py, s));
+/** Distance from a point to an opening: its gap quad in an angled wall, its rectangle otherwise. */
+const openingDist = (px, py, o, plan) => (o.axis === 'a' ? polyDist(px, py, openingPoly(o, plan)) : rectDist(px, py, o));
+const r01 = (v) => Math.round(v * 10) / 10 + 0;
+/** The two ends of a wall segment's centre line: an angled wall's x1…y2, a rect core's west / north end first. */
+function segEnds(s) {
+  if (s.axis === 'a') return [[s.x1, s.y1], [s.x2, s.y2]];
+  const c = s.core;
+  return s.axis === 'h' ? [[c.x, c.y + c.h / 2], [c.x + c.w, c.y + c.h / 2]] : [[c.x + c.w / 2, c.y], [c.x + c.w / 2, c.y + c.h]];
+}
+const NUM_KEY = /^[0-9.,]$/;
 /** Centre-line coordinate to hand to the engine so that the wall's near face lands on `face` (the engine snaps the
  *  centre to the grid first, then the face). */
 function centreFor(face, t) {
@@ -124,13 +146,13 @@ export function createStructureTools(V, io) {
     let best = null;
     const tolO = Math.max(3, 5 / cam.scale);
     for (const o of env.plan.openings) {
-      const dist = rectDist(pp.x, pp.y, o);
+      const dist = openingDist(pp.x, pp.y, o, env.plan);
       if (dist <= tolO && (!best || dist < best.dist)) best = { type: 'opening', id: o.id, dist };
     }
     if (!best) {
       const tol = Math.max(4, 6 / cam.scale);
       for (const s of d.segs) {
-        const dist = rectDist(pp.x, pp.y, s);
+        const dist = segmentDist(pp.x, pp.y, s);
         if (dist <= tol && (!best || dist < best.dist)) best = { type: 'segment', id: s.id, dist };
       }
     }
@@ -154,7 +176,7 @@ export function createStructureTools(V, io) {
   }
   const nearestSegment = (pp) => {
     let best = null, bd = Infinity;
-    for (const s of data().segs) { const dist = rectDist(pp.x, pp.y, s.core); if (dist < bd) { bd = dist; best = s; } }
+    for (const s of data().segs) { const dist = s.axis === 'a' ? polyDist(pp.x, pp.y, s.poly) : rectDist(pp.x, pp.y, s.core); if (dist < bd) { bd = dist; best = s; } }
     return best;
   };
 
@@ -188,15 +210,95 @@ export function createStructureTools(V, io) {
     V.invalidate();
   }
 
+  // ───────────── snap targets of angled walls (per plan revision) ─────────────
+  let targetsCache = null;
+  /** Points, faces, wall ends and reference lines the angle tools snap to; `self` (a segment) is left out. */
+  function targets(self) {
+    const plan = env.plan, key = [plan.walls, plan.openings, plan.wallOutline, plan.slants];
+    if (!targetsCache || targetsCache.key.some((k, i) => k !== key[i])) {
+      const segs = wallSegments(plan);
+      targetsCache = { key, all: snapTargets(plan, segs, wallFaces(plan)), segs };
+    }
+    const T = targetsCache.all;
+    if (!self) return T;
+    // the wall being changed is no target for itself: its own corners, faces and centre line
+    const poly = self.axis === 'a' ? self.poly : [[self.core.x, self.core.y], [self.core.x + self.core.w, self.core.y], [self.core.x + self.core.w, self.core.y + self.core.h], [self.core.x, self.core.y + self.core.h]];
+    const near = (x, y) => polyDist(x, y, poly) <= 0.6;
+    return {
+      points: T.points.filter(([x, y]) => !near(x, y)),
+      faces: T.faces.filter((f) => !near((f.x1 + f.x2) / 2, (f.y1 + f.y2) / 2)),
+      ends: T.ends.filter((q) => !near(q.x, q.y)),
+      lines: T.lines.filter((l) => l.id !== self.id),
+    };
+  }
+  /** How far (cm) the angle tools reach for points and faces: about 9 CSS px. */
+  const angledReach = () => clamp(9 / cam.scale, 1.5, 30);
+  /** Is the angled-walls switch on? It guards only what CREATES an angled wall. */
+  const angledOn = () => !!FEATURES.angledWalls;
+
   // ───────────── drawing a wall ─────────────
+  /** Typed length / angle while drawing (angled walls): { field: 'len' | 'ang', len: '', ang: '' }. */
+  function typedValues(D) {
+    const T = D && D.typed;
+    if (!T) return { len: null, ang: null };
+    const len = parseFloat(String(T.len).replace(',', '.')), ang = parseFloat(String(T.ang).replace(',', '.'));
+    return { len: Number.isFinite(len) && len > 0 ? (store.ui.units === 'cm' ? len : len * 100) : null, ang: Number.isFinite(ang) ? ang : null };
+  }
   function updateDraft(p, e) {
     const D = S.draft;
     if (!D) return;
-    const pp = io.toPlan(p), t = thickness(), opts = { scale: cam.scale, enabled: io.snapOn(e) };
+    S.lastDraftP = p;
+    const typed = typedValues(D);
+    if (angledOn() && !(e && e.shiftKey)) return updateAngledDraft(p, e, typed);
+    legacyDraft(io.toPlan(p), e, null);
+    D.angled = false; D.typedOn = false;
+    D.shown = D.input ? shownAngle(D.input.x2 - D.input.x1, D.input.y2 - D.input.y1) : 0;
+  }
+  /**
+   * The wall tool with the angled-walls switch on: any direction, snapped (slant-tools.snapWallEnd: points / faces, 15°
+   * steps with 45° and 90° stronger, parallel / perpendicular, extension lines, 5 cm lengths; Alt frees the angle, Shift is
+   * the old axis lock). A direction on an axis is drawn exactly as before (the rect wall's own snapping).
+   */
+  function updateAngledDraft(p, e, typed) {
+    const D = S.draft, pp = io.toPlan(p), t = thickness(), snap = io.snapOn(e);
+    const T = snap ? targets() : { points: [], faces: [], ends: [], lines: [] };
+    const sn = snapSlantEnd(D.raw, pp, { ...T, reach: angledReach(), scale: cam.scale, free: !snap || (e && e.altKey), step: snap ? 5 : 1, typedLength: typed.len, typedAngle: typed.ang });
+    D.typedOn = true;
+    const axisDir = Math.abs(Math.sin(sn.deg * Math.PI / 90)) < 1e-9;     // 0 / 90 / 180 / 270°
+    if (axisDir && sn.endKind !== 'point' && typed.len == null) {
+      const forced = Math.abs(Math.cos(sn.deg * Math.PI / 180)) > 0.5 ? 'h' : 'v';
+      legacyDraft({ x: sn.x, y: sn.y }, e, forced);
+      Object.assign(D, { angled: false, angleKind: sn.angleKind, endKind: sn.endKind, shown: D.input ? shownAngle(D.input.x2 - D.input.x1, D.input.y2 - D.input.y1) : sn.shown, slantGuides: [] });
+      D.readout = `${fmtDim(D.length, store.ui.units)}  ·  ${D.shown}°`;
+      return;
+    }
+    const input = { x1: r01(D.raw.x), y1: r01(D.raw.y), x2: r01(sn.x), y2: r01(sn.y), thickness: t, angled: true };
+    const len = Math.hypot(input.x2 - input.x1, input.y2 - input.y1), tooShort = len < 30;
+    const chk = tooShort ? { ok: false, reason: '' } : canAddWall(input);
+    const f = lineFrame(input.x1, input.y1, input.x2, input.y2), hw = t / 2;
+    const quad = [[input.x1 - f.nx * hw, input.y1 - f.ny * hw], [input.x2 - f.nx * hw, input.y2 - f.ny * hw], [input.x2 + f.nx * hw, input.y2 + f.ny * hw], [input.x1 + f.nx * hw, input.y1 + f.ny * hw]];
+    const sl = chk.ok && chk.slant ? chk.slant : null;
+    const poly = chk.ok ? (chk.poly || (chk.rect ? null : quad)) : quad;
+    const ends = sl ? [[sl.x1, sl.y1], [sl.x2, sl.y2]] : [[input.x1, input.y1], [input.x2, input.y2]];
+    // an end is joined when the engine moved it onto another wall, or it already sits in one
+    const joined = ends.map(([x, y], k) => !!sl && (Math.hypot(x - (k ? input.x2 : input.x1), y - (k ? input.y2 : input.y1)) > 0.05 || inWallOrOpening(x, y, env.plan)));
+    const shownLen = sl ? Math.hypot(sl.x2 - sl.x1, sl.y2 - sl.y1) : len;
+    Object.assign(D, {
+      angled: !(chk.ok && chk.rect), axis: null, input, ok: chk.ok, reason: chk.ok ? '' : chk.reason, level: chk.ok ? chk.level : 'locked',
+      poly: poly || quad, rect: chk.ok && chk.rect ? chk.rect : polygonBounds(poly || quad), length: shownLen, thickness: t,
+      shown: sn.shown, angleKind: sn.angleKind, endKind: sn.endKind, ends, joined, guides: [], slantGuides: sn.guides, clear: [],
+      readout: `${fmtDim(shownLen, store.ui.units)}  ·  ${sn.shown}°`,
+    });
+  }
+  /** The rect wall tool as it always was (axis lock; `forced` = 'h' | 'v' fixes the axis). */
+  function legacyDraft(pp, e, forced) {
+    const D = S.draft;
+    const t = thickness(), opts = { scale: cam.scale, enabled: io.snapOn(e) };
     const dx = pp.x - D.raw.x, dy = pp.y - D.raw.y;
     // axis lock, with a little hysteresis so the ghost does not flicker around the diagonal
     let axis = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
     if (D.axis && D.axis !== axis && Math.abs(Math.abs(dx) - Math.abs(dy)) < 8 / cam.scale) axis = D.axis;
+    if (forced) axis = forced;
     const h = axis === 'h';
     const rawA = h ? D.raw.x : D.raw.y, rawC = h ? D.raw.y : D.raw.x, cur = h ? pp.x : pp.y;
     const line = snapper.snapWallLine(axis, rawC, rawA, cur, t, opts);
@@ -217,6 +319,7 @@ export function createStructureTools(V, io) {
   function commitDraft(e, keepOnFail) {
     const D = S.draft;
     if (!D || !D.input) { S.draft = null; return; }
+    if (!e || !Number.isFinite(e.clientX)) e = { ...lastEvent, shiftKey: !!(e && e.shiftKey) };   // committed with Enter
     const fail = (reason) => {
       if (reason) { emit(isLockReason(reason) ? 'locked' : 'refused', 'add-wall', 'locked', reason, e); setTip(reason, 'refused'); }
       if (!keepOnFail) S.draft = null;
@@ -231,13 +334,50 @@ export function createStructureTools(V, io) {
     if (!e.shiftKey) store.setUI({ tool: 'structure' });
   }
 
+  /**
+   * Typed entry while drawing an angled wall: digits set the length (in the units shown), Tab switches to the angle field
+   * (degrees, counter-clockwise from east), Backspace edits, Enter builds the wall, Esc clears what was typed first.
+   * Returns true when the key was used.
+   */
+  function key(e) {
+    const D = S.draft;
+    if (io.tool() !== 'wall' || !D || !angledOn() || e.ctrlKey || e.metaKey) return false;
+    const T = D.typed || (D.typed = { field: 'len', len: '', ang: '' });
+    const k = e.key;
+    if (NUM_KEY.test(k) || (k === '-' && T.field === 'ang' && !T.ang)) T[T.field] += k === ',' ? '.' : k;
+    else if (k === 'Backspace') { if (!T[T.field] && !T.len && !T.ang) return false; T[T.field] = T[T.field].slice(0, -1); }
+    else if (k === 'Tab') T.field = T.field === 'len' ? 'ang' : 'len';
+    else if (k === 'Escape') { if (!T.len && !T.ang) return false; T.len = ''; T.ang = ''; T.field = 'len'; }
+    else if (k === 'Enter') {
+      if (S.lastDraftP) updateDraft(S.lastDraftP, { ...lastEvent, shiftKey: false, altKey: e.altKey, ctrlKey: false, metaKey: false });
+      if (S.draft && S.draft.input) { commitDraft(e, true); if (S.draft && S.draft.typed) { S.draft.typed.len = ''; S.draft.typed.ang = ''; } }
+      V.invalidate();
+      return true;
+    } else return false;
+    if (S.lastDraftP) updateDraft(S.lastDraftP, { ...lastEvent, shiftKey: false, altKey: e.altKey, ctrlKey: false, metaKey: false });
+    V.invalidate();
+    return true;
+  }
+
   // ───────────── placing an opening ─────────────
   function updateGhost(p, e) {
     const kind = OPENING_TOOL_KIND[io.tool()];
     if (!kind) { S.ghost = null; return; }
     const pp = io.toPlan(p), d = data(), prev = S.ghost;
     let x = pp.x, y = pp.y;
-    if (prev && prev.ok && prev.kind === kind) {
+    if (prev && prev.ok && prev.kind === kind && prev.axis === 'a') {
+      // on an angled wall: off the wall the ghost stays (its side = swing, its half = hinge); past a jamb it is pushed along
+      const seg = d.byId.get(prev.segmentId);
+      if (seg) {
+        const f = lineFrame(seg.x1, seg.y1, seg.x2, seg.y2), along = (pp.x - seg.x1) * f.ux + (pp.y - seg.y1) * f.uy, off = Math.abs((pp.x - seg.x1) * f.nx + (pp.y - seg.y1) * f.ny);
+        const band = seg.t / 2 + 4 / cam.scale, reach = clamp(70 / cam.scale, REACH, 150);
+        if (off > band && off <= reach && nearestSegment(pp) === seg) {
+          const half = prev.width / 2, m = 3 / cam.scale;
+          const want = along < prev.at - half - m ? along + half : along > prev.at + half + m ? along - half : prev.at;
+          x = seg.x1 + f.ux * want; y = seg.y1 + f.uy * want;
+        }
+      }
+    } else if (prev && prev.ok && prev.kind === kind) {
       const seg = d.byId.get(prev.segmentId);
       if (seg) {
         // Off the wall the ghost stays where it is, so the cursor can choose which way the door hangs: the side
@@ -259,6 +399,22 @@ export function createStructureTools(V, io) {
       return;
     }
     const seg = d.byId.get(chk.segmentId), axis = seg ? seg.axis : (chk.rect.w >= chk.rect.h ? 'h' : 'v');
+    if (axis === 'a' && seg) {
+      // a ghost in an angled wall: its frame from the wall (openingFrame reads cx, cy, angle, t)
+      const f = lineFrame(seg.x1, seg.y1, seg.x2, seg.y2), cx = seg.x1 + f.ux * chk.at, cy = seg.y1 + f.uy * chk.at;
+      const ghost = {
+        ok: true, kind, axis: 'a', rect: chk.rect, quad: chk.quad, level: chk.level, segmentId: chk.segmentId, wall: chk.wall, at: chk.at, width: chk.width,
+        cx, cy, angle: seg.angle, t: seg.t, centre: { x: r01(cx), y: r01(cy) }, reason: '', lock: false,
+      };
+      if (kind === 'door') {
+        const same = prev && prev.ok && prev.kind === kind && prev.segmentId === chk.segmentId;
+        const along = (pp.x - seg.x1) * f.ux + (pp.y - seg.y1) * f.uy, perp = (pp.x - seg.x1) * f.nx + (pp.y - seg.y1) * f.ny;
+        ghost.swing = Math.abs(perp) < 1.5 && same ? prev.swing : perp > 0 ? 'r' : 'l';
+        ghost.hinge = Math.abs(along - chk.at) < 6 ? (same ? prev.hinge : 'a') : along < chk.at ? 'a' : 'b';
+      }
+      S.ghost = ghost;
+      return;
+    }
     const h = axis === 'h', q = spanOf(chk.rect, axis), mid = (q.c0 + q.c1) / 2, centre = (q.a0 + q.a1) / 2;
     const ghost = {
       ok: true, kind, axis, rect: chk.rect, level: chk.level, segmentId: chk.segmentId, width: q.a1 - q.a0,
@@ -454,16 +610,42 @@ export function createStructureTools(V, io) {
       const s = d.byId.get(g.target.id);
       if (!s) { g.type = 'noop'; return; }
       g.id = s.id; g.axis = s.axis;
+      if (s.axis === 'a') {
+        // an angled wall: the body moves across it, an end grip turns it about the other end (Shift: along it only)
+        const f = lineFrame(s.x1, s.y1, s.x2, s.y2);
+        if (g.handle === 'end0' || g.handle === 'end1') {
+          const k = g.handle === 'end1' ? 1 : 0;
+          g.type = 's-end-slant'; g.op = 'rotate-wall'; g.fixed = k ? [s.x1, s.y1] : [s.x2, s.y2]; g.lastKey = '';
+        } else { g.type = 's-move-slant'; g.op = 'move-wall'; g.applied = 0; g.n = [f.nx, f.ny]; }
+        beginBatch(g);
+        S.hover = null; S.hoverHandle = null;
+        return;
+      }
       g.grabAlong = s.axis === 'h' ? g.startPlan.x : g.startPlan.y;
       if (g.handle === 'end0' || g.handle === 'end1') {
         g.type = 's-resize-wall'; g.op = 'resize-wall'; g.end = g.handle === 'end0' ? 0 : 1;
         const q = spanOf(s.core, s.axis);
         g.grabAlong = (q.a0 + q.a1) / 2; g.from = g.end ? q.a1 : q.a0;
+        // angled walls switched on: dragged off its axis, the end turns the wall into an angled one
+        if (angledOn()) { g.canAngle = true; g.fixed = segEnds(s)[1 - g.end]; g.lastKey = ''; }
       } else { g.type = 's-move-wall'; g.op = 'move-wall'; g.applied = 0; }
     } else {
       const o = env.plan.openings.find((q) => q.id === g.target.id);
       if (!o) { g.type = 'noop'; return; }
       g.id = o.id; g.axis = o.axis; g.op = 'update-opening';
+      if (o.axis === 'a') {
+        // in an angled wall: slide along it, or drag a jamb (the other jamb stays)
+        const seg = d.segOfOpening.get(o.id);
+        if (!seg) { g.type = 'noop'; return; }
+        const f = lineFrame(seg.x1, seg.y1, seg.x2, seg.y2);
+        g.u = [f.ux, f.uy]; g.origin = [seg.x1, seg.y1]; g.kind = o.kind;
+        const along = (g.startPlan.x - seg.x1) * f.ux + (g.startPlan.y - seg.y1) * f.uy;
+        if (g.handle === 'w0' || g.handle === 'w1') { g.type = 's-width-a'; g.side = g.handle === 'w0' ? 0 : 1; g.fixedAt = g.side ? o.at - o.width / 2 : o.at + o.width / 2; }
+        else { g.type = 's-slide-a'; g.grabOff = along - o.at; }
+        beginBatch(g);
+        S.hover = null; S.hoverHandle = null;
+        return;
+      }
       const q = spanOf(o, o.axis), along = o.axis === 'h' ? g.startPlan.x : g.startPlan.y;
       if (g.handle === 'w0' || g.handle === 'w1') {
         g.type = 's-width'; g.side = g.handle === 'w0' ? 0 : 1; g.fixed = g.side ? q.a0 : q.a1;
@@ -505,6 +687,11 @@ export function createStructureTools(V, io) {
   function dragResizeWall(g, p, e) {
     const pp = io.toPlan(p), d = data(), s = d.byId.get(g.id);
     if (!s) return;
+    if (g.canAngle && !e.shiftKey) {
+      // off the wall's own line by more than ~10 px (or already angled): the end turns the wall
+      const h = s.axis === 'h', off = Math.abs(h ? pp.y - g.fixed[1] : pp.x - g.fixed[0]);
+      if (s.axis === 'a' || off * cam.scale > 10) { g.type = 's-end-slant'; g.op = 'rotate-wall'; dragEndSlant(g, p, e); return; }
+    }
     const q = spanOf(s.core, s.axis), c = (q.c0 + q.c1) / 2;
     const v = snapper.snapWallEnd(g.axis, g.axis === 'h' ? pp.x : pp.y, c, s.thickness, { scale: cam.scale, enabled: io.snapOn(e) }).value;
     if (v === g.from) { if (S.tip && S.tip.tone === 'refused') setTip(null); return; }
@@ -546,11 +733,103 @@ export function createStructureTools(V, io) {
     if (why) blocked(g, why, e); else setTip(null);
   }
 
+  // ───────────── drags of angled walls and their openings ─────────────
+  /** The angled wall's body: across it, delta = (pointer − press) · n, in 5 cm steps (snap off: 1 mm). */
+  function dragMoveSlant(g, p, e) {
+    const pp = io.toPlan(p), raw = (pp.x - g.startPlan.x) * g.n[0] + (pp.y - g.startPlan.y) * g.n[1];
+    const want = io.snapOn(e) ? snapTo(raw, GRID) : r01(raw);
+    if (want === g.applied) { if (S.tip && S.tip.tone === 'refused') setTip(null); liveSlant(g); return; }
+    let res = call(moveWallSegment, g.id, r01(want - g.applied), TRANSIENT);
+    if (res.ok) { g.applied = want; accepted(g, res, e); setTip(null); }
+    else {
+      const dir = Math.sign(want - g.applied);
+      for (let i = 0; i < 16 && g.applied !== want; i++) {
+        const step = call(moveWallSegment, g.id, dir * GRID, TRANSIENT);
+        if (!step.ok) { res = step; break; }
+        g.applied = r01(g.applied + dir * GRID); accepted(g, step, e);
+      }
+      if (g.applied !== want) blocked(g, res.reason, e); else setTip(null);
+    }
+    liveSlant(g);
+  }
+  function liveSlant(g, extra) {
+    const s = data().byId.get(g.id);
+    S.live = s ? { op: g.op, delta: g.applied || 0, axis: s.axis, seg: s.id, n: g.n || null, from: g.startPlan, ...(extra || {}) } : null;
+  }
+  /** The segment now holding the dragged wall (ids change when it turns from angled to straight or back). */
+  function followEnd(g, res) {
+    const d = data(), ids = (res.ids || []).filter((id) => d.byId.has(id));
+    let pick = ids.map((id) => d.byId.get(id))[0] || null;
+    if (ids.length > 1) {
+      // the piece that still holds the fixed end
+      pick = ids.map((id) => d.byId.get(id)).find((q) => segEnds(q).some(([x, y]) => Math.hypot(x - g.fixed[0], y - g.fixed[1]) <= 6)) || pick;
+    }
+    if (pick && pick.id !== g.id) { g.id = pick.id; g.target = { type: 'segment', id: pick.id }; }
+    select(g.target);
+  }
+  /**
+   * An end grip: rotateWallEnd about the fixed end with the drawing snaps (Alt: free angle); Shift = along the wall only
+   * (resizeWallSegment). Also a straight wall's free end dragged off its axis while the switch is on.
+   */
+  function dragEndSlant(g, p, e) {
+    const pp = io.toPlan(p), s = data().byId.get(g.id);
+    if (!s) return;
+    const ends = segEnds(s), k = Math.hypot(ends[1][0] - g.fixed[0], ends[1][1] - g.fixed[1]) >= Math.hypot(ends[0][0] - g.fixed[0], ends[0][1] - g.fixed[1]) ? 1 : 0;
+    const letter = k ? 'b' : 'a';
+    let res, key;
+    if (e.shiftKey) {
+      // along the wall only
+      const mv = ends[k], L0 = Math.hypot(mv[0] - g.fixed[0], mv[1] - g.fixed[1]) || 1, ux = (mv[0] - g.fixed[0]) / L0, uy = (mv[1] - g.fixed[1]) / L0;
+      const raw = (pp.x - g.fixed[0]) * ux + (pp.y - g.fixed[1]) * uy, L = io.snapOn(e) ? Math.max(30, snapTo(raw, GRID)) : Math.max(30, r01(raw));
+      const delta = r01(L - L0);
+      key = `len:${L}`;
+      if (!delta) { liveSlant(g, { angle: shownAngle(mv[0] - g.fixed[0], mv[1] - g.fixed[1]), length: L0, at: [mv[0], mv[1]] }); return; }
+      res = s.axis === 'a' ? call(resizeWallSegment, g.id, k ? { end: delta } : { start: delta }, TRANSIENT)
+        : call(resizeWallSegment, g.id, k ? { end: (s.axis === 'h' ? mv[0] : mv[1]) + delta * (s.axis === 'h' ? ux : uy) } : { start: (s.axis === 'h' ? mv[0] : mv[1]) + delta * (s.axis === 'h' ? ux : uy) }, TRANSIENT);
+    } else {
+      const snap = io.snapOn(e);
+      const T = snap ? targets(s) : { points: [], faces: [], ends: [], lines: [] };
+      const sn = snapSlantEnd({ x: g.fixed[0], y: g.fixed[1] }, pp, { ...T, reach: angledReach(), scale: cam.scale, free: !snap || e.altKey, step: snap ? GRID : 1 });
+      const pt = { x: r01(sn.x), y: r01(sn.y), angled: true };
+      key = `${pt.x},${pt.y}`;
+      g.snapInfo = { angle: sn.shown, kind: sn.angleKind, guides: sn.guides, at: [pt.x, pt.y], length: sn.len };
+      if (key === g.lastKey) { liveSlant(g, g.snapInfo); return; }
+      res = call(rotateWallEnd, g.id, letter, pt, TRANSIENT);
+    }
+    if (res.ok) { g.lastKey = key; followEnd(g, res); accepted(g, res, e); setTip(null); } else blocked(g, res.reason, e);
+    const now = data().byId.get(g.id);
+    if (now) {
+      const ne = segEnds(now), kk = Math.hypot(ne[1][0] - g.fixed[0], ne[1][1] - g.fixed[1]) >= Math.hypot(ne[0][0] - g.fixed[0], ne[0][1] - g.fixed[1]) ? 1 : 0, m = ne[kk];
+      liveSlant(g, { ...(g.snapInfo || {}), angle: shownAngle(m[0] - g.fixed[0], m[1] - g.fixed[1]), length: Math.hypot(m[0] - g.fixed[0], m[1] - g.fixed[1]), at: m, fixed: g.fixed });
+    }
+  }
+  /** Slide an opening along its angled wall (the engine clamps it to where it fits). */
+  function dragSlideA(g, p, e) {
+    const pp = io.toPlan(p), x = r01(pp.x - g.u[0] * g.grabOff), y = r01(pp.y - g.u[1] * g.grabOff);
+    const res = call(updateOpening, g.id, { x, y }, TRANSIENT);
+    if (res.ok) { accepted(g, res, e); setTip(null); remember(); } else blocked(g, res.reason, e);
+  }
+  /** A jamb of an opening in an angled wall: the other jamb stays; widths in 5 cm steps within the kind's range. */
+  function dragWidthA(g, p, e) {
+    const o = env.plan.openings.find((q) => q.id === g.id);
+    if (!o) return;
+    const pp = io.toPlan(p), along = (pp.x - g.origin[0]) * g.u[0] + (pp.y - g.origin[1]) * g.u[1];
+    const [minW, maxW] = WIDTHS[g.kind] || [40, 400];
+    let width = snapTo(g.side ? along - g.fixedAt : g.fixedAt - along, GRID), why = '';
+    if (width < minW || width > maxW) { width = clamp(width, minW, maxW); why = `A ${KIND_NAME[g.kind] || 'opening'} is ${minW}–${maxW} cm wide.`; }
+    const at = r01(g.side ? g.fixedAt + width / 2 : g.fixedAt - width / 2);
+    if (width !== o.width || Math.abs(at - o.at) > 0.05) {
+      const res = call(updateOpening, g.id, { at, width }, TRANSIENT);
+      if (!res.ok) why = res.reason; else { accepted(g, res, e); remember(); }
+    }
+    if (why) blocked(g, why, e); else setTip(null);
+  }
+
   function endDrag(g, e) {
     S.live = null;
     if (g.batch) {
       // back where it started (or nothing accepted): restore the snapshot exactly instead of recording a no-op step
-      const none = (g.type === 's-move-wall' && g.applied === 0) || (/^s-(move-stair|stair-|void)/.test(g.type) && !g.changed);
+      const none = ((g.type === 's-move-wall' || g.type === 's-move-slant') && g.applied === 0) || (/^s-(move-stair|stair-|void|end-slant|slide-a|width-a)/.test(g.type) && !g.changed);
       if (none) { call(() => store.cancel()); g.changed = false; } else call(() => store.commit());
     }
     if (g.changed) V.renderer.invalidate();                                   // settle on a complete repaint
@@ -596,6 +875,10 @@ export function createStructureTools(V, io) {
       case 's-resize-wall': dragResizeWall(g, p, e); break;
       case 's-slide': dragSlide(g, p, e); break;
       case 's-width': dragWidth(g, p, e); break;
+      case 's-move-slant': dragMoveSlant(g, p, e); break;
+      case 's-end-slant': dragEndSlant(g, p, e); break;
+      case 's-slide-a': dragSlideA(g, p, e); break;
+      case 's-width-a': dragWidthA(g, p, e); break;
       case 's-move-stair': dragMoveStair(g, p, e); break;
       case 's-stair-rot': dragRotateStair(g, p, e); break;
       case 's-stair-width': dragStairWidth(g, p, e); break;
@@ -630,6 +913,7 @@ export function createStructureTools(V, io) {
       }
       case 's-locked': setTip(S.tip ? S.tip.text : null, 'locked'); break;
       case 's-move-wall': case 's-resize-wall': case 's-slide': case 's-width':
+      case 's-move-slant': case 's-end-slant': case 's-slide-a': case 's-width-a':
       case 's-move-stair': case 's-stair-rot': case 's-stair-width': case 's-void': endDrag(g, e); break;
       case 's-place-stair':
         if (Math.hypot(p.x - g.start.x, p.y - g.start.y) < 12 || e.pointerType === 'touch') placeStair(e);
@@ -675,13 +959,18 @@ export function createStructureTools(V, io) {
     resolveSelection(e && e.reason);
     if (S.hover && !exists(S.hover)) S.hover = null;
     S.hoverHandle = null; S.ghost = null; S.stairGhost = null;
-    if (S.draft && S.draft.input) { const chk = canAddWall(S.draft.input); S.draft.ok = chk.ok; S.draft.reason = chk.ok ? '' : chk.reason; if (chk.ok) S.draft.rect = chk.rect; }
+    if (S.draft && S.draft.input) {
+      const chk = canAddWall(S.draft.input); S.draft.ok = chk.ok; S.draft.reason = chk.ok ? '' : chk.reason;
+      if (chk.ok && chk.rect) S.draft.rect = chk.rect; else if (chk.ok && chk.poly) S.draft.poly = chk.poly;
+    }
   }
 
   function cursor() {
     const g = st.gesture, tool = io.tool();
     const across = (axis) => (axis === 'h' ? 'ns-resize' : 'ew-resize'), along = (axis) => (axis === 'h' ? 'ew-resize' : 'ns-resize');
     if (g) {
+      if (g.type === 's-move-slant' && g.n) return cursorFor(g.n[0], g.n[1]);
+      if (g.type === 's-end-slant' || g.type === 's-slide-a' || g.type === 's-width-a') return 'grabbing';
       if (g.type === 's-move-wall') return across(g.axis);
       if (g.type === 's-resize-wall' || g.type === 's-width') return along(g.axis);
       if (g.type === 's-slide' || g.type === 's-move-stair' || g.type === 's-stair-rot' || g.type === 's-void') return 'grabbing';
@@ -691,6 +980,10 @@ export function createStructureTools(V, io) {
     if (tool === 'wall') return 'crosshair';
     if (tool === 'stairs') return S.stairGhost && !S.stairGhost.ok && S.stairGhost.reason ? 'not-allowed' : 'crosshair';
     if (tool !== 'structure') return S.ghost && S.ghost.lock ? 'not-allowed' : 'crosshair';
+    if (S.hoverHandle && S.hoverHandle.axis === 'a') {
+      const hh = S.hoverHandle;
+      return hh.kind === 'move' ? cursorFor(hh.nx, hh.ny) : hh.kind === 'slide' ? 'grab' : hh.kind.startsWith('w') ? cursorFor(hh.ux, hh.uy) : 'crosshair';
+    }
     if (S.hoverHandle) {
       const k = S.hoverHandle.kind;
       if (k === 'stair-rot') return 'grab';
@@ -705,11 +998,12 @@ export function createStructureTools(V, io) {
     if (hv.type === 'opening' || hv.type === 'stair') return 'grab';
     if (hv.type === 'void') return 'pointer';
     const s = data().byId.get(hv.id);
+    if (s && s.axis === 'a') { const f = lineFrame(s.x1, s.y1, s.x2, s.y2); return cursorFor(f.nx, f.ny); }
     return s ? across(s.axis) : 'default';
   }
 
   return {
-    down, move, up, hover, leave, cancel, toolChanged, planChanged, cursor, remember,
+    down, move, up, hover, leave, cancel, toolChanged, planChanged, cursor, remember, key,
     /** `{ type, id, level, reason }` of the wall segment / opening under the cursor, or null. */
     getHover: () => (S.hover ? { type: S.hover.type, id: S.hover.id, level: S.hover.level, reason: S.hover.reason } : null),
   };

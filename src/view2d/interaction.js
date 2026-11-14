@@ -630,6 +630,8 @@ export function attachInteraction(V) {
 
   function onKeyDown(e) {
     if (!V.active || editable(e.target)) return;
+    // typed length / angle while drawing an angled wall (structure-tools.key; only with the angled-walls switch on)
+    if (structureTool() && structure.key(e)) { e.preventDefault(); e.stopPropagation(); return; }
     if (e.code === 'Space') {
       if (!st.spaceDown) { st.spaceDown = true; setCursor(null); }
       e.preventDefault();

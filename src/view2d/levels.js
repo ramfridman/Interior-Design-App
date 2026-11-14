@@ -12,6 +12,7 @@ import { GROUND, levelIds } from '../core/levels.js';
 import { levelPlan, wallSegments } from '../core/plan-edit.js';
 import { css } from './color.js';
 import { drawStairsGhost } from './stairs.js';
+import { slantPolys, openingFrame, openingPoint } from '../core/geometry.js';
 
 /** The level an item stands on ('L0' when it has none). */
 export const itemLevel = (it) => (it && typeof it.level === 'string' && it.level ? it.level : GROUND);
@@ -49,7 +50,7 @@ export function ghostOf(plan, id) {
   if (!below) return null;
   const v = levelPlan(plan, below);
   if (!v) return null;
-  return { levelId: below, walls: v.walls || [], outline: v.wallOutline || [], openings: v.openings || [], stairs: v.stairs || [] };
+  return { levelId: below, walls: v.walls || [], outline: v.wallOutline || [], openings: v.openings || [], stairs: v.stairs || [], slants: slantPolys(v), view: v };
 }
 
 /**
@@ -87,6 +88,7 @@ export function drawGhostBelow(G, env) {
   ctx.globalAlpha = 0.25;
   ctx.beginPath();
   for (const w of g.walls) G.rect(w.x, w.y, w.w, w.h);
+  for (const poly of g.slants || []) { poly.forEach(([x, y], i) => (i ? ctx.lineTo(G.RX(x), G.RY(y)) : ctx.moveTo(G.RX(x), G.RY(y)))); ctx.closePath(); }   // angled walls
   ctx.fillStyle = pal.wall; ctx.fill();
   const lw = G.px(1);
   ctx.beginPath();
@@ -97,6 +99,7 @@ export function drawGhostBelow(G, env) {
   for (const o of g.openings) {
     if (o.axis === 'h') G.seg(o.x, o.y + o.h / 2, o.x + o.w, o.y + o.h / 2, lw);
     else if (o.axis === 'v') G.seg(o.x + o.w / 2, o.y, o.x + o.w / 2, o.y + o.h, lw);
+    else if (o.axis === 'a') { const F = openingFrame(o, g.view), a = openingPoint(F, 0, F.T / 2), b = openingPoint(F, F.L, F.T / 2); G.seg(a[0], a[1], b[0], b[1], lw); }
   }
   ctx.strokeStyle = pal.inkSoft; ctx.stroke();
   if (g.stairs.length) drawStairsGhost(G, env, g.levelId);     // the stairs of the floor below (stage F4b)

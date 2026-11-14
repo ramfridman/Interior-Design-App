@@ -8,7 +8,8 @@
  * across plan revisions.
  */
 import { wallSegments, openingPolicy, planDiff, isPlanModified, BASE_PLAN, levelPlan, planPhase, REASONS } from '../core/plan-edit.js';
-import { polygonBounds } from '../core/geometry.js';
+import { polygonBounds, openingPoly, openingFrame, openingPoint } from '../core/geometry.js';
+import { slantHandles } from './slant-tools.js';
 import { css } from './color.js';
 import { chainSignatures } from './annotations.js';
 import { PLAN } from '../core/plan.js';
@@ -64,10 +65,18 @@ export function structureOf(plan) {
   let d = cache.get(segments);
   if (d && d.openings === plan.openings) return d;
   const openings = new Map(plan.openings.map((o) => [o.id, o]));
-  d = { openings: plan.openings, segments, segs: [], byId: new Map(), pieces: new Map(), segOfOpening: new Map(), removed: null, diff: null };
+  d = { openings: plan.openings, segments, segs: [], byId: new Map(), pieces: new Map(), polys: new Map(), segOfOpening: new Map(), removed: null, diff: null };
   for (const s of segments) {
     d.byId.set(s.id, s);
     if (!isJunction(s)) d.segs.push(s);
+    if (s.axis === 'a') {
+      // an angled wall (stage A3): its joined footprint, with the gap quads of its openings as holes (even-odd fill)
+      const holes = [];
+      for (const id of s.openingIds) { const o = openings.get(id); if (o) { d.segOfOpening.set(id, s); holes.push(openingPoly(o, plan)); } }
+      d.pieces.set(s.id, []);
+      d.polys.set(s.id, [{ poly: s.poly, holes }]);
+      continue;
+    }
     const { a0, a1, c0, c1 } = spanOf(s, s.axis);
     const cuts = [];
     for (const id of s.openingIds) {
@@ -111,6 +120,7 @@ export function selectionHandles(plan, sel, cam) {
   if (sel.type === 'segment') {
     const s = structureOf(plan).byId.get(sel.id);
     if (!s || isJunction(s) || s.policy.level === 'locked') return out;
+    if (s.axis === 'a') return slantHandles(s, (x, y) => cam.toScreen(x, y), cam.scale);
     const { a0, a1, c0, c1 } = spanOf(s.core, s.axis), c = (c0 + c1) / 2;
     const P = (a) => (s.axis === 'h' ? cam.toScreen(a, c) : cam.toScreen(c, a));
     if ((a1 - a0) * cam.scale >= 30 || !(s.freeEnds[0] || s.freeEnds[1])) out.push({ kind: 'move', axis: s.axis, ...P((a0 + a1) / 2) });
@@ -125,6 +135,14 @@ export function selectionHandles(plan, sel, cam) {
   } else if (sel.type === 'opening') {
     const o = plan.openings.find((q) => q.id === sel.id);
     if (!o || openingPolicy(o.id).level === 'locked') return out;
+    if (o.axis === 'a') {
+      // in an angled wall: jamb grips and the slide grip on the centre line, oriented along the wall
+      const F = openingFrame(o, plan), P = (u) => { const q = openingPoint(F, u, F.T / 2); return cam.toScreen(q[0], q[1]); };
+      const dir = { axis: 'a', ux: F.ux, uy: F.uy, nx: F.nx, ny: F.ny };
+      out.push({ kind: 'w0', ...dir, ...P(0) }, { kind: 'w1', ...dir, ...P(F.L) });
+      if (F.L * cam.scale >= 34) out.push({ kind: 'slide', ...dir, ...P(F.L / 2) });
+      return out;
+    }
     const { a0, a1, c0, c1 } = spanOf(o, o.axis), c = (c0 + c1) / 2;
     const P = (a) => (o.axis === 'h' ? cam.toScreen(a, c) : cam.toScreen(c, a));
     out.push({ kind: 'w0', axis: o.axis, ...P(a0) }, { kind: 'w1', axis: o.axis, ...P(a1) });
@@ -136,11 +154,17 @@ export function selectionHandles(plan, sel, cam) {
 /** Parts of the architect's walls that are no longer wall (removed or moved away), as rectangles. */
 function removedWalls(plan, d) {
   if (d.removed) return d.removed;
-  const solids = [...plan.walls, ...plan.openings], out = [];
+  const solids = [...plan.walls, ...plan.openings.filter((o) => o.axis !== 'a')], out = [];
   // an upper level is compared with the same level of the base plan (none: a new floor, nothing was removed)
   const base = plan.levelId && plan.levelId !== 'L0' ? levelPlan(BASE_PLAN, plan.levelId) : BASE_PLAN;
   if (!base) { d.removed = out; return out; }
+  const now = new Set((plan.slants || []).map((x) => `${x.x1},${x.y1},${x.x2},${x.y2},${x.t}`));
   for (const b of wallSegments(base)) {
+    if (b.axis === 'a') {
+      // an angled wall of the base plan that is no longer there (removed, moved or turned): its footprint as a polygon
+      if (!now.has(`${b.x1},${b.y1},${b.x2},${b.y2},${b.t}`)) out.push({ poly: b.poly, ...polygonBounds(b.poly) });
+      continue;
+    }
     const { a0, a1, c0, c1 } = spanOf(b, b.axis);
     const cover = [];
     for (const r of solids) {
@@ -166,17 +190,28 @@ export function drawWallTints(G, env) {
   const levels = isStructureTool(ui.tool) && !env.exporting, changes = showsChanges(env);
   if (!levels && !changes) return;
   const d = structureOf(plan);
-  const groups = { free: [], warn: [], locked: [], fresh: [] };
+  const groups = { free: [], warn: [], locked: [], fresh: [] }, polys = { free: [], warn: [], locked: [], fresh: [] };
   for (const s of d.segments) {
     const key = changes && s.isNew ? 'fresh' : levels ? s.policy.level : null;
-    if (key && groups[key]) groups[key].push(...d.pieces.get(s.id));
+    if (key && groups[key]) { groups[key].push(...d.pieces.get(s.id)); if (d.polys.has(s.id)) polys[key].push(...d.polys.get(s.id)); }
   }
   const fills = { locked: pal.wallTint.locked, warn: pal.wallTint.warn, free: pal.wallTint.free, fresh: pal.wallNew };
   for (const key of ['locked', 'warn', 'free', 'fresh']) {
-    if (!groups[key].length) continue;
+    if (!groups[key].length && !polys[key].length) continue;
     ctx.beginPath();
     for (const r of groups[key]) G.rect(r.x, r.y, r.w, r.h);
     ctx.fillStyle = fills[key]; ctx.fill();
+    if (polys[key].length) fillPolyPieces(G, polys[key], fills[key]);
+  }
+}
+
+/** Fill angled-wall pieces ({ poly, holes }) — the holes (gaps of openings) are left out (even-odd). */
+export function fillPolyPieces(G, pieces, color) {
+  const { ctx } = G;
+  for (const { poly, holes } of pieces) {
+    ctx.beginPath();
+    for (const ring of [poly, ...(holes || [])]) ring.forEach(([x, y], i) => (i ? ctx.lineTo(G.RX(x), G.RY(y)) : ctx.moveTo(G.RX(x), G.RY(y))));
+    ctx.fillStyle = color; ctx.fill('evenodd');
   }
 }
 
@@ -184,9 +219,12 @@ export function drawWallTints(G, env) {
 export function drawRemovedWalls(G, env) {
   if (!showsChanges(env)) return;
   const { plan, pal } = env, { ctx } = G;
-  const list = removedWalls(plan, structureOf(plan));
-  if (!list.length) return;
+  const all = removedWalls(plan, structureOf(plan));
+  if (!all.length) return;
+  const list = all.filter((r) => !r.poly), polys = all.filter((r) => r.poly);
   const dpr = G.dpr;
+  if (polys.length) drawRemovedPolys(G, env, polys);
+  if (!list.length) return;
   ctx.save();
   ctx.beginPath();
   for (const r of list) G.rect(r.x, r.y, r.w, r.h);
@@ -206,6 +244,27 @@ export function drawRemovedWalls(G, env) {
     const x0 = G.RX(r.x) + 0.5, y0 = G.RY(r.y) + 0.5;
     ctx.rect(x0, y0, Math.max(1, G.RX(r.x + r.w) - G.RX(r.x) - 1), Math.max(1, G.RY(r.y + r.h) - G.RY(r.y) - 1));
   }
+  ctx.setLineDash([4 * dpr, 3 * dpr]);
+  ctx.strokeStyle = pal.removedLine || css(pal.ink, 0.6); ctx.lineWidth = Math.max(1, Math.round(1.25 * dpr)); ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+/** Removed / moved angled walls of the base plan: the same ghost (fill, 45° hatch, dashed outline) on their footprints. */
+function drawRemovedPolys(G, env, list) {
+  const { pal } = env, { ctx } = G, dpr = G.dpr;
+  const path = () => { ctx.beginPath(); for (const r of list) r.poly.forEach(([x, y], i) => (i ? ctx.lineTo(G.X(x), G.Y(y)) : ctx.moveTo(G.X(x), G.Y(y)))); };
+  ctx.save();
+  path(); ctx.fillStyle = pal.removedFill || css(pal.ink, 0.07); ctx.fill();
+  ctx.clip();
+  const step = Math.max(4, Math.round(5 * dpr));
+  ctx.beginPath();
+  for (const r of list) {
+    const x0 = G.RX(r.x), y0 = G.RY(r.y), x1 = G.RX(r.x + r.w), y1 = G.RY(r.y + r.h);
+    for (let t = Math.floor((x0 + y0) / step) * step; t < x1 + y1 + step; t += step) { ctx.moveTo(t - y0, y0); ctx.lineTo(t - y1, y1); }
+  }
+  ctx.strokeStyle = pal.removedHatch || css(pal.ink, 0.3); ctx.lineWidth = Math.max(1, Math.round(dpr)); ctx.stroke();
+  ctx.restore();
+  path(); ctx.closePath();
   ctx.setLineDash([4 * dpr, 3 * dpr]);
   ctx.strokeStyle = pal.removedLine || css(pal.ink, 0.6); ctx.lineWidth = Math.max(1, Math.round(1.25 * dpr)); ctx.stroke();
   ctx.setLineDash([]);
@@ -255,7 +314,8 @@ export function planSnapshot(plan) {
   // a door reaches as far as its leaf swings
   for (const o of plan.openings) openings.set(o.id, { sig: JSON.stringify(o), rect: grow(o, Math.max(o.w, o.h) + 12) });
   for (const r of plan.rooms) rooms.set(r.id, { sig: JSON.stringify(r), rect: polygonBounds(r.polygon) });
-  for (const s of wallSegments(plan)) segs.set(s.id, { sig: `${s.policy.level}|${s.isNew}|${s.x},${s.y},${s.w},${s.h}|${s.openingIds}`, rect: s });
+  // (an angled wall: its joined footprint too — a neighbour's join changes it without changing its bounding box)
+  for (const s of wallSegments(plan)) segs.set(s.id, { sig: `${s.policy.level}|${s.isNew}|${s.x},${s.y},${s.w},${s.h}|${s.openingIds}${s.axis === 'a' ? `|${s.poly}` : ''}`, rect: s });
   return { walls, openings, rooms, segs, stairs: stairsSnapshot(PLAN, plan, plan.levelId || 'L0'), chains: chainSignatures(plan) };
 }
 

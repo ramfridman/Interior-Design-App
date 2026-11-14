@@ -14,9 +14,14 @@ try {
   if (raw) { const o = JSON.parse(raw); for (const k of Object.keys(FEATURES)) if (typeof o[k] === 'boolean') { SAVED[k] = o[k]; FEATURES[k] = o[k]; } }
 } catch (e) { /* no storage (node, sandboxed iframe): keep the defaults */ }
 
-// Manual / e2e checks: `?levels=1` in the page URL switches the levels UI on (read once, when this module loads).
+// Manual / e2e checks: `?levels=1` / `?angled=1` in the page URL switch the levels / angled-walls UI on (read once, when
+// this module loads).
 try {
-  if (typeof location !== 'undefined' && location && typeof location.search === 'string' && new URLSearchParams(location.search).get('levels') === '1') FEATURES.levels = true;
+  if (typeof location !== 'undefined' && location && typeof location.search === 'string') {
+    const q = new URLSearchParams(location.search);
+    if (q.get('levels') === '1') FEATURES.levels = true;
+    if (q.get('angled') === '1') FEATURES.angledWalls = true;
+  }
 } catch (e) { /* no URL (node) or an unreadable one: keep the default */ }
 
 /** Tests only: turn a flag on / off. Returns the previous value. */
