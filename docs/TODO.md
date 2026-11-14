@@ -62,7 +62,7 @@ Order of work:
   - [x] F4a stairs: geometry (straight / L / U), 3D model, regulation checks sourced from the Planning and Building Regulations (`tests/stairs.test.mjs`; guard heights are from a secondary source and reported as info)
   - [x] F6 light simulation on every floor, with light passing through stair openings (`tests/daylight-levels.test.mjs`)
   - [x] F4b stair tool in the plan: place / move / turn / resize / remove stairs, stair and opening inspector with rule hints, symbols on both floors (`tests/stairs-edit.test.mjs`)
-  - [ ] F5 walking between floors [running] 
+  - [x] F5 walking between floors: stairs are walkable both ways, the view follows the walker's floor (`tests/walk-levels.test.mjs`). To fix: guard rails on open landing sides of L / U stairs are placed wrongly (core `stairSides`); the two-storey test house looks very dark while walking with realistic daylight on — judge on a real device. 
   - [x] F7 regulations, carpentry, checks, runs, budget per floor + Settings → Experimental → "Several floors (in development)" (`tests/levels-rules.test.mjs`)
   - [ ] later: F4 stairs · F5 walk across floors · F6 daylight per level · F7 regulations / carpentry per level · F8 import per floor
   - [x] A1 mixed derive (`tests/slants.test.mjs`)

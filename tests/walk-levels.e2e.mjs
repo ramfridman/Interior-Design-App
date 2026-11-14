@@ -68,11 +68,10 @@ async function main() {
   await page.locator('#view3d canvas').first().focus().catch(() => {});
   await page.keyboard.down('w');
   const samples = [];
-  let half = false, t0 = Date.now();
+  let t0 = Date.now();
   while (Date.now() - t0 < 40000) {
     w = await walker();
     samples.push(w);
-    if (!half && w.y < 520) { half = true; await shot('halfway'); }
     if (w.level === 'L1' && w.y < 255) break;
     await sleep(80);
   }
@@ -87,9 +86,6 @@ async function main() {
   let jump = 1;
   for (let i = 1; i < samples.length; i++) { const a = samples[i - 1].exposure, b = samples[i].exposure; if (a > 0 && b > 0) jump = Math.max(jump, b / a, a / b); }
   check('exposure stable on the way up (no step > ×1.35 between samples ~0.1 s apart)', jump < 1.35, `max ratio ${jump.toFixed(3)}, ${samples[0].exposure.toFixed(3)} → ${samples.at(-1).exposure.toFixed(3)}`);
-  await sleep(1500);
-  await shot('arrived-upper');
-  await shot('minimap-upper', '.minimap');
 
   // walk down again
   await page.evaluate(() => window.app.view3d.enterWalk({ x: 570, y: 200, heading: 180 }));
@@ -110,6 +106,28 @@ async function main() {
   await sleep(500);
   const pd = await walker();
   check('PageUp: top of the stair (L1); PageDown: its foot (L0)', pu.level === 'L1' && Math.abs(pu.eye - 4.65) < 1e-3 && pd.level === 'L0' && Math.abs(pd.eye - 1.65) < 1e-3, `${pu.level} ${pu.eye} / ${pd.level} ${pd.eye}`);
+
+  if (shots) {
+    // screenshots with the realistic daylight off (the geometry reads better in the headless renderer): halfway up,
+    // looking back from the L1 floor at the opening, its railing and the stair, and the mini-map on L1
+    await page.evaluate(() => { window.app.store.setUI({ daylight: false }); window.app.view3d.enterWalk({ x: 570, y: 740, heading: 0 }); });
+    await sleep(1500);
+    await page.keyboard.down('w');
+    t0 = Date.now();
+    while (Date.now() - t0 < 30000) { w = await walker(); if (w.y < 530) break; await sleep(30); }
+    await page.keyboard.up('w');
+    await sleep(1500);
+    await shot('halfway');
+    await page.keyboard.down('w');
+    t0 = Date.now();
+    while (Date.now() - t0 < 30000) { w = await walker(); if (w.level === 'L1' && w.y < 255) break; await sleep(50); }
+    await page.keyboard.up('w');
+    await page.evaluate(() => window.app.view3d.enterWalk({ x: 600, y: 110, heading: 195 }));
+    await sleep(2000);
+    await shot('arrived-upper');
+    await shot('minimap-upper', '.minimap');
+    await page.evaluate(() => window.app.store.setUI({ daylight: true }));
+  }
 
   await page.evaluate(() => window.app.store.setUI({ mode: '3d', level: 'L0' }));
   await sleep(1500);
