@@ -64,7 +64,8 @@ Order of work:
   - [x] F7 regulations, carpentry, checks, runs, budget per floor + Settings → Experimental → "Several floors (in development)" (`tests/levels-rules.test.mjs`)
   - [ ] later: F4 stairs · F5 walk across floors · F6 daylight per level · F7 regulations / carpentry per level · F8 import per floor
   - [x] A1 mixed derive (`tests/slants.test.mjs`)
-  - [ ] A2 editing angled walls [running] · later: A2 editing angled walls · A3 2D tools · A4 3D shell · A5 regulations / carpentry / walk · A6b import dialog · A7 exact daylight on angled faces
+  - [x] A2 editing angled walls: add, move, resize, rotate an end, remove, doors and windows in angled walls (`tests/slants-edit.test.mjs`, incl. 300 random operations)
+  - [ ] later: A2 editing angled walls · A3 2D tools · A4 3D shell · A5 regulations / carpentry / walk · A6b import dialog · A7 exact daylight on angled faces
   - Will still not be supported afterwards: true curves (short straight pieces within 2 cm), sloped roofs / attics, basements, split levels, spiral stairs.
 
 ## Still waiting for the owner
