@@ -137,6 +137,10 @@
 .ilegend--win { --sw: var(--imp-win); }
 .ilegend--pass { --sw: var(--imp-pass); }
 .ilegend--uns .ilegend__sw { background: transparent; border: 2px dashed var(--imp-uns); }
+.ilegend--ang { flex-wrap: wrap; }
+.ilegend--ang .ilegend__sw { background: linear-gradient(135deg, var(--imp-ext) 50%, var(--imp-int) 50%); }
+.ilegend__sub { flex-basis: 100%; padding-left: calc(14px + var(--s-2)); font-size: var(--fs-12); color: var(--ink-3); }
+.iwarns__hint { margin: 0; font-size: var(--fs-12); color: var(--ink-2); }
 .itoggles { display: flex; flex-direction: column; gap: 2px; padding-top: var(--s-2); border-top: 1px solid var(--line); }
 .ibanner { margin-top: 0; }
 .iwarns { display: flex; flex-direction: column; gap: 6px; }

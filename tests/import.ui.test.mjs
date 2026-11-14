@@ -74,6 +74,37 @@ function encryptedPdf(userPw, ownerPw = userPw + '-owner') {
   return Buffer.from(body, 'latin1');
 }
 
+// ── a one-page vector PDF of the Wedge drawing at 1 : S on a 842 × 595 pt page (wall lines 0.7 pt, symbols 0.18 pt, door swings
+//    as Bézier arcs, "SCALE 1:S" text, a small title block so the page reads as a drawing) ──
+function wedgePdf(d, S) {
+  const k = 1 / (S * 2.54 / 72), X = (x) => (60 + x * k).toFixed(2), Y = (y) => (595 - (80 + y * k)).toFixed(2);
+  const ops = ['0 0 0 RG', '0.7 w'];
+  for (const [x1, y1, x2, y2] of d.lines) ops.push(`${X(x1)} ${Y(y1)} m ${X(x2)} ${Y(y2)} l S`);
+  ops.push('0.18 w');
+  for (const [x1, y1, x2, y2] of [...d.winLines, ...d.doorLines]) ops.push(`${X(x1)} ${Y(y1)} m ${X(x2)} ${Y(y2)} l S`);
+  for (const a of d.arcs) {
+    const n = Math.max(1, Math.ceil(Math.abs(a.a1 - a.a0) / 90 - 1e-9));
+    for (let i = 0; i < n; i++) {
+      const t0 = (a.a0 + (a.a1 - a.a0) * i / n) * Math.PI / 180, t1 = (a.a0 + (a.a1 - a.a0) * (i + 1) / n) * Math.PI / 180, hh = 4 / 3 * Math.tan((t1 - t0) / 4);
+      const p0 = [a.cx + a.r * Math.cos(t0), a.cy + a.r * Math.sin(t0)], p3 = [a.cx + a.r * Math.cos(t1), a.cy + a.r * Math.sin(t1)];
+      const p1 = [p0[0] - hh * a.r * Math.sin(t0), p0[1] + hh * a.r * Math.cos(t0)], p2 = [p3[0] + hh * a.r * Math.sin(t1), p3[1] - hh * a.r * Math.cos(t1)];
+      ops.push(`${X(p0[0])} ${Y(p0[1])} m ${X(p1[0])} ${Y(p1[1])} ${X(p2[0])} ${Y(p2[1])} ${X(p3[0])} ${Y(p3[1])} c S`);
+    }
+  }
+  for (let i = 0; i < 12; i++) ops.push(`${690 + i * 10} 30 m ${690 + i * 10} 62 l S`);   // title block ticks
+  ops.push('BT /F1 9 Tf 700 40 Td (SCALE 1:' + S + ') Tj ET');
+  const stream = ops.join('\n');
+  const objs = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+  let body = '%PDF-1.4\n'; const offs = [];
+  objs.forEach((o, i) => { offs.push(body.length); body += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = body.length;
+  body += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map((o) => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+  body += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(body, 'latin1');
+}
+
 const server = spawn(process.execPath, [path.join(root, 'dev', 'serve.mjs'), String(PORT)], { stdio: 'ignore' });
 const browser = await chromium.launch();
 try {
@@ -442,6 +473,205 @@ try {
     });
     check('DXF underlay aligned with the walls (ink on both faces within 3 cm)', ink.length >= 2 && ink.every((s) => s.top != null && Math.abs(s.top - s.wy) <= 3 && Math.abs(s.bottom - (s.wy + s.wh)) <= 3), JSON.stringify(ink));
     if (shots) await page.screenshot({ path: path.join(shotDir, 'import-dxf-draft.png') });
+  }
+
+  // ─────────── 3c. angled and curved walls (stage A6b): the Wedge and a quarter-circle wall as DXF, the Wedge as a PDF ───────────
+  {
+    const { WEDGE, wedgeDrawing, dxfOf, quarterOutline, QUARTER, wedgeSymbols } = await import('./import-slant-fixtures.mjs');
+    const { WEDGE: DESIGN } = await import('./fixtures/houses.mjs');
+    const { buildPlan } = await import('../src/core/plan-build.js');
+    const d = wedgeDrawing(), q = quarterOutline();
+    const WEDGE_DXF = path.join(tmp, 'wedge.dxf'), QUARTER_DXF = path.join(tmp, 'quarter.dxf'), WEDGE_PDF = path.join(tmp, 'wedge.pdf');
+    fs.writeFileSync(WEDGE_DXF, Buffer.from(dxfOf({ lines: d.lines, symLines: d.doorLines, symArcs: d.arcs, winLines: d.winLines }).bytes()));
+    fs.writeFileSync(QUARTER_DXF, Buffer.from(dxfOf({ lines: q.lines, wallArcs: q.arcs }).bytes()));
+    fs.writeFileSync(WEDGE_PDF, wedgePdf(d, 50));
+    // the design's rooms, by the plan builder itself (areas in cm², sorted)
+    const ref = buildPlan({ walls: DESIGN.walls, slants: DESIGN.slants, openings: DESIGN.openings, heights: DESIGN.heights, meta: { name: 'Wedge' } }, { slants: true });
+    const polyArea = (P) => { let a = 0; for (let i = 0; i < P.length; i++) { const p0 = P[i], p1 = P[(i + 1) % P.length]; a += p0[0] * p1[1] - p1[0] * p0[1]; } return Math.abs(a) / 2; };
+    const refAreas = ref.plan.rooms.map((r) => polyArea(r.polygon)).sort((a, b) => a - b);
+    check('reference: the design builds to 3 rooms', ref.ok && refAreas.length === 3, refAreas.map((a) => (a / 1e4).toFixed(3)).join(' / ') + ' m²');
+
+    const driver = (pg) => {
+      const state = () => pg.evaluate(() => { const dd = document.querySelector('.importdlg'); const s = dd && dd._import && dd._import.state; return s ? { step: s.step, busy: s.busy, error: s.error, kind: s.kind, sheet: !!s.sheet, first: !!s.first,
+        result: s.result ? { walls: s.result.walls.length, openings: s.result.openings.length, slants: (s.result.slants || []).length, unsupported: (s.result.unsupported || []).length, slantsOn: !!s.result.slantsOn } : null } : null; });
+      const until = async (fn, ms = 60000) => { const t0 = Date.now(); for (;;) { const v = await state(); if (v && fn(v)) return v; if (v && v.error) return v; if (Date.now() - t0 > ms) return v; await sleep(200); } };
+      const nextBtn = () => pg.locator('.importdlg .dialog__foot .btn--primary');
+      return { state, until, nextBtn };
+    };
+    const bootPage = async (pg) => {
+      await pg.waitForFunction(() => document.documentElement.classList.contains('app-ready') && window.app && window.app.projects && window.app.projects.current(), null, { timeout: 90000 });
+      await sleep(800);
+      await pg.getByRole('button', { name: 'Start designing' }).click({ timeout: 5000 }).catch(() => {});
+      await sleep(300);
+      for (let i = 0; i < 3 && await pg.locator('.scrim').count(); i++) { await pg.keyboard.press('Escape'); await sleep(300); }
+    };
+    /** Open the dialog, read `file`, confirm the file's own scale, choose the orientation and arrive at the Review step. */
+    const toReview = async (pg, dr, file, { rotate = 0, mirror = false } = {}) => {
+      await pg.locator('.inext .btn--primary').click().catch(() => {});
+      await pg.evaluate(() => window.app.store.setUI({ tool: 'select' }));
+      await sleep(200);
+      await pg.locator('.projname--switch').click();
+      await pg.getByRole('menuitem', { name: /Import a sketch/ }).click();
+      await pg.waitForSelector('.importdlg');
+      await pg.setInputFiles('#import-sketch-file', file);
+      let st = await dr.until((x) => x.sheet && x.first && !x.busy, 90000);
+      if (!st || st.error) return st;
+      await dr.nextBtn().click();
+      await pg.waitForSelector('.iopts');
+      if (file.endsWith('.pdf')) {
+        await pg.locator('.iopt', { hasText: 'Type the scale' }).locator('input[type=radio]').check();
+        await pg.getByLabel('Scale denominator (1 : N)').fill('50');
+        await sleep(150);
+      }
+      await dr.nextBtn().click();
+      await pg.waitForSelector('.inorth');
+      if (rotate) await pg.locator(`.seg [data-value="${rotate}"]`).first().click();
+      if (mirror) await pg.locator(`.seg [data-value="${mirror}"]`).first().click();
+      await dr.nextBtn().click();
+      return dr.until((x) => x.step === 3 && x.result && !x.busy, 90000);
+    };
+    /** What the open project's plan says about its angled walls and rooms (plan cm), computed in the page. */
+    const planFacts = (pg) => pg.evaluate(async () => {
+      const { slantFrame, pointAt } = await import('/src/core/slant-geom.js');
+      const P = window.app.plan;
+      const area = (Q) => { let a = 0; for (let i = 0; i < Q.length; i++) { const p0 = Q[i], p1 = Q[(i + 1) % Q.length]; a += p0[0] * p1[1] - p1[0] * p0[1]; } return Math.abs(a) / 2; };
+      const inside = (Q, x, y) => { let c = false; for (let i = 0, j = Q.length - 1; i < Q.length; j = i++) { const [xi, yi] = Q[i], [xj, yj] = Q[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+      const slants = (P.slants || []).map((s) => ({ ...s }));
+      const doors = (P.openings || []).filter((o) => o.axis === 'a').map((o) => {
+        const s = slants.find((x) => x.id === o.wall), f = slantFrame(s), sg = o.swing === 'r' ? 1 : -1;
+        const c = pointAt(s, o.at), hat = o.hinge === 'b' ? o.at + o.width / 2 : o.at - o.width / 2, hp = pointAt(s, hat);
+        const sp = [c[0] + f.nx * sg * 45, c[1] + f.ny * sg * 45], room = P.rooms.find((r) => inside(r.polygon, sp[0], sp[1]));
+        return { id: o.id, kind: o.kind, wall: o.wall, wallKind: s.kind, at: o.at, width: o.width, hinge: o.hinge, swing: o.swing, hingePt: [hp[0] + f.nx * sg * s.t / 2, hp[1] + f.ny * sg * s.t / 2], swingRoom: room ? area(room.polygon) : null };
+      });
+      return { name: window.app.projects.current().name, phase: window.app.projects.current().phase, walls: P.walls.length, slants, doors, rooms: P.rooms.map((r) => area(r.polygon)).sort((a, b) => a - b), underlay: !!(window.app.store.underlay && window.app.store.underlay.image), bounds: P.bounds };
+    });
+    const create = async (pg, dr, name) => {
+      await dr.nextBtn().click();
+      await pg.waitForSelector('.icreate');
+      await pg.getByLabel('Project name').fill(name);
+      const warnText = await pg.locator('.icreate').textContent();
+      const errBanner = await pg.locator('.lvlbanner--locked').count();
+      await dr.nextBtn().click();
+      await pg.waitForFunction((n) => !document.querySelector('.importdlg') && window.app.projects.current().name === n, name, { timeout: 30000 }).catch(() => {});
+      await sleep(600);
+      return { warnText, errBanner };
+    };
+    const distLine = (x, y, s) => { const L = Math.hypot(s.x2 - s.x1, s.y2 - s.y1); return Math.abs((s.x2 - s.x1) * (s.y1 - y) - (s.x1 - x) * (s.y2 - s.y1)) / L; };
+
+    // ── switch OFF (the default): today's behaviour plus the hint line ──
+    {
+      const dr = driver(page);
+      const st = await toReview(page, dr, WEDGE_DXF);
+      check('switch off: the Wedge reviews with its angled pieces unsupported (4), no slants', st && st.result && st.result.slants === 0 && st.result.unsupported === 4 && !st.result.slantsOn, JSON.stringify(st && st.result));
+      const lg = await page.locator('.ilegend').textContent(), side = await page.locator('.importdlg .isplit__side').textContent();
+      check('switch off: legend has the amber "Not understood" count, no angled walls line', /Not understood \(angled \/ curved\)4/.test(lg) && !/Angled walls/.test(lg), lg);
+      check('switch off: still says to redraw them by hand as straight walls', /redraw them by hand as straight walls/.test(side));
+      check('switch off: the new hint line under the amber list', side.includes('Angled walls can be imported — turn on “Angled walls (in development)” in Settings → Experimental and import again.'));
+      await page.locator('.importdlg .dialog__foot').getByRole('button', { name: 'Cancel' }).click();
+      await sleep(300);
+    }
+
+    // ── switch ON (?angled=1) ──
+    const actx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const pa = await actx.newPage();
+    pa.on('pageerror', (e) => errors.push('angled pageerror: ' + e.message));
+    pa.on('console', (m) => { if (m.type() === 'error') errors.push('angled: ' + m.text()); });
+    await pa.goto(`http://localhost:${PORT}/index.html?angled=1`);
+    await bootPage(pa);
+    check('?angled=1 turns the Angled walls switch on', await pa.evaluate(async () => (await import('/src/core/features.js')).FEATURES.angledWalls === true));
+    const dr = driver(pa);
+
+    // the Wedge as DXF
+    let st = await toReview(pa, dr, WEDGE_DXF);
+    check('switch on: DXF Wedge reviews with 2 slants, 4 openings, nothing unsupported', st && st.result && st.result.slants === 2 && st.result.openings === 4 && st.result.unsupported === 0 && st.result.slantsOn, JSON.stringify(st && st.result));
+    let lg = await pa.locator('.ilegend').textContent();
+    check('review legend: "Angled walls 2" with their 2 openings', /Angled walls2/.test(lg) && /with 2 openings in them/.test(lg) && !/Not understood/.test(lg) && !/Curved wall pieces/.test(lg), lg);
+    check('review: no "redraw by hand" text and no switch hint', !/by hand/.test(await pa.locator('.importdlg .isplit__side').textContent()) && !/can be imported/.test(await pa.locator('.importdlg .isplit__side').textContent()));
+    // the overlay really paints angled bands: wall colour pixels along the s01 centre line away from the opening
+    const paint = await pa.evaluate(() => {
+      const dd = document.querySelector('.importdlg'), r = dd._import.state.result, sh = dd._import.sheet;
+      const cv = sh.canvas, rect = cv.getBoundingClientRect(), g = cv.getContext('2d'), dpr = cv.width / rect.width;
+      const inv = (a) => { const [A, B, C, D, E, F] = a, det = A * D - B * C; return [D / det, -B / det, -C / det, A / det, (C * F - D * E) / det, (B * E - A * F) / det]; };
+      const T = inv(r.sheetTransform);
+      const at = (x, y) => { const u = T[0] * x + T[2] * y + T[4], v = T[1] * x + T[3] * y + T[5], p = sh.toScreen(u, v); return g.getImageData(Math.round(p[0] * dpr), Math.round(p[1] * dpr), 1, 1).data; };
+      return r.slants.map((s) => { const L = Math.hypot(s.x2 - s.x1, s.y2 - s.y1), f = 0.2; const px = s.x1 + (s.x2 - s.x1) * f, py = s.y1 + (s.y2 - s.y1) * f; return { id: s.id, kind: s.kind, rgb: [...at(px, py)].slice(0, 3), L }; });
+    });
+    check('review paints the slants as coloured bands (exterior blue-ish, interior green-ish)', paint.length === 2 && paint.every((p) => p.rgb.some((v) => v < 200)), JSON.stringify(paint));
+    if (shots) await pa.screenshot({ path: path.join(shotDir, 'import-angled-review.png') });
+    let made = await create(pa, dr, 'Imported Wedge');
+    check('create step: no errors; plan has no stray angled-wall warnings', made.errBanner === 0 && /2 angled walls/.test(made.warnText) && !/does not meet another wall/.test(made.warnText), made.warnText.replace(/\s+/g, ' ').slice(0, 260));
+    let pf = await planFacts(pa);
+    const near = (a, b, tol) => Math.abs(a - b) <= tol;
+    const mapped = DESIGN.slants.map((ds) => pf.slants.find((s) => s.t === ds.t && s.kind === ds.kind && distLine(s.x1, s.y1, ds) <= 2 && distLine(s.x2, s.y2, ds) <= 2));
+    check('Wedge project: both slants within 2 cm of the design centre lines, thickness and kind right', pf.name === 'Imported Wedge' && pf.slants.length === 2 && mapped.every(Boolean), JSON.stringify(pf.slants));
+    const areasOk = (areas) => areas.length === 3 && areas.every((a, i) => Math.abs(a - refAreas[i]) / refAreas[i] <= 0.001);
+    check('Wedge project: 3 rooms, areas within 0.1 % of the design', areasOk(pf.rooms), pf.rooms.map((a) => (a / 1e4).toFixed(3)).join(' / ') + ' vs ' + refAreas.map((a) => (a / 1e4).toFixed(3)).join(' / '));
+    const win = pf.doors.find((o) => o.kind === 'window'), door = pf.doors.find((o) => o.kind === 'door');
+    check('Wedge project: the window (120 cm) in the exterior slant, the door (80 cm) in the interior one', win && near(win.width, 120, 0.6) && win.wallKind === 'exterior' && door && near(door.width, 80, 0.6) && door.wallKind === 'interior', JSON.stringify(pf.doors));
+    check('Wedge project: a draft with the underlay, the 4 orthogonal walls + doors kept', pf.phase === 'draft' && pf.underlay && pf.walls >= 6, JSON.stringify({ phase: pf.phase, underlay: pf.underlay, walls: pf.walls }));
+    // the design's hinge point of the s02 door (jamb a, 5 cm onto the swing side)
+    const s2 = DESIGN.slants[1], L2 = Math.hypot(s2.x2 - s2.x1, s2.y2 - s2.y1), u2 = [(s2.x2 - s2.x1) / L2, (s2.y2 - s2.y1) / L2], n2 = [-u2[1], u2[0]];
+    const hingeDesign = [s2.x1 + u2[0] * (L2 / 2 - 40) + n2[0] * 5, s2.y1 + u2[1] * (L2 / 2 - 40) + n2[1] * 5];
+    check('Wedge project: the door hinges at the design\'s jamb, on the design\'s swing side', door && Math.hypot(door.hingePt[0] - hingeDesign[0], door.hingePt[1] - hingeDesign[1]) <= 2 && near(door.swingRoom, refAreas[2], refAreas[2] * 0.001), JSON.stringify({ hinge: door && door.hingePt, want: hingeDesign, room: door && door.swingRoom }));
+    if (shots) await pa.screenshot({ path: path.join(shotDir, 'import-angled-draft.png') });
+
+    // mirrored north–south: the plan is the design reflected (y → 800 − y), room areas equal, hinge and swing mirrored
+    st = await toReview(pa, dr, WEDGE_DXF, { mirror: 'ns' });
+    check('mirror north–south: review finds the same 2 slants', st && st.result && st.result.slants === 2 && st.result.openings === 4, JSON.stringify(st && st.result));
+    made = await create(pa, dr, 'Wedge flipped');
+    pf = await planFacts(pa);
+    const flip = (s) => ({ ...s, y1: 800 - s.y1, y2: 800 - s.y2 });
+    const mmapped = DESIGN.slants.map((ds) => pf.slants.find((s) => s.t === ds.t && s.kind === ds.kind && distLine(s.x1, s.y1, flip(ds)) <= 2 && distLine(s.x2, s.y2, flip(ds)) <= 2));
+    check('mirrored Wedge: slants on the reflected centre lines', pf.name === 'Wedge flipped' && pf.slants.length === 2 && mmapped.every(Boolean), JSON.stringify(pf.slants));
+    check('mirrored Wedge: room areas equal to the design\'s', areasOk(pf.rooms), pf.rooms.map((a) => (a / 1e4).toFixed(3)).join(' / '));
+    const mdoor = pf.doors.find((o) => o.kind === 'door');
+    check('mirrored Wedge: the door hinge is at the reflected jamb and it swings into the same (mirrored) room', mdoor && Math.hypot(mdoor.hingePt[0] - hingeDesign[0], mdoor.hingePt[1] - (800 - hingeDesign[1])) <= 2 && near(mdoor.swingRoom, refAreas[2], refAreas[2] * 0.001), JSON.stringify(mdoor));
+    check('mirrored Wedge: the door\'s letters flipped (hinge a ↔ b and swing l ↔ r against the as-drawn plan)', mdoor && door && mdoor.hinge !== door.hinge && mdoor.swing !== door.swing, `${door && door.hinge}/${door && door.swing} → ${mdoor && mdoor.hinge}/${mdoor && mdoor.swing}`);
+
+    // the same drawing as a PDF page at 1 : 50
+    st = await toReview(pa, dr, WEDGE_PDF);
+    check('switch on: PDF Wedge reviews with 2 slants and 4 openings', st && st.kind === 'pdf' && st.result && st.result.slants === 2 && st.result.openings === 4 && st.result.unsupported === 0, JSON.stringify(st));
+    if (st && st.result && st.result.slants === 2) {
+      made = await create(pa, dr, 'Wedge from PDF');
+      pf = await planFacts(pa);
+      const pm = DESIGN.slants.map((ds) => pf.slants.find((s) => s.t === ds.t && s.kind === ds.kind && distLine(s.x1, s.y1, ds) <= 2 && distLine(s.x2, s.y2, ds) <= 2));
+      check('PDF Wedge project: slants within 2 cm of the design centre lines, 3 rooms within 0.1 %', pm.every(Boolean) && areasOk(pf.rooms), JSON.stringify({ slants: pf.slants.length, rooms: pf.rooms.map((a) => (a / 1e4).toFixed(3)) }));
+    } else await pa.locator('.importdlg .dialog__foot').getByRole('button', { name: 'Cancel' }).click().catch(() => {});
+
+    // the quarter-circle wall: a chain of straight pieces and the note
+    st = await toReview(pa, dr, QUARTER_DXF);
+    const pieces = st && st.result ? st.result.slants : 0;
+    check('quarter circle: the review finds a chain of straight pieces, nothing unsupported', pieces >= 3 && st.result.unsupported === 0, JSON.stringify(st && st.result));
+    lg = await pa.locator('.ilegend').textContent();
+    const notes = await pa.locator('.iwarns').textContent().catch(() => '');
+    check('quarter circle: legend counts the curved wall pieces and the note says N straight pieces within 2 cm', new RegExp(`Curved wall pieces${pieces}`).test(lg) && !/Angled walls\d/.test(lg) && new RegExp(`Curved wall drawn as ${pieces} straight pieces, within 2 cm`).test(notes), lg + ' | ' + notes);
+    made = await create(pa, dr, 'Quarter circle');
+    pf = await planFacts(pa);
+    const radii = pf.slants.map((s) => { let m = 0; for (let i = 0; i <= 20; i++) { const x = s.x1 + (s.x2 - s.x1) * i / 20, y = s.y1 + (s.y2 - s.y1) * i / 20; m = Math.max(m, Math.abs(Math.hypot(x - QUARTER.cx, y - QUARTER.cy) - QUARTER.r)); } return m; });
+    check('quarter-circle project: chain pieces created, all within 2 cm of the circle, thickness 20', pf.slants.length === pieces && pf.slants.every((s) => s.chain && s.t === 20) && Math.max(...radii) <= 2 && pf.rooms.length >= 1, JSON.stringify({ n: pf.slants.length, dev: Math.max(...radii), rooms: pf.rooms.length, errBanner: made.errBanner }));
+    await actx.close();
+
+    // every rotation × mirror: the converted slants and the door agree with the design (engine, as the dialog calls it)
+    const { readDxf, analyseDxf } = await import('../src/import/index.js');
+    const { slantFrame, pointAt } = await import('../src/core/slant-geom.js');
+    const prims = readDxf(Buffer.from(fs.readFileSync(WEDGE_DXF)));
+    const s2d = DESIGN.slants[1], hd = [s2d.x1 + u2[0] * (L2 / 2 - 40) + n2[0] * 5, s2d.y1 + u2[1] * (L2 / 2 - 40) + n2[1] * 5];
+    let okAll = true; const bad = [];
+    for (const rotate of [0, 90, 180, 270]) for (const mirror of [false, 'ns', 'ew']) {
+      const T = (x, y) => { if (mirror === 'ns') y = -y; if (mirror === 'ew') x = -x; return rotate === 90 ? [-y, x] : rotate === 180 ? [-x, -y] : rotate === 270 ? [y, -x] : [x, y]; };
+      const cs = [[0, 0], [1000, 0], [0, 800], [1000, 800]].map(([x, y]) => T(x, y)), ox = Math.min(...cs.map((p) => p[0])), oy = Math.min(...cs.map((p) => p[1]));
+      const out = (x, y) => { const p = T(x, y); return [p[0] - ox, p[1] - oy]; };
+      const r = analyseDxf(prims, { slants: true, rotate, mirror });
+      const b = buildPlan({ walls: r.walls.map(({ id, x, y, w, h, kind }) => ({ id, x, y, w, h, kind })), slants: r.slants, openings: r.openings.map(({ confidence, ...o }) => o) }, { slants: true });
+      const lines = DESIGN.slants.map((ds) => { const a = out(ds.x1, ds.y1), c = out(ds.x2, ds.y2); return { x1: a[0], y1: a[1], x2: c[0], y2: c[1] }; });
+      const onLines = DESIGN.slants.every((ds, i) => (b.plan.slants || []).some((s) => s.t === ds.t && s.kind === ds.kind && distLine(s.x1, s.y1, lines[i]) <= 2 && distLine(s.x2, s.y2, lines[i]) <= 2));
+      const dop = b.plan.openings.find((o) => o.axis === 'a' && o.kind === 'door'), ds = dop && b.plan.slants.find((x) => x.id === dop.wall);
+      let hingeErr = Infinity;
+      if (ds) { const f = slantFrame(ds), sg = dop.swing === 'r' ? 1 : -1, c = pointAt(ds, dop.hinge === 'b' ? dop.at + dop.width / 2 : dop.at - dop.width / 2), want = out(...hd); hingeErr = Math.hypot(c[0] + f.nx * sg * ds.t / 2 - want[0], c[1] + f.ny * sg * ds.t / 2 - want[1]); }
+      const areas = b.plan.rooms.map((x) => polyArea(x.polygon)).sort((x, y) => x - y);
+      if (!(b.ok && onLines && hingeErr <= 2 && areasOk(areas))) { okAll = false; bad.push(`${rotate}/${mirror}: ok ${b.ok} lines ${onLines} hinge ${hingeErr.toFixed(1)}`); }
+    }
+    check('all 4 rotations × both mirrors: slants, hinge side and room areas agree with the design', okAll, bad.join('; '));
   }
 
   // ─────────── 4. phone (390 × 800, touch): pinch zooms, two fingers pan, one finger picks a snapped corner ───────────

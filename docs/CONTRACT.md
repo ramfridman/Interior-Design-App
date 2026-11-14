@@ -316,6 +316,57 @@ Both views show the same store state live (move in 2D → moves in 3D, and vice-
   a void (its arrival edge not on a void edge) leaves that void's edges facing the arrival open (as the 3D railing); headroom on the stair
   itself under a too-short void is not enforced (the rules report it); no winders / spirals (none in F4).
 
+#### Angled walls in 3D (stage A4, additive; levels without slants: byte-identical meshes and light)
+* **Two builders.** A level without slants is built by the grid builder of `view3d/house.js` exactly as before (House 98:
+  `tests/fixtures/house98-mesh-hashes.json`; daylight: `tests/daylight-levels.test.mjs` hashes). A level with ≥ 1 slant
+  (`plan.slants` / `levels[i].slants`) is built, as a WHOLE (rect walls too — no seam between builders), by
+  `view3d/shell-poly.js`: `hasSlants(view)`, `preparePolyLevel(view)` (solid footprint = rect walls ∪ `slantPolys` ∪ every
+  `openingPoly`, the openings' frames / frame planes / side materials, a cache of band regions), `buildPolyShell(geo,
+  { top, ceiling, plinthDepth, dryRooms, K })` → `{ soups, aoFloor, aoCeiling, stats: { skirting: Map(roomId → cm), bands } }`
+  (the same soups / mesh names as the grid: `wall:room:<id>`, `wall:ext`, `wall:cap`, `wall:skirting`, `wall:plinth`,
+  `ao:floor`, `ao:ceiling`), `buildPolyFloors(geo, floorHoles, ceilingHoles)` → `{ floors: Map(roomId → Soup), ceilings }`.
+* **Shell.** Height bands at 0, every sill / head, the soft-shading heights (0.45 m, ceiling − 0.45 m) and the top; per band
+  the solid region = footprint − the gaps open at that height (polygon kernel). Every boundary edge of a band → one
+  vertical quad (u = metres along the edge in a fixed direction — plain x / y for axis edges, the grid's texture scale —,
+  v = height; outward normal), material = the space 1 cm out from the middle of the piece: room → its wall finish,
+  outdoors → exterior render, an open gap → a reveal split at the frame plane (room side / other side), as the grid.
+  Horizontal faces where bands differ (sill tops, lintel undersides, split at the frame plane), the cap at the top (the
+  cut-away section) and the foot at Y = 0 close the solid. Every edge is split at every vertex lying on it (vertices of
+  different kernel results within 0.02 cm are welded), so the wall shell is a closed, consistently oriented 2-manifold
+  (each edge in exactly two triangles), at full height and cut away. Floors: each room's exact polygon + its door
+  thresholds − stair voids; ceilings: rooms ∪ wall heads − the voids above. Skirting: mitred boards along every room face
+  that reaches the floor (dry rooms; stopped at door gaps: length = perimeter − door widths); contact-shade strips
+  mitred in room corners, inset at wall ends / doors; plinth = outdoor-facing edges of the footprint offset 8 mm.
+* **Roof** of a level with slants: the polygon roof (footprint − the level above, parapet / coping by offset) — also for a
+  one-level plan (the classic traced-outline roof stays for orthogonal one-level plans).
+* **Openings** (`view3d/openings.js`): `openingFrame(o, plan?)` (frame plane via `openingFaceSign`) and
+  `openingPlacement(o, side, plan?)` work for `'h' | 'v' | 'a'` — for `'a'` the rotation about Y is atan2(fx, fy) of the
+  face normal, hinge `'a' | 'b'` / swing `'l' | 'r'` through the frame (`openingJambSign`), the safe-room inner door on
+  the opposite face; a mamad shutter in a slant parks to +X. No NaN anywhere (it came from the compass-only tables).
+* **Consumers.** `house.js` `keysOf` includes the level's `slants` (an upper-level slant edit rebuilds it); sun-study
+  casters, `shadowGeometries`, cut-away, per-level visibility, `forEachInterior` / `setDaylight` work unchanged on the
+  same mesh names. `interaction.js` `wallRuns(plan).diag` = diagonal runs (angled faces, merged across openings): a
+  wall-mounted item slides onto them (rotation to 0.1°); axis runs ignore angled faces. Finish drop: the hit face's true
+  normal → the room in front (slant faces included). Carpentry section cut: the ray also stops at slant footprints.
+  Walk: the slants' `walkBoxes` block (verified in the browser); stairs still snap to rect walls only.
+* **Daylight — approximate on angled faces (design's cheap fallback; exact faces are stage A7).** `sceneInputFromPlan`
+  of a level with slants adds `slants` (joined footprints) and, for openings in slants, `quad` + `frame` (no keys added
+  otherwise). `buildScene` rasterises a slant cell as WALL when ≥ 2 of its 4 × 4 sub-samples are in a footprint outside
+  the gaps (supercover: 7 cm walls at any angle stay 4-connected; walls thicken by ≤ ≈ 2.5 cm), and the gap cells (centre
+  in the quad) as OPEN; an opening in a slant has `oAxisN = 3` (oblique glass plane p·n = `oPlane`, normal in `scene.oDir`):
+  glass transmittance on that plane, apertures sampled along its centre line with the true cosine, sun-beam test on that
+  plane. Approximate: the slant cells' faces in the solve are staircase charts with axis normals (their area ≈ 1.2–1.4 ×
+  the true face at 30–45°), and `chartFor` maps every rendered face more than 8° off both axes — and, on such a level, any
+  face whose front cell the rasterising thickened — to the **average chart of the room / opening in front** (first air
+  cell within 15 cm along its normal): an angled wall shows its room's mean light (no gradient, no sun patch of its own
+  in the lightmap; the real-time sun shadows still fall on it). Orthogonal plans: identical input, scene and light.
+* Tests: `node tests/slants-3d.test.mjs` (Wedge: manifold shell full / cut away, normals, materials by side, reveals /
+  sill / lintel of the slant window and door, frame placement, floor areas, skirting lengths, polygon roof, House 98
+  hashes, the Wedge over a box as L1 — slab / roof / terrace areas —, daylight fallback, timings); `node tests/e2e.slants.mjs
+  [--shots]` (3D part: orbit, cut-away, a wall finish dropped on s01, walking into s02 blocked, clean console).
+* Performance (Node): Wedge `rebuildPlan` ≈ 7–10 ms (shell ≈ 4 ms), 17 draw calls — the same as an orthogonal box of
+  the same size (≈ 3.5 ms).
+
 ## 5. UI (`index.html`, `src/styles/*`, `src/ui/*`) — UX/UI team
 `index.html` provides the shell with mount points `#view2d` and `#view3d`, a boot splash `#boot` containing
 `#boot-status`, the import map, and `<script type="module" src="./src/main.js">`.

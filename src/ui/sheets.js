@@ -172,7 +172,7 @@ function angledGroup(app) {
     h('p', { class: 'setnote' }, 'Works: drawing walls at any angle in the plan (15° steps, parallel and perpendicular guides, typed length and angle), angling a straight wall by dragging its end, doors and windows in angled walls, the rooms and their areas, dimensions, the checks that already handle them, and angled walls in 3D (walls, doors, windows, floors, roofs, cut-away, finishes, walking).'),
     h('p', { class: 'setnote' }, 'Approximate: the light simulation. Angled walls block daylight and let it in through their windows, but each angled wall surface shows its room’s average light, not its own.'),
     h('p', { class: 'setnote' }, 'Also works: the regulation checks on rooms with angled walls (sizes, doors, windows, safe room, furniture, setbacks), carpentry runs along angled walls (no corner units at corners that are not square), and the walk-through.'),
-    h('p', { class: 'setnote' }, 'Not yet: importing them from a drawing.'),
+    h('p', { class: 'setnote' }, 'Importing from a drawing works too: in “Import a sketch…”, a PDF or DXF’s angled walls (with their doors and windows) and curved walls (as straight pieces, within 2 cm) become walls you can edit.'),
     note);
 }
 

@@ -323,7 +323,7 @@ async function main() {
     const checked = box ? !!box.querySelector('input[type="checkbox"]')?.checked || box.querySelector('[aria-checked="true"]') !== null : false;
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    return { found: !!box, checked, works: /Works: drawing walls at any angle.*angled walls in 3D/.test(text), approx: /Approximate: the light simulation/.test(text), notYet: /Not yet: importing them/.test(text) && !/Not yet: angled walls in 3D/.test(text) && !/Not yet: the regulation/.test(text), a5: /Also works: the regulation checks.*carpentry runs along angled walls.*walk-through/.test(text) };
+    return { found: !!box, checked, works: /Works: drawing walls at any angle.*angled walls in 3D/.test(text), approx: /Approximate: the light simulation/.test(text), notYet: /Importing from a drawing works too/.test(text) && !/Not yet: importing/.test(text) && !/Not yet: angled walls in 3D/.test(text) && !/Not yet: the regulation/.test(text), a5: /Also works: the regulation checks.*carpentry runs along angled walls.*walk-through/.test(text) };
   });
   check('Settings → Experimental: "Angled walls (in development)", on, with what works (3D too), what is approximate (light) and what not yet', setting.found && setting.checked && setting.works && setting.approx && setting.notYet && setting.a5, JSON.stringify(setting));
   await sleep(300);
@@ -409,7 +409,7 @@ async function main() {
   });
   check('Wedge in 3D: room walls with angled faces, no NaN bounding spheres', in3d.angled >= 3 && in3d.walls === 3 && in3d.nan === 0, JSON.stringify(in3d));
   for (const [theta, phi] of [[0.6, 0.9], [2.4, 1.1], [-2.2, 0.8], [3.6, 1.2]]) { await look([5, 0.8, 4], theta, phi, 16); await sleep(250); }   // orbit
-  await look([5, 0.8, 4], 2.2, 1.15, 17);
+  await look([5, 0.8, 4], 0.9, 1.1, 17);
   await sleep(1500);
   await shot3d('wedge-3d-outside');
   await page.evaluate(() => window.app.store.setUI({ wallsCutaway: true }));
@@ -449,7 +449,7 @@ async function main() {
   // inside the west room, looking at s02 and its door (the NW triangle and the west room have no window — the entry door
   // is closed — so under the daylight solve they are dark: this shot uses the standard lighting)
   await page.evaluate(() => window.app.store.setUI({ daylight: false }));
-  await look([1.62, 1.1, 1.62], Math.PI / 4 + 0.5, 1.3, 4.4);
+  await look([1.62, 1.1, 1.62], Math.PI / 4 + 0.3, 1.38, 3.0);
   await sleep(1500);
   await shot3d('wedge-3d-interior');
   await page.evaluate(() => window.app.store.setUI({ daylight: true }));

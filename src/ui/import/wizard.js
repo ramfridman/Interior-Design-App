@@ -19,6 +19,8 @@ import { btn, segmented } from '../components.js';
 import { openDialog, toast, layer } from '../dialogs.js';
 import { field, numInput, readNum, placeFields, ceilingField } from '../projects.js';
 import { buildPlan } from '../../core/plan-build.js';
+import { FEATURES } from '../../core/features.js';
+import { joinSlants, slantJoins, slantFrame, openingQuad } from '../../core/slant-geom.js';
 import { createSheet } from './sheet.js';
 import { runTask } from './engine-client.js';
 import { sniff, plainError, pdfInfo, renderPage, pagePrims, decodeImage, pixelsOf, encodeUnderlay, affThen, affInv, affApply, ImportError } from './source.js';
@@ -687,17 +689,18 @@ export function openImportWizard(app, opts = {}) {
   async function analyse() {
     const sc = currentScale();
     if (!sc) return false;
-    const key = JSON.stringify([S.kind, S.page, sc.cmPerUnit, S.drawing, S.rotate, S.mirror, S.dxf ? S.dxf.roles : null]);
+    const slantsOn = !!FEATURES.angledWalls && vector();      // angled / curved walls are converted only while the Settings switch is on (pictures have none)
+    const key = JSON.stringify([S.kind, S.page, sc.cmPerUnit, S.drawing, S.rotate, S.mirror, S.dxf ? S.dxf.roles : null, slantsOn]);
     if (S.result && S.resultKey === key) return true;
     const res = await work(vector() ? 'Finding walls, doors and windows…' : 'Looking for walls in the picture…', async () => {
       if (S.kind === 'dxf') {
-        const r = await engine('dxf-analyse', { prims: S.prims, opts: { candidates: S.dxf.candidates, layers: S.dxf.layers, roles: S.dxf.roles, scale: { cmPerUnit: sc.cmPerUnit }, walls: { drawing: S.drawing }, rotate: S.rotate, mirror: S.mirror } });
+        const r = await engine('dxf-analyse', { prims: S.prims, opts: { candidates: S.dxf.candidates, layers: S.dxf.layers, roles: S.dxf.roles, scale: { cmPerUnit: sc.cmPerUnit }, walls: { drawing: S.drawing }, rotate: S.rotate, mirror: S.mirror, ...(slantsOn ? { slants: true } : {}) } });
         if (!r) return null;
         r.sheetTransform = r.walls.length ? r.transform : null;
         return r;
       }
       if (S.kind === 'pdf') {
-        const r = await engine('analyse', { prims: S.prims, opts: { scale: { cmPerUnit: sc.cmPerUnit }, walls: { drawing: S.drawing }, rotate: S.rotate, mirror: S.mirror } });
+        const r = await engine('analyse', { prims: S.prims, opts: { scale: { cmPerUnit: sc.cmPerUnit }, walls: { drawing: S.drawing }, rotate: S.rotate, mirror: S.mirror, ...(slantsOn ? { slants: true } : {}) } });
         if (!r) return null;
         r.sheetTransform = r.walls.length ? r.transform : null;   // page units → plan cm (none without walls: placed by scale below)
         return r;
@@ -716,6 +719,7 @@ export function openImportWizard(app, opts = {}) {
     });
     if (!res) return false;
     if (!res.sheetTransform) res.sheetTransform = fallbackTransform(sc.cmPerUnit);
+    res.slantsOn = slantsOn;
     S.result = res; S.resultKey = key; S.built = null;
     return true;
   }
@@ -746,19 +750,23 @@ export function openImportWizard(app, opts = {}) {
     const ext = r.walls.filter((w) => w.kind === 'exterior').length, int = r.walls.length - ext;
     const doors = r.openings.filter((o) => o.kind === 'door').length, wins = r.openings.filter((o) => o.kind === 'window').length;
     const other = r.openings.length - doors - wins;
+    const sl = slantsOf(r), angled = sl.filter((q) => !q.chain).length, pieces = sl.length - angled, inSlants = r.openings.filter((o) => o.axis === 'a').length;
     const legend = h('ul', { class: 'ilegend' },
       h('li', { class: 'ilegend__item ilegend--ext' }, h('span', { class: 'ilegend__sw' }), `Exterior walls`, h('b', null, String(ext))),
       h('li', { class: 'ilegend__item ilegend--int' }, h('span', { class: 'ilegend__sw' }), `Interior walls`, h('b', null, String(int))),
       h('li', { class: 'ilegend__item ilegend--door' }, h('span', { class: 'ilegend__sw' }), `Doors`, h('b', null, String(doors))),
       h('li', { class: 'ilegend__item ilegend--win' }, h('span', { class: 'ilegend__sw' }), `Windows`, h('b', null, String(wins))),
       other ? h('li', { class: 'ilegend__item ilegend--pass' }, h('span', { class: 'ilegend__sw' }), `Passages and sliding doors`, h('b', null, String(other))) : null,
+      angled ? h('li', { class: 'ilegend__item ilegend--ang' }, h('span', { class: 'ilegend__sw' }), `Angled walls`, h('b', null, String(angled)),
+        inSlants ? h('span', { class: 'ilegend__sub' }, `with ${inSlants} opening${inSlants === 1 ? '' : 's'} in them (counted above)`) : null) : null,
+      pieces ? h('li', { class: 'ilegend__item ilegend--ang' }, h('span', { class: 'ilegend__sw' }), `Curved wall pieces`, h('b', null, String(pieces))) : null,
       r.unsupported && r.unsupported.length ? h('li', { class: 'ilegend__item ilegend--uns' }, h('span', { class: 'ilegend__sw' }), `Not understood (angled / curved)`, h('b', null, String(r.unsupported.length))) : null);
     const banner = r.lowConfidence || S.kind === 'image'
       ? h('div', { class: 'lvlbanner lvlbanner--warn ibanner' }, h('span', { class: 'lvlbanner__icon' }, icon('warn', { size: 16 })),
         h('div', null, h('p', { class: 'lvlbanner__title' }, 'A starting point to trace over'),
           h('p', { class: 'lvlbanner__text' }, `Pictures cannot be read exactly: ${r.walls.length ? 'about three quarters of the walls are usually found, and most doors and windows are not' : 'no walls could be recognised in this picture'}. The picture is kept under the plan, so you can check, fix and draw everything with the Structure tools.`)))
       : null;
-    const empty = !r.walls.length
+    const empty = !foundCount(r)
       ? h('div', { class: 'callout' }, icon('info', { size: 16 }), h('div', null, h('p', { class: 'callout__title' }, 'Nothing to convert automatically'),
         h('p', { class: 'callout__text' }, 'The project is still created — empty, with your drawing under the plan at the scale you set, so you can trace every wall with the wall tool.')))
       : null;
@@ -776,16 +784,17 @@ export function openImportWizard(app, opts = {}) {
   }
   function fitToResult() {
     const r = S.result;
-    if (!r || !r.walls.length || !r.stats || !r.stats.bounds) { sheet.fit(); return; }
+    if (!r || !foundCount(r) || !r.stats || !r.stats.bounds) { sheet.fit(); return; }
     const inv = affInv(r.sheetTransform);
-    const b = r.stats.bounds, pts = rectPts({ x: b.x, y: b.y, w: b.w, h: b.h }, 200).map(([x, y]) => affApply(inv, x, y));
+    const b = foundBox(r), pts = rectPts({ x: b.x, y: b.y, w: b.w, h: b.h }, 200).map(([x, y]) => affApply(inv, x, y));
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
     sheet.fit({ x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) });
   }
   function warningList(r) {
     const items = [];
     const n = (r.unsupported || []).length;
-    if (n) items.push({ cls: 'warn', text: `${n} wall piece${n === 1 ? ' is' : 's are'} angled or curved (outlined in amber). The plan engine only knows straight, square-on walls for now: redraw ${n === 1 ? 'it' : 'them'} by hand as straight walls after importing.` });
+    if (n && r.slantsOn) items.push({ cls: 'warn', text: `${n} angled or curved wall piece${n === 1 ? '' : 's'} (outlined in amber) could not be turned into ${n === 1 ? 'a wall' : 'walls'} — for example a single line with no second face. Draw ${n === 1 ? 'it' : 'them'} by hand with the Structure tools after importing.` });
+    else if (n) items.push({ cls: 'warn', text: `${n} wall piece${n === 1 ? ' is' : 's are'} angled or curved (outlined in amber). The plan engine only knows straight, square-on walls for now: redraw ${n === 1 ? 'it' : 'them'} by hand as straight walls after importing.` });
     for (const w of r.warnings || []) {
       if (['scale-guessed', 'raster', 'no-scale', 'angled-wall', 'curved-wall'].includes(w.code)) continue;
       if (w.code === 'several-drawings') { items.push({ cls: 'info', text: `The sheet holds ${S.first && S.first.drawings ? S.first.drawings.length : 'several'} drawings; drawing ${S.drawing + 1} was read. Go back to step 1 to choose another.` }); continue; }
@@ -793,7 +802,8 @@ export function openImportWizard(app, opts = {}) {
     }
     if (!items.length) return h('p', { class: 'iside__text' }, 'No problems were reported. Still, compare the walls with the drawing before you fix the plan.');
     return h('div', { class: 'iwarns' }, h('p', { class: 'newproj__label' }, 'Notes from the reader'),
-      h('ul', { class: 'iwarns__list' }, items.map((it) => h('li', { class: `iwarns__item iwarns--${it.cls}` }, icon(it.cls === 'warn' ? 'warn' : 'info', { size: 14 }), h('span', null, it.text)))));
+      h('ul', { class: 'iwarns__list' }, items.map((it) => h('li', { class: `iwarns__item iwarns--${it.cls}` }, icon(it.cls === 'warn' ? 'warn' : 'info', { size: 14 }), h('span', null, it.text)))),
+      n && !r.slantsOn ? h('p', { class: 'iwarns__hint' }, 'Angled walls can be imported — turn on “Angled walls (in development)” in Settings → Experimental and import again.') : null);
   }
   function reviewOverlay(ctx, V) {
     const r = S.result;
@@ -807,7 +817,15 @@ export function openImportWizard(app, opts = {}) {
       ctx.fillStyle = w.kind === 'exterior' ? col.extFill : col.intFill; ctx.fill();
       ctx.strokeStyle = w.kind === 'exterior' ? col.ext : col.int; ctx.lineWidth = 1; ctx.stroke();
     }
+    const sl = slantsOf(r), polys = slantPolys(r);
+    sl.forEach((q, i) => {
+      const pts = polys[i] || freePolyOf(q);
+      poly(pts);
+      ctx.fillStyle = q.kind === 'exterior' ? col.extFill : col.intFill; ctx.fill();
+      ctx.strokeStyle = q.kind === 'exterior' ? col.ext : col.int; ctx.lineWidth = 1; ctx.stroke();
+    });
     for (const o of r.openings) {
+      if (o.axis === 'a') { drawSlantOpening(ctx, o, sl.find((q) => q.id === o.wall), P, col); continue; }
       poly(rectPts(o));
       const c = o.kind === 'door' ? col.door : o.kind === 'window' ? col.win : col.pass;
       ctx.fillStyle = c + '33'; ctx.fill();
@@ -823,6 +841,34 @@ export function openImportWizard(app, opts = {}) {
       ctx.setLineDash([5, 3]); ctx.strokeStyle = col.uns; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
       ctx.fillStyle = col.uns + '22'; ctx.fill();
     }
+  }
+  /** An opening in an angled wall: the gap, then a door's leaf(s) and swing arc or a window's two glass lines, turned with the wall. */
+  function drawSlantOpening(ctx, o, q, P, col) {
+    if (!q) return;
+    const f = slantFrame(q), c = o.kind === 'door' ? col.door : o.kind === 'window' ? col.win : col.pass;
+    const path = (pts) => { ctx.beginPath(); pts.forEach(([x, y], i) => { const p = P(x, y); if (i) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]); }); };
+    path(openingQuad(q, o.at, o.width)); ctx.closePath();
+    ctx.fillStyle = c + '33'; ctx.fill(); ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.stroke();
+    const at = (a, off) => [q.x1 + f.ux * a + f.nx * off, q.y1 + f.uy * a + f.ny * off];
+    if (o.kind === 'window') {
+      for (const k of [0.4, 0.6]) { const off = (k - 0.5) * q.t; path([at(o.at - o.width / 2, off), at(o.at + o.width / 2, off)]); ctx.stroke(); }
+      return;
+    }
+    if (o.kind !== 'door') return;
+    ctx.strokeStyle = c; ctx.lineWidth = 1.2;
+    // a leaf: hinge on the swing-side face at the jamb, open leaf along that side's normal, arc back to the wall line
+    const leaf = (jamb, side, rad, from, to) => {
+      const sg = side === 'r' ? 1 : -1, n = [f.nx * sg, f.ny * sg], dir = jamb === 'a' ? [f.ux, f.uy] : [-f.ux, -f.uy];
+      const Hh = at(jamb === 'a' ? from : to, sg * q.t / 2), L = [Hh[0] + n[0] * rad, Hh[1] + n[1] * rad];
+      path([Hh, L]); ctx.stroke();
+      const arc = [];
+      for (let i = 0; i <= 16; i++) { const t = (i / 16) * Math.PI / 2, cs = Math.cos(t), sn = Math.sin(t); arc.push([Hh[0] + rad * (n[0] * cs + dir[0] * sn), Hh[1] + rad * (n[1] * cs + dir[1] * sn)]); }
+      path(arc); ctx.stroke();
+    };
+    const a0 = o.at - o.width / 2, a1 = o.at + o.width / 2, sw = o.swing || 'r';
+    if (o.leaves === 2) { leaf('a', sw, o.width / 2, a0, a1); leaf('b', sw, o.width / 2, a0, a1); }
+    else leaf(o.hinge === 'b' ? 'b' : 'a', sw, o.width, a0, a1);
+    if (o.innerDoor) { ctx.setLineDash([4, 3]); leaf(o.innerDoor.hinge === 'b' ? 'b' : 'a', o.innerDoor.swing || 'r', o.width, a0, a1); ctx.setLineDash([]); }
   }
   function drawSwing(ctx, o, P, c) {
     const along = o.axis === 'h' ? o.w : o.h;
@@ -862,6 +908,7 @@ export function openImportWizard(app, opts = {}) {
     const r = S.result;
     const facts = h('ul', { class: 'ifacts' },
       h('li', null, h('b', null, String(built.plan.walls.length)), ' wall pieces'),
+      (built.plan.slants || []).length ? h('li', null, h('b', null, String(built.plan.slants.length)), ` angled wall${built.plan.slants.length === 1 ? '' : 's'}`) : null,
       h('li', null, h('b', null, String(built.plan.openings.length)), ' doors, windows and passages'),
       h('li', null, h('b', null, String(built.plan.rooms.length)), ' rooms'),
       h('li', null, 'Scale ', h('b', null, currentScale().label)));
@@ -885,16 +932,26 @@ export function openImportWizard(app, opts = {}) {
     const r = S.result;
     const meta = { name: S.name || 'Imported house', location: S.location ? S.location.name : '', latitude: S.location && S.location.latitude, longitude: S.location && S.location.longitude, timeZone: S.location && S.location.timeZone, northAngle: S.north || 0 };
     const heights = { ceiling: S.ceilingCm || 300 };
-    if (!r.walls.length) {
+    if (!foundCount(r)) {
       const box = sheetBox(r.sheetTransform);
       const boundary = [[box.x, box.y], [box.x + box.w, box.y], [box.x + box.w, box.y + box.h], [box.x, box.y + box.h]].map(([x, y]) => [Math.round(x), Math.round(y)]);
       const b = buildPlan({ walls: [], openings: [], meta, heights, site: { boundary } });
       b.shift = { x: 0, y: 0 };
       return b;
     }
-    const minX = Math.min(...r.walls.map((w) => w.x)), minY = Math.min(...r.walls.map((w) => w.y));
-    const b = buildPlan({ walls: r.walls.map(({ id, x, y, w, h: hh, kind }) => ({ id, x, y, w, h: hh, kind })), openings: r.openings.map(({ confidence, ...o }) => o), meta, heights });
-    b.shift = { x: -minX, y: -minY };             // buildPlan moves the house's NW corner to the origin
+    const input = { walls: r.walls.map(({ id, x, y, w, h: hh, kind }) => ({ id, x, y, w, h: hh, kind })), openings: r.openings.map(({ confidence, ...o }) => o), meta, heights };
+    if (!slantsOf(r).length) {
+      const minX = Math.min(...r.walls.map((w) => w.x)), minY = Math.min(...r.walls.map((w) => w.y));
+      const b = buildPlan(input, r.slantsOn ? { slants: true } : undefined);
+      b.shift = { x: -minX, y: -minY };           // buildPlan moves the house's NW corner to the origin
+      return b;
+    }
+    // angled walls: the origin also covers their footprints (whole cm), so the move is the one buildPlan reports
+    input.slants = slantsOf(r).map(({ id, x1, y1, x2, y2, t, kind, chain }) => ({ id, x1, y1, x2, y2, t, kind, ...(chain ? { chain } : {}) }));
+    const b = buildPlan(input, { slants: true });
+    const moved = b.warnings.map((w) => /moved by (-?[\d.]+) cm east–west and (-?[\d.]+) cm north–south/.exec(w.text)).find(Boolean);
+    b.shift = moved ? { x: -Number(moved[1]), y: -Number(moved[2]) } : { x: 0, y: 0 };
+    b.warnings.push(...slantWarnings(input.slants, b.plan));
     return b;
   }
   async function create() {
@@ -912,7 +969,7 @@ export function openImportWizard(app, opts = {}) {
     dlg.close();
     toast(`Created “${res.project.name}” — a draft over your drawing`, { kind: 'success' });
     try { app.structure && app.structure.enter(); } catch (e) { /* the 2D view may be busy */ }
-    showNextCard(app, { lowConfidence: !!S.result.lowConfidence, empty: !S.result.walls.length });
+    showNextCard(app, { lowConfidence: !!S.result.lowConfidence, empty: !foundCount(S.result) });
   }
   /** The stored underlay: the page / picture around the house, re-encoded, with its image px → plan cm transform. */
   async function makeUnderlay(shift) {
@@ -921,7 +978,7 @@ export function openImportWizard(app, opts = {}) {
     let src = S.sheet.canvas, ppu = S.sheet.ppu, crop;
     if (vector()) {
       // the page around the house with a generous margin (keeps the stored image compact), rendered sharper
-      const b = r.walls.length && r.stats && r.stats.bounds ? r.stats.bounds : null;
+      const b = foundCount(r) && r.stats && r.stats.bounds ? foundBox(r) : null;
       let box = { x: 0, y: 0, w: S.sheet.w, h: S.sheet.h };
       if (b) {
         const m = Math.max(600, 0.35 * Math.max(b.w, b.h));
@@ -966,6 +1023,40 @@ export function openImportWizard(app, opts = {}) {
 }
 
 // ── helpers ──
+/** What buildPlan changed about the angled walls without saying so (it only reports errors): plain-words notes. */
+function slantWarnings(input, plan) {
+  const out = [], n = (k, one, many) => (k === 1 ? one : many);
+  const straight = input.filter((q) => { const off = Math.atan2(Math.abs(q.y2 - q.y1), Math.abs(q.x2 - q.x1)) * 180 / Math.PI; return off <= 0.5 || off >= 89.5; }).length;
+  if (straight) out.push({ level: 'info', text: `${straight} angled wall piece${n(straight, ' was', 's were')} within ½° of straight and became ${n(straight, 'an ordinary straight wall', 'ordinary straight walls')}.` });
+  const kept = plan.slants || [];
+  if (kept.length) {
+    try {
+      const ends = slantJoins(kept, plan.walls).filter((j) => j.ends.some((e) => e.type === 'free')).length;
+      if (ends) out.push({ level: 'warning', text: `${ends} angled wall${n(ends, ' has an end that does not', 's have an end that does not')} meet another wall — check ${n(ends, 'it', 'them')} against the drawing.` });
+    } catch (e) { /* the join check is only advice */ }
+  }
+  return out;
+}
+const slantsOf = (r) => (r && Array.isArray(r.slants) ? r.slants : []);
+/** Rectangles + angled / curved pieces found (the review and the create step treat both as "walls"). */
+const foundCount = (r) => r.walls.length + slantsOf(r).length;
+const freePolyOf = (q) => { const f = slantFrame(q); return [[q.x1 - f.nx * f.hw, q.y1 - f.ny * f.hw], [q.x2 - f.nx * f.hw, q.y2 - f.ny * f.hw], [q.x2 + f.nx * f.hw, q.y2 + f.ny * f.hw], [q.x1 + f.nx * f.hw, q.y1 + f.ny * f.hw]]; };
+/** The slants' footprints as the plan engine will join them (mitred at junctions), memoised on the result. */
+function slantPolys(r) {
+  if (r._polys) return r._polys;
+  let polys = [];
+  try { polys = joinSlants(slantsOf(r), r.walls).map((q) => q.poly); } catch (e) { polys = []; }
+  return (r._polys = polys);
+}
+/** Bounding box (plan cm, as found) of the rectangles and the angled pieces. */
+function foundBox(r) {
+  const b = r.stats && r.stats.bounds;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  if (b && r.walls.length) { x0 = b.x; y0 = b.y; x1 = b.x + b.w; y1 = b.y + b.h; }
+  const polys = slantPolys(r);
+  slantsOf(r).forEach((q, i) => { for (const [x, y] of polys[i] || freePolyOf(q)) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); } });
+  return Number.isFinite(x0) ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : b;
+}
 function rectPts(r, pad = 0) { return [[r.x - pad, r.y - pad], [r.x + r.w + pad, r.y - pad], [r.x + r.w + pad, r.y + r.h + pad], [r.x - pad, r.y + r.h + pad]]; }
 function label(ctx, text, x, y, color) {
   ctx.font = '600 12px system-ui, sans-serif';
