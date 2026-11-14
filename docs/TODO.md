@@ -51,9 +51,15 @@ Order of work:
 - [x] A. Live collaboration core (in version 14, dormant until there is a backend): operations over the store, server-ordered convergence, per-person undo, shared room logic, Node dev server (`node dev/collab-server.mjs`), presence, soft locks. Tested locally with two browsers; not yet on real Cloudflare.
 - [x] B. DXF import (version 14): own reader with true units and layers, layer panel in the import dialog, Hebrew layer names; tested on generated files only, not on a real architect's DXF. DWG is explained, not parsed.
 - [x] Hebrew carpentry terms checked against Israeli trade sources (version 14): 5 corrected, 11 confirmed, 9 unverified — see `docs/HEBREW-TERMS.md`.
-- [ ] C. Cloudflare Worker + Durable Object around the room logic, online storage adapter, sharing dialog and roles (owner / editor / viewer), version history, deployment steps [Opus, running].
-- [ ] D. Angled walls in the plan engine (2D, 3D, daylight, regulations, carpentry, import) [design analysis running; implementation in stages after it].
-- [ ] E. Several floors (stairs, per-floor plans, 3D stacking, daylight and walk-through across floors).
+- [x] C. Hosted backend and sharing (pushed 14 Nov; shows only where there is a backend): Cloudflare Worker with one Durable Object per project in `server/`, sign-in through Cloudflare Access, roles (owner / can edit / can view), Share and History dialogs, online project list, view-only mode. Runs locally under `wrangler dev` (125 checks); **not yet deployed or tested on a real Cloudflare account** — the owner's steps are in `docs/HOSTING-PLAN.md`. Limits: one owner per project (no transfer), projects are exported one at a time.
+- [ ] D + E. Angled walls and several floors — design in `docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md` (about 18 work sessions; House 98 stays on the current engine, pinned by golden tests; both features stay behind internal switches until complete). Stage status:
+  - [x] G1 geometry seams (golden test `tests/geometry.test.mjs`)
+  - [ ] G2 schema / persistence seams [running]
+  - [ ] A0 polygon kernel and wall joins [running]
+  - [ ] A6a import of angled and curved walls, engine side, off by default [running]
+  - [ ] F1 levels in the engine · F2 2D per level · F3 3D stacking · F4 stairs · F5 walk across floors · F6 daylight per level · F7 regulations / carpentry per level · F8 import per floor
+  - [ ] A1 mixed derive · A2 editing angled walls · A3 2D tools · A4 3D shell · A5 regulations / carpentry / walk · A6b import dialog · A7 exact daylight on angled faces
+  - Will still not be supported afterwards: true curves (short straight pieces within 2 cm), sloped roofs / attics, basements, split levels, spiral stairs.
 
 ## Still waiting for the owner
 1. **Hosting** — a free Cloudflare account, authorising its GitHub app for the repo, the email addresses to invite, and whether the working branch is merged into the default branch first (a pull request). With live collaboration the site becomes a Cloudflare Worker with static files instead of plain Pages; steps will be updated when part C is done.
