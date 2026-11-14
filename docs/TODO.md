@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 21): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 22): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -70,12 +70,17 @@ Order of work:
   - [x] A3 drawing / editing angled walls in the plan: any-direction wall tool with angle snapping and typed length / angle, grips, openings, aligned dimensions, furniture snapping; Settings → Experimental → "Angled walls (in development)" (`tests/slants-2d.test.mjs`, `tests/e2e.slants.mjs`)
   - [x] A5 regulation checks, carpentry runs and the walk-through on angled walls (`tests/slants-rules.test.mjs`)
   - [x] A4 angled walls in 3D: watertight shell at any angle, doors / windows / floors / skirting / roof, finishes by side (`tests/slants-3d.test.mjs`). Light on angled faces is approximate (room average) until A7.
-  - [ ] A6b angled and curved walls through the import dialog [running]
+  - [x] A6b angled and curved walls through the import dialog (in `tests/import.ui.test.mjs`)
+  - [ ] F8 importing a house with several floors (floor list, alignment, stair proposals, underlay per floor) [running]
+  - [ ] A7 exact light on angled faces — deferred (optional; the design's first thing to cut)
   - [ ] later: A2 editing angled walls · A3 2D tools · A4 3D shell · A5 regulations / carpentry / walk · A6b import dialog · A7 exact daylight on angled faces
   - Will still not be supported afterwards: true curves (short straight pieces within 2 cm), sloped roofs / attics, basements, split levels, spiral stairs.
 
 ## Version 16 (14 Nov 2026) — floors can be tried
 Settings → Experimental → "Several floors (in development)" switches floors on: floor switcher, add / rename / remove a floor (outer walls and windows copied up), walls / doors / furniture / carpentry / checks per floor, floors stacked in 3D with slabs and cut-away, "Show whole house". Not yet in this version: placing stairs in the plan (stage F4b, running), realistic light on upper floors (F6, running), walking between floors (F5), importing several floors (F8). Angled walls are complete in the engine (derive + editing) but have no drawing tools yet (A3) and no 3D (A4), so they stay off.
+
+## Version 22 (14 Nov 2026) — angled walls behind the Settings switch
+Settings → Experimental → "Angled walls (in development)": draw walls at any angle (15° steps, parallel / perpendicular guides, typed length and angle), move / turn / resize them, doors and windows in them, exact rooms and areas, aligned dimensions, furniture snapping; shown in 3D; regulation checks, carpentry runs and the walk-through handle them; a PDF or DXF's angled and curved walls import as walls. Approximate: the light simulation on angled faces (room average). Not done: furniture dragged in 3D does not snap to angled walls; stairs snap only to straight walls; photos / scans do not get angled walls.
 
 ## Version 19 (14 Nov 2026) — floors complete behind the Settings switch
 Stairs tool in the plan (straight / L / U, move, turn, resize, opening above follows, rule hints), the light simulation on every floor with light through stair openings, walking up and down stairs in the walk-through. Remaining for floors: importing a multi-floor sketch (F8); then the switch can become the default. Known: the two-storey test house looks very dark while walking with realistic daylight on (to judge on a real device); stairs cannot be picked in 3D; a wall can still be drawn through a placed stair (checks report it).
