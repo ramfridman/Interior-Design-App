@@ -88,8 +88,8 @@ function findingsFor(run, v) {
     const blindDoor = x.g.fronts.filter((f) => f.kind === 'door').reduce((s, f) => s + f.w, 0);
     const k = (x.u.carp.internals && x.u.carp.internals.corner) || 'none';
     if (x.mod.id === 'base-corner-blind' && blindDoor < 30) add('warning', 'corner-dead', `${C(x)} is a ${x.w} cm corner box with no usable door (dead corner). Widen it into the next unit to 100–120 cm (blind 60 + door 40–55) with a LeMans / magic-corner pull-out, or use an L-corner carousel unit.`,
-      `${C(x)} הוא ארון פינה ברוחב ${x.w} ס״מ ללא דלת שמישה (פינה מתה). יש להרחיב לתוך הארון הסמוך ל-100–120 ס״מ (60 עיוור + דלת 40–55) עם מנגנון לה-מאן / מג׳יק קורנר, או ארון פינה L עם קרוסלה.`, [x]);
-    else if (k === 'none' || k === 'shelf') add('info', 'corner-access', `${C(x)}: a corner fitting (LeMans / magic corner) makes the blind corner usable.`, `${C(x)}: מנגנון פינה (לה-מאן / מג׳יק קורנר) הופך את הפינה העיוורת לשמישה.`, [x]);
+      `${C(x)} הוא ארון פינה ברוחב ${x.w} ס״מ ללא דלת שמישה (פינה מתה). יש להרחיב לתוך הארון הסמוך ל-100–120 ס״מ (60 עיוור + דלת 40–55) עם מנגנון LeMans / Magic Corner, או ארון פינה L עם קרוסלה.`, [x]);
+    else if (k === 'none' || k === 'shelf') add('info', 'corner-access', `${C(x)}: a corner fitting (LeMans / magic corner) makes the blind corner usable.`, `${C(x)}: מנגנון פינה (LeMans / Magic Corner) הופך את הפינה העיוורת לשמישה.`, [x]);
   }
 
   // ── corner modules spanning both arms ──

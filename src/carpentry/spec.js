@@ -41,7 +41,7 @@ export const VOCAB = {
     'j-profile': L('Handle-less, J-profile', 'ללא ידיות — פרופיל J'), gola: L('Handle-less, gola channel', 'ללא ידיות — פרופיל גולה'),
   },
   handleType: {
-    bar: L('Bar handle', 'ידית מוט'), knob: L('Knob', 'ידית כפתור'), 'edge-pull': L('Edge pull', 'ידית חריץ עליונה'),
+    bar: L('Bar handle', 'ידית מוט'), knob: L('Knob', 'ידית כפתור'), 'edge-pull': L('Edge pull', 'ידית במה (פרופיל עליון)'),
     push: L('Push-to-open', 'פתיחה בלחיצה (פוש)'), none: L('No handle (profile)', 'ללא ידית (פרופיל)'),
   },
   finish: {
@@ -117,12 +117,12 @@ export const VOCAB = {
   hwVariant: {
     standard: L('standard', 'רגיל'), glass: L('for glass doors', 'לדלת זכוכית'), 'blind-corner': L('blind corner', 'לפינה עיוורת'),
     internal: L('internal drawer', 'מגירה פנימית'), spice: L('spice pull-out', 'נשלף תבלינים'), bin: L('waste-bin pull-out', 'נשלף לפחי אשפה'),
-    lemans: L('LeMans-type swing-out', 'מנגנון לה-מאן'), 'magic-corner': L('Magic-corner pull-out', 'מנגנון מג׳יק קורנר'), carousel: L('carousel', 'קרוסלה'),
+    lemans: L('LeMans-type swing-out', 'מנגנון LeMans'), 'magic-corner': L('Magic-corner pull-out', 'מנגנון Magic Corner'), carousel: L('carousel', 'קרוסלה'),
     custom: L('bespoke', 'בהתאמה אישית'),
   },
   cornerInternal: {
-    shelf: L('Fixed shelf', 'מדף קבוע'), lemans: L('LeMans-type swing-out', 'מנגנון לה-מאן'),
-    'magic-corner': L('Magic-corner pull-out', 'מנגנון מג׳יק קורנר'), carousel: L('Carousel', 'קרוסלה'), none: L('Empty (dead corner)', 'פינה מתה (ללא גישה)'),
+    shelf: L('Fixed shelf', 'מדף קבוע'), lemans: L('LeMans-type swing-out', 'מנגנון LeMans'),
+    'magic-corner': L('Magic-corner pull-out', 'מנגנון Magic Corner'), carousel: L('Carousel', 'קרוסלה'), none: L('Empty (dead corner)', 'פינה מתה (ללא גישה)'),
   },
 };
 
@@ -138,7 +138,7 @@ export const SPEC_TEXT_HE = {
   navy: 'כחול נייבי', oak: 'אלון', 'natural oak': 'אלון טבעי', walnut: 'אגוז', beige: 'בז׳', cream: 'שמנת',
   'white quartz': 'קוורץ לבן', calacatta: 'קלקטה', 'concrete grey': 'אפור בטון', basalt: 'בזלת', travertine: 'טרוורטין', steel: 'נירוסטה',
   // default hardware descriptions (DEFAULT_SPEC.hardware)
-  'clip-on 110°': 'ציר קליפס 110°', 'full-extension box': 'מגירת קופסה על מסילות טלסקופיות (שליפה מלאה)', 'stay-lift': 'מנגנון הרמה (סטיי-ליפט)',
+  'clip-on 110°': 'ציר קליפ 110°', 'full-extension box': 'מגירת קופסה על מסילות טלסקופיות (שליפה מלאה)', 'stay-lift': 'מנגנון הרמה (קלפה)',
   'soft-close': 'טריקה שקטה',
 };
 /** A free-text spec value as { en, he } (Hebrew from SPEC_TEXT_HE when known, otherwise the text as typed). */

@@ -68,7 +68,7 @@ const CASES = [
   ["פרימיום (בדרגת Blum / Hettich)", "rtl", "(Blum / Hettich תגרדב) םוימירפ"],
   ["MDF צבוע בתנור, מט, 18 מ״מ", "rtl", "מ״מ 18 ,טמ ,רונתב עובצ MDF"],
   ["אבן קוורץ (בסגנון Caesarstone), 20 מ״מ, קוורץ לבן", "rtl", "ןבל ץרווק ,מ״מ 20 ,(Caesarstone ןונגסב) ץרווק ןבא"],
-  ["ציר קליפס 110°", "rtl", "110° ספילק ריצ"],
+  ["ציר קליפ 110°", "rtl", "110° פילק ריצ"],
   ["למינציה ננו מט (בסגנון Fenix), 18 מ״מ, ירוק מרווה", "rtl", "הוורמ קורי ,מ״מ 18 ,(Fenix ןונגסב) טמ וננ היצנימל"]
 ];
 for (const [s, dir, want] of CASES) { const got = visualOrder(s, dir); check(`${dir} ${JSON.stringify(s)}`, got === want, got === want ? '' : JSON.stringify(got)); }
@@ -205,7 +205,7 @@ group('Hebrew edition: spec values (colours, materials, handles, hardware) in He
   const all = texts.join('\n');
   check('colours in Hebrew (ירוק מרווה, קלקטה, אפור בהיר, לבן חם)', ['ירוק מרווה', 'קלקטה', 'אפור בהיר', 'לבן חם'].every((w) => all.includes(w)));
   check('materials and finishes in Hebrew (Fenix / Dekton / Caesarstone kept in Latin letters)', ['למינציה ננו מט (בסגנון Fenix)', 'פורצלן / אבן מסונטרת (בסגנון Dekton)', 'אבן קוורץ (בסגנון Caesarstone)', 'MDF צבוע בתנור', 'ידית כפתור', 'פליז מוברש', 'פרימיום (בדרגת Blum / Hettich)'].every((w) => all.includes(w)));
-  check('hardware descriptions in Hebrew (ציר קליפס, מסילות טלסקופיות, טריקה שקטה)', ['ציר קליפס 110°', 'מסילות טלסקופיות', 'טריקה שקטה', 'ללא ידיות — פרופיל גולה'].every((w) => all.includes(w)));
+  check('hardware descriptions in Hebrew (ציר קליפ, מסילות טלסקופיות, טריקה שקטה)', ['ציר קליפ 110°', 'מסילות טלסקופיות', 'טריקה שקטה', 'ללא ידיות — פרופיל גולה'].every((w) => all.includes(w)));
   const english = ['Sage', 'Calacatta', 'Light grey', 'warm white', 'clip-on', 'full-extension', 'standard', 'gola', 'knob', 'edge-pull', 'Brushed', 'Lacquered', 'Quartz', 'Melamine'];
   const leaks = texts.filter((t) => english.some((w) => new RegExp(`(^|[^A-Za-z])${w}([^A-Za-z]|$)`).test(t)));
   check('no English vocabulary value printed in the Hebrew edition', !leaks.length, leaks.slice(0, 4).join(' | '));
