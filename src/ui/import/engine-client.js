@@ -4,7 +4,8 @@
  * Where workers are unavailable (a sandbox that forbids them) the same code runs on the main thread after a frame,
  * so the progress state is painted first; cancelling then only discards the result.
  *
- *   const task = runTask('analyse', { prims, opts });   // or 'image' { image, opts }, 'dxf-read' { bytes }, 'dxf-analyse' { prims, opts }
+ *   const task = runTask('analyse', { prims, opts });   // or 'image' { image, opts }, 'dxf-read' { bytes }, 'dxf-analyse' { prims, opts },
+ *                                                        // 'stair-check' { plan, stairs } (several floors; worker only, else null)
  *   task.promise.then(result => …);  task.cancel();     // a cancelled task rejects with { cancelled: true }
  */
 let workersBroken = false;
@@ -15,6 +16,10 @@ export function runEngine(eng, type, p) {
   if (type === 'image') { const r = eng.readImage(p.image, p.opts || {}); if (r) r.prims = null; return r; }
   if (type === 'dxf-read') { const prims = eng.readDxf(p.bytes); return { prims, look: eng.firstLook(prims) }; }
   if (type === 'dxf-analyse') return eng.analyseDxf(p.prims, p.opts || {});
+  // several floors (F8): the stairs found on the drawings tried on the built plan by the plan engine itself. Only in a
+  // worker (its own plan engine, `p.PE`); on the main thread it would replace the open project's plan → null (the dialog
+  // then checks them when the project is created)
+  if (type === 'stair-check') return p.PE ? eng.stairVerdicts(p.PE, p.plan, p.stairs || []) : null;
   throw new Error('unknown task ' + type);
 }
 let seq = 0;

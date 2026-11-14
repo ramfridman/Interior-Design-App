@@ -71,7 +71,7 @@ Order of work:
   - [x] A5 regulation checks, carpentry runs and the walk-through on angled walls (`tests/slants-rules.test.mjs`)
   - [x] A4 angled walls in 3D: watertight shell at any angle, doors / windows / floors / skirting / roof, finishes by side (`tests/slants-3d.test.mjs`). Light on angled faces is approximate (room average) until A7.
   - [x] A6b angled and curved walls through the import dialog (in `tests/import.ui.test.mjs`)
-  - [ ] F8 importing a house with several floors (floor list, alignment, stair proposals, underlay per floor) [running]
+  - [x] F8 importing a house with several floors: floor list (drawings on a sheet, PDF pages, other files), per-floor scale and orientation, Align floors step, stair proposals checked by the plan engine, an underlay per floor (`tests/import-floors.test.mjs`). Tested on generated drawings only; per-floor underlays are not yet synced in live collaboration; DXF paper-space layouts are not read.
   - [ ] A7 exact light on angled faces — deferred (optional; the design's first thing to cut)
   - [ ] later: A2 editing angled walls · A3 2D tools · A4 3D shell · A5 regulations / carpentry / walk · A6b import dialog · A7 exact daylight on angled faces
   - Will still not be supported afterwards: true curves (short straight pieces within 2 cm), sloped roofs / attics, basements, split levels, spiral stairs.

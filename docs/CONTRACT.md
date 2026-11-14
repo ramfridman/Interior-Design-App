@@ -1856,6 +1856,79 @@ Settings → Experimental and import again." (no auto-switching).
   hinge at the design's jamb; mirrored north–south; quarter-circle wall → chain pieces + note; all 12 rotation × mirror
   combinations (engine + `buildPlan`) agree with the design.
 
+**Several floors in the import dialog** (stage F8, additive; only while `FEATURES.levels` is on — Settings → Experimental →
+"Several floors", `?levels=1`). With the switch **off** the dialog is exactly the five steps above (no floor list).
+* **Engine** (`src/import/floors.js`, pure, also exported by `import/index.js`): `floorFootprint(result)` (union of walls,
+  openings and slant footprints with holes filled; outline edges and every wall face with outward normals);
+  `alignFloors(lower, upper, { rotations = [0, 90, 180, 270], lowerMarks, upperMarks })` → `{ rot, dx, dy, overlap, sides:
+  { n, e, s, w: { overhang (cm, + sticks out / − set back), coincide } }, coinciding, of, confidence: 'high' | 'medium' |
+  'low', text ("Outer walls coincide on 3 of 4 sides"), notes, warnings, ambiguous }` — `dx, dy` = where the upper floor's
+  own origin (its rectangles' NW corner, as `normalise` leaves it) goes in the lower floor's frame after turning it by `rot`
+  (clockwise, as `normalise({ rotate })`). Search: aligned NW corners, centroids, bounding-box sides and every pair of outline
+  corners, the best six starts refined within ± 50 cm at 5 cm, then ± 5 cm at 1 cm; score = intersection area of the
+  outlines (rect slabs; the polygon kernel when a floor has angled walls) + 20 cm² per cm of upper outer face lying on a
+  lower wall face of the same direction (any face, so an upper wall on a partition counts) + the overlap of stair / void
+  marks; a turn needs a 1 % better fit than the floor as drawn. Low confidence: another position of the same turn within
+  2 %, ≤ 1 coinciding side, or < 30 % overlap; medium: another turn fits within 0.5 % (noted — "check the stair") or 2
+  sides. Warnings: a side sticking out > 150 cm, overlap < 30 %. `alignmentReport(lower, upper, { rot, dx, dy })` = the
+  same read-out for a chosen position; `snapFaces` (drag snapping); `placeFloor(result, rot, dx, dy)` (preview, `.map`).
+  `detectStairSymbols(prims, result)` → straight runs: ≥ 6 (≤ 30) parallel lines 55–160 cm long of equal extent (± 3 cm),
+  equally spaced 22–32 cm (± 1.5 cm), both long sides closed by a drawn line or a wall face over ≥ 70 % → `{ x, y, w, h,
+  axis, up ('n'|'s'|'e'|'w'|null — from an arrow head inside, else "UP" / "עולה" near the bottom end, "DN" near the top),
+  lines, going, width, evidence, confidence }`. `detectVoidSymbols(prims, result)` → rectangles ≥ 40 cm with both
+  diagonals, or a closed rectangle around "void" / "open to below" / "חלל". `matchStairs(lowerStairs, { voids, stairs })`
+  (one frame) pairs a stair with the upper void / stair over ≥ 30 % of it (a stair with no drawn direction goes up towards
+  that void); the other voids are plain voids. `stairCandidates(stair, { rise, level })` → addStair inputs (risers from
+  `proposeStair` for the rise — never the drawn count, reported when it differs; the drawn going when 24–32 cm, else the
+  proposal's; start at the drawn bottom end, centred across the drawn width rounded to 5 cm; both ways when no direction).
+  `stairVerdicts(PE, plan, stairs)` runs them through an isolated plan engine (`setBasePlan(plan, draft)`, `canAddStair`, the
+  first accepted one `addStair`ed) → `[{ ok, input, risers, going, rise, notes, voidId } | { ok: false, code, reason }]`.
+  `levelsInput(floors, { meta, heights })` → the `buildPlan` input (ground floor top level, `levels: [{ id: 'L1'…, name,
+  heights: { ceiling }, walls, openings, slants?, voids? }]`, each floor moved by its offset, opening ids prefixed `L1-`…);
+  `shiftOf(warnings)` = buildPlan's origin move.
+* **Step 1 — Drawing**: under the drawing chooser a **Floors** list (bottom-up): thumbnail, name ("Ground floor", "First
+  floor"… editable), ceiling height (shown from 2 floors; default: the floor below's, the first 3.00 m), source, move up /
+  down, remove. Add a floor from another drawing of the sheet ("Add drawing N as a floor"; the chooser labels each drawing
+  with its floor), another page of the PDF ("Add page N as a floor"), or "Add a floor from another file…" (PDF / DXF /
+  image, mixed). The floor clicked is the one shown; each floor keeps its own source state (`FLOOR_KEYS` swapped into the
+  dialog state). Paper-space layouts of a DXF are still not read (model-space drawings are). One floor = today's flow.
+* **Steps 2–3**: the floors as tabs (a horizontally scrollable strip on phones). Each floor has its own scale ("Same scale as
+  the ground floor" for upper floors of the same kind — pre-ticked for another drawing of the same sheet, or another page
+  whose detected scale agrees within 1 %) and its own rotate / mirror (changing them marks the floor's orientation as set:
+  the alignment then tries no turn); north and location once for the house (one set of fields); no ceiling field (the list
+  has them). Next analyses every floor (the per-floor analysis cache key as before) and looks for stair / void symbols.
+* **Step "Align floors"** (only with ≥ 2 floors, between Orientation and Review; `align-view.js`): per upper floor over the
+  floor below (pairs as tabs with ≥ 3 floors) — the automatic proposal (a turn found re-reads the floor turned), the two
+  floors drawn over each other (lower grey, upper accent at 60 %), drag the upper floor (faces snap to the lower floor's
+  within 12 px, else the 5 cm grid), pinch / wheel zoom, two-finger pan, arrow keys 1 cm (Shift 5 cm), "Match two points"
+  (upper point, then the same point below → translation; a second pair checks the turn: agrees / a quarter turn applied /
+  scale or skew mismatch reported; `affine.js`), "Turn 90° clockwise", "Back to the proposal", and the read-out (coinciding
+  sides, overlap, each side flush / sticks out / set back in cm, the warnings).
+* **Review**: floor tabs with counts; each floor's legend and notes; "Show the floor below (alignment)" draws the lower floor
+  dashed under an upper one; **Stairs and openings between the floors**: each stair found → matched to the floor above →
+  `buildPlan` → worker task `stair-check` (`engine-client.js`: the worker imports its own `core/plan-edit.js`; on the main
+  thread it returns null and the dialog says the stairs are checked at Create) — "will be added: 18 risers of 16.7 cm, going
+  29 cm, up towards the north…" (the engine stair drawn green over the drawn run) or the engine's refusal reason + "place it
+  with the Stairs tool (Structure mode, T)"; none found → that reminder; plain voids counted.
+* **Create**: `buildPlan(levelsInput(…), { levels: true, slants: FEATURES.angledWalls })` → `projects.create({ name, fromPlan,
+  underlay, underlays })` → each found stair through `canAddStair` / `addStair` on the new draft (one undo step each) → ground
+  floor, Structure mode, "what next" card with the floors and the stair line. Plain voids go in through `buildPlan`
+  (`levels[i].voids`, `stair: null`).
+* **One underlay per floor**: `store.underlay` stays the ground floor's; `store.underlays = { L1: underlay, … } | null`
+  (same shape; transform = that floor's page → plan cm composed with its alignment offset and buildPlan's origin move);
+  `store.underlayOf(levelId)`, `store.setUnderlay(patch | null, { level })` (event `'underlay'` gains `level`),
+  `store.openProject({ …, underlays })`; project record `underlays` (written only when there is one — old projects and
+  files byte-identical), `projects.create({ underlays })`, duplicate / export / import carry it. `view2d/underlay.js`
+  `shownUnderlay(env)` = the underlay of `env.level`; the Structure guide's underlay card ("Sketch underlay — First floor")
+  and Re-align work on the floor shown. **Not synchronised in live collaboration** (the room keeps the ground floor's
+  underlay only).
+* Tested: `node tests/import-floors.test.mjs` (alignment: shifted / with a wing / turned 90° within 1 cm, a smaller floor on
+  its shared walls, ambiguous squares → low; symbols: the Duplex stair within 5 cm, direction from arrow / text / the
+  opening above, hatch / too few / uneven / no rectangle rejected, voids by cross and by text; pipeline on the Duplex drawn
+  per floor — one DXF sheet, two DXF files with the upper floor turned 90°, PDF-like primitives — → 2 levels, 2 rooms each,
+  walls exact, the stair with void `v1` x 520–620 y 266–670, underlay transforms on known corners within 1 cm) and
+  `tests/import.ui.test.mjs` section 5. Generated drawings only; real multi-floor architects' sets are untested.
+
 ## 13. Live collaboration (`src/collab/`, `dev/collab-server.mjs`) — core
 
 Several invited people edit one **online** project at the same time. A project is *local* (§ 10, unchanged) or

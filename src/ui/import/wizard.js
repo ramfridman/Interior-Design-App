@@ -25,9 +25,9 @@ import { createSheet } from './sheet.js';
 import { runTask } from './engine-client.js';
 import { sniff, plainError, pdfInfo, renderPage, pagePrims, decodeImage, pixelsOf, encodeUnderlay, affThen, affInv, affApply, ImportError } from './source.js';
 import { renderPrims } from '../../import/dxf-render.js';
-import { addStair } from '../../core/plan-edit.js';
+import { addStair, canAddStair } from '../../core/plan-edit.js';
 import { stairGeometry } from '../../core/stairs.js';
-import { alignFloors, alignmentReport, detectStairSymbols, detectVoidSymbols, matchStairs, levelsInput, shiftOf, snapFaces, placeFloor } from '../../import/floors.js';
+import { alignFloors, alignmentReport, detectStairSymbols, detectVoidSymbols, matchStairs, levelsInput, shiftOf, snapFaces, placeFloor, stairCandidates } from '../../import/floors.js';
 import { createAlignView } from './align-view.js';
 
 const PT_CM = 2.54 / 72;            // one PDF point on paper, in cm
@@ -96,7 +96,7 @@ export function openImportWizard(app, opts = {}) {
   const cancelBtn = btn('Cancel', { variant: 'quiet', onClick: () => dlg.close() });
   const dlg = openDialog({ title: 'Import a sketch', size: 'xl', cls: 'importdlg', body,
     actions: [cancelBtn, h('span', { class: 'iwiz__spacer' }), backBtn, nextBtn],
-    onClose: () => { if (task) task.cancel(); sheet.destroy(); } });
+    onClose: () => { if (task) task.cancel(); sheet.destroy(); if (alignView) alignView.destroy(); } });
 
   // one drawing viewer, moved between the steps that need it
   const sheet = createSheet({
@@ -283,7 +283,8 @@ export function openImportWizard(app, opts = {}) {
         h('div', { class: 'isplit__side' },
           h('p', { class: 'iside__title' }, many ? 'Which drawing?' : S.kind === 'dxf' ? 'The drawing' : 'The page'),
           h('p', { class: 'iside__text' }, many
-            ? `This sheet holds ${S.first.drawings.length} separate drawings. Click the one to import on the page — drawing ${S.drawing + 1} is chosen.`
+            ? (S.floors && S.floors.length > 1 ? `This sheet holds ${S.first.drawings.length} separate drawings. Click a drawing to read it as the ${lowerFirst(floorAt(S.cur).name)} — drawing ${S.drawing + 1} is.`
+              : `This sheet holds ${S.first.drawings.length} separate drawings. Click the one to import on the page — drawing ${S.drawing + 1} is chosen.`)
             : S.kind === 'image' ? (S.sheet.fromPdf ? 'This PDF page is a scanned picture: it is read like a photo.' : 'The picture you chose. Next, set its scale.')
               : S.kind === 'dxf' ? 'The drawing’s model space. Check which layers hold the walls, doors and windows below; then confirm the scale.' : 'This is the page that will be read. Next, confirm its scale.'),
           many ? h('ol', { class: 'idrawings' }, S.first.drawings.map((d, i) => h('li', null, h('button', { type: 'button', class: `idrawings__btn${i === S.drawing ? ' is-on' : ''}`, onClick: () => pickDrawing(i) },
@@ -361,6 +362,8 @@ export function openImportWizard(app, opts = {}) {
       h('ol', { class: 'ifloors', 'aria-label': 'Floors of the house, ground floor first' }, items),
       h('div', { class: 'ifloors__add' }, adds));
   }
+  /** After a reorder: the ground floor has its own scale; another drawing of the ground floor's sheet takes it. */
+  function syncSameScale() { S.floors.forEach((F, k) => { if (!k) F.sameScale = false; else if (F.prims && F.prims === S.floors[0].prims) F.sameScale = true; }); }
   function resetFloorWork() { S.stairs = null; S.built = null; for (const F of S.floors) { F.align = null; F.plainVoids = []; } }
   function addFloorDrawing(k) {
     stash();
@@ -396,8 +399,8 @@ export function openImportWizard(app, opts = {}) {
     [S.floors[i], S.floors[j]] = [S.floors[j], S.floors[i]];
     S.floors.forEach((F, k) => { if (!F.nameEdited) F.name = floorDefaultName(k); });
     resetFloorWork();
+    syncSameScale();
     S.cur = S.floors.indexOf(was);
-    if (S.floors[0].sameScale) S.floors[0].sameScale = false;
     renderFile(); syncFoot();
   }
   function removeFloor(i) {
@@ -407,7 +410,7 @@ export function openImportWizard(app, opts = {}) {
     S.floors.splice(i, 1);
     S.floors.forEach((F, k) => { if (!F.nameEdited) F.name = floorDefaultName(k); });
     resetFloorWork();
-    if (S.floors[0].sameScale) S.floors[0].sameScale = false;
+    syncSameScale();
     const keep = S.floors.indexOf(was);
     unstash(keep >= 0 ? keep : Math.min(i, S.floors.length - 1));
     if (S.sheet) sheet.setImage(S.sheet.canvas, S.sheet.ppu);
@@ -1061,7 +1064,8 @@ export function openImportWizard(app, opts = {}) {
         h('div', { class: `ialign__auto ialign__auto--${auto.confidence}` },
           h('p', { class: 'ialign__title' }, icon(auto.confidence === 'low' ? 'warn' : 'check', { size: 14 }), `Proposed automatically: ${auto.text.toLowerCase()} — ${CONF_WORDS[auto.confidence]}`),
           auto.notes && auto.notes.length ? h('ul', { class: 'iwarns__list' }, auto.notes.map((t) => h('li', { class: 'iwarns__item iwarns--info' }, icon('info', { size: 14 }), h('span', null, t)))) : null,
-          F.align.manual ? btn('Back to the proposal', { small: true, variant: 'quiet', icon: 'reset', onClick: () => { Object.assign(F.align, { dx: auto.dx, dy: auto.dy, manual: false }); S.stairs = null; S.built = null; render(); } }) : null),
+          btn('Back to the proposal', { small: true, variant: 'quiet', icon: 'reset', disabled: !F.align.manual, attrs: { 'data-role': 'align-reset' },
+            onClick: () => { Object.assign(F.align, { dx: auto.dx, dy: auto.dy, manual: false }); S.stairs = null; S.built = null; render(); } })),
         info,
         h('div', { class: 'iopt' },
           h('p', { class: 'iopt__title' }, 'Match two points'),
@@ -1081,6 +1085,8 @@ export function openImportWizard(app, opts = {}) {
     const info = content.querySelector('.ialign__info');
     if (!info) return;
     const k = S.alignK, F = floorAt(k), rep = alignReport(k);
+    const reset = content.querySelector('[data-role="align-reset"]');
+    if (reset) reset.disabled = !F.align.manual;
     const side = (d) => { const o = rep.sides ? rep.sides[d].overhang : 0; return Math.abs(o) < 0.5 ? 'flush' : o > 0 ? `sticks out ${Math.round(o)} cm` : `set back ${Math.round(-o)} cm`; };
     setKids(info,
       h('p', { class: 'isanity__title' }, `${rep.text}; overlap ${Math.round(rep.overlap * 100)} %`),
@@ -1260,7 +1266,11 @@ export function openImportWizard(app, opts = {}) {
     else if (n) items.push({ cls: 'warn', text: `${n} wall piece${n === 1 ? ' is' : 's are'} angled or curved (outlined in amber). The plan engine only knows straight, square-on walls for now: redraw ${n === 1 ? 'it' : 'them'} by hand as straight walls after importing.` });
     for (const w of r.warnings || []) {
       if (['scale-guessed', 'raster', 'no-scale', 'angled-wall', 'curved-wall'].includes(w.code)) continue;
-      if (w.code === 'several-drawings') { items.push({ cls: 'info', text: `The sheet holds ${S.first && S.first.drawings ? S.first.drawings.length : 'several'} drawings; drawing ${S.drawing + 1} was read. Go back to step 1 to choose another.` }); continue; }
+      if (w.code === 'several-drawings') {
+        items.push({ cls: 'info', text: multi() ? `The sheet holds ${S.first && S.first.drawings ? S.first.drawings.length : 'several'} drawings; drawing ${S.drawing + 1} is the ${lowerFirst(floorAt(S.cur).name)}. The floor list in step 1 says which drawing is which floor.`
+          : `The sheet holds ${S.first && S.first.drawings ? S.first.drawings.length : 'several'} drawings; drawing ${S.drawing + 1} was read. Go back to step 1 to choose another.` });
+        continue;
+      }
       items.push({ cls: 'info', text: w.text });
     }
     if (!items.length) return h('p', { class: 'iside__text' }, 'No problems were reported. Still, compare the walls with the drawing before you fix the plan.');
@@ -1408,8 +1418,10 @@ export function openImportWizard(app, opts = {}) {
       h('li', null, h('b', null, String(built.plan.walls.length)), ' wall pieces'),
       (built.plan.slants || []).length ? h('li', null, h('b', null, String(built.plan.slants.length)), ` angled wall${built.plan.slants.length === 1 ? '' : 's'}`) : null,
       h('li', null, h('b', null, String(built.plan.openings.length)), ' doors, windows and passages'),
-      h('li', null, h('b', null, String(built.plan.rooms.length)), ' rooms'),
-      h('li', null, 'Scale ', h('b', null, currentScale().label)));
+      h('li', null, h('b', null, String(built.plan.rooms.length + (built.plan.levels || []).reduce((t, l) => t + (l.rooms || []).length, 0))), ' rooms'),
+      multi() ? h('li', null, h('b', null, String(1 + (built.plan.levels || []).length)), ' floors') : null,
+      multi() && S.stairs && S.stairs.list.length ? h('li', null, h('b', null, String(S.stairs.checked ? S.stairs.verdicts.filter((v) => v.ok).length : S.stairs.list.length)), ' stairs to add') : null,
+      h('li', null, 'Scale ', h('b', null, multi() ? S.floors.map((_, i) => withFloorSync(i, effScale).label).filter((v, i, a) => a.indexOf(v) === i).join(' / ') : currentScale().label)));
     const list = (items, cls, title) => (items.length ? h('div', { class: `iwarns iwarns--block` }, h('p', { class: 'newproj__label' }, title),
       h('ul', { class: 'iwarns__list' }, items.map((w) => h('li', { class: `iwarns__item iwarns--${cls}` }, icon(cls === 'fail' ? 'fail' : cls === 'warn' ? 'warn' : 'info', { size: 14 }), h('span', null, w.text))))) : null);
     setKids(content, h('div', { class: 'icreate' },
@@ -1423,12 +1435,14 @@ export function openImportWizard(app, opts = {}) {
         list(warns, 'warn', 'Check'),
         list(infos.filter((w) => !/moved by/.test(w.text)), 'info', 'Notes'),
         h('div', { class: 'callout' }, icon('note', { size: 16 }), h('div', null, h('p', { class: 'callout__title' }, 'What happens next'),
-          h('p', { class: 'callout__text' }, `A new project opens as a draft in Structure mode, with your drawing under the plan${r.lowConfidence ? '' : ' exactly where the walls were found'}. Everything stays editable until you say “This is the house as built”. Your other projects are not changed.`))))));
+          h('p', { class: 'callout__text' }, multi() ? `A new project opens as a draft in Structure mode on the ground floor, each floor with its own drawing under the plan. Switch floors with the floor switcher at the top (or PageUp / PageDown). Everything stays editable until you say “This is the house as built”. Your other projects are not changed.`
+            : `A new project opens as a draft in Structure mode, with your drawing under the plan${r.lowConfidence ? '' : ' exactly where the walls were found'}. Everything stays editable until you say “This is the house as built”. Your other projects are not changed.`))))));
     setTimeout(() => { nameInput.focus(); nameInput.select(); }, 30);
   }
   function build() {
     const r = S.result;
     const meta = { name: S.name || 'Imported house', location: S.location ? S.location.name : '', latitude: S.location && S.location.latitude, longitude: S.location && S.location.longitude, timeZone: S.location && S.location.timeZone, northAngle: S.north || 0 };
+    if (multi()) return buildFloors(meta);
     const heights = { ceiling: S.ceilingCm || 300 };
     if (!foundCount(r)) {
       const box = sheetBox(r.sheetTransform);
@@ -1452,8 +1466,42 @@ export function openImportWizard(app, opts = {}) {
     b.warnings.push(...slantWarnings(input.slants, b.plan));
     return b;
   }
+  /**
+   * Several floors: one plan — the ground floor at the top level, each upper floor a level moved by its alignment, the
+   * plain openings in floors drawn on the upper drawings — by buildPlan with first-class levels.
+   */
+  function buildFloors(meta) {
+    stash();
+    const floors = S.floors.map((F, i) => ({ result: F.result, offset: offsetOf(i), name: F.name, ceiling: F.ceiling, voids: i ? F.plainVoids || [] : [] }));
+    const input = levelsInput(floors, { meta, heights: { ceiling: floors[0].ceiling || S.ceilingCm || 300 } });
+    const b = buildPlan(input, { levels: true, slants: !!FEATURES.angledWalls });
+    b.shift = shiftOf(b.warnings);
+    return b;
+  }
+  /** After the project is created: the stairs through the plan engine on the new draft (the same candidates as the Review). */
+  function addFoundStairs(plan, shift) {
+    const added = [], refused = [];
+    const ids = ['L0', ...((plan.levels || []).map((l) => l.id))];
+    const elev = (id) => (id === 'L0' ? 0 : ((plan.levels || []).find((l) => l.id === id) || {}).elevation || 0);
+    for (const q of (S.stairs && S.stairs.list) || []) {
+      const level = q.level || 'L0', to = ids[ids.indexOf(level) + 1];
+      if (!to) continue;
+      const cands = stairCandidates({ ...q, x: q.x + shift.x, y: q.y + shift.y }, { rise: elev(to) - elev(level), level });
+      let done = null, why = null;
+      for (const c of cands) {
+        const v = canAddStair(c.input);
+        if (!v.ok) { why = why || v.reason; continue; }
+        const r = addStair(c.input);
+        if (r && r.ok) { done = r; break; }
+        why = why || (r && r.reason);
+      }
+      if (done) added.push(done.stairId); else refused.push(why || 'no stair fits');
+    }
+    return { added, refused };
+  }
   async function create() {
     if (S.busy) return;
+    if (multi()) return createFloors();
     const built = S.built || (S.built = build());
     const name = (nameInput && nameInput.value.trim()) || S.name || 'Imported house';
     let underlay = null;
@@ -1468,6 +1516,32 @@ export function openImportWizard(app, opts = {}) {
     toast(`Created “${res.project.name}” — a draft over your drawing`, { kind: 'success' });
     try { app.structure && app.structure.enter(); } catch (e) { /* the 2D view may be busy */ }
     showNextCard(app, { lowConfidence: !!S.result.lowConfidence, empty: !foundCount(S.result) });
+  }
+  async function createFloors() {
+    const built = S.built || (S.built = build());
+    const name = (nameInput && nameInput.value.trim()) || S.name || 'Imported house';
+    let underlay = null;
+    const underlays = {};
+    const res = await work('Creating the project…', async () => {
+      // one underlay per floor: its page / drawing with the page → plan transform composed with the floor's alignment
+      await eachFloor(async (i) => {
+        const off = offsetOf(i);
+        const u = await makeUnderlay({ x: built.shift.x + off.x, y: built.shift.y + off.y });
+        if (i === 0) underlay = u; else underlays[`L${i}`] = u;
+      });
+      if (built.plan.meta) built.plan.meta.name = name;
+      return app.projects.create({ name, fromPlan: built.plan, underlay, underlays });
+    });
+    if (!res) return;
+    if (!res.ok) { setError(res.reason || 'The project could not be created.'); return; }
+    let stairs = { added: [], refused: [] };
+    try { stairs = addFoundStairs(built.plan, built.shift); } catch (e) { console.warn('[import] stairs', e); }
+    const n = S.floors.length;
+    dlg.close();
+    toast(`Created “${res.project.name}” — a draft with ${n} floors over your drawings`, { kind: 'success' });
+    try { app.store.setUI({ level: 'L0' }); } catch (e) { /* the floor switcher may not be there */ }
+    try { app.structure && app.structure.enter(); } catch (e) { /* the 2D view may be busy */ }
+    showNextCard(app, { lowConfidence: S.floors.some((F) => F.result && F.result.lowConfidence), empty: false, floors: n, stairs: { added: stairs.added.length, refused: stairs.refused.length, found: ((S.stairs && S.stairs.list) || []).length } });
   }
   /** The stored underlay: the page / picture around the house, re-encoded, with its image px → plan cm transform. */
   async function makeUnderlay(shift) {
@@ -1516,7 +1590,7 @@ export function openImportWizard(app, opts = {}) {
   render();
   if (opts.file) chooseFile(opts.file);
   // test / diagnostics handle (not part of the contract)
-  dlg.el._import = { state: S, sheet, go, next };
+  dlg.el._import = { state: S, sheet, go, next, get align() { return alignView; }, showFloor: (i) => { showFloor(i); render(); }, offsetOf };
   return dlg;
 }
 
@@ -1580,9 +1654,15 @@ function colors() {
 }
 
 /** After the import: a small card over the plan with what to do next. */
-export function showNextCard(app, { lowConfidence = false, empty = false } = {}) {
+export function showNextCard(app, { lowConfidence = false, empty = false, floors = 1, stairs = null } = {}) {
   const old = document.querySelector('.inext');
   if (old) old.remove();
+  const floorSteps = floors > 1 ? [
+    `Your house has ${floors} floors, each with its own drawing under the plan: switch floors with the floor switcher at the top (PageUp / PageDown).`,
+    stairs && stairs.added ? `${stairs.added === 1 ? 'The stair was' : `${stairs.added} stairs were`} added with ${stairs.added === 1 ? 'its opening' : 'their openings'} in the floor above — check ${stairs.added === 1 ? 'it' : 'them'} in Structure mode.${stairs.refused ? ` ${stairs.refused} could not be placed as drawn.` : ''}`
+      : stairs && stairs.found ? 'The stair on the drawing could not be placed as drawn — place it with the Stairs tool (Structure mode, T).'
+        : 'No stair was found on the drawings — place one with the Stairs tool (Structure mode, T).',
+  ] : [];
   const steps = empty
     ? ['Trace the walls over your drawing with the wall tool (W) — drag along each wall’s centre line.', 'Add the doors (D) and windows (N).', 'Name the rooms in the Rooms tab.']
     : [lowConfidence ? 'Check every wall against the drawing — fix, add or delete walls with the Structure tools.' : 'Check the walls against the drawing (the sketch under the plan).',
@@ -1591,7 +1671,7 @@ export function showNextCard(app, { lowConfidence = false, empty = false } = {})
   const close = () => el.remove();
   const el = h('section', { class: 'inext', role: 'dialog', 'aria-label': 'What next' },
     h('header', { class: 'inext__head' }, h('p', { class: 'inext__title display' }, 'Your sketch is now a draft'), h('button', { type: 'button', class: 'iconbtn', 'aria-label': 'Close', onClick: close }, icon('close', { size: 16 }))),
-    h('ol', { class: 'inext__list' }, steps.map((s) => h('li', null, s)), h('li', null, 'Then press “This is the house as built…” in the Structure guide.')),
+    h('ol', { class: 'inext__list' }, [...floorSteps, ...steps].map((s) => h('li', null, s)), h('li', null, 'Then press “This is the house as built…” in the Structure guide.')),
     h('p', { class: 'inext__hint' }, 'The drawing’s strength, re-aligning and removing it are in the Structure guide under “Sketch underlay”.'),
     btn('Got it', { small: true, variant: 'primary', onClick: close }));
   layer().append(el);

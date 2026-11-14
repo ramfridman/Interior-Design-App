@@ -150,8 +150,8 @@ function experimentalGroup(app) {
   paintNote();
   return h('section', { class: 'settings__group settings__group--exp' }, h('h3', { class: 'sec__title' }, 'Experimental'),
     sw,
-    h('p', { class: 'setnote' }, 'Works: adding floors and switching between them in the plan and in 3D, furniture, carpentry and the checks per floor, and stairs (the Stairs tool in Structure, with the opening in the floor above and the stair rules), walking up and down them in the walk-through.'),
-    h('p', { class: 'setnote' }, 'Not yet: realistic daylight on the upper floors, and importing a drawing with several floors.'),
+    h('p', { class: 'setnote' }, 'Works: adding floors and switching between them in the plan and in 3D, furniture, carpentry and the checks per floor, and stairs (the Stairs tool in Structure, with the opening in the floor above and the stair rules), walking up and down them in the walk-through, and importing a house with several floors (Import a sketch: one drawing per floor, lined up floor over floor, the stair proposed).'),
+    h('p', { class: 'setnote' }, 'Not yet: realistic daylight on the upper floors.'),
     note,
     angledGroup(app));
 }

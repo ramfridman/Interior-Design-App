@@ -7,6 +7,9 @@
 //   3. a broken file and a password-protected PDF give plain messages; re-align is exercised with real clicks.
 //   3b. a DXF of the built-in house (Hebrew layers, code page 1255): DWG explained, binary DXF refused, layer panel
 //       pre-ticked, units read, project created with walls within 1 cm and a DXF rendering as the underlay.
+//   5. several floors (stage F8): the Duplex as two plans in one DXF — switch off: no floor list; ?levels=1: the second
+//      drawing added as a floor, reordered, Align floors (proposal, arrow keys, drag, Match two points), Review with the
+//      engine's stair, Create → 2 floors, the stair and its void, one underlay per floor (aligned, shown per floor), reload.
 //      node tests/import.ui.test.mjs [--shots]      (screenshots → $SHOTS_DIR or dev/screens/import-*.png)
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -730,6 +733,192 @@ try {
       foot: [...document.querySelectorAll('.importdlg .dialog__foot button')].filter((b) => b.offsetWidth).every((b) => { const r = b.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }) }));
     check('phone: no page scroll, footer buttons on screen', lay.scroll === 0 && lay.foot, JSON.stringify(lay));
     await pctx.close();
+  }
+
+  // ─────────── 5. several floors (stage F8): the Duplex as two plans side by side in one DXF ───────────
+  {
+    const { floorsDxf, duplexSheet } = await import('./import-floor-fixtures.mjs');
+    const TWO = path.join(tmp, 'duplex-two-floors.dxf');
+    fs.writeFileSync(TWO, Buffer.from(floorsDxf(duplexSheet()).bytes()));
+    const bootIt = async (pg) => {
+      await pg.waitForFunction(() => document.documentElement.classList.contains('app-ready') && window.app && window.app.projects && window.app.projects.current(), null, { timeout: 90000 });
+      await sleep(800);
+      await pg.getByRole('button', { name: 'Start designing' }).click({ timeout: 5000 }).catch(() => {});
+      await sleep(300);
+      for (let i = 0; i < 3 && await pg.locator('.scrim').count(); i++) { await pg.keyboard.press('Escape'); await sleep(300); }
+    };
+    const openWith = async (pg, file) => {
+      await pg.locator('.inext .btn--primary').click().catch(() => {});
+      await pg.evaluate(() => window.app.store.setUI({ tool: 'select' }));
+      await sleep(200);
+      await pg.locator('.projname--switch').click();
+      await pg.getByRole('menuitem', { name: /Import a sketch/ }).click();
+      await pg.waitForSelector('.importdlg');
+      await pg.setInputFiles('#import-sketch-file', file);
+      await pg.waitForFunction(() => { const s = document.querySelector('.importdlg')?._import?.state; return s && s.sheet && s.first && !s.busy; }, null, { timeout: 90000 });
+      await sleep(300);
+    };
+    const fstate = (pg) => pg.evaluate(() => { const s = document.querySelector('.importdlg')?._import?.state; return s ? { step: s.step, busy: s.busy, error: s.error, floors: s.floors ? s.floors.length : null, cur: s.cur } : null; });
+    const funtil = async (pg, fn, ms = 90000) => { const t0 = Date.now(); for (;;) { const v = await fstate(pg); if (v && (fn(v) || v.error)) return v; if (Date.now() - t0 > ms) return v; await sleep(200); } };
+    const fnext = (pg) => pg.locator('.importdlg .dialog__foot .btn--primary').click();
+
+    // ── switch OFF: no floor list, today's "Which drawing?" chooser and five steps ──
+    await openWith(page, TWO);
+    const off = await page.evaluate(() => ({ floorsBox: document.querySelectorAll('.importdlg .ifloorsbox').length, chooser: document.querySelectorAll('.importdlg .idrawings__btn').length, steps: document.querySelectorAll('.importdlg .istep__item').length, floors: document.querySelector('.importdlg')._import.state.floors }));
+    check('floors switch off: no floor list, the drawing chooser, five steps', off.floorsBox === 0 && off.chooser === 2 && off.steps === 5 && off.floors === null, JSON.stringify(off));
+    await page.locator('.importdlg .dialog__foot').getByRole('button', { name: 'Cancel' }).click();
+    await sleep(300);
+
+    // ── switch ON (?levels=1) ──
+    const fctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const pf = await fctx.newPage();
+    pf.on('pageerror', (e) => errors.push('floors pageerror: ' + e.message));
+    pf.on('console', (m) => { if (m.type() === 'error') errors.push('floors: ' + m.text()); });
+    await pf.goto(`http://localhost:${PORT}/index.html?levels=1`);
+    await bootIt(pf);
+    await openWith(pf, TWO);
+    check('floors on: the Drawing step has a floor list with one floor and "Add drawing 2 as a floor"', await pf.locator('.ifloor').count() === 1 && await pf.getByRole('button', { name: /Add drawing \d as a floor/ }).count() === 1);
+    await pf.getByRole('button', { name: /Add drawing \d as a floor/ }).click();
+    await sleep(400);
+    let fs1 = await fstate(pf);
+    check('a second drawing of the sheet becomes the first floor; the steps gain "Align floors"', fs1.floors === 2 && await pf.locator('.ifloor').count() === 2 && (await pf.locator('.istep').textContent()).includes('Align floors'), JSON.stringify(fs1));
+    // the ground floor is the drawing on the left of the sheet (the one with the stair): put it first
+    const order = await pf.evaluate(() => {
+      const s = document.querySelector('.importdlg')._import.state;
+      const d = s.first.drawings, left = d.indexOf([...d].sort((a, b) => a.bbox.x - b.bbox.x)[0]);
+      return { left, floors: s.floors.map((F, i) => (i === s.cur ? s.drawing : F.drawing)) };
+    });
+    if (order.floors[0] !== order.left) await pf.getByRole('button', { name: 'Move Ground floor up a floor' }).click();
+    await sleep(300);
+    const order2 = await pf.evaluate(() => { const s = document.querySelector('.importdlg')._import.state; return s.floors.map((F, i) => ({ name: F.name, drawing: i === s.cur ? s.drawing : F.drawing })); });
+    check('reordered bottom-up: the ground floor reads the left drawing (names follow the order)', order2[0].drawing === order.left && order2[0].name === 'Ground floor' && order2[1].name === 'First floor', JSON.stringify(order2));
+    for (const n of ['Ground floor', 'First floor']) await pf.getByLabel(`Ceiling height of ${n} in metres`).fill('2.80');
+    const labels = await pf.locator('.idrawings__floor').allTextContents();
+    check('the drawing chooser says which drawing is which floor', labels.length === 2 && labels.some((t) => /Ground floor/.test(t)) && labels.some((t) => /First floor/.test(t)), labels.join(' | '));
+    if (shots) await pf.screenshot({ path: path.join(shotDir, 'import-floors-list.png') });
+
+    await fnext(pf);
+    await pf.waitForSelector('.ifloortabs');
+    check('Scale step: the floors as tabs', await pf.locator('.ifloortabs__tab').count() === 2);
+    await pf.locator('.ifloortabs__tab', { hasText: 'First floor' }).click();
+    await sleep(200);
+    check('…the first floor offers "Same scale as the ground floor", pre-ticked (same file, same units)', await pf.getByLabel('Same scale as the ground floor').isChecked());
+    await fnext(pf);
+    await pf.waitForSelector('.inorth');
+    check('Orientation step: floor tabs, no ceiling field (the floor list has them)', await pf.locator('.ifloortabs__tab').count() === 2 && await pf.getByLabel('Ceiling height in metres').count() === 0);
+    await fnext(pf);
+    fs1 = await funtil(pf, (v) => v.step === 3 && !v.busy);
+    await pf.waitForSelector('.ialign__info');
+    await sleep(500);
+    const side = await pf.locator('.importdlg .isplit__side').textContent();
+    check('Align floors: proposed automatically, "outer walls coincide on 4 of 4 sides — confident", every side flush', /Proposed automatically: outer walls coincide on 4 of 4 sides — confident/.test(side) && (side.match(/flush/g) || []).length === 4, side.slice(0, 260));
+    const A = () => pf.evaluate(() => { const s = document.querySelector('.importdlg')._import.state; return { ...s.floors[1].align, auto: undefined }; });
+    // arrow keys: 1 cm, Shift 5 cm
+    await pf.locator('.ialign__canvas').focus();
+    for (let i = 0; i < 3; i++) await pf.keyboard.press('ArrowRight');
+    await pf.keyboard.press('Shift+ArrowDown');
+    let a = await A();
+    check('arrow keys nudge the upper floor (3 × 1 cm east, Shift 5 cm south)', a.dx === 3 && a.dy === 5 && a.manual, JSON.stringify(a));
+    check('…the read-out follows (east side sticks out 3 cm)', /East\s*sticks out 3 cm/.test(await pf.locator('.ialign__info').textContent()), await pf.locator('.ialign__info').textContent());
+    // drag with the mouse: the upper floor moves, then lands on the grid / snaps to the walls below
+    const scr = (x, y) => pf.evaluate(([px, py]) => { const d = document.querySelector('.importdlg'), v = d._import.align, r = v.canvas.getBoundingClientRect(), q = v.toScreen(px, py); return [r.left + q[0], r.top + q[1]]; }, [x, y]);
+    const p0 = await scr(700, 600);
+    await pf.mouse.move(p0[0], p0[1]); await pf.mouse.down();
+    for (let i = 1; i <= 8; i++) await pf.mouse.move(p0[0] + 6 * i, p0[1] + 2 * i);
+    await pf.mouse.up();
+    await sleep(200);
+    a = await A();
+    check('dragging moves the upper floor (it lands on the 5 cm grid or on a wall face below)', (a.dx !== 3 || a.dy !== 5) && a.manual, JSON.stringify(a));
+    await pf.getByRole('button', { name: 'Back to the proposal' }).click();
+    await sleep(200);
+    a = await A();
+    check('"Back to the proposal" puts it back', a.dx === 0 && a.dy === 0 && !a.manual, JSON.stringify(a));
+    // Match two points: nudge 10 cm east, then match the upper floor's north-west corner with the lower floor's
+    await pf.locator('.ialign__canvas').focus();
+    await pf.keyboard.press('Shift+ArrowRight'); await pf.keyboard.press('Shift+ArrowRight');
+    await pf.getByRole('button', { name: 'Match two points' }).click();
+    await sleep(150);
+    let q = await scr(10, 0); await pf.mouse.click(q[0] + 2, q[1] + 2);
+    await sleep(150);
+    q = await scr(0, 0); await pf.mouse.click(q[0] + 2, q[1] + 2);
+    await sleep(250);
+    a = await A();
+    check('"Match two points": the upper corner lands on the lower corner (the 10 cm nudge undone)', Math.abs(a.dx) < 0.01 && Math.abs(a.dy) < 0.01, JSON.stringify(a));
+    await pf.getByRole('button', { name: 'Match a second pair' }).click();
+    await sleep(150);
+    q = await scr(1000, 800); await pf.mouse.click(q[0] - 2, q[1] - 2);
+    await sleep(150);
+    q = await scr(1000, 800); await pf.mouse.click(q[0] - 2, q[1] - 2);
+    await sleep(250);
+    check('…a second pair checks the turn: "not turned against each other"', /not turned against each other/.test(await pf.locator('.importdlg .isplit__side').textContent()));
+    if (shots) await pf.screenshot({ path: path.join(shotDir, 'import-floors-align.png') });
+
+    await fnext(pf);
+    fs1 = await funtil(pf, (v) => v.step === 4 && !v.busy);
+    await pf.waitForSelector('.istairs');
+    const rv = await pf.locator('.importdlg .isplit__side').textContent();
+    check('Review: the stair found on the ground floor is checked by the engine — "will be added: 18 risers of 16.7 cm, going 29 cm, up towards the north"', /will be added: 18 risers of 16\.7 cm, going 29 cm, up towards the north/.test(rv), rv.slice(rv.indexOf('Stairs and'), rv.indexOf('Stairs and') + 260));
+    await pf.locator('.ifloortabs__tab', { hasText: 'First floor' }).click();
+    await sleep(300);
+    const rv1 = await pf.locator('.importdlg .isplit__side').textContent();
+    check('…the first floor tab: its own legend and "Show the floor below"', /What was found on the first floor/.test(rv1) && /Show the floor below/.test(rv1) && /Doors1/.test(rv1.replace(/\s+/g, '')), rv1.slice(0, 200));
+    await fnext(pf);
+    await pf.waitForSelector('.icreate');
+    await pf.getByLabel('Project name').fill('Duplex from DXF');
+    check('Create: "2 floors", "1 stairs to add"', /2\s*floors/.test(await pf.locator('.ifacts').textContent()) && /1\s*stairs to add/.test(await pf.locator('.ifacts').textContent()), await pf.locator('.ifacts').textContent());
+    await fnext(pf);
+    await pf.waitForFunction(() => !document.querySelector('.importdlg') && window.app.projects.current().name === 'Duplex from DXF', null, { timeout: 30000 }).catch(() => {});
+    await sleep(900);
+    const made = await pf.evaluate(() => {
+      const P = window.app.plan, st = window.app.store, L1 = (P.levels || [])[0] || {};
+      const box = (r) => { const xs = r.map((p) => p[0]), ys = r.map((p) => p[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; };
+      return { phase: window.app.projects.current().phase, levels: (P.levels || []).length, rooms: [P.rooms.length, (L1.rooms || []).length], stairs: (P.stairs || []).map((s) => ({ id: s.id, x: s.x, y: s.y, rot: s.rot, risers: s.risers, going: s.going })),
+        voids: (L1.voids || []).map((v) => ({ id: v.id, stair: v.stair, box: box(v.polygon) })), l1Partition: (L1.walls || []).filter((w) => w.kind !== 'exterior').map((w) => [w.x, w.y, w.w, w.h]),
+        underlay: !!(st.underlay && st.underlay.image), underlays: Object.keys(st.underlays || {}), differ: !!(st.underlays && st.underlays.L1 && st.underlay && st.underlays.L1.image !== st.underlay.image),
+        card: !!document.querySelector('.inext') && /2 floors/.test(document.querySelector('.inext').textContent) && /stair was added/.test(document.querySelector('.inext').textContent) };
+    });
+    check('created: a draft with 2 floors, 2 rooms on each', made.phase === 'draft' && made.levels === 1 && made.rooms[0] === 2 && made.rooms[1] === 2, JSON.stringify(made.rooms));
+    check('…the stair added by the engine on the ground floor (18 risers, going 29, up north) with its void on the first floor', made.stairs.length === 1 && made.stairs[0].risers === 18 && made.stairs[0].going === 29 && made.stairs[0].rot === 0
+      && made.voids.length === 1 && made.voids[0].stair === made.stairs[0].id && made.voids[0].box.join() === '520,266,620,670', JSON.stringify({ s: made.stairs, v: made.voids }));
+    check('…the first floor lined up over the ground floor (its partition at x 300)', made.l1Partition.some((w) => w[0] === 300), JSON.stringify(made.l1Partition));
+    check('…one underlay per floor (ground + L1, different pictures)', made.underlay && made.underlays.join() === 'L1' && made.differ, JSON.stringify(made.underlays));
+    check('…the "what next" card mentions the floors and the stair', made.card);
+    // each floor's underlay sits on that floor's walls: ink on both faces of its partition (ground x 500–510, first floor x 300–310)
+    const ink = await pf.evaluate(async () => {
+      const { affInv, affApply } = await import('/src/ui/import/affine.js');
+      const st = window.app.store, out = {};
+      for (const [lv, u, wx] of [['L0', st.underlay, 500], ['L1', st.underlays.L1, 300]]) {
+        const img = new Image(); img.src = u.image; await img.decode();
+        const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+        const M = affInv(u.transform), dark = [];
+        for (let x = wx - 25; x <= wx + 35; x += 0.5) { const [px, py] = affApply(M, x, 650); const d = g.getImageData(Math.round(px), Math.round(py), 1, 1).data; if (255 - (d[0] + d[1] + d[2]) / 3 > 90) dark.push(x); }
+        out[lv] = dark.length ? [Math.min(...dark), Math.max(...dark)] : null;
+      }
+      return out;
+    });
+    check('each floor\'s underlay is aligned with its own walls (partition faces within 3 cm)', ink.L0 && ink.L1 && Math.abs(ink.L0[0] - 500) <= 3 && Math.abs(ink.L0[1] - 510) <= 3 && Math.abs(ink.L1[0] - 300) <= 3 && Math.abs(ink.L1[1] - 310) <= 3, JSON.stringify(ink));
+    // switching floors: the 2D view and the Structure guide's card use that floor's underlay
+    const shown = async () => pf.evaluate(async () => { const { shownUnderlay } = await import('/src/view2d/underlay.js'); const st = window.app.store, lv = st.ui.level || 'L0', u = shownUnderlay({ store: st, level: lv }); return { lv, which: u === st.underlay ? 'L0' : u === (st.underlays || {}).L1 ? 'L1' : null, card: (document.querySelector('.iunder .phase__title') || {}).textContent }; });
+    let sh = await shown();
+    check('on the ground floor the 2D view shows the ground floor\'s underlay; the card says so', sh.lv === 'L0' && sh.which === 'L0' && /Ground floor/.test(sh.card), JSON.stringify(sh));
+    await pf.locator('.inext .btn--primary').click().catch(() => {});
+    await pf.keyboard.press('PageUp');
+    await sleep(500);
+    sh = await shown();
+    if (sh.lv !== 'L1') { await pf.evaluate(() => window.app.store.setUI({ level: 'L1' })); await sleep(500); sh = await shown(); }
+    check('switching to the first floor shows its own underlay (2D and the Structure guide card)', sh.lv === 'L1' && sh.which === 'L1' && /First floor/.test(sh.card), JSON.stringify(sh));
+    if (shots) { await pf.evaluate(() => window.app.view2d && window.app.view2d.fitHouse && window.app.view2d.fitHouse()); await sleep(400); await pf.screenshot({ path: path.join(shotDir, 'import-floors-draft.png') }); }
+    // opacity on the first floor changes only its underlay
+    await pf.evaluate(() => window.app.store.setUnderlay({ opacity: 0.3 }, { level: 'L1' }));
+    const op = await pf.evaluate(() => [window.app.store.underlay.opacity, window.app.store.underlays.L1.opacity]);
+    check('the card / setUnderlay on the first floor changes only that floor\'s underlay', op[0] !== 0.3 && op[1] === 0.3, JSON.stringify(op));
+    // a reload keeps both underlays
+    await pf.evaluate(() => window.app.projects.flush());
+    await pf.reload();
+    await bootIt(pf);
+    const kept = await pf.evaluate(() => ({ name: window.app.projects.current().name, l0: !!window.app.store.underlay, l1: !!(window.app.store.underlays && window.app.store.underlays.L1), op: window.app.store.underlays && window.app.store.underlays.L1 && window.app.store.underlays.L1.opacity, levels: (window.app.plan.levels || []).length }));
+    check('a reload keeps the project with both underlays', kept.name === 'Duplex from DXF' && kept.l0 && kept.l1 && kept.op === 0.3 && kept.levels === 1, JSON.stringify(kept));
+    await fctx.close();
   }
 
   check('no request left this machine', foreign.length === 0, foreign.join(' '));

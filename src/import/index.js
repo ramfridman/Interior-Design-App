@@ -12,6 +12,7 @@ export { loadPdfjs } from './pdfjs-loader.js';
 export { readDxf, mtextPlain, aciColor, INSUNITS, DXF_PAGE_RATIO } from './dxf-read.js';
 export { analyseDxf, dxfScaleCandidates, proposeLayers, firstLook, rolesOf, doorBlockWidths, ROLES } from './dxf.js';
 export { renderPrims } from './dxf-render.js';
+export { floorFootprint, alignFloors, alignmentReport, snapFaces, placeFloor, detectStairSymbols, detectVoidSymbols, matchStairs, stairCandidates, stairVerdicts, levelsInput, shiftOf } from './floors.js';
 
 import { readPdf } from './pdf-read.js';
 import { detectScale } from './scale.js';
