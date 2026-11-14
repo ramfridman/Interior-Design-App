@@ -114,6 +114,10 @@ export function createView3D(container, ctx) {
     camera, dom: canvas, overlay, ctx, emit,
     pickTarget: (x, y) => interaction.walkTarget(x, y),
     requestExit: () => { exitWalk(); if (store.ui.mode === 'walk') store.setUI({ mode: '3d' }); },
+    // stage F5: up / down a stair onto another level — the floor shown follows the walker (the topbar, the 2D plan on
+    // leaving the walk, the checks), without restarting the walk (the 'level' handler sees the walker already there).
+    // Walk mode shows every level, so nothing pops; the daylight picks the walked level by the eye height (F6).
+    onLevelChange: (id) => { if (mode === 'walk' && multiLevel() && validLevel(plan, store.ui.level) !== id) store.setUI({ level: id }); invalidate(); },
   });
 
   // ───────────── house / site / environment ─────────────
@@ -558,6 +562,8 @@ export function createView3D(container, ctx) {
       house: () => house, environment: () => env, sun: () => sunInfo,
       /** Several floors: the levels as built ({ id, y, wallTop, top, visible }) and the level the view is built around. */
       levels: () => ({ list: house && house.levels ? house.levels() : [], shown: shownLevel(), view: viewLevel(), whole: wholeHouse, walk: walk.getLevel() }),
+      /** Stage F5: the walker — { level, x, y (cm), eye (m, world height without the bob), stair: { id, height } | null }. */
+      walker: () => { const s = walk.getState(), e = walk.eyePose().position; return { level: walk.getLevel(), x: s.x, y: s.y, heading: s.heading, eye: e.y, camera: camera.position.y, stair: walk.getStair(), exposure: renderer.toneMappingExposure }; },
       /** Daylight solver: state() (patch count, timings, …), sampleAt(xcm, ycm, hcm) → irradiance there. */
       daylight: () => (daylight ? daylight.debug : null),
       renderNow,

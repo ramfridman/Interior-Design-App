@@ -477,5 +477,31 @@ async function realWorld(record, names) {
   await W.close();
 }
 
+{
+  // stairs (stage F4b): replica A adds a stair on L0 while B draws a wall on L1 at the same time → both kept, identical;
+  // then B moves the stair and A undoes nothing of B's
+  const { buildPlan } = await import('../src/core/plan-build.js');
+  const { DUPLEX } = await import('./fixtures/houses.mjs');
+  const { stairs: _s, voids: _v, ...l1 } = DUPLEX.levels[0];
+  const duplex = buildPlan({ walls: DUPLEX.walls, openings: DUPLEX.openings, heights: DUPLEX.heights, meta: { name: 'Duplex' }, levels: [l1] }, { levels: true }).plan;
+  const record = { id: 'real4', name: 'Duplex stairs', phase: 'fixed', basePlan: duplex, design: { items: [] } };
+  const W = await realWorld(record, [['A'], ['B']]);
+  const [A, B] = W.reps;
+  await W.pumpAll();
+  const same2 = async () => { const [sa, sb, ka, kb] = await Promise.all([A.call('serialize'), B.call('serialize'), A.call('planKey'), B.call('planKey')]); return sa === sb && ka === kb; };
+  const a1 = await A.call('pe', ['addStair', [{ level: 'L0', shape: 'straight', x: 570, y: 512.5, rot: 0, width: 100, going: 29 }]]);
+  const b1 = await B.call('wallOn', ['L1', { x1: 800, y1: 20, x2: 800, y2: 780 }]);
+  await W.pumpAll();
+  const plan = JSON.parse(await A.call('planJSON'));
+  const up = plan.levels[0];
+  ok(a1.ok && b1.ok && await same2() && plan.stairs && plan.stairs[0].id === 'st1' && up.voids && up.voids[0].stair === 'st1' && up.walls.some((w) => w.x === 795),
+    'stairs: A adds a stair while B draws a wall on L1 → both kept, identical plans' + (a1.ok ? '' : ': ' + a1.reason) + (b1.ok ? '' : ': ' + b1.reason));
+  const m = await B.call('pe', ['updateStair', ['st1', { y: 492.5 }]]);
+  await W.pumpAll();
+  const plan2 = JSON.parse(await A.call('planJSON'));
+  ok(m.ok && await same2() && plan2.stairs[0].y === 492.5 && plan2.levels[0].voids[0].polygon[0][1] === 246, 'stairs: B moves the stair → A gets the stair and its void moved');
+  await W.close();
+}
+
 console.log(`\ncollab: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

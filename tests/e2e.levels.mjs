@@ -345,6 +345,7 @@ async function main() {
       return cols.size;
     });
     await page.evaluate(() => window.app.store.setUI({ structureSel: null }));
+    await page.mouse.move(at.x + 400, at.y + 300); await sleep(150);       // no hover tint on the stair
     const colsL0 = await sample();
     if (shots) {
       const box = await page.evaluate(() => { const v = window.app.view2d, a = v.planToScreen(1150, 560), b = v.planToScreen(1560, 1240); return { x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y }; });
@@ -446,6 +447,24 @@ async function main() {
   if (shots) await page.screenshot({ path: path.join(shotDir, 'e2e-levels-phone.png') });
   await page.keyboard.press('Escape');
   check('phone (390 × 800): floors in the mode menu, no page scroll', phone.menu.includes('First floor') && phone.menu.includes('Add floor above…') && phone.switcher === 'none' && phone.scroll, JSON.stringify(phone));
+
+  // phone: the stair inspector (the stair placed again through the engine) fits, no page scroll
+  const phoneStair = await page.evaluate(async () => {
+    const E = await import('/src/core/plan-edit.js');
+    window.app.store.setUI({ level: 'L0' });
+    const r = E.addStair({ level: 'L0', x: 1350, y: 902.25 });
+    window.app.store.setUI({ tool: 'structure', mode: '2d' });
+    window.app.store.setUI({ structureSel: { type: 'stair', id: r.ids[0] } });
+    if (window.app.openPanel) window.app.openPanel('inspector');
+    return r.ok;
+  });
+  await sleep(600);
+  const phoneInsp = await page.evaluate(() => {
+    const rules = document.querySelector('.sinsp__rules'), r = rules && rules.getBoundingClientRect();
+    return { rules: !!(rules && rules.offsetParent), inside: !!r && r.left >= 0 && r.right <= window.innerWidth + 0.5,
+      scroll: document.scrollingElement.scrollHeight <= window.innerHeight && document.scrollingElement.scrollWidth <= window.innerWidth };
+  });
+  check('phone: the stair inspector is shown within the screen, no page scroll', phoneStair && phoneInsp.rules && phoneInsp.inside && phoneInsp.scroll, JSON.stringify(phoneInsp));
 
   check('no console errors', errors.length === 0, errors.slice(0, 5).join(' | '));
   await browser.close();

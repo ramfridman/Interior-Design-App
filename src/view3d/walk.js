@@ -12,10 +12,13 @@
  * Plan units inside this module are METRES (x east, y south); the public API speaks plan centimetres.
  */
 import * as THREE from 'three';
-import { walkBoxes, spaceAt, openingFrame } from '../core/geometry.js';
+import { walkBoxes, spaceAt, openingFrame, pointInPolygon } from '../core/geometry.js';
 import { groundY } from './items.js';
-import { validLevel, viewOf, itemLevel, GROUND } from './levels.js';
+import { validLevel, viewOf, itemLevel, elevationM, GROUND } from './levels.js';
 import { sideVec, sideHeading } from './camera.js';
+import { stairGeometry, floorHeightAt, stairSides } from '../core/stairs.js';
+import { levelIds, levelElevation, levelHeights, footprintOf, voidsOf } from '../core/levels.js';
+import { pointInPolys } from '../core/polykernel.js';
 
 export const EYE_HEIGHT = 1.65;
 export const WALKER_RADIUS = 0.22;
@@ -117,19 +120,163 @@ function resolve(p, r, blockers, ignore) {
   }
 }
 
+// ───────────── stairs and voids (stage F5: walking between floors) ─────────────
+// Plan cm in, walker boxes in metres out. A plan without stairs and voids gets none of this (one-level plans walk
+// exactly as before).
+const STEP_ON = 30;                 // cm: a stair surface within this of the floor underfoot can be stepped onto
+const HEADROOM_MIN = 180;           // cm: clear height under a flight / landing below this blocks a walker under it
+const WAIST = 18, LANDING_T = 20;   // cm: depth of a flight's waist / a landing slab (as view3d/stairs.js draws them)
+const GUARD_T = 0.04;               // m: thickness of a guard / railing as a blocker
+const STAIR_SPEED = 0.7;            // speed factor on a stair
+const UPPER_WALLS = 200;            // cm: an upper level's walls block a walker on the stair within this below its floor
+const NEAR_FLOOR_ITEMS = 60;        // cm: furniture of a floor blocks a walker on the stair within this of that floor
+
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
+const dot2 = (a, b) => a[0] * b[0] + a[1] * b[1];
+const lerp2 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+/** Blocker (m) along the plan segment a → b (cm), `t` m thick, lying on its `out` side (unit vector). */
+function segBox(a, b, out, t = GUARD_T) {
+  const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  if (L < 1) return null;
+  return { cx: (a[0] + b[0]) / 200 + (out[0] * t) / 2, cy: (a[1] + b[1]) / 200 + (out[1] * t) / 2, hw: L / 200, hh: t / 2, cos: (b[0] - a[0]) / L, sin: (b[1] - a[1]) / L, fixed: true };
+}
+/** Blocker (m) over a flight between s0 and s1 cm along it, its full width. */
+function flightBox(f, W, s0, s1) {
+  const c = [f.origin[0] + f.dir[0] * (s0 + s1) / 2, f.origin[1] + f.dir[1] * (s0 + s1) / 2];
+  return { cx: c[0] / 100, cy: c[1] / 100, hw: (s1 - s0) / 200, hh: W / 200, cos: f.dir[0], sin: f.dir[1], fixed: true };
+}
+/** Blocker (m) over a rectangular ring (cm). */
+function ringBox(r) {
+  const L1 = Math.hypot(r[1][0] - r[0][0], r[1][1] - r[0][1]), L2 = Math.hypot(r[2][0] - r[1][0], r[2][1] - r[1][1]);
+  const c = r.reduce((s, q) => [s[0] + q[0] / r.length, s[1] + q[1] / r.length], [0, 0]);
+  return L1 < 1 || L2 < 1 ? null : { cx: c[0] / 100, cy: c[1] / 100, hw: L1 / 200, hh: L2 / 200, cos: (r[1][0] - r[0][0]) / L1, sin: (r[1][1] - r[0][1]) / L1, fixed: true };
+}
+/** The part [t0, t1] (0..1) of a side run, with its pitch heights. */
+const sidePart = (sd, t0, t1) => ({ ...sd, a: lerp2(sd.a, sd.b, t0), b: lerp2(sd.a, sd.b, t1), ha: sd.ha + (sd.hb - sd.ha) * t0, hb: sd.ha + (sd.hb - sd.ha) * t1 });
+
+/**
+ * The stairs of a plan as the walker uses them: `[{ id, stair, geo, bottom, to, rise, base, underside, guard, low }]`
+ * (rise / underside cm above the bottom floor; base m = the bottom level's elevation). `guard` = the blockers of a walker
+ * ON the stair (every side, open or along a wall — except the first tread, which can be left sideways); `low` = the
+ * blockers of a walker on the bottom floor next to / under it (the sides and the underside where the clear height is
+ * below 1.80 m; the start stays open for a first step of up to 30 cm).
+ */
+export function walkStairs(root) {
+  const ids = levelIds(root), out = [];
+  ids.forEach((id, i) => {
+    const view = viewOf(root, id);
+    for (const st of view.stairs || []) {
+      if (!st || typeof st.id !== 'string') continue;
+      const to = st.to && ids.includes(st.to) ? st.to : (st.to ? null : ids[i + 1]);   // as view3d/house.js
+      if (!to) continue;
+      const rise = levelElevation(root, to) - levelElevation(root, id);
+      const geo = rise > 0 ? stairGeometry(st, { rise }) : null;
+      if (!geo || geo.footprint.length < 3) continue;
+      const R = geo.riser, G = geo.going, W = geo.width, f0 = geo.flights[0];
+      const free0 = Math.max(G, WALKER_RADIUS * 100 + 2);
+      const guardSides = [];
+      for (const raw of stairSides(st, geo, view)) {
+        // sides as the walker needs them: `outward` really pointing off the stair, landing edges at the landing's height
+        const m = lerp2(raw.a, raw.b, 0.5), off = pointInPolygon(m[0] + raw.outward[0] * 2, m[1] + raw.outward[1] * 2, geo.footprint);
+        const lh = raw.piece === 'landing' && geo.landings[raw.index] ? geo.landings[raw.index].h : null;
+        const sd = { ...raw, outward: off ? [-raw.outward[0], -raw.outward[1]] : raw.outward, ...(lh != null ? { ha: lh, hb: lh } : {}) };
+        if (sd.piece === 'flight' && sd.index === 0) {
+          const L = Math.hypot(sd.b[0] - sd.a[0], sd.b[1] - sd.a[1]), sa = dot2(sub(sd.a, f0.origin), f0.dir), sb = dot2(sub(sd.b, f0.origin), f0.dir);
+          if (Math.max(sa, sb) <= free0 || L < 1) continue;
+          if (Math.min(sa, sb) < free0) { const t = (free0 - sa) / (sb - sa); guardSides.push(sa < sb ? sidePart(sd, t, 1) : sidePart(sd, 0, t)); continue; }
+        }
+        guardSides.push(sd);
+      }
+      const guard = guardSides.map((sd) => segBox(sd.a, sd.b, sd.outward)).filter(Boolean);
+      // from the bottom floor: the sides up to where the stair's underside clears 1.80 m, the underside itself below that
+      const low = [], pMax = HEADROOM_MIN + R + WAIST;
+      for (const sd of guardSides) {
+        if (Math.min(sd.ha, sd.hb) >= pMax) continue;
+        let part = sd;
+        if (Math.max(sd.ha, sd.hb) > pMax) { const t = (pMax - sd.ha) / (sd.hb - sd.ha); part = sd.ha < sd.hb ? sidePart(sd, 0, t) : sidePart(sd, t, 1); }
+        const b = segBox(part.a, part.b, part.outward);
+        if (b) low.push(b);
+      }
+      for (const f of geo.flights) {
+        if (!(f.length > 0)) continue;
+        const slope = (f.h1 - f.h0) / f.length;
+        const lo = f.index === 0 ? Math.max(STEP_ON / slope, WALKER_RADIUS * 100 + 5) : 0;
+        const hi = Math.min(f.length, ((HEADROOM_MIN + WAIST - f.h0) * G) / R);
+        if (hi > lo + 1) low.push(flightBox(f, W, lo, hi));
+      }
+      for (const l of geo.landings) if (l.h - LANDING_T < HEADROOM_MIN && l.poly.length === 4) { const b = ringBox(l.poly); if (b) low.push(b); }
+      out.push({ id: st.id, stair: st, geo, bottom: id, to, rise, base: elevationM(root, id), underside: rise - ((levelHeights(root, to) || {}).slab || 0), guard, low });
+    }
+  });
+  return out;
+}
+
+/**
+ * Railings round the voids of a level, as blockers (m) set on the floor side of each edge — except where a stair
+ * arrives: the stair's arrival edge (when it lies on the void's edge; otherwise the void edge facing its arrival,
+ * as view3d/house.js leaves its railing open). A void without a railing blocks the same: nobody falls through.
+ */
+export function voidBoxes(root, id, stairs) {
+  const voids = voidsOf(viewOf(root, id));
+  if (!voids.length) return [];
+  const arrivals = stairs.filter((s) => s.to === id).map((s) => ({ ...s.geo.arrival, matched: false }));
+  const edges = [];
+  for (const v of voids) {
+    const ring = v.polygon, sgn = Math.sign(ring.reduce((s, p, i) => { const b = ring[(i + 1) % ring.length]; return s + p[0] * b[1] - b[0] * p[1]; }, 0)) || 1;
+    ring.forEach((a, i) => {
+      const b = ring[(i + 1) % ring.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (L < 1) return;
+      const u = [(b[0] - a[0]) / L, (b[1] - a[1]) / L], out = [u[1] * sgn, -u[0] * sgn];   // outward from the void, onto the floor
+      let keep = [[0, L]];
+      for (const ar of arrivals) {
+        if (dot2(out, ar.dir) < 0.9) continue;
+        const da = dot2(sub(ar.a, a), out), db = dot2(sub(ar.b, a), out);
+        if (Math.abs(da) > 2 || Math.abs(db) > 2) continue;
+        const t0 = Math.min(dot2(sub(ar.a, a), u), dot2(sub(ar.b, a), u)), t1 = Math.max(dot2(sub(ar.a, a), u), dot2(sub(ar.b, a), u));
+        if (t1 < 0 || t0 > L) continue;
+        ar.matched = true;
+        keep = keep.flatMap(([k0, k1]) => [[k0, Math.min(k1, t0)], [Math.max(k0, t1), k1]].filter(([p, q]) => q - p > 1));
+      }
+      edges.push({ v, a, u, out, keep });
+    });
+  }
+  // a stair arriving inside a void (not on its edge): that void's edges facing the arrival stay open
+  for (const ar of arrivals) {
+    if (ar.matched) continue;
+    const probe = [ar.mid[0] - ar.dir[0] * 5, ar.mid[1] - ar.dir[1] * 5];
+    for (const e of edges) if (dot2(e.out, ar.dir) > 0.9 && pointInPolygon(probe[0], probe[1], e.v.polygon)) e.keep = [];
+  }
+  const out = [];
+  for (const e of edges) for (const [k0, k1] of e.keep) { const b = segBox([e.a[0] + e.u[0] * k0, e.a[1] + e.u[1] * k0], [e.a[0] + e.u[0] * k1, e.a[1] + e.u[1] * k1], e.out); if (b) out.push(b); }
+  return out;
+}
+
+/**
+ * Where a walker on an upper level has a floor under its feet (plan cm → bool): inside the footprint of its level or
+ * of a level below (a terrace on the roof below), and not over a void of its level. null on the ground floor (anywhere).
+ */
+function floorTest(root, id) {
+  if (id === GROUND) return null;
+  const ids = levelIds(root), k = ids.indexOf(id);
+  const fps = ids.slice(0, k + 1).map((l) => footprintOf(viewOf(root, l)).polygons).filter((p) => p.length);
+  const voids = voidsOf(viewOf(root, id));
+  return (x, y) => fps.some((p) => pointInPolys(x, y, p) !== 0) && !voids.some((v) => pointInPolygon(x, y, v.polygon));
+}
+
 const css = (el, text) => { el.style.cssText = text; return el; };
 
 /**
  * @param {{ camera: THREE.PerspectiveCamera, dom: HTMLElement, overlay: HTMLElement, ctx: object,
  *           pickTarget: (clientX: number, clientY: number) => ({x: number, y: number}|null),
- *           emit: (event: string, payload: object) => void, requestExit: () => void }} o
+ *           emit: (event: string, payload: object) => void, requestExit: () => void,
+ *           onLevelChange?: (levelId: string) => void }} o   onLevelChange: the walker went up / down a stair onto another level
  */
-export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, requestExit }) {
+export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, requestExit, onLevelChange = null }) {
   const { store } = ctx;
   const sb = ctx.plan.site.bounds;
   const lot = { x0: sb.x / 100 - LOT_MARGIN, x1: (sb.x + sb.w) / 100 + LOT_MARGIN, y0: sb.y / 100 - LOT_MARGIN, y1: (sb.y + sb.h) / 100 + LOT_MARGIN };
-  // several floors: the walker stays on the level it started on (stage F5 adds stairs) — that level's walls, floor height
-  // and furniture only. `plan` is that level's view (the plan itself on the ground floor).
+  // several floors: the walker is on one level at a time — that level's walls, floor height and furniture only (`plan`
+  // is that level's view, the plan itself on the ground floor) — and changes level on a stair (stage F5).
   let level = GROUND, plan = ctx.plan;
   const setLevel = (id) => { level = validLevel(ctx.plan, id); plan = viewOf(ctx.plan, level); };
   const floorY = (x, y) => (level === GROUND ? groundY(x, y, plan) : groundY(x, y, plan, level));
@@ -138,8 +285,40 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
   const readWalls = () => wallBlockers(plan);
   let walls = readWalls();
 
+  // ── stairs (stage F5) ── `onStair` = the stair walked on (walkStairs record), `stairH` = height on it (cm above its
+  // bottom floor, smooth along the walking line). The level changes at the stair's ends: at the top riser onto `to`, at
+  // the bottom one back onto the bottom level (and on leaving the stair, by the end it was left at) — once per crossing.
+  let stairs = [], stairsHere = [], extraOff = [], onFloor = null, onStair = null, stairH = 0;
+  const wallsByLevel = new Map(), furnByLevel = new Map(), stairLists = new Map();
+  const stairsActive = () => stairs.length > 0 || extraOff.length > 0 || onFloor !== null;
+  function levelStairs() {
+    stairsHere = stairs.filter((s) => s.bottom === level || s.to === level);
+    extraOff = [...stairs.filter((s) => s.bottom === level).flatMap((s) => s.low), ...voidBoxes(ctx.plan, level, stairs)];
+    onFloor = floorTest(ctx.plan, level);
+  }
+  function readStairs() {
+    stairs = walkStairs(ctx.plan);
+    wallsByLevel.clear(); stairLists.clear();
+    if (onStair) onStair = stairs.find((s) => s.id === onStair.id) || null;
+    levelStairs();
+  }
+  const wallsOf = (id) => {
+    if (id === level) return walls;
+    if (!wallsByLevel.has(id)) wallsByLevel.set(id, wallBlockers(viewOf(ctx.plan, id)));
+    return wallsByLevel.get(id);
+  };
+  const furnOf = (id) => {
+    if (id === level) return blockers.slice(walls.length);
+    if (!furnByLevel.has(id)) furnByLevel.set(id, furnitureBlockers(store.items, ctx.models, (it) => itemLevel(it, ctx.plan, store) === id));
+    return furnByLevel.get(id);
+  };
+  const stairHeight = (s) => floorHeightAt(s.stair, s.geo, p.x * 100, p.y * 100);
+  /** Floor under the walker (m above the ground floor's finished floor). */
+  const floorAt = () => (onStair ? onStair.base + stairH / 100 : floorY(p.x * 100, p.y * 100));
+
   let active = false;
   let blockers = walls, blockersDirty = true;
+  let offAll = walls, offWalls = walls;      // blockers off a stair: the level's + its stairs' undersides and void railings
   const ignore = new Set();
   const p = { x: 0, y: 0 };
   const vel = { x: 0, y: 0 };
@@ -165,7 +344,7 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
   function showHint() {
     hint.textContent = coarse()
       ? 'Left thumb to move · drag to look around · tap a spot to go there'
-      : `WASD / arrows to move · ${usePointerLock && !lockDenied ? 'click to capture the mouse' : 'drag to look, click to go there'} · Shift to run · Esc to exit`;
+      : `WASD / arrows to move · ${usePointerLock && !lockDenied ? 'click to capture the mouse' : 'drag to look, click to go there'} · Shift to run${stairs.length ? ' · PgUp / PgDn: up / down the stairs' : ''} · Esc to exit`;
     hint.style.opacity = '1';
     clearTimeout(hintTimer);
     hintTimer = setTimeout(() => { hint.style.opacity = '0'; }, 5200);
@@ -180,6 +359,9 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
   function rebuildBlockers() {
     blockers = walls.concat(furnitureBlockers(store.items, ctx.models, level === GROUND && !ctx.plan.levels ? null : onLevel));
     blockersDirty = false;
+    offAll = extraOff.length ? blockers.concat(extraOff) : blockers;
+    offWalls = extraOff.length ? walls.concat(extraOff) : walls;
+    furnByLevel.clear(); stairLists.clear();
     for (const b of [...ignore]) if (!b.wall) ignore.delete(b);
     adoptContaining();
   }
@@ -192,21 +374,108 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
   }
   function clampLot() { p.x = clamp(p.x, lot.x0, lot.x1); p.y = clamp(p.y, lot.y0, lot.y1); }
 
-  /** Move by (dx, dy) metres with collision; `list` = blockers to test. */
-  function move(dx, dy, list) {
-    const n = Math.max(1, Math.ceil(Math.hypot(dx, dy) / SUB_STEP));
-    for (let i = 0; i < n; i++) {
-      p.x += dx / n; p.y += dy / n;
-      resolve(p, WALKER_RADIUS, list, ignore);
-      clampLot();
+  /**
+   * The blockers where the walker is: `kind` 'all' (walls, windows, furniture) or 'walls' (a glide crosses furniture).
+   * Off a stair: the level's (+ its stairs' sides / undersides below 1.80 m and the void railings, when it has any).
+   * On a stair: its guards, the bottom level's walls below the upper slab, the upper level's walls near the top, and
+   * the furniture of a floor within 60 cm of it.
+   */
+  function listFor(kind) {
+    if (!onStair) return kind === 'all' ? offAll : offWalls;
+    const s = onStair, h = stairH;
+    const lowW = h < s.underside, highW = h > s.rise - UPPER_WALLS, lowF = kind === 'all' && h < NEAR_FLOOR_ITEMS, highF = kind === 'all' && h > s.rise - NEAR_FLOOR_ITEMS;
+    const key = `${s.id}|${+lowW}${+highW}${+lowF}${+highF}`;
+    let list = stairLists.get(key);
+    if (!list) {
+      list = s.guard.slice();
+      if (lowW) list.push(...wallsOf(s.bottom));
+      if (highW) list.push(...wallsOf(s.to));
+      if (lowF) list.push(...furnOf(s.bottom));
+      if (highF) list.push(...furnOf(s.to));
+      stairLists.set(key, list);
     }
+    return list;
+  }
+
+  /** Several floors: the walker went onto another level (stair end) — its walls, furniture, floor, events. */
+  function changeLevel(id) {
+    if (id === level) return;
+    setLevel(id);
+    walls = readWalls();
+    for (const b of [...ignore]) if (b.wall) ignore.delete(b);
+    levelStairs();
+    rebuildBlockers();
+    emitPosition(performance.now(), true);
+    if (onLevelChange) onLevelChange(level);
+  }
+  /** Step onto / along / off a stair at the walker's position (and change level at its ends). */
+  function track() {
+    if (onStair) {
+      const s = onStair, h = stairHeight(s);
+      if (h != null) {
+        stairH = h;
+        if (level === s.bottom && h >= s.rise - s.geo.riser) changeLevel(s.to);
+        else if (level === s.to && h <= s.geo.riser) changeLevel(s.bottom);
+        return;
+      }
+      onStair = null;
+      changeLevel(stairH > s.rise / 2 ? s.to : s.bottom);
+      return;
+    }
+    for (const s of stairsHere) {
+      const h = stairHeight(s);
+      if (h == null) continue;
+      if (Math.abs(h - (level === s.bottom ? 0 : s.rise)) <= STEP_ON) { onStair = s; stairH = h; return; }
+    }
+  }
+  /** After a sub-step: stairs, and no step off the floor of an upper level (back to the last point that had one). */
+  function settle(px, py) {
+    track();
+    if (!onFloor || onStair || onFloor(p.x * 100, p.y * 100) || !onFloor(px * 100, py * 100)) return;
+    if (onFloor(p.x * 100, py * 100)) p.y = py;
+    else if (onFloor(px * 100, p.y * 100)) p.x = px;
+    else { p.x = px; p.y = py; }
+  }
+
+  /** Move by (dx, dy) metres with collision; `kind` = which blockers to test ('all' | 'walls', see listFor). */
+  function move(dx, dy, kind) {
+    const n = Math.max(1, Math.ceil(Math.hypot(dx, dy) / SUB_STEP));
+    const staged = stairsActive();
+    for (let i = 0; i < n; i++) {
+      const px = p.x, py = p.y;
+      p.x += dx / n; p.y += dy / n;
+      resolve(p, WALKER_RADIUS, listFor(kind), ignore);
+      clampLot();
+      if (staged) settle(px, py);
+    }
+  }
+
+  /**
+   * PageUp / PageDown: to the top of the nearest stair going up from this level (+1) / the bottom of the nearest one
+   * coming down to it (−1), a step off its end, facing on. False when there is none.
+   */
+  function stairJump(dir) {
+    const cands = onStair ? [onStair] : stairs.filter((s) => (dir > 0 ? s.bottom === level : s.to === level));
+    let best = null, bd = Infinity;
+    for (const s of cands) { const e = dir > 0 ? s.geo.start : s.geo.arrival, d = Math.hypot(e.mid[0] - p.x * 100, e.mid[1] - p.y * 100); if (d < bd) { bd = d; best = s; } }
+    if (!best) return false;
+    const e = dir > 0 ? best.geo.arrival : best.geo.start, k = (WALKER_RADIUS * 100 + 15) * (dir > 0 ? 1 : -1);
+    const v = dir > 0 ? e.dir : [-e.dir[0], -e.dir[1]];
+    onStair = null;
+    changeLevel(dir > 0 ? best.to : best.bottom);
+    place(e.mid[0] + e.dir[0] * k, e.mid[1] + e.dir[1] * k, (Math.atan2(v[0], -v[1]) * 180) / Math.PI);
+    applyCamera();
+    emitPosition(performance.now(), true);
+    return true;
   }
 
   // ───────────── state / events ─────────────
   const headingDeg = () => (((yaw * 180) / Math.PI) % 360 + 360) % 360;
   function state() {
     const s = spaceAt(p.x * 100, p.y * 100, plan);
-    return { x: p.x * 100, y: p.y * 100, heading: headingDeg(), pitch: (pitch * 180) / Math.PI, spaceId: s ? s.id : null, speed: speedNow, gliding: !!glide, pointerLocked: locked };
+    const out = { x: p.x * 100, y: p.y * 100, heading: headingDeg(), pitch: (pitch * 180) / Math.PI, spaceId: s ? s.id : null, speed: speedNow, gliding: !!glide, pointerLocked: locked };
+    if (onStair) { out.stair = onStair.id; out.stairHeight = stairH; }
+    return out;
   }
   function emitPosition(now, force) {
     if (!force && now - lastEmit < EMIT_MS) return;
@@ -231,7 +500,9 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
     ignore.clear();
     if (blockersDirty) rebuildBlockers(); else adoptContaining();
     resolve(p, WALKER_RADIUS, blockers, ignore);
-    gy = floorY(p.x * 100, p.y * 100);
+    onStair = null;
+    if (stairsActive()) { track(); if (!onStair) resolve(p, WALKER_RADIUS, offAll, ignore); }
+    gy = floorAt();
   }
 
   /** Glide to a plan point (cm). Walls stop the glide; furniture is crossed and left on arrival. */
@@ -250,6 +521,7 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
   function onKeyDown(e) {
     if (!active || typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.code === 'Escape') { e.preventDefault(); requestExit(); return; }
+    if ((e.code === 'PageUp' || e.code === 'PageDown') && stairs.length) { e.preventDefault(); stairJump(e.code === 'PageUp' ? 1 : -1); return; }
     if (!MOVE_KEYS.has(e.code)) return;
     e.preventDefault();
     keys.add(e.code);
@@ -358,7 +630,8 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
     const mag = Math.hypot(fwd, side);
     if (mag > 1) { fwd /= mag; side /= mag; }
     const analog = joy.id !== null || (pad && (pad.mx || pad.my));
-    const top = keys.has('ShiftLeft') || keys.has('ShiftRight') || (pad && pad.run) ? RUN_SPEED : analog ? TOUCH_SPEED : WALK_SPEED;
+    let top = keys.has('ShiftLeft') || keys.has('ShiftRight') || (pad && pad.run) ? RUN_SPEED : analog ? TOUCH_SPEED : WALK_SPEED;
+    if (onStair) top *= STAIR_SPEED;
     const fx = Math.sin(yaw), fy = -Math.cos(yaw), rx = Math.cos(yaw), ry = Math.sin(yaw);
     const tvx = (fx * fwd + rx * side) * top, tvy = (fy * fwd + ry * side) * top;
     if (mag > 0.05 && glide) glide = null;
@@ -368,13 +641,13 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
       glide.t = Math.min(1, glide.t + dt / glide.dur);
       const e = easeInOut(glide.t);
       const ix = glide.fx + (glide.tx - glide.fx) * e, iy = glide.fy + (glide.ty - glide.fy) * e;
-      move(ix - glide.px, iy - glide.py, walls);
+      move(ix - glide.px, iy - glide.py, 'walls');
       glide.px = ix; glide.py = iy;
-      if (glide.t >= 1) { glide = null; adoptContaining(); resolve(p, WALKER_RADIUS, blockers, ignore); }
+      if (glide.t >= 1) { glide = null; adoptContaining(); resolve(p, WALKER_RADIUS, stairsActive() ? listFor('all') : blockers, ignore); }
     } else {
       const a = 1 - Math.exp(-dt * (mag > 0.05 ? 9 : 12));
       vel.x += (tvx - vel.x) * a; vel.y += (tvy - vel.y) * a;
-      if (Math.abs(vel.x) + Math.abs(vel.y) > 1e-3) move(vel.x * dt, vel.y * dt, blockers);
+      if (Math.abs(vel.x) + Math.abs(vel.y) > 1e-3) move(vel.x * dt, vel.y * dt, 'all');
       else vel.x = vel.y = 0;
     }
     releaseLeft();
@@ -383,7 +656,7 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
     const wantBob = glide || reducedMotion() ? 0 : clamp(speedNow / WALK_SPEED, 0, 1.25);
     bobAmt += (wantBob - bobAmt) * (1 - Math.exp(-dt * 8));
     bob += speedNow * dt * 4.1;
-    gy += (floorY(p.x * 100, p.y * 100) - gy) * (1 - Math.exp(-dt / 0.07));
+    gy += (floorAt() - gy) * (1 - Math.exp(-dt / 0.07));
     applyCamera();
     emitPosition(performance.now(), false);
   }
@@ -397,6 +670,7 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
       const was = level;
       setLevel(opts.level);
       if (was !== level) { walls = readWalls(); ignore.clear(); }
+      readStairs();
       const d = defaultWalkStart(plan);
       usePointerLock = opts.pointerLock !== false;
       blockersDirty = true;
@@ -452,12 +726,18 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
       return { position: new THREE.Vector3(p.x, gy + EYE_HEIGHT, p.y), quaternion: new THREE.Quaternion().setFromEuler(e) };
     },
     teleport(x, y, heading) { place(x, y, heading); applyCamera(); emitPosition(performance.now(), true); },
+    /** Stage F5: PageUp / PageDown — to the top (+1) / bottom (−1) of the nearest stair; false when there is none. */
+    stairJump,
+    /** The stair walked on: { id, height (cm above its bottom floor), bottom, to } or null. */
+    getStair: () => (onStair ? { id: onStair.id, height: stairH, bottom: onStair.bottom, to: onStair.to } : null),
     glideTo,
     /** Test hook: is a circle of the walker's radius at plan (x, y) cm overlapping a wall, window or blocking furniture? */
-    blockedAt(x, y, { furniture = true } = {}) {
+    blockedAt(x, y, { furniture = true, here = false } = {}) {
       if (blockersDirty) rebuildBlockers();
       const q = { x: x / 100, y: y / 100 };
-      return (furniture ? blockers : walls).some((b) => gap(q, b) < WALKER_RADIUS - 2e-3);
+      // here: what blocks where the walker now is (on its stair, or the level with its stairs and void railings)
+      const list = here ? listFor(furniture ? 'all' : 'walls') : furniture ? blockers : walls;
+      return list.some((b) => gap(q, b) < WALKER_RADIUS - 2e-3);
     },
     blockerCount: () => (blockersDirty ? (rebuildBlockers(), blockers.length) : blockers.length),
     /** The plan was edited: re-read walls / windows; a walker now standing inside a wall is let out, not trapped. */
@@ -466,10 +746,11 @@ export function createWalk({ camera, dom, overlay, ctx, pickTarget, emit, reques
     refreshPlan() {
       setLevel(level);
       walls = readWalls();
+      readStairs();
       for (const b of [...ignore]) if (b.wall) ignore.delete(b);
       glide = null;
       rebuildBlockers();
-      if (active) gy = floorY(p.x * 100, p.y * 100);
+      if (active) gy = floorAt();
     },
     dispose() { this.stop(); offItems(); },
   };

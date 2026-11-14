@@ -87,3 +87,23 @@ Climate: summer highs of 38-42 C, mild frost-free winters, under 300 mm rain, br
   * Date palms / large specimen palms: nurseries list pot sizes without trunk height or canopy (e.g. Phoenix dactylifera 25 L 480 at mashtelaadhabait.com has no height); Zeraviv roebelenii 50 L (250, final height 2.5 m) and Gan Yarak ring palm 25 L (250, 2 m) have no spread, so not added.
   * Heat-pump water heaters: Mashav (mashav.com and electra.mashav.com) lists Tadiran WATEC 150/200 (5450/5790) and Electra EcoWater 150-300 (4490-5990 on mashav.com, 5990-8890 on electra.mashav.com, the two sites disagree) with no dimensions on the page; Keter Dudim Chromagen Eco-Heat has none either; Thermostar Electra 150L page gives an unlabeled 500/500/1670. None added.
   * Rotary clotheslines (Leifheit Linomatic 500/600 on Home Center): sold by an unnamed external seller and no height on the page. Composters at gardencenter.co.il (GREEN 60 / 130 L): volume only, no dimensions.
+
+## Added 14 Nov 2026: new-supplier pass (planters, water features, decking, turf)
+
+9 products from 4 suppliers not previously in the catalogue; prices as displayed, read 14 Nov 2026.
+
+| Supplier | What it is | Rating read 14 Nov 2026 | Products |
+|---|---|---|---|
+| Izraela (izraela.co.il) | Nursery from Kibbutz Gvat; exclusive importer of the Esschert garden brand for 12 years (home page text) | no rating on the page | 5: 2 bird baths, 3 Corten-steel planters |
+| Shiruzka (shiruzka.co.il) | Handmade concrete planters and gifts by one concrete artist, "100 % local production" (about page). Tag `boutique` | no rating on the page | 2 small concrete pots |
+| Camisa (camisa.co.il) | Wood and building-materials warehouse with a decking, fencing and garden department | rating not checked | 2: composite decking (per m2), synthetic grass (per m2) |
+
+(Aviv Hegia's bench is listed in outdoor-living.sources.md.)
+
+Details:
+* **Bird baths (earlier gap): partly filled.** Izraela `izraela-birdbath-terracotta-dish` (terracotta drinking / bathing dish, 30.2 x 23.8 x 11.7 cm, 125) and `izraela-birdbath-sundial-cast-iron` (cast-iron sundial with bird bath dish, 24.3 x 24.3 x 9.3 cm, 260). Both are small table / ground dishes, not pedestal baths.
+* **Composite decking (earlier gap): filled with one product.** Camisa "Simple Green" WPC deck: the page states "price per m2" = 386.10, profile 138 x 22.5 mm, thickness 25 mm, 368 cm boards, ~7 boards per m2, slip class C. The VAT basis is not stated. Other Camisa deck pages (TechWood etc.) show a bare price with no unit and were skipped. During the session the site intermittently showed a bot-check ("One moment, please") page; the product page was re-fetched successfully.
+* Camisa synthetic lawn "Model 38" 40 mm, 52 per m2 (title states "price per m2" and 40 mm pile). Colour is a typical green, not sampled.
+* Izraela price note: the site shows a banner "November without VAT"; the product pages show plain prices (125.00, 955.00 ...) and do not say whether they include VAT. Recorded as displayed.
+* Shiruzka pots are sold planted with a succulent and are very small (8 and 13 cm); the list also has many gift sets and message-printed pots that were not added. The rectangular planter's page gave "height 9, diameter 19" and was skipped as ambiguous.
+* Skipped: Kolbogan (kolbogan.co.il) synthetic grass (15-65 per m2) - every product page shows "out of stock"; Izraela raised bed for kids (not sourced as an individual page); Aviv Hegia raised beds (made to measure, size-dependent price).

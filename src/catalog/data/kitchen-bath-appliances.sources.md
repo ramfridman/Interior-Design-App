@@ -72,3 +72,22 @@ Largest share: Makina 28 %.
 
 ### Verification
 Random sample of 12 of the new URLs re-fetched: 12 of 12 returned HTTP 200 and showed the recorded price.
+
+## Added 14 Nov 2026: new-supplier pass (appliances, bathroom)
+
+32 products from 4 suppliers not previously in the catalogue; prices as displayed, read 14 Nov 2026; dimensions from the product page text.
+
+| Supplier | What it is | Rating read 14 Nov 2026 | Products |
+|---|---|---|---|
+| Golan Westline (golan-westline.co.il) | Official importer of SMEG and White Westinghouse in Israel, "30 years in luxury kitchen appliances" (home page text); the Smeg retro fridge carries tag `boutique` | rating not checked | 8: 5 White Westinghouse fridges, 1 Smeg retro fridge, 1 Vintec wine cooler, 1 induction hob |
+| Bath Boutique (bathboutique.co.il) | Importer of bathroom furniture, shower enclosures and sanitary ware, "over 30 years", sells directly (about page); listed as a boutique store on Easy.co.il. Tag `boutique` | rating not checked (a Zap result lists 11 reviews and no aggregate score; the page was not opened) | 11: 2 vanities, 2 wall-hung toilets, 3 basins, 2 mirrors, 2 bathtubs |
+| Bol Parket (bolparket.com) | Parquet, wall-cladding and lighted-mirror showroom in Petah Tikva (pricing page) | its product pages show "5.0 from 202 Google reviews". Tagged `top-rated` | 6 LED mirrors here (20 finishes in finishes.sources.md) |
+| Merkaz HaOdafim (merkazod.co.il) | Discount appliance store, about 300 m2 in Petah Tikva, 20 years (home page) | 5-star icons, "excellent", based on 75 reviews, no numeric average; not tagged | 7: 2 integrated fridges, 2 integrated dishwashers, 2 built-in ovens, 1 induction hob |
+
+Method and caveats:
+* Golan Westline, Merkaz HaOdafim: WooCommerce store API for the list, product pages for price (JSON-LD) and dimensions (page text; Golan pages give them in the short description for the White Westinghouse range and the Smeg retro fridge, and in mm for the Vintec). Many Smeg pages give no dimensions in the text (data sheet is a PDF) and were skipped (hoods, ovens, hobs).
+* Bath Boutique: JSON-LD `valueAddedTaxIncluded: true` (prices include VAT). Vanities that are sold "width 60-150 cm" with a width-dependent price were skipped; only fixed-size vanities and parts were added. Delivery and installation are priced separately. Two items (Belgian vanity, floating mirror) are flagged "stock clearance, no returns" on their pages.
+* Bol Parket: prices include VAT (FAQ: "all prices on the site include VAT"). Mirror depth is not published (3 cm modelled).
+* Golan / Merkazod: the page does not state the VAT basis; displayed prices are used. Merkazod colours are not stated, so a neutral grey is used and noted.
+* `type` mapping: fridges by door layout; integrated dishwashers `integrated`; built-in oven `range` / `built-in-oven`; hobs `cooktop`; basins `sink` / `vessel`.
+* Skipped: Hezibank, Alony, Hamat, Negev (no prices on product pages or a price list in a PDF, ex-VAT); Kosko, Hrsena, Bathline (not read in depth); Porcelanita vanities (width-configurable price); taps and shower mixers (no model type).

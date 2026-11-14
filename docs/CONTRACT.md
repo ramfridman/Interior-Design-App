@@ -1934,6 +1934,56 @@ source). Upper-level voids of a stair: those with `void.stair === stair.id`, els
 * The 3D view rebuilds on `rebuildPlan()`; a stair-only change on an upper level is picked up through `stairsSig`
   (no per-level shell rebuild needed). Stairs in `plan.levels[i].stairs` are supported by geometry, rules and 3D.
 
+### Editing (stage F4b — `core/plan-edit.js`, `view2d/stairs.js`, the Stairs tool; UI entry points behind `FEATURES.levels`)
+Plans without stairs and voids are untouched (one-level plans byte for byte: no new key, no new event field).
+```js
+import { addStair, updateStair, removeStair, updateVoid, removeVoid, canAddStair, stairInfo, voidInfo, allStairs } from './core/plan-edit.js';
+addStair({ level?, to?, shape?, x, y, rot?, width?, risers?, going?, landing?, turn?, gap?, nosing?, guard?, handrail? })
+//   level default = the active level; missing fields from proposeStair for the rise to the level above. ids = [stairId, voidId?]
+//   (+ stairId, voidId). Refused with `code`: 'no-level-above' (the caller offers "Add floor above…"), 'problems'
+//   (stairProblems), 'opening' / 'wall' / 'outside' (footprint pieces through a doorway / a wall / off the level's floor,
+//   voids excluded), 'stair' (overlaps another stair), 'arrival' (the 30 cm beyond the top step is not free floor of the
+//   level above), 'locked' / 'upper-wall' (its opening would cut a locked / any wall up there).
+updateStair(id, { x, y, rot, shape, turn, width, risers, going, landing | null, gap, nosing, guard, handrail, fit: true })
+//   same checks; `fit` re-runs proposeStair (rise, shape, width, turn) keeping the position. rot is stored in 90° steps.
+removeStair(id)            // → keptVoid: the void id when the user had enlarged it (kept with stair: null), else null
+updateVoid(id, { polygon })   // inside its level's rooms, through no wall / doorway, never smaller than its stair needs
+removeVoid(id)             // refused while a stair needs it
+canAddStair(input)         // dry run for the ghost: { ok, stair, geo, need (rings), level } | { ok: false, reason, code, stair?, geo? }
+stairInfo(id) → { stair, data, levelId, to, rise, geo, need, voids, covers } · voidInfo(id) → { void, levelId, stairId, need, covers }
+```
+* **The opening above** = `requiredVoid` ∩ the upper footprint, its free edges rounded OUT to the 5 cm grid (edges flush
+  with the stair's own sides / arrival stay exact; the Duplex gives exactly `v1` x 520–620, y 266–670), clipped to the
+  upper rooms; stored `{ id: 'v<n>', polygon (0.001 cm, clockwise, from its NW corner), stair, railing: true }`. A plain
+  void the stair overlaps is adopted. On update: a void that is exactly what the old stair needed (± 60 cm²) is replaced
+  by the new requirement; an enlarged one moves with a plain move, stays inside the rooms and grows where it must.
+* **State / events.** Stairs of L0 in `PLAN.stairs`, above in `levels[i].stairs`; voids in `levels[i].voids` (keys deleted
+  when empty; lazy schema). One undo step + one `'plan'` event (reasons `'add-stair' | 'update-stair' | 'remove-stair' |
+  'update-void' | 'remove-void'`, `levelId` = the stair's bottom level / the void's level); any change of stairs or voids
+  (also undo / load / remote) sets `changed.stairs: true` AND `changed.levels: true`. Tracked collaboration intents
+  (`PLAN_CALLS`). Policy: `'permit'` + `REASONS.stair` in a fixed plan, free while drafting. `planDiff()`: `stair-added |
+  stair-removed | stair-changed` (levelId = bottom level) and `void-added | void-removed | void-changed` (levelId = its level).
+* **Rooms and voids.** A room keeps its outline; rooms of a level with voids carry `voids: [{ id, area (cm²) }]`
+  (`levels.js annotateVoids`, applied whenever levels are installed, by setBasePlan and buildPlan). `roomVoids(level, room)`,
+  `roomFloorArea(level, room, polygonArea)`, `voidsOf(level)`. `spaceAt(x, y, view)` inside a void → the room + `void: id`.
+  Regulations' room area (`roomMetrics`), the 2D room label and `finishes.floorAreaM2` use the area without voids. New rule
+  `item-in-void` (Stairs, fail): an item of a level overlapping one of its voids. Carpentry: a unit on a stair footprint or
+  over a void is a hard conflict (`carpentry/checks.js stairConflicts`; createRun / layout refuse it, checkRun reports `stair`).
+* **buildPlan(…, { levels: true })** keeps the ground floor's `stairs` and every level's `stairs` / `voids` (data fields only,
+  validated — unreadable ones are an error and left out; moved with the origin shift).
+* **3D.** `stairSoups(…, { slabEdge })`: an open side's guard stops where its top meets the slab of the floor above that runs
+  beside the stair with its void railing — one continuous railing at the top (house.js passes `slabEdge`).
+* **2D** (`view2d/stairs.js`): bottom level — outline, riser lines (dashed above the 1.20 m cut plane, after a zigzag break
+  line), landings, walking line (dot → arrow), "UP" + riser count; upper level — the void dashed with a cross, the treads
+  seen through it, arrow down and "DN"; the ghost of the floor below draws its stairs faintly. Layer `stairs` under the walls.
+  Structure tool: stairs and voids are selectable (`structureSel { type: 'stair' | 'void', id }`, a stair on its bottom
+  level); drag = move (snaps a side flush to a wall face within ~12 px, else the box to the 5 cm grid), the round grip
+  turns it (click = +90°, drag = 90° steps), the side grip sets the width; a void's corner / edge grips reshape it
+  (orthogonal, 5 cm). While dragging / placing: free width to the walls and the distance to the nearest door swing.
+  Tool `'stairs'` (key T, R turns the ghost; `store.ui.stairShape | stairTurn | stairRot`): a live ghost (level colour /
+  red + the reason), click places; with no floor above it explains and offers "Add floor above…".
+* Tests: `node tests/stairs-edit.test.mjs`, the stairs case of `tests/collab.test.mjs`, `node tests/e2e.levels.mjs [--shots]`.
+
 ### Notes for F5 (walk)
 * Floor under the walker: `floorHeightAt(stair, geo, x, y)` (smooth, along the walking line) + the bottom level's
   elevation; `null` = not on this stair. Reaching `arrival` (h = rise) switches to `to`; below `start` back down.
