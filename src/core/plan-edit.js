@@ -57,6 +57,7 @@ export const REASONS = Object.freeze({
   permit: 'Changing an exterior opening requires a building-permit amendment.',
   thick: (t) => `This ${t} cm wall may be structural — confirm with your structural engineer before changing it.`,
   level: 'Adding or removing a floor, or changing its height, changes the building — it requires a building permit.',
+  // stage A1 texts, no longer returned since stage A2 (kept for callers that still compare with them)
   angledWalls: 'This floor has angled walls: its walls cannot be drawn, moved or removed here yet. Doors and windows in its straight walls, and room names, can be changed.',
   angledOpening: 'Doors and windows in angled walls cannot be added, moved or re-hung here yet — they can be removed.',
 });

@@ -320,5 +320,135 @@ group('House 98 + added slants (fixed)');
   check('undo ×4 → House 98 byte-identical (no schema / slants keys)', JSON.stringify(PLAN) === H98 && !E.isPlanModified());
 }
 
+group('randomized: 300 valid operations (fixed seed) never leave an invalid plan');
+{
+  wedge();
+  let seed = 98;
+  const rand = () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const pick = (a) => a[Math.floor(rand() * a.length)];
+  const rr = (a, b) => a + rand() * (b - a);
+  const free = () => E.wallSegments().filter((g) => g.policy.level !== 'locked' && !g.id.includes('seg:j:'));
+  const aOps = () => PLAN.openings.filter((o) => o.axis === 'a');
+  const ops = [
+    ['addWall angled', 4, () => { const x = rr(30, 900), y = rr(30, 770), a = rr(0, Math.PI), L = rr(60, 450); return E.addWall({ x1: x, y1: y, x2: x + Math.cos(a) * L, y2: y + Math.sin(a) * L, angled: true, thickness: pick([7, 10, 12]) }); }],
+    ['addWall rect', 1, () => { const x = rr(30, 900), y = rr(30, 770); return rand() < 0.5 ? E.addWall({ x1: x, y1: y, x2: x + rr(-300, 300), y2: y }) : E.addWall({ x1: x, y1: y, x2: x, y2: y + rr(-300, 300) }); }],
+    ['move', 4, () => { const g = pick(free()); return g ? E.moveWallSegment(g.id, Math.round(rr(-60, 60))) : null; }],
+    ['resize', 2, () => { const g = pick(free().filter((x) => x.axis === 'a')); return g ? E.resizeWallSegment(g.id, { start: rr(-40, 40), end: rr(-40, 40) }) : null; }],
+    ['rotate', 3, () => { const g = pick(free().filter((x) => x.axis === 'a')); if (!g) return null; const k = rand() < 0.5 ? 'a' : 'b', P = k === 'a' ? [g.x1, g.y1] : [g.x2, g.y2]; return E.rotateWallEnd(g.id, k, { x: P[0] + rr(-80, 80), y: P[1] + rr(-80, 80) }); }],
+    ['remove', 1, () => { const g = pick(free().filter((x) => x.axis === 'a' || x.isNew)); return g ? E.removeWallSegment(g.id) : null; }],
+    ['door in a slant', 3, () => { const g = pick(E.wallSegments().filter((x) => x.axis === 'a')); if (!g) return null; const a = rr(0, g.length); return E.addOpening({ kind: rand() < 0.8 ? 'door' : 'opening', x: g.x1 + (g.x2 - g.x1) * a / g.length, y: g.y1 + (g.y2 - g.y1) * a / g.length, width: pick([60, 70, 80, 90]) }); }],
+    ['update opening', 2, () => { const o = pick(aOps()); return o ? E.updateOpening(o.id, rand() < 0.5 ? { at: o.at + rr(-50, 50) } : { width: o.width + pick([-10, 10, 20]) }) : null; }],
+    ['flip', 1, () => { const o = pick(aOps().filter((x) => x.kind === 'door')); return o ? E.flipDoor(o.id, rand() < 0.5 ? 'hinge' : 'swing') : null; }],
+    ['remove opening', 1, () => { const o = pick(aOps().filter((x) => !x.exterior)); return o ? E.removeOpening(o.id) : null; }],
+    ['undo', 1, () => { if (!store._undo.length) return null; store.undo(); return { ok: true }; }],
+  ];
+  const total = ops.reduce((a, o) => a + o[1], 0);
+  const choose = () => { let x = rand() * total; for (const o of ops) { x -= o[1]; if (x < 0) return o; } return ops[0]; };
+  const solidsOf = () => [...PLAN.walls, ...PLAN.openings.filter((o) => o.axis !== 'a'), ...G.slantPolys(PLAN), ...PLAN.openings.filter((o) => o.axis === 'a').map((o) => G.openingPoly(o))];
+  let done = 0, tries = 0, bad = null;
+  const counts = {}, times = [];
+  while (done < 300 && tries < 6000 && !bad) {
+    tries++;
+    const [name, , fn] = choose();
+    const t0 = performance.now(), r = fn(), dt = performance.now() - t0;
+    if (!r || !r.ok) continue;
+    if (name !== 'undo') times.push(dt);
+    done++; counts[name] = (counts[name] || 0) + 1;
+    // 1. the state re-derives identically from itself
+    const rc = E.recomputePlan(PLAN);
+    if (rc.problems.length || JSON.stringify(rc.rooms) !== JSON.stringify(PLAN.rooms) || JSON.stringify(rc.openings) !== JSON.stringify(PLAN.openings) || JSON.stringify(rc.wallOutline) !== JSON.stringify(PLAN.wallOutline)) { bad = `${name}: does not re-derive identically (${rc.problems.length} problems)`; break; }
+    if (done % 25 === 0) { const st = clone(E.planState()), key = E.planStateKey(); E.applyPlanState(null); const back = E.applyPlanState(st); if (!back.ok || E.planStateKey() !== key) { bad = `${name}: saved state does not load back (${back.reason})`; break; } }
+    // 2. rooms + wall material = the built footprint (rooms disjoint from the solids and from each other)
+    const sol = solidsOf(), roomsA = PLAN.rooms.reduce((a, x) => a + area(x.polygon), 0);
+    const all = K.netArea(K.union([...sol, ...PLAN.rooms.map((x) => ({ polygon: x.polygon }))])), mat = K.netArea(K.union(sol));
+    if (!near(all - mat, roomsA, 1 + PLAN.rooms.length)) { bad = `${name}: room areas ${roomsA.toFixed(1)} ≠ interior ${(all - mat).toFixed(1)}`; break; }
+    // 3. slant footprints overlap only at their joins / crossings (≤ 2 t·t' / sin θ)
+    const polys = G.slantPolys(PLAN), sl = PLAN.slants || [];
+    for (let i = 0; i < sl.length && !bad; i++) for (let j = i + 1; j < sl.length; j++) {
+      const fi = SG.slantFrame(sl[i]), fj = SG.slantFrame(sl[j]), sin = Math.max(0.1, Math.abs(fi.ux * fj.uy - fi.uy * fj.ux));
+      const ov = K.intersectArea([polys[i]], [polys[j]]);
+      if (ov > (2 * fi.t * fj.t) / sin + 1) { bad = `${name}: ${sl[i].id} and ${sl[j].id} overlap by ${ov.toFixed(1)} cm²`; break; }
+    }
+  }
+  console.log(`   ${done} operations in ${tries} attempts: ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', ')}; slants now ${(PLAN.slants || []).length}, rooms ${PLAN.rooms.length}; median op ${median(times).toFixed(2)} ms, max ${Math.max(...times).toFixed(1)} ms`);
+  check('300 random valid operations: every state re-derives identically (and loads back), room areas sum to the interior, no overlapping solids beyond joins', done === 300 && !bad, bad || `${done} done`);
+  check('…every kind of operation happened', ['addWall angled', 'move', 'resize', 'rotate', 'door in a slant', 'update opening', 'flip'].every((k) => counts[k] > 0), JSON.stringify(counts));
+  E.setBasePlan(E.BUILTIN_PLAN);
+}
+
+group('collaboration: A adds a slant while B adds a door in a rect wall (real stores in worker threads)');
+{
+  const WORKER = fileURLToPath(new URL('./collab-replica.worker.mjs', import.meta.url));
+  const memStorage = () => { const m = new Map(); return { async get(k) { return m.has(k) ? clone(m.get(k)) : undefined; }, async put(k, v) { m.set(k, clone(v)); }, async delete(k) { m.delete(k); } }; };
+  const spawn = (name) => {
+    const w = new Worker(WORKER, { workerData: { name } }), waits = new Map(), rep = { name, w, email: name.toLowerCase() + '@example.com', up: [], toasts: [] };
+    let n = 0;
+    w.on('message', (m) => { if (m.type === 'reply') { const f = waits.get(m.id); waits.delete(m.id); f && f(m); } else if (m.type === 'up') rep.up.push(m.text); else if (m.type === 'toast') rep.toasts.push(m.message); else if (m.type === 'rest') w.postMessage({ type: 'rest', id: m.id, value: null }); });
+    rep.call = (code, arg) => new Promise((res, rej) => { const id = ++n; waits.set(id, (m) => (m.error ? rej(new Error(m.error)) : res(m.value))); w.postMessage({ type: 'call', id, code, arg }); });
+    return rep;
+  };
+  const record = { id: 'wedge', name: 'Wedge', phase: 'fixed', basePlan: clone(W), design: { items: [] } };
+  const room = createRoom({ id: 'wedge', storage: memStorage(), now: () => 1e12, record, limits: { rate: { ops: [1e6, 1e6] } } });
+  await room.load();
+  const reps = [spawn('A'), spawn('B')];
+  for (const r of reps) { r.connId = r.name + '#1'; room.join({ id: r.connId, email: r.email, role: 'editor', send: (text) => r.w.postMessage({ type: 'down', text }) }); await r.call('start'); }
+  const pump = async (only) => {
+    for (let g = 0; g < 200; g++) {
+      let moved = false;
+      for (const r of reps) { if (only && !only.includes(r)) continue; while (r.up.length) { moved = true; await room.receive(r.connId, r.up.shift()); } }
+      await Promise.all(reps.map((r) => r.call('tick')));
+      if (!moved && !reps.some((r) => r.up.length)) return;
+    }
+  };
+  await pump();
+  const [A, Bp] = reps;
+  const same = async () => { const [a, b, ka, kb] = await Promise.all([A.call('serialize'), Bp.call('serialize'), A.call('planKey'), Bp.call('planKey')]); return a === b && ka === kb; };
+  check('both replicas open the Wedge', (await A.call('planJSON')) === WB && (await Bp.call('planJSON')) === WB);
+  const ra = await A.call('pe', ['addWall', [{ x1: 20, y1: 400, x2: 400, y2: 780, angled: true }]]);
+  const rb = await Bp.call('pe', ['addOpening', [{ kind: 'door', x: 505, y: 650, width: 80 }]]);
+  await pump([A]); await pump();
+  const pa = JSON.parse(await A.call('planJSON'));
+  check('concurrent: A\'s slant and B\'s door both kept on both replicas (one re-run on the newer plan), identical, no toast', ra.ok && rb.ok && await same() && pa.slants.length === 3 && pa.openings.some((o) => o.id === rb.ids[0])
+    && !A.toasts.length && !Bp.toasts.length, JSON.stringify([ra.reason, rb.reason, A.toasts, Bp.toasts]));
+  const mv = await Bp.call('pe', ['moveWallSegment', ['seg:a:s02', 20]]), rot = await A.call('pe', ['rotateWallEnd', ['seg:a:s03', 'b', { x: 420, y: 780 }]]);
+  await pump([Bp]); await pump();
+  check('then B moves s02 while A rotates s03 (rotateWallEnd is a tracked call): both kept, identical', mv.ok && rot.ok && await same() && JSON.parse(await A.call('planJSON')).slants.find((s) => s.id === 's02').y1 !== 300, JSON.stringify([mv.reason, rot.reason]));
+  const op = await A.call('pe', ['addOpening', [{ kind: 'door', wall: 's03', at: 150 }]]), rm = await Bp.call('pe', ['removeWallSegment', ['seg:a:s03']]);
+  await pump([A]); await pump();
+  check('A adds a door in s03 while B removes s03: identical result on both, the door dropped with its wall', op.ok && rm.ok && await same() && !JSON.parse(await A.call('planJSON')).openings.some((o) => o.id === op.ids[0]), JSON.stringify([op.reason, rm.reason, A.toasts, Bp.toasts]));
+  await Promise.all(reps.map((r) => r.w.terminate()));
+}
+
+group('timings (median of 15 after warm-up; each operation done and undone)');
+{
+  const timeOp = (f) => { for (let i = 0; i < 3; i++) { const r = f(); if (r && r.ok && E.isPlanModified()) store.undo(); } const ts = []; for (let i = 0; i < 15; i++) { const t = performance.now(); const r = f(); ts.push(performance.now() - t); if (r && r.ok && E.isPlanModified()) store.undo(); } return median(ts); };
+  wedge();
+  const tw = {
+    'add slant': timeOp(() => E.addWall({ x1: 20, y1: 400, x2: 400, y2: 780, angled: true })),
+    'move s02': timeOp(() => E.moveWallSegment('seg:a:s02', 20)),
+    'resize s02': timeOp(() => E.resizeWallSegment('seg:a:s02', { end: 0.5 })),
+    'rotate s02': timeOp(() => E.rotateWallEnd('seg:a:s02', 'b', { x: 183.8, y: 25 })),
+    'remove s02': timeOp(() => E.removeWallSegment('seg:a:s02')),
+    'door in s02': timeOp(() => E.addOpening({ kind: 'door', wall: 's02', at: 80, width: 60 })),
+    'update door': timeOp(() => E.updateOpening('door-s02', { width: 90 })),
+  };
+  E.setBasePlan(E.BUILTIN_PLAN);
+  const a1 = E.addWall({ x1: 1155, y1: 1240, x2: 1275, y2: 1360, angled: true }), a2 = E.addWall({ x1: 600, y1: 300, x2: 750, y2: 450, angled: true });
+  const sid = a1.ids[0];
+  const th = {
+    'add slant': timeOp(() => E.addWall({ x1: 1515, y1: 800, x2: 1400, y2: 750, angled: true })),
+    'move slant': timeOp(() => E.moveWallSegment(sid, -10)),
+    'rotate slant': timeOp(() => E.rotateWallEnd(sid, 'b', { x: 1285, y: 1360 })),
+    'door in slant': timeOp(() => E.addOpening({ kind: 'door', wall: sid, at: 90, width: 70 })),
+    'rect wall move': timeOp(() => E.moveWallSegment(E.segmentAt(150, 1195).id, 10)),
+  };
+  store.undo(); store.undo();
+  const t98 = timeOp(() => E.moveWallSegment(E.segmentAt(150, 1195).id, 10));
+  const fmt = (o) => Object.entries(o).map(([k, v]) => `${k} ${v.toFixed(2)}`).join(', ');
+  console.log(`   Wedge: ${fmt(tw)} ms\n   House 98 + 2 slants (${a1.ok && a2.ok ? 'added' : 'NOT added: ' + (a1.reason || a2.reason)}): ${fmt(th)} ms\n   House 98 (orthogonal) wall move: ${t98.toFixed(2)} ms`);
+  check('every operation < 15 ms after warm-up (Wedge, House 98 + slants)', a1.ok && a2.ok && [...Object.values(tw), ...Object.values(th)].every((v) => v < 15), fmt({ ...tw, ...th }));
+  check('House 98 orthogonal wall move unchanged in kind (< 15 ms; the grid path)', t98 < 15 && JSON.stringify(PLAN) === H98, t98.toFixed(2));
+}
+
 console.log(`\nslants-edit: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

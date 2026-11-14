@@ -284,7 +284,7 @@ The owner may change interior walls, doors and windows "based on what is allowed
 **Model.** `PLAN` stays ONE shared object. An edit REPLACES `PLAN.walls`, `PLAN.openings`, `PLAN.rooms` and
 `PLAN.wallOutline` with new arrays (never mutates them in place) and the store then emits
 `'plan' { reason, changed: { walls: bool, openings: bool, rooms: bool }, transient?: bool }`.
-`reason`: `'add-wall' | 'remove-wall' | 'move-wall' | 'resize-wall' | 'add-opening' | 'update-opening' | 'remove-opening' |
+`reason`: `'add-wall' | 'remove-wall' | 'move-wall' | 'resize-wall' | 'rotate-wall'` (stage A2) `| 'add-opening' | 'update-opening' | 'remove-opening' |
 'update-room' | 'reset' | 'history'` (undo / redo / cancel) `| 'load'`.
 **Views:** on `'plan'` rebuild everything drawn from `PLAN` (walls, openings, floors, room labels, dimensions, snapping,
 collision, checks); read `PLAN.walls` etc. at the time of use and never keep those arrays. `geometry.wallFaces()` is
@@ -551,7 +551,7 @@ default, `buildPlan`'s default).
   `planDiff()` adds `{ kind: 'slant-added' | 'slant-removed' | 'slant-changed', level, text, at, ref: <segment id> }`
   (removed / changed: the base wall's level, `'locked'` given as `'permit'`); an opening in a slant moved along it reads
   "moved N cm", one in a removed slant is not listed as closed.
-* **Existing mutations on a level with slants** (until stage A2): `addWall`, `canAddWall`, `removeWallSegment`,
+* **Existing mutations on a level with slants** (stage A1 only — lifted by stage A2, see "Angled walls: editing"): `addWall`, `canAddWall`, `removeWallSegment`,
   `moveWallSegment`, `resizeWallSegment` are refused with `REASONS.angledWalls` (that level only). `addOpening` /
   `canAddOpening` work in rect walls (refused with `REASONS.angledOpening` when the nearest wall is a slant);
   `updateOpening` / `flipDoor` work on openings in rect walls and are refused with `REASONS.angledOpening` for openings in
@@ -601,6 +601,80 @@ default, `buildPlan`'s default).
   ceiling, `total` is always the whole design (`shownTotal` = the filter); the budget tab has a floor filter and the
   CSV a Floor column (plans with levels only). Walk HUD: mini-map and room label follow `'walk-position'.level`.
 * Tests: `node tests/levels-rules.test.mjs`, `node tests/e2e.levels.mjs [--shots]`.
+
+### Angled walls: editing (stage A2, additive; engine only — the UI entry points stay behind `FEATURES.angledWalls`)
+Every call below works on the active level (L0 or an upper level through the F1 swap; ids prefixed there: `'L1|seg:a:s03'`),
+is one undo step + one `'plan'` event, returns the usual `{ ok, level, warnings, ids }` / `{ ok: false, reason }`, takes the
+last optional `opts = { transient }`, and is a tracked collaboration intent (`PLAN_CALLS` in `src/collab/bridge.js`, so a
+re-run after a conflicting remote edit works). A refused call changes nothing. Draft phase: everything free (no locks, no
+permit, thickness up to 30 cm, may be outside the house). House 98 and every orthogonal plan take exactly the old code.
+**Conventions** (slant-geom): u = unit (x1, y1) → (x2, y2); **'r' = the right-hand normal on screen n = (−uy, ux)** (a wall
+running east: 'r' is south), 'l' the other side; end **'a' = (x1, y1), 'b' = (x2, y2)** (of a rect core: 'a' = its west / north
+end); **`at` = cm along the centre line from (x1, y1)** to an opening's centre. Centre lines are stored on 0.1 cm.
+```js
+addWall({ x1, y1, x2, y2, thickness = 10, angled: true })   // ids = ['seg:a:s<n>']; canAddWall → { ok, slant, poly, level }
+//   Without `angled` (or within 0.5° of an axis) it is the old rect addWall exactly ("smaller delta dropped").
+//   Ends: within 1.5 t of another slant's END → exactly that point (shared; the corner is mitred / bevelled by joinSlants);
+//   already joined as drawn (T onto a slant side, end on / in a rect, within the join reach t) → kept as given; else
+//   extended along the wall to the nearest wall face ahead within 1.5 t; else a free end. New slant: id 's<n>' (above every
+//   id the level and its base level used), kind from its derived class.
+removeWallSegment('seg:a:…')        // with its openings; rooms merge (the usual tie rules)
+moveWallSegment('seg:a:…', delta)   // delta cm along n (+ = towards 'r'), 0.1 cm. A slant end at a corner: the neighbour's
+//   end slides along the neighbour's own line (line intersection; a corner of 3+ walls is refused); an end in a T or on a
+//   rect slides along that wall; slants that T onto it slide along their own lines; rect walls ending on it stretch /
+//   shrink on the 5 cm grid (the joint fill is recomputed); its openings travel with it (same place along the wall).
+resizeWallSegment('seg:a:…', { start, end })   // cm the start (x1, y1) / end (x2, y2) moves OUTWARDS along the centre line
+//   (+ longer, − shorter, omitted 0); a moved end is snapped like a drawn one; openings keep their place (`at` re-measured).
+rotateWallEnd(segId, end /* 'a' | 'b' */, { x, y, angled? })   // NEW. Drags one end; the other stays. The point is taken
+//   as given (angle snapping is the UI's job), then snapped / joined as above; other slant ends at that corner follow it,
+//   T-ing slants slide, rect walls ending on it stretch; its openings keep their distance from the FIXED end. Within 0.5° of
+//   an axis the slant becomes a rect wall (drawn through the fixed end and the point by addWall's rect rules; its openings
+//   become rect openings, hinge / swing letters converted). A RECT segment: with `angled: true` and the point off its axis
+//   it becomes a slant (centre line from the core's fixed end centre to the point; openings converted to 'a'); otherwise
+//   the end moves along its own axis (= resizeWallSegment of that end). ids = the new segment id(s); reason 'rotate-wall'.
+addOpening({ kind, wall: 'seg:a:…' | 's01', at, width, … })   // in a slant, exactly at `at` (refused when it does not fit)
+addOpening({ kind, wall: <rect segment id>, at, … })          // in a rect segment: `at` = cm from its core start (clamped)
+addOpening({ kind, x, y, … })   // the nearest wall within 60 cm, rect or slant; in a slant `at` = the projected point,
+//   clamped to the nearest place that fits (0.1 cm). canAddOpening → { ok, segmentId, wall, at, width, quad, rect (AABB), level }
+updateOpening(id, { at | offset (exact) | x, y (clamped), width (centre kept, exact), height, sill, style,
+                    hinge: 'a' | 'b', swing: 'l' | 'r' })
+flipDoor(id, 'hinge' | 'swing')     // a ↔ b, l ↔ r (same cycle as rect doors);  removeOpening(id) as before
+```
+* **Rules** (evaluated on the mixed derive, texts as for rect walls): thickness 7–20 cm (draft 30); ≥ 30 cm long; not
+  crossing a locked (exterior / safe-room) wall — its centre line may not pass through one, ends inside a join are fine;
+  inside the house in a fixed plan (centre-line samples not in the outdoor face); not on top of / along another wall (> 50 %
+  of the middle of its strip covered; > 90 %: "There is already a wall here."); not through, ending on or < 10 cm beside a
+  door / window of another wall; not inside the safe room; no space narrower than 60 cm (every changed room shrunk by 30 cm
+  with the polygon kernel: nothing left, or more pieces than the room had before → refused); the openings' own checks (10 cm
+  jamb on the SHORTER face after mitres / joins, no overlap, ≥ 10 cm between openings of one wall). A move also refuses a
+  sweep across another wall, a slide off the wall an end sits on, and locked walls that would have to follow.
+  Openings in slants: windows only in exterior slants, passages only in interior ones; a new door hinges on the jamb nearer
+  the end of the free stretch it sits in and swings into the smaller room; exterior → `'permit'` (+ REASONS.permit) in a
+  fixed plan; a slant classed mamad → REASONS.mamad.
+* **Rect walls on a level with slants** are added / removed / moved / resized with their own rules (the A1 refusal is gone).
+  Their grid sees the slants (cells touching a footprint or a slant opening's gap are not free; outdoors from the polygon
+  faces); a rect end running into a slant is fitted to the last 5 cm position before its face (the joint fill closes the
+  rest) — when drawn, extended (≤ 15 cm) or moved; it may cross an unlocked slant, never a locked one or a slant's opening;
+  the 60 cm rule uses the polygon test. A slant whose end sits on a moved rect does not follow it (the move is refused if it
+  would open a gap that leaves a narrow space).
+* **State / diff.** Slants are installed with the level (L0: `PLAN.slants`, lazy `schema`; upper levels: `levels[i].slants`);
+  the last one removed → the schema-1 bytes again. `planDiff()` entries keep their shapes; `slant-changed` gains
+  `change: 'moved' | 'resized' | 'rotated' | 'changed'` (text "Moved the … N cm", "Turned the … by N°", "Changed the …");
+  an opening in a slant that travelled with its wall is not listed as moved (only its displacement along the wall counts).
+  A rect wall turned into a slant (or back) reads as wall-removed + slant-added (resp. slant-removed + wall-added).
+* **For stage A3 (2D tools):** draw with `canAddWall({ …, angled: true })` per pointer move (`slant`, `poly` for the
+  preview; snap the angle / length yourself, the engine joins ends); segment handles: the body → `moveWallSegment(id,
+  delta)` with delta = (pointer − press) · n of the segment (`seg.x1…y2` give u, n); each end → `rotateWallEnd(id, 'a' |
+  'b', point)` (hold a modifier for along-the-wall only = `resizeWallSegment(id, { start | end })`); a rect end dragged
+  off-axis with the angle tool → `rotateWallEnd(rectId, 'a' | 'b', { x, y, angled: true })`. Openings: `canAddOpening({
+  kind, x, y })` for the ghost (`quad`), drag along → `updateOpening(id, { x, y })` (clamped) or `{ at }` (exact, typed);
+  aligned dimensions from `seg.x1…y2`, `seg.faces`, `o.at` / `o.width`. Use transient calls inside `store.begin()` …
+  `commit()` for drags.
+* Limits: a corner where 3+ slants meet does not move with one of them; rect moves do not drag slant ends along; openings
+  across a junction or in a joint fill are not supported (§ 5 of the design).
+* Tests: `node tests/slants-edit.test.mjs` (Wedge, House 98 + slants, upper level, refusals, joins, openings, draft, a
+  300-operation randomized run, collaboration with real stores, timings: every operation ≈ 2–5 ms on the Wedge and House
+  98 + 2 slants; the orthogonal House 98 wall move ≈ 3.5 ms before and after).
 
 ### Notes for the view / UI teams
 * New opening kind `'opening'` (style `'open'`): draw it as a clear gap with jambs — no leaf, no swing arc; it is
