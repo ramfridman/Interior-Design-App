@@ -11,7 +11,7 @@
  *                 plausible the result is: door swings 70–100 cm, a wall pen paired at 7–40 cm, a building size of
  *                 3–100 m. A best guess, marked as such.
  */
-import { PT_CM, arcsOf, penStats, segmentsOf, clusters, wMedian, DEG } from './prep.js';
+import { PT_CM, arcsOf, penStats, segmentsOf, clusters, DEG } from './prep.js';
 import { scoreWallPens, pickWallPens } from './walls.js';
 
 export const STANDARD_SCALES = [1, 2, 5, 10, 20, 25, 50, 75, 100, 125, 150, 200, 250, 300, 500, 1000];
@@ -86,6 +86,11 @@ function fromDimensions(prims) {
   }
   const cl = clusters(ratios, 0.02).filter((c) => c.n >= 3);
   if (!cl.length) return [];
+  // the same numbers read as cm or as mm give two equally consistent clusters: the one whose scale makes the wall
+  // lines a plausible wall thickness wins a tie
+  const pre = penStats(segmentsOf(prims));
+  for (const c of cl) { const best = pickWallPens(scoreWallPens(prims, c.v, {}, pre))[0]; c.pl = best ? best.score : 0; }
+  cl.sort((a, b) => (Math.abs(a.n - b.n) <= 1 ? b.pl - a.pl : b.n - a.n));
   const tot = ratios.length / 2 || 1;
   return cl.slice(0, 2).map((c) => {
     const S = c.v / PT_CM;
@@ -100,7 +105,7 @@ function fromGeometry(prims) {
   const pre = penStats(segmentsOf(prims));
   const arcs = arcsOf(prims).filter((a) => Math.abs(a.sweep) >= 70 && Math.abs(a.sweep) <= 110 && a.r > 0);
   const radii = clusters(arcs.map((a) => ({ v: a.r, w: 1 })), 0.04);
-  const out = [];
+  const out = [], geoCache = new Map();
   for (const S of [...STANDARD_SCALES, ...IMPERIAL_SCALES]) {
     const k = S * PT_CM;
     const scored = scoreWallPens(prims, k, {}, pre);
@@ -113,11 +118,12 @@ function fromGeometry(prims) {
     for (const c of radii) { const cm = c.v * k; if (cm >= 60 && cm <= 125 && c.n > doorN) { doorN = c.n; doorW = cm; } }
     const doorScore = doorN >= 2 ? (doorW >= 70 && doorW <= 105 ? 1 : 0.7) : doorN === 1 ? 0.6 : 0.35;
     // building extent of the wall pen
-    const ext = wallExtent(prims, wall.pen) * k;
+    const geo = penGeometry(prims, wall.pen, geoCache);
+    const ext = geo.extent * k;
     const extScore = ext >= 300 && ext <= 10000 ? 1 : 0.2;
     // module test: at the right scale the wall edges sit on a building module (5 cm, or 1 inch for imperial scales)
     const module = IMPERIAL_SCALES.includes(S) ? 2.54 : 5;
-    const grid = moduleFit(prims, wall.pen, k, module);
+    const grid = moduleFit(geo, k, module);
     const score = wall.score * tOk * doorScore * extScore * (0.1 + grid);
     out.push({ S, score, ev: { moduleFit: +grid.toFixed(2), module, wallPen: wall.pen, wallThickness: wall.thickness && +wall.thickness.toFixed(1), doors: doorN, doorWidth: +doorW.toFixed(1), extent: Math.round(ext) } });
   }
@@ -130,15 +136,26 @@ function fromGeometry(prims) {
   });
 }
 
-/** Share of the wall pen's distinct edge coordinates (relative to the first) lying on the module, above chance. */
-function moduleFit(prims, pen, k, module) {
+/** Axis-aligned edge coordinates and extent of one pen (page units), computed once per pen. */
+function penGeometry(prims, pen, cache) {
+  if (cache.has(pen)) return cache.get(pen);
   const xs = [], ys = [];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const s of segmentsOf(prims)) {
-    if (s.pen !== pen || s.curved) continue;
-    if (Math.abs(s.y2 - s.y1) < 1e-3 * s.len + 1e-6) ys.push(s.y1 * k); else if (Math.abs(s.x2 - s.x1) < 1e-3 * s.len + 1e-6) xs.push(s.x1 * k);
+    if (s.pen !== pen) continue;
+    x0 = Math.min(x0, s.x1, s.x2); x1 = Math.max(x1, s.x1, s.x2); y0 = Math.min(y0, s.y1, s.y2); y1 = Math.max(y1, s.y1, s.y2);
+    if (s.curved) continue;
+    if (Math.abs(s.y2 - s.y1) < 1e-3 * s.len + 1e-6) ys.push(s.y1); else if (Math.abs(s.x2 - s.x1) < 1e-3 * s.len + 1e-6) xs.push(s.x1);
   }
+  const g = { xs: xs.sort((a, b) => a - b), ys: ys.sort((a, b) => a - b), extent: Number.isFinite(x0) ? Math.max(x1 - x0, y1 - y0) : 0 };
+  cache.set(pen, g);
+  return g;
+}
+
+/** Share of a pen's consecutive edge spacings that land on the building module at this scale, above chance. */
+function moduleFit(geo, k, module) {
   const fit = (vals) => {
-    const u = []; vals.sort((a, b) => a - b).forEach((v) => { if (!u.length || v - u[u.length - 1] > 0.3) u.push(v); });
+    const u = []; for (const v0 of vals) { const v = v0 * k; if (!u.length || v - u[u.length - 1] > 0.3) u.push(v); }
     if (u.length < 4) return null;
     // consecutive spacings (wall thicknesses, room sizes) — independent of where each drawing on the sheet starts
     const tol = module * 0.1;
@@ -150,17 +167,10 @@ function moduleFit(prims, pen, k, module) {
     }
     return n ? { f: on / n, n } : null;
   };
-  const a = fit(xs), b = fit(ys);
-  const parts = [a, b].filter(Boolean);
+  const parts = [fit(geo.xs), fit(geo.ys)].filter(Boolean);
   if (!parts.length) return 0.5;
   const f = parts.reduce((t, p) => t + p.f * p.n, 0) / parts.reduce((t, p) => t + p.n, 0);
   return Math.max(0, (f - 0.2) / 0.8);
-}
-
-function wallExtent(prims, pen) {
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const s of segmentsOf(prims)) if (s.pen === pen) { x0 = Math.min(x0, s.x1, s.x2); x1 = Math.max(x1, s.x1, s.x2); y0 = Math.min(y0, s.y1, s.y2); y1 = Math.max(y1, s.y1, s.y2); }
-  return Number.isFinite(x0) ? Math.max(x1 - x0, y1 - y0) : 0;
 }
 
 /**
@@ -185,4 +195,3 @@ export function detectScale(prims, opts = {}) {
   return { best: cands[0] || null, candidates: cands };
 }
 
-export { wMedian };

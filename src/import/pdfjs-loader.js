@@ -3,8 +3,8 @@
  * initial load is unaffected. Works in browsers (worker served from our own origin) and in Node (tests:
  * pdf.js then runs its "fake worker" in-process; rendering to a canvas is browser-only).
  */
-const PDFJS_URL = new URL('../../vendor/pdfjs/pdf.min.mjs', import.meta.url);
-const WORKER_URL = new URL('../../vendor/pdfjs/pdf.worker.min.mjs', import.meta.url);
+const PDFJS_URL = new URL('../../vendor/pdfjs/pdf.min.js', import.meta.url);
+const WORKER_URL = new URL('../../vendor/pdfjs/pdf.worker.min.js', import.meta.url);
 
 let loading = null;
 const isNode = typeof process !== 'undefined' && !!process.versions?.node && typeof window === 'undefined';
@@ -21,7 +21,7 @@ function installNodeShims() {
   }
 }
 
-/** @returns {Promise<typeof import('../../vendor/pdfjs/pdf.min.mjs')>} */
+/** @returns {Promise<typeof import('../../vendor/pdfjs/pdf.min.js')>} */
 export function loadPdfjs() {
   if (!loading) loading = (async () => {
     let restore = null;

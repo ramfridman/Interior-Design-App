@@ -25,8 +25,12 @@ export function penKey(p) {
   return `${lw}|${p.color}|${p.dash && p.dash.length && p.dash.some((d) => d > 0) ? 'dash' : 'solid'}`;
 }
 
+// per-primitives caches (the same page is analysed by several detectors; the data is never mutated)
+const segCache = new WeakMap(), arcCache = new WeakMap();
+
 /** All straight stroked segments: { x1, y1, x2, y2, len, ang (0..180 deg), pen, lw, path, curved }. */
 export function segmentsOf(prims) {
+  if (segCache.has(prims)) return segCache.get(prims);
   const out = [];
   prims.paths.forEach((p, pi) => {
     if (!p.stroke) return;
@@ -39,6 +43,7 @@ export function segmentsOf(prims) {
       out.push({ x1, y1, x2, y2, len, ang, pen, lw: p.lw, path: pi, curved: p.curved });
     }
   });
+  segCache.set(prims, out);
   return out;
 }
 
@@ -177,6 +182,15 @@ export function fitArc(pts) {
  * Each arc keeps its points (`pts`).
  */
 export function arcsOf(prims, { excludePens = new Set(), joinGap = 2.5, maxPiece = 6 } = {}) {
+  const key = joinGap + '|' + maxPiece;
+  let c = arcCache.get(prims);
+  if (!c) arcCache.set(prims, c = new Map());
+  if (!c.has(key)) c.set(key, allArcs(prims, joinGap, maxPiece));
+  return c.get(key).filter((a) => !excludePens.has(a.pen));
+}
+
+function allArcs(prims, joinGap, maxPiece) {
+  const excludePens = new Set();
   const arcs = [];
   const tryFit = (pts, extra) => {
     const f = fitArc(pts);

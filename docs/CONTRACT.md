@@ -944,3 +944,104 @@ Duplicate, Export project file, Import project file…, Delete project…). Stru
 house as built…"; fixed own plan → "Back to drafting…"). An empty plan shows a "Draw walls" hint. House-98-only features
 (reset to the architect's layout, Carpentry "Start from the architect's layout") are shown only when `isBuiltinBase()`.
 Regulations skip with "Not checked: …" findings when a project lacks the data (setbacks, parking, written room areas, a draft plan).
+
+## 11. Sketch import engine (`src/import/`) — pure logic (no DOM except page rendering; runs in a browser, a worker or Node)
+
+Reads a 2D sketch (vector PDF page, or a raster image) and proposes walls and openings in exactly the `PLAN` schema,
+ready for `buildPlan` (§ 10). Nothing is drawing-specific: line weights, page size and scale are found per drawing.
+pdf.js (vendor/pdfjs/, see its README) is imported lazily on the first read, so the app's initial load is unchanged.
+
+```js
+import { importPdfSketch, analysePrims, readPdf, renderPdfPage, detectScale, scaleFromPoints, detectWalls,
+         detectOpenings, normalise, readImage, scaleFromImagePoints } from './import/index.js';
+const prims = await readPdf(bytes, { page: 1 });          // async: pdf.js (worker from our origin, no eval)
+const result = analysePrims(prims, { scale, walls, openings, rotate, mirror });   // sync, plain data in/out → run it in a worker
+// or both at once: await importPdfSketch(bytes, { page, scale, walls, rotate, mirror })
+```
+
+**`readPdf(bytes, { page })`** → `{ pageCount, page, pageBox: { w, h }, rotate, units: 'pt', paths, texts, images }`.
+Page units = PDF points, origin top-left of the displayed page, +y down (= pixels of the page rendered at scale 1).
+`paths[i] = { pts: [x0, y0, x1, y1, …] (Béziers flattened, 12 steps), closed, stroke, fill, evenOdd, lw (page units, 0 =
+hairline), color, fillColor ('#rrggbb'), dash [], curved, sub, group }`; `texts[i] = { str, x, y (baseline), w, h, angle,
+dir }`; `images = [{ x, y, w, h }]`. Many CAD PDFs (both reference drawings) draw their text as strokes: `texts` is then
+empty. **`renderPdfPage(bytes, { page, pxPerUnit, canvas?, bitmap? })`** (browser) → `{ canvas, bitmap?, pxPerUnit,
+width, height }` — the tracing underlay; place it with `result.transform` (below) scaled by `1 / pxPerUnit`.
+
+**`detectScale(prims, override?)`** → `{ best, candidates: [{ cmPerUnit, ratio (S of 1:S) | null, label, source,
+confidence, evidence }] }`. Sources: `user` (override `{ cmPerUnit }`, `{ ratio }` or `{ points: [[x, y], [x, y]], cm }`;
+also `scaleFromPoints(p1, p2, cm)`), `text` (a stated scale "1:100", "SCALE 1/50", "M 1:50", 'קנ"מ 1:50'), `dimensions`
+(numbers written along thin lines: value ÷ line length, read as cm / m / mm, clustered; ≥ 3 agreeing), `geometry`
+(no usable text: every standard metric and imperial scale is scored by plausibility — a wall pen paired at 7–40 cm, door
+swings of 60–125 cm, a building of 3–100 m, wall edges on a 5 cm / 1 inch module; confidence ≤ 0.7 and the result
+carries a `scale-guessed` warning). `text` / `dimensions` assume the PDF is at true paper size; a "fit to page" print
+needs the two-point override.
+
+**`detectWalls(prims, scale, options)`** — options `{ snap: 5, minThickness: 7, maxThickness: 40, maxOpening: 400,
+fill: 'auto' | 'parity' | 'pairs', pens: [penKey…], angle, drawing: 0 }`. Wall pens are scored (thick, orthogonal in both
+directions, paired with a parallel line of the same pen at a wall thickness; hatch-like one-direction pens score 0;
+filled narrow rectilinear polygons count as solid walls); the drawing is deskewed to the walls' orientation; outlines
+are merged, a compressed grid is filled by even–odd parity along rows AND columns (both must agree), or — when outlines
+are not closed (> 25 % ambiguous; always for raster) — by the bands between parallel wall lines plus corner / junction
+squares; cells are sampled onto the snap grid (relative to the drawing's NW corner) and cut into rectangles
+**scanline-greedy** (top-most then left-most free cell, extend right, then down — the convention of the hand
+extraction: a wall reached first keeps its junction). Pieces thicker than `maxThickness × 1.25` are left out with a
+`not-a-wall` warning; non-orthogonal / curved wall-pen lines are reported in `unsupported` with `angled-wall` /
+`curved-wall` warnings (never bent or silently dropped). Several separate drawings on one sheet are found
+(`drawings`, `several-drawings` warning) and the largest is used unless `drawing` picks another; isolated pieces away
+from the building are dropped (`stray-walls`). Exterior: the outside is flood-filled with every evidenced opening gap
+closed; a wall whose long side faces it (≥ 20 % or ≥ 40 cm) is exterior, a piece touching it only with its end is
+exterior only if it is as thick as the exterior walls. Returns `{ walls (drawing-frame cm), gaps, frame: { matrix
+(page → frame cm), angle, cmPerUnit, origin, snap }, pens, fills, unsupported, rejected, drawings, drawing, warnings,
+stats, confidence }`.
+
+**`detectOpenings(prims, walls, scale)`** → `{ openings, warnings, stats }`. Gaps: from the free end of a wall run the
+wall's band stays empty 25–400 cm and is then closed by another wall, with free space on both faces. `door` = a swing
+arc (curved path, polyline, or a hand-dashed arc chained from pieces) of radius 0.7–1.15 × the gap, centred on a jamb
+→ `hinge` (that jamb), `swing` (side of the arc); a second arc on the other face → `innerDoor`; two half-width arcs →
+`leaves: 2`. `window` = ≥ 2 thin lines along the wall spanning ≥ 70 % of the gap (1 line if the gap is framed by
+collinear walls); `sliding-door` = the same in a gap ≥ 200 cm (a convention, confidence 0.5); `opening` (`style
+'open'`) = an empty gap framed by collinear walls of the same thickness, ≤ 250 cm, confidence 0.35. Defaults are listed
+in `assumed`: doors 210 high (style `entry` ≥ 100 cm / `service` exterior, `interior`), windows 120 high, sill 90
+(style `tilt` ≤ 90 cm, else `sliding`). Each opening has `confidence` and `evidence`.
+
+**`normalise({ walls, openings, scale, pageBox }, { rotate: 0 | 90 | 180 | 270 (clockwise), mirror: false | 'ns' | 'ew' })`**
+→ `{ walls: [{ id 'wNN', x, y, w, h, kind 'exterior' | 'interior' }], openings: [PLAN opening shape + confidence],
+scale, pageBox, transform, rotate, mirror, drawings, drawing, warnings: [{ code, text, where }], unsupported, stats,
+confidence: { scale, walls, openings, overall } }` — plan cm, origin at the house's outer NW corner, +y south; the
+mirror is applied before the rotation; after either, rectangles are re-cut top-down and exterior / interior
+re-derived. `transform = [a, b, c, d, e, f]`: page units → plan cm (`X = a·x + c·y + e`, `Y = b·x + d·y + f`).
+`where` boxes are in plan cm. `analysePrims` adds `scaleCandidates`, `page`, `pageCount` and `no-scale` /
+`scale-guessed` / `raster-page` warnings.
+
+**`readImage(image, { cmPerPx? | points + cm, deskew = true, propose = true, threshold?, walls?, rotate?, mirror? })`**
+(raster: PNG / JPG / a scanned page rendered to pixels; `image` = ImageData-like `{ width, height, data }` or
+`{ width, height, gray }`) → `{ threshold (Otsu; coloured pixels never count as ink), deskew: { angle (drawing's tilt,
+clockwise °), confidence }, scale, strokes: { thin, thick } px, prims (vector-like strokes of the deskewed image),
+toImage, proposal, warnings }`. `proposal` (only with a scale; `scaleFromImagePoints(p1, p2, cm)`) is a `normalise`
+result with `lowConfidence: true`, wall confidence ≤ 0.4, opening confidence ≤ 0.3, and `imageTransform` (image px →
+plan cm). Strokes come from run-length analysis (centre line of each horizontal / vertical ink run, width = run
+thickness; ≥ the minimum wall thickness at that scale → a solid wall), then the vector engine runs with pair filling.
+
+**What is exact and what is not.**
+* Exact: vector PDFs with orthogonal walls drawn as closed outlines (or solid fills) at a known scale. Measured on the
+  owner's drawings (tests/import.test.mjs): lot-98 site plan → 53 rectangles for plan.js's 55, every plan wall within
+  5 cm, wall area identical (144 050 cm², symmetric difference 0), 52 rectangles identical; the 3 others are one
+  straight run (x 340, y 890–1380) that plan.js splits by meaning (partition / safe-room shell / exterior) — the
+  drawing does not distinguish them. All 23 openings found with the right kind, every door's hinge and swing right, the
+  safe-room door's dashed inner leaf found as `innerDoor`, no extra openings. Lot-99 dimension sheet (two drawings on the
+  sheet; mirror `'ns'`): the same for both drawings; the dimension plan's living-room north window is 5 cm further west
+  than on the lot-98 sheet (plan.js notes this; the lot-98 sheet wins).
+* Not inferable from drawing geometry: `kind: 'mamad'` (the safe-room walls are hatched like every other wall; they
+  come out exterior / interior), window heights / sills, sliding vs. hinged door styles beyond the stated conventions,
+  room names. One hand-labelled piece (lot 98 `w52`, a 10 cm stub in the south wall) differs in exterior / interior.
+* Scale: the reference PDFs carry no text objects (all text is stroked), so their 1:100 comes from geometry (confidence
+  0.48, flagged); the UI should ask the user to confirm or measure a known distance.
+* Openings drawn over continuous wall lines (no gap in the outline) cannot be found. Doors without swing arcs come out
+  as passages. Angled / curved walls are reported, not converted. One floor per page; several floors on one sheet are
+  separate `drawings` (pick one). Furniture or fixtures drawn with the wall pen and closed can be mistaken for walls when
+  ≤ 50 cm thick; thicker ones are rejected with a warning.
+* Raster is a proposal, never exact: on House 98 rendered at 150 dpi (scale from two picked points) 75 % of the wall
+  area is found, 99.7 % of what is found lies within 5 cm of a real wall, but only 11 / 55 rectangles are identical;
+  openings are rarely right (no arcs in raster). Deskew estimate on a 3° tilted page: 3.0°.
+* Cost (Node, lot 98, 51 k paths): readPdf ≈ 0.7 s, scale ≈ 1 s (geometry path), walls + openings ≈ 0.2 s;
+  `analysePrims` is synchronous plain-data work — run it in a worker.

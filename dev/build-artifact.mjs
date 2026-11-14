@@ -53,6 +53,8 @@ for (const dir of ['vendor/pdf', 'vendor/fonts']) {
   if (!exists(dir)) continue;
   for (const f of walk(dir)) if (/\.(js|mjs|ttf|otf|woff2?)$/i.test(f)) seen.add(f);
 }
+// pdf.js for the sketch importer (loaded lazily through a computed URL): the library, its worker and licence only.
+for (const f of ['vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js']) if (exists(f)) seen.add(f);
 
 // index.html → page fragment
 const html = read('index.html');

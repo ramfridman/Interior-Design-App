@@ -41,6 +41,7 @@ function crawl(file) {
 walk('src').filter((f) => f.endsWith('.js')).forEach(crawl);            // every app module (some load through computed imports)
 for (const f of walk('src/styles')) if (f.endsWith('.css')) files.add(f);
 for (const dir of ['vendor/pdf', 'vendor/fonts']) if (exists(dir)) for (const f of walk(dir)) if (/\.(js|mjs|ttf|otf|woff2?)$/i.test(f)) files.add(f);
+for (const f of ['vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js', 'vendor/pdfjs/LICENSE.txt']) if (exists(f)) files.add(f); // sketch importer (lazy)
 
 /* ───────── index.html ───────── */
 let html = read('index.html');

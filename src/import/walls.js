@@ -136,11 +136,8 @@ export function detectWalls(prims, scale, options = {}) {
   const nx = xs.length - 1, ny = ys.length - 1;
   if (nx < 1 || ny < 1) return { walls: [], frame: { matrix: toFrame, angle, cmPerUnit: k }, pens, fills, unsupported: pieces, warnings, stats: {}, confidence: 0 };
   const ix = (v) => nearestIdx(xs, v), iy = (v) => nearestIdx(ys, v);
-  // toggles
-  const rowT = new Uint8Array(nx * ny + ny), colT = new Uint8Array(nx * ny + nx);
-  // rowT[j*(nx+1)+i]: vertical line at xs[i] crossing row j
+  // RT[j*(nx+1)+i]: vertical line at xs[i] crossing row j; CT[i*(ny+1)+j]: horizontal line at ys[j] crossing column i
   const RT = new Uint8Array((nx + 1) * ny), CT = new Uint8Array((ny + 1) * nx);
-  void rowT; void colT;
   for (const s of mV) { const i = ix(s.k), j0 = iy(s.a), j1 = iy(s.b); for (let j = j0; j < j1; j++) RT[j * (nx + 1) + i] ^= 1; }
   for (const s of mH) { const j = iy(s.k), i0 = ix(s.a), i1 = ix(s.b); for (let i = i0; i < i1; i++) CT[i * (ny + 1) + j] ^= 1; }
   const solid = new Uint8Array(nx * ny);
@@ -154,6 +151,19 @@ export function detectWalls(prims, scale, options = {}) {
       const h = hp[j * nx + i];
       if (h && p) solid[j * nx + i] = 1; else if (h !== p) disagree += (xs[i + 1] - xs[i]) * (ys[j + 1] - ys[j]);
     }
+  }
+  // parallel line pairs: the band between two wall lines at a wall thickness (used when the outlines are not
+  // closed — raster tracings, sloppy CAD — where parity cannot be trusted)
+  let solidArea = 0;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) if (solid[j * nx + i]) solidArea += (xs[i + 1] - xs[i]) * (ys[j + 1] - ys[j]);
+  const fillMode = o.fill === 'pairs' || o.fill === 'parity' ? o.fill : (disagree > 0.25 * solidArea ? 'pairs' : 'parity');
+  if (fillMode === 'pairs') {
+    solid.fill(0);
+    for (const r of pairRects(mH, mV, o.minThickness, o.maxThickness, o.mergeTol)) {
+      const i0 = ix(r.x0), i1 = ix(r.x1), j0 = iy(r.y0), j1 = iy(r.y1);
+      for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) solid[j * nx + i] = 1;
+    }
+    warnings.push({ code: 'pair-fill', text: 'Wall outlines are not closed; walls were filled between parallel wall lines instead (check corners and junctions).', where: null });
   }
   // filled wall polygons
   for (const f of fills) for (const poly of f.polys) {
@@ -197,7 +207,7 @@ export function detectWalls(prims, scale, options = {}) {
     }
     walls.push({ x: r.x0, y: r.y0, w, h, o: r.o });
   }
-  if (disagree > 0) {
+  if (disagree > 0 && fillMode === 'parity') {
     const area = walls.reduce((t, w) => t + w.w * w.h, 0);
     if (disagree > 0.02 * area) warnings.push({ code: 'open-outline', text: `Some wall outlines are not closed (${Math.round(disagree / 1e4 * 10) / 10} m² ambiguous); those parts were left out.`, where: null });
   }
@@ -205,12 +215,14 @@ export function detectWalls(prims, scale, options = {}) {
   // ---- several drawings on one sheet (plan + site plan, two variants…): group walls, keep one ----
   const drawings = groupDrawings(walls, o.maxOpening);
   let chosen = 0;
-  if (drawings.length > 1 && !o.clip) {
+  const strays = drawings.length === 1 && drawings[0].walls.length < walls.length;
+  if ((drawings.length > 1 || strays) && !o.clip) {
     // re-run on the chosen drawing alone, so its grid snapping starts at its own corner
     chosen = Math.min(drawings.length - 1, Math.max(0, o.drawing ?? 0));
     const b = drawings[chosen].bbox, m = 60;
     const res = detectWalls(prims, scale, { ...options, angle, clip: { x: b.x - m, y: b.y - m, w: b.w + 2 * m, h: b.h + 2 * m } });
-    res.warnings.unshift({ code: 'several-drawings', text: `The sheet holds ${drawings.length} separate wall drawings; drawing ${chosen + 1} (${drawings[chosen].walls.length} walls, the ${chosen ? 'number ' + (chosen + 1) + ' by' : 'largest by'} wall area) was used. Choose another with the "drawing" option.`, where: { ...b, frame: 'drawing-cm' } });
+    if (strays) res.warnings.unshift({ code: 'stray-walls', text: `${walls.length - drawings[0].walls.length} isolated wall-like piece(s) away from the building were left out.`, where: null });
+    else res.warnings.unshift({ code: 'several-drawings', text: `The sheet holds ${drawings.length} separate wall drawings; drawing ${chosen + 1} (${drawings[chosen].walls.length} walls, the ${chosen ? 'number ' + (chosen + 1) + ' by' : 'largest by'} wall area) was used. Choose another with the "drawing" option.`, where: { ...b, frame: 'drawing-cm' } });
     res.drawings = drawings.map((d, i) => ({ index: i, bbox: d.bbox, walls: d.walls.length, area: Math.round(d.area) }));
     res.drawing = chosen;
     return res;
@@ -227,7 +239,6 @@ export function detectWalls(prims, scale, options = {}) {
   walls.sort((a, b) => a.y - b.y || a.x - b.x);
   walls.forEach((w, i) => { w.id = 'w' + String(i + 1).padStart(2, '0'); });
 
-  void mergeRects;
   const conf = pens.length ? Math.min(1, pens[0].pairFrac + 0.1) * (disagree > 0 ? 0.9 : 1) * (pieces.length ? 0.9 : 1) : 0.6;
   return {
     walls, gaps, frame: { matrix: toFrame, angle, cmPerUnit: k, origin: [ox, oy], snap: o.snap },
@@ -239,6 +250,54 @@ export function detectWalls(prims, scale, options = {}) {
     confidence: +conf.toFixed(2),
     options: o,
   };
+}
+
+/**
+ * Bands between parallel wall lines at a plausible thickness, plus the squares that complete corners and the
+ * junction gaps of a through wall. Rectangles { x0, x1, y0, y1 } in the drawing frame (cm).
+ */
+export function pairRects(H, V, minT, maxT, tol = 0.6) {
+  const bands = (list, horiz) => {
+    const out = [];
+    const L = list.slice().sort((a, b) => a.k - b.k);
+    for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
+      const s = L[i], t = L[j], d = t.k - s.k;
+      if (d < minT * 0.9) continue;
+      if (d > maxT * 1.1) break;
+      const a = Math.max(s.a, t.a), b = Math.min(s.b, t.b);
+      if (b - a <= tol) continue;
+      let between = false;
+      for (let m = i + 1; m < j && !between; m++) { const u = L[m]; if (u.k - s.k > tol && t.k - u.k > tol && Math.min(u.b, b) - Math.max(u.a, a) > 0.5 * (b - a)) between = true; }
+      if (between) continue;
+      out.push(horiz ? { x0: a, x1: b, y0: s.k, y1: t.k, o: 'h' } : { x0: s.k, x1: t.k, y0: a, y1: b, o: 'v' });
+    }
+    return out;
+  };
+  const hb = bands(H, true), vb = bands(V, false);
+  const extra = [];
+  const near = (p, q) => Math.abs(p - q) <= tol;
+  for (const h of hb) for (const v of vb) {
+    const xt = near(h.x0, v.x1) || near(h.x1, v.x0), yt = near(v.y0, h.y1) || near(v.y1, h.y0);
+    if (xt && yt) extra.push({ x0: v.x0, x1: v.x1, y0: h.y0, y1: h.y1 });
+  }
+  const gaps = (list, perp, horiz) => {
+    for (let i = 0; i < list.length; i++) for (let j = 0; j < list.length; j++) {
+      const p = list[i], q = list[j];
+      if (horiz) {
+        if (!near(p.y0, q.y0) || !near(p.y1, q.y1)) continue;
+        const g = q.x0 - p.x1;
+        if (g <= tol || g > maxT * 1.1) continue;
+        if (perp.some((v) => v.x0 < q.x0 + tol && v.x1 > p.x1 - tol && (near(v.y1, p.y0) || near(v.y0, p.y1) || (v.y0 < p.y1 && v.y1 > p.y0)))) extra.push({ x0: p.x1, x1: q.x0, y0: p.y0, y1: p.y1 });
+      } else {
+        if (!near(p.x0, q.x0) || !near(p.x1, q.x1)) continue;
+        const g = q.y0 - p.y1;
+        if (g <= tol || g > maxT * 1.1) continue;
+        if (perp.some((h) => h.y0 < q.y0 + tol && h.y1 > p.y1 - tol && (near(h.x1, p.x0) || near(h.x0, p.x1) || (h.x0 < p.x1 && h.x1 > p.x0)))) extra.push({ x0: p.x0, x1: p.x1, y0: p.y1, y1: q.y0 });
+      }
+    }
+  };
+  gaps(hb, vb, true); gaps(vb, hb, false);
+  return [...hb, ...vb, ...extra];
 }
 
 const inBox = (r, b, m) => r.x + r.w >= b.x - m && r.x <= b.x + b.w + m && r.y + r.h >= b.y - m && r.y <= b.y + b.h + m;
@@ -364,23 +423,5 @@ function inPoly(pts, x, y) {
   return inside;
 }
 
-/** Merge rectangles with the same orientation that together form a rectangle (repeat until stable). */
-function mergeRects(rs) {
-  let changed = true;
-  while (changed) {
-    changed = false;
-    outer: for (let a = 0; a < rs.length; a++) for (let b = a + 1; b < rs.length; b++) {
-      const p = rs[a], q = rs[b];
-      if (p.o !== q.o) continue;
-      if (p.y0 === q.y0 && p.y1 === q.y1 && (p.x1 === q.x0 || q.x1 === p.x0)) {
-        rs[a] = { ...p, x0: Math.min(p.x0, q.x0), x1: Math.max(p.x1, q.x1) }; rs.splice(b, 1); changed = true; break outer;
-      }
-      if (p.x0 === q.x0 && p.x1 === q.x1 && (p.y1 === q.y0 || q.y1 === p.y0)) {
-        rs[a] = { ...p, y0: Math.min(p.y0, q.y0), y1: Math.max(p.y1, q.y1) }; rs.splice(b, 1); changed = true; break outer;
-      }
-    }
-  }
-  return rs;
-}
 
 export { penKey };

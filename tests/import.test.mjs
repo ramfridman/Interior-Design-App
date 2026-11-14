@@ -29,7 +29,10 @@ function compareWalls(found, plan, tol = 5) {
   const within = plan.filter((p) => exact.includes(p) || covered.includes(p));
   let sym = 0; for (const k of fu) if (!pu.has(k)) sym++; for (const k of pu) if (!fu.has(k)) sym++;
   const area = (a) => a.reduce((t, w) => t + w.w * w.h, 0);
-  return { found: found.length, plan: plan.length, exact: exact.length, within: within.length, missing: plan.filter((p) => !within.includes(p)),
+  let inter = 0; for (const k of fu) if (pu.has(k)) inter++;
+  let near5 = 0; for (const k of fu) if (puGrown.has(k)) near5++;
+  const recall = pu.size ? inter / pu.size : 0, precision = fu.size ? near5 / fu.size : 0;
+  return { recall, precision, found: found.length, plan: plan.length, exact: exact.length, within: within.length, missing: plan.filter((p) => !within.includes(p)),
     stickOut, areaFound: area(found), areaPlan: area(plan), symDiffCm2: sym * 25,
     extra: found.filter((f) => !plan.some((p) => key(p) === key(f))), notExact: plan.filter((p) => !exact.includes(p)) };
 }
@@ -88,11 +91,19 @@ else {
   const near = prims.paths.some((p) => p.lw > 1 && p.pts.some((v, i) => i % 2 === 0 && Math.hypot(v - px, p.pts[i + 1] - py) < 0.5));
   check(near, 'transform maps plan (0,0) onto a wall-outline vertex on the page');
 
+  // the output is accepted as is by the plan builder (src/core/plan-build.js), when present
+  if (existsSync('src/core/plan-build.js')) {
+    const { buildPlan } = await import('../src/core/plan-build.js');
+    const b = buildPlan({ walls: res.walls, openings: res.openings });
+    console.log(`  buildPlan: ok ${b.ok}, ${b.plan.walls.length} walls, ${b.plan.openings.length} openings, ${b.plan.rooms.length} rooms`);
+    check(b.ok && b.plan.openings.length === res.openings.length, 'buildPlan accepts the import (no errors, every opening kept)');
+  }
+
   // ---------- 2. the mirror-twin dimension sheet → lot 98 by mirroring north–south ----------
   const prims99 = await readPdf(readFileSync(LOT99));
   for (const drawing of [0, 1]) {
     const r99 = analysePrims(prims99, { mirror: 'ns', walls: { drawing } });
-    const { cw: c2, co: o2 } = report(`lot 99 dimension sheet, drawing ${drawing + 1} of ${r99.stats.deskew !== undefined ? 2 : '?'}, mirrored N–S`, r99, PLAN);
+    const { cw: c2, co: o2 } = report(`lot 99 dimension sheet, drawing ${drawing + 1} of ${r99.drawings.length} (${r99.drawings[drawing].bbox.x > r99.drawings[1 - drawing].bbox.x ? 'right-hand: dimension plan' : 'left-hand: site plan'}), mirrored N–S`, r99, PLAN);
     check(r99.scale.ratio === 100, 'lot 99 scale 1:100');
     check(Math.abs(c2.found - c2.plan) <= 3, `lot 99 (drawing ${drawing + 1}) wall count ${c2.found} vs ${c2.plan}`);
     check(Math.abs(c2.areaFound / c2.areaPlan - 1) <= 0.01, `lot 99 (drawing ${drawing + 1}) wall area within 1 %`);
@@ -145,6 +156,17 @@ function arcPts(cx, cy, r, a0, a1, n = 12) { const o = []; for (let i = 0; i <= 
   const door = res.openings.find((o) => o.kind === 'door'), win = res.openings.find((o) => o.kind === 'window');
   check(door && door.width === 90 && door.x === 400 && door.y === 200 && door.hinge === 'n' && door.swing === 'e', 'synthetic: door width / hinge / swing');
   check(win && win.width === 120 && win.x === 150 && win.exterior && win.outside === 'n', 'synthetic: window');
+  // scale from dimension strings (no scale text): numbers written along thin dimension lines
+  const dimPrims = { ...prims, texts: [], paths: [...prims.paths] };
+  for (const [x0, x1, y] of [[0, 800, -80], [0, 150, -50], [150, 270, -50], [270, 800, -50]]) {
+    const [ax, ay] = P(x0, y), [bx] = P(x1, y);
+    dimPrims.paths.push(pen([ax, ay, bx, ay], 0.12));
+    const str = String(x1 - x0), tw = str.length * 4;
+    dimPrims.texts.push({ str, x: (ax + bx) / 2 - tw / 2, y: ay - 1.5, w: tw, h: 6, angle: 0 });
+  }
+  const ds = detectScale(dimPrims);
+  console.log(`== synthetic dimension strings: ${ds.best.label} (${ds.best.source}, confidence ${ds.best.confidence})`);
+  check(ds.best.source === 'dimensions' && ds.best.ratio === 50, 'scale from dimension strings');
   // explicit overrides
   check(Math.abs(detectScale(prims, { cmPerUnit: 2 }).best.cmPerUnit - 2) < 1e-12, 'scale override { cmPerUnit }');
   const [ax, ay] = P(0, 0), [bx, by] = P(800, 0);
@@ -188,15 +210,18 @@ if (existsSync(LOT98)) {
   const co = compareOpenings(res.openings, PLAN.openings, 10);
   console.log(`\n== raster 150 dpi (${W} × ${H} px, ${ms} ms): scale ${img.scale.cmPerPx.toFixed(4)} cm/px (true ${truth.toFixed(4)}), deskew ${img.deskew.angle}°, strokes thin ${img.strokes.thin}px thick ${img.strokes.thick}px`);
   console.log(`walls: found ${cw.found} vs ${cw.plan}; identical ${cw.exact}; within 5 cm ${cw.within}, within 10 cm ${cw10.within}; area ${cw.areaFound} vs ${cw.areaPlan} (${((cw.areaFound / cw.areaPlan - 1) * 100).toFixed(1)} %), symmetric difference ${(cw.symDiffCm2 / 1e4).toFixed(2)} m²; bounds ${res.stats.bounds && res.stats.bounds.w} × ${res.stats.bounds && res.stats.bounds.h}`);
-  console.log(`openings (gaps) within 10 cm: ${co.rows.filter((r) => r.found).length}/24 (raster has no swing arcs: doors come out as passages / windows at best); extra ${co.extra.length}`);
+  console.log(`wall area: recall ${(cw.recall * 100).toFixed(1)} % of the plan's wall area found; precision ${(cw.precision * 100).toFixed(1)} % of the found area lies within 5 cm of a plan wall`);
+  console.log(`openings (gaps) within 10 cm: ${co.rows.filter((r) => r.found).length}/${PLAN.openings.length} (raster has no swing arcs: doors come out as passages / windows at best); extra ${co.extra.length}`);
   check(res.lowConfidence && res.confidence.walls <= 0.4, 'raster proposal is marked low confidence');
-  check(cw10.within >= 0.5 * cw.plan, `raster: at least half the walls within 10 cm (${cw10.within}/${cw.plan})`);
+  // not gated on perfection: a regression guard on what the best-effort path achieves today (see the numbers above)
+  check(cw.recall >= 0.6 && cw.precision >= 0.8, `raster: wall-area recall ≥ 60 % and precision ≥ 80 % (${(cw.recall * 100).toFixed(0)} / ${(cw.precision * 100).toFixed(0)})`);
 
   // deskew: the same page rotated by 3°
   const rot = rotateGray(gray, W, H, 3);
-  const est = readImage({ width: rot.w, height: rot.h, gray: rot.g }, { propose: false });
-  console.log(`deskew estimate for a 3° rotated page: ${est.deskew.angle}° (confidence ${est.deskew.confidence})`);
-  check(Math.abs(Math.abs(est.deskew.angle) - 3) <= 0.15, 'deskew estimate within 0.15°');
+  const est = readImage({ width: rot.w, height: rot.h, gray: rot.g }, { cmPerPx: img.scale.cmPerPx });
+  const cr = compareWalls(est.proposal.walls, PLAN.walls);
+  console.log(`page turned 3° clockwise: deskew estimate ${est.deskew.angle}° (confidence ${est.deskew.confidence}); walls after deskew: recall ${(cr.recall * 100).toFixed(1)} %, precision ${(cr.precision * 100).toFixed(1)} %`);
+  check(Math.abs(est.deskew.angle - 3) <= 0.15, 'deskew estimate within 0.15°');
 }
 
 function rasterise(prims, W, H, z) {

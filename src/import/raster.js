@@ -58,8 +58,15 @@ export function otsu(gray) {
 /** Deskew estimate (deg): maximise the sharpness of ink projection profiles over ±maxAngle. */
 export function estimateDeskew(mask, w, h, { maxAngle = 10 } = {}) {
   const pts = [];
-  const step = Math.max(1, Math.floor(Math.sqrt((w * h) / 400000)));
-  for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step) if (mask[y * w + x]) pts.push(x, y);
+  // sample ink pixels pseudo-randomly (a regular sampling grid would itself peak at 0°)
+  let ink = 0; for (let i = 0; i < w * h; i++) ink += mask[i];
+  const keep = Math.min(1, 60000 / Math.max(1, ink));
+  let seed = 12345;
+  for (let i = 0; i < w * h; i++) {
+    if (!mask[i]) continue;
+    seed = (seed * 1103515245 + 12345) >>> 0;
+    if (seed / 4294967296 < keep) pts.push(i % w, (i / w) | 0);
+  }
   const n = pts.length / 2;
   if (n < 50) return { angle: 0, confidence: 0 };
   const cx = w / 2, cy = h / 2, diag = Math.ceil(Math.hypot(w, h)) + 4;
@@ -80,8 +87,8 @@ export function estimateDeskew(mask, w, h, { maxAngle = 10 } = {}) {
   for (let a = best - 0.5; a <= best + 0.5 + 1e-9; a += 0.05) { const v = score(a); if (v > bs) { bs = v; best = a; } }
   const sorted = scores.slice().sort((p, q) => p - q), med = sorted[sorted.length >> 1];
   const angle = Math.abs(best) < 0.05 ? 0 : +best.toFixed(2);
-  // "angle" = rotation that straightens the drawing; the drawing's tilt is its negative
-  return { angle: -angle, straighten: angle, confidence: +Math.min(1, (bs / med - 1) / 2).toFixed(2) };
+  // angle = the drawing's tilt, clockwise on screen (y down), in degrees; it is undone by turning the image back
+  return { angle, straighten: angle, confidence: +Math.min(1, (bs / med - 1) / 2).toFixed(2) };
 }
 
 function rotateMask(mask, w, h, deg) {
@@ -102,47 +109,88 @@ function rotateMask(mask, w, h, deg) {
 
 /**
  * Run-length strokes → vector-like primitives (page units = px). Horizontal and vertical pieces only.
- * @param thickMinPx  bars at least this thick become filled rectangles (solid walls)
+ * For horizontal strokes every ink pixel gets the length of the vertical ink run through it (its stroke thickness);
+ * the pixels at the middle of their vertical run form the stroke's centre line. Centre pixels are chained along the
+ * row (bridging crossings of other strokes, up to `bridge` px) and split where the thickness changes; each chain
+ * becomes a line of that width — or a filled rectangle when it is at least `thickMinPx` thick (solid walls).
+ * Vertical strokes: the same with rows and columns swapped.
  */
-export function imageToPrims(mask, w, h, { minRun = 8, thickMinPx = Infinity } = {}) {
+export function imageToPrims(mask, w, h, { minRun = 8, thickMinPx = Infinity, maxStroke = 64, bridge = 4 } = {}) {
   const paths = [];
   const scan = (horiz) => {
-    const A = horiz ? h : w, B = horiz ? w : h; // A = rows (for horizontal strokes), B = along
-    let active = []; // groups: { a0, b0, b1, rows }
-    const close = (g) => {
-      const t = g.rows, k = g.a0 + t / 2, b0 = g.b0, b1 = g.b1;
-      if (b1 - b0 < minRun || b1 - b0 < 2 * t) return; // not a line along this direction
+    // thickness across the stroke direction: horizontal strokes -> vertical runs
+    const A = horiz ? h : w, B = horiz ? w : h; // A: across index, B: along index
+    const at = horiz ? (a, b) => mask[a * w + b] : (a, b) => mask[b * w + a];
+    const T = new Uint16Array(w * h), C = new Uint8Array(w * h); // thickness, is-centre
+    const id = horiz ? (a, b) => a * w + b : (a, b) => b * w + a;
+    for (let b = 0; b < B; b++) for (let a = 0; a < A;) {
+      if (!at(a, b)) { a++; continue; }
+      let e = a + 1; while (e < A && at(e, b)) e++;
+      const t = e - a;
+      for (let q = a; q < e; q++) T[id(q, b)] = t;
+      if (t <= maxStroke) C[id(a + ((t - 1) >> 1), b)] = 1;
+      a = e;
+    }
+    for (let a = 0; a < A; a++) {
+      let b = 0;
+      while (b < B) {
+        if (!C[id(a, b)]) { b++; continue; }
+        // chain centre pixels along the row, bridging short interruptions
+        const ts = [];
+        let e = b, last = b;
+        while (e < B) {
+          if (C[id(a, e)]) { ts.push(T[id(a, e)]); last = e; e++; continue; }
+          let k = e; while (k < B && k - last <= bridge && !C[id(a, k)]) k++;
+          if (k < B && k - last <= bridge && C[id(a, k)]) { e = k; continue; }
+          break;
+        }
+        emit(horiz, a, b, last + 1, ts);
+        b = last + 1;
+      }
+    }
+  };
+  const emit = (horiz, a, b0, b1, ts) => {
+    // split where the thickness changes clearly (a thin line continuing a thick one)
+    let start = 0;
+    const flush = (i0, i1) => {
+      if (i1 - i0 < minRun) return;
+      const seg = ts.slice(i0, i1).sort((p, q) => p - q), t = seg[seg.length >> 1];
+      if (i1 - i0 < 2 * t) return;
+      const k = a + 0.5, x0 = b0 + i0, x1 = b0 + i1;
       if (t >= thickMinPx) {
-        const pts = horiz ? [b0, g.a0, b1, g.a0, b1, g.a0 + t, b0, g.a0 + t, b0, g.a0] : [g.a0, b0, g.a0 + t, b0, g.a0 + t, b1, g.a0, b1, g.a0, b0];
+        const lo = a - ((t - 1) >> 1), hi = lo + t;
+        const pts = horiz ? [x0, lo, x1, lo, x1, hi, x0, hi, x0, lo] : [lo, x0, hi, x0, hi, x1, lo, x1, lo, x0];
         paths.push({ pts, closed: true, stroke: false, fill: true, evenOdd: false, lw: 0, color: '#000000', fillColor: '#000000', dash: [], curved: false });
       } else {
-        const pts = horiz ? [b0, k, b1, k] : [k, b0, k, b1];
+        const off = (t % 2 === 0) ? 0.5 : 0; // even thickness: the centre lies between two pixel rows
+        const kk = k + off;
+        const pts = horiz ? [x0, kk, x1, kk] : [kk, x0, kk, x1];
         paths.push({ pts, closed: false, stroke: true, fill: false, evenOdd: false, lw: t, color: '#000000', fillColor: '#000000', dash: [], curved: false });
       }
     };
-    for (let a = 0; a < A; a++) {
-      const runs = [];
-      for (let b = 0; b < B;) {
-        const on = horiz ? mask[a * w + b] : mask[b * w + a];
-        if (!on) { b++; continue; }
-        let e = b + 1;
-        while (e < B && (horiz ? mask[a * w + e] : mask[e * w + a])) e++;
-        if (e - b >= minRun) runs.push([b, e]);
-        b = e;
-      }
-      const next = [];
-      for (const [b0, b1] of runs) {
-        const g = active.find((q) => !q.taken && Math.abs(q.b0 - b0) <= 2 && Math.abs(q.b1 - b1) <= 2);
-        if (g) { g.taken = true; g.rows++; g.b0 = Math.min(g.b0, b0); g.b1 = Math.max(g.b1, b1); next.push(g); }
-        else next.push({ a0: a, b0, b1, rows: 1, taken: true });
-      }
-      for (const g of active) if (!g.taken) close(g);
-      active = next.map((g) => { g.taken = false; return g; });
+    let med = ts[0];
+    for (let i = 1; i <= ts.length; i++) {
+      if (i === ts.length) { flush(start, i); break; }
+      const t = ts[i];
+      if (Math.abs(t - med) > Math.max(1, 0.4 * med)) {
+        // ignore single-pixel spikes (crossings)
+        if (i + 1 < ts.length && Math.abs(ts[i + 1] - med) <= Math.max(1, 0.4 * med)) continue;
+        flush(start, i); start = i; med = t;
+      } else if (i - start < 8) med = ts.slice(start, i + 1).sort((p, q) => p - q)[(i - start + 1) >> 1];
     }
-    for (const g of active) close(g);
   };
   scan(true); scan(false);
-  // stroke widths, quantised to whole pixels so pens group (run thickness jitters by ±1 px)
+  // stroke widths jitter by ±1 px with sub-pixel position: a width next to a much more common width joins it
+  const strokes = paths.filter((p) => p.stroke);
+  const hist = new Map();
+  for (const p of strokes) hist.set(p.lw, (hist.get(p.lw) || 0) + Math.abs(p.pts[2] - p.pts[0]) + Math.abs(p.pts[3] - p.pts[1]));
+  const map = new Map();
+  for (const [t, L] of hist) {
+    let to = t;
+    for (const d of [-1, 1]) { const L2 = hist.get(t + d) || 0; if (L2 > 3 * L && L2 > (hist.get(to) || 0)) to = t + d; }
+    map.set(t, to);
+  }
+  for (const p of strokes) { p.rawWidth = p.lw; p.lw = map.get(p.lw); }
   return { pageBox: { w, h }, units: 'px', paths, texts: [], images: [] };
 }
 
@@ -169,7 +217,7 @@ export function readImage(image, opts = {}) {
   const thick = widths.length ? widths.filter((e) => e.v > thin).reduce((m, e) => (e.w > (m.w || 0) ? e : m), {}).v || thin : thin;
   let proposal = null;
   if (scale && opts.propose !== false) {
-    const walls = detectWalls(prims, { cmPerUnit: scale.cmPerPx }, { mergeTol: Math.max(0.6, 1.5 * scale.cmPerPx), ...(opts.walls || {}) });
+    const walls = detectWalls(prims, { cmPerUnit: scale.cmPerPx }, { mergeTol: Math.max(0.6, 1.5 * scale.cmPerPx), fill: 'pairs', ...(opts.walls || {}) });
     walls.confidence = Math.min(0.4, walls.confidence * 0.5);
     const openings = detectOpenings(prims, walls, { cmPerUnit: scale.cmPerPx });
     for (const o of openings.openings) o.confidence = Math.min(0.3, o.confidence * 0.4);

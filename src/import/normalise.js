@@ -112,6 +112,9 @@ export function normalise(result, { rotate = 0, mirror = false } = {}) {
   const bounds = walls.length ? { x: 0, y: 0, w: Math.max(...walls.map((w) => w.x + w.w)), h: Math.max(...walls.map((w) => w.y + w.h)) } : null;
   return {
     walls, openings, scale, pageBox: result.pageBox || null, transform, rotate, mirror: mirror || false,
+    // every separate wall drawing found on the sheet, in plan cm relative to the chosen one (for a chooser in the UI)
+    drawings: (W.drawings || []).map((d) => ({ index: d.index, walls: d.walls, area: d.area, bbox: shift(mapRect(d.bbox)) })),
+    drawing: W.drawing ?? 0,
     warnings, unsupported,
     stats: { walls: walls.length, exterior: walls.filter((w) => w.kind === 'exterior').length, wallArea: area, bounds,
       openings: openings.length, doors: openings.filter((o) => o.kind === 'door').length, windows: openings.filter((o) => o.kind === 'window').length,
