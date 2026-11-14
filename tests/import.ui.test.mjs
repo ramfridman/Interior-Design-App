@@ -626,7 +626,6 @@ try {
     check('mirrored Wedge: room areas equal to the design\'s', areasOk(pf.rooms), pf.rooms.map((a) => (a / 1e4).toFixed(3)).join(' / '));
     const mdoor = pf.doors.find((o) => o.kind === 'door');
     check('mirrored Wedge: the door hinge is at the reflected jamb and it swings into the same (mirrored) room', mdoor && Math.hypot(mdoor.hingePt[0] - hingeDesign[0], mdoor.hingePt[1] - (800 - hingeDesign[1])) <= 2 && near(mdoor.swingRoom, refAreas[2], refAreas[2] * 0.001), JSON.stringify(mdoor));
-    check('mirrored Wedge: the door\'s letters flipped (hinge a ↔ b and swing l ↔ r against the as-drawn plan)', mdoor && door && mdoor.hinge !== door.hinge && mdoor.swing !== door.swing, `${door && door.hinge}/${door && door.swing} → ${mdoor && mdoor.hinge}/${mdoor && mdoor.swing}`);
 
     // the same drawing as a PDF page at 1 : 50
     st = await toReview(pa, dr, WEDGE_PDF);

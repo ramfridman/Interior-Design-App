@@ -1827,6 +1827,35 @@ errors keep `plain` / `code`, so DXF problems show their plain message. Tested b
 option first and chosen, project walls identical to the built-in house, 23 openings, 9 rooms, the DXF underlay's ink on
 both faces of the north wall within 3 cm).
 
+**Angled and curved walls in the dialog** (stage A6b, additive; only while `FEATURES.angledWalls` is on — Settings →
+Experimental → "Angled walls (in development)", `?angled=1`). With the switch **off** nothing changes, except one plain
+line under the amber list in the Review step: "Angled walls can be imported — turn on 'Angled walls (in development)' in
+Settings → Experimental and import again." (no auto-switching).
+* **Engine call**: the analysis at the confirmed scale (`analyse` for a PDF page, `dxf-analyse` for a DXF; the worker and the
+  main-thread fallback alike, the option travels in `opts`) gets `slants: true`; the result carries `slantsOn: true`, and the
+  cache key includes the switch. The first analysis (scale candidates, drawings) is unchanged. Pictures (raster, scanned
+  PDF pages) have no angled walls to read: unchanged.
+* **Review**: `result.slants` are drawn as true angled bands in the exterior / interior wall colours (footprints from
+  `joinSlants`, mitred at junctions); `result.openings` with `axis: 'a'` are drawn turned with their wall — the gap, a door's
+  leaf(s) and quarter-circle swing (hinge jamb `a` / `b`, side `l` / `r`, `leaves: 2`, `innerDoor`), a window's two glass
+  lines, a passage's gap. Legend: "Angled walls N" (slants without `chain`, with "with M openings in them (counted above)")
+  and "Curved wall pieces N" (slants with `chain`); Doors / Windows / Passages count every opening, those in slants
+  included. The engine's info warning `curved-wall-pieces` is listed in the notes ("Curved wall drawn as N straight pieces,
+  within 2 cm …"). Still-`unsupported` pieces stay dashed amber with the explanation "… could not be turned into walls —
+  draw them by hand with the Structure tools". The view fits rectangles and slants together.
+* **Create**: `buildPlan(input, { slants: true })` with `input.slants` = the result's slants (`id, x1, y1, x2, y2, t, kind,
+  chain?`) and the slant openings in `openings`. Its origin includes the slants' footprints, so the underlay's shift is the
+  one buildPlan reports in its "moved by …" info (parsed; the rectangles' NW corner when there are no slants). The
+  create step lists buildPlan's warnings as before and adds two plain-words notes buildPlan does not give: slants within 0.5°
+  of an axis that became ordinary straight walls (info), and angled walls with an end that meets no other wall (warning,
+  by `slantJoins` on the created plan). A fact line "N angled walls" joins the counts. Orientation: rotate / mirror are
+  mapped by the engine's `normalise` (centre lines, hinge `a` ↔ `b`, swing `l` ↔ `r`); the Orientation preview is the page
+  image only. The underlay is unchanged.
+* Tested in `tests/import.ui.test.mjs` (section 3c): switch off (4 amber pieces + hint line); `?angled=1` Wedge as DXF and as a
+  generated vector PDF → legend, slants within 2 cm of the design lines, 3 rooms within 0.1 %, window / door widths, door
+  hinge at the design's jamb; mirrored north–south; quarter-circle wall → chain pieces + note; all 12 rotation × mirror
+  combinations (engine + `buildPlan`) agree with the design.
+
 ## 13. Live collaboration (`src/collab/`, `dev/collab-server.mjs`) — core
 
 Several invited people edit one **online** project at the same time. A project is *local* (§ 10, unchanged) or
