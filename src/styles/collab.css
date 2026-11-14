@@ -1,0 +1,78 @@
+/* Live collaboration: Share dialog, version history, view-only mode, presence on phones (CONTRACT § 13).
+   Only visible when a collaboration backend answered (src/collab/online.js); presence.js keeps its own base styles. */
+
+/* ── top bar: people / share ── */
+.cl-count { display: none; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 12px; background: var(--accent-soft); color: var(--accent-ink); font: 600 var(--fs-12)/24px var(--font-ui); text-align: center; box-sizing: border-box; }
+.cl-pop__share { display: block; width: calc(100% - 8px); margin: 6px 4px 2px; height: 32px; border-radius: var(--r-2); border: 1px solid var(--line-strong); background: var(--raised); color: var(--ink); font: 500 var(--fs-13)/1 var(--font-ui); cursor: pointer; }
+.cl-pop__share:hover { background: var(--hover); }
+@media (max-width: 699px) {
+  .cl-avatars .cl-av, .cl-avatars .cl-more { display: none; }
+  .cl-avatars .cl-count { display: inline-block; }
+  .cl-golive { padding: 0 8px; }
+}
+
+/* ── view-only banner and disabled editing tools ── */
+.cl-banner { position: absolute; z-index: 6; top: var(--s-2); left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px); box-sizing: border-box;
+  padding: 6px 12px; border-radius: var(--r-2); background: var(--info-soft); color: var(--ink); border: 1px solid var(--line); box-shadow: var(--shadow-1); font-size: var(--fs-13); line-height: 1.35; pointer-events: none; }
+.cl-banner[hidden] { display: none; }
+.cl-banner strong { color: var(--info); }
+.cl-banner__short { display: none; }
+@media (max-width: 699px) { .cl-banner { font-size: var(--fs-12); white-space: nowrap; } .cl-banner__text { display: none; } .cl-banner__short { display: inline; } }
+.cl-banner__inline { margin: 0 0 var(--s-3); padding: 8px 12px; border-radius: var(--r-2); background: var(--info-soft); font-size: var(--fs-13); }
+.app.is-viewonly .topbar__edit,
+.app.is-viewonly .topbar__structure,
+.app.is-viewonly .pcard__add,
+.app.is-viewonly .guide,
+.app.is-viewonly .cpanel,
+.app.is-viewonly .cinsp,
+.app.is-viewonly .tabpanel--inspector :is(input, select, textarea, button:not(.tab)),
+.app.is-viewonly .tabpanel--rooms :is(input, select, textarea, .btn),
+.app.is-viewonly .planchip { pointer-events: none; opacity: .45; filter: grayscale(.4); }
+.app.is-viewonly .topbar [aria-label="Undo"], .app.is-viewonly .topbar [aria-label="Redo"] { pointer-events: none; opacity: .4; }
+.app.is-viewonly .sb__cell--saved { display: none; }
+
+/* ── Share dialog ── */
+.share { display: flex; flex-direction: column; gap: var(--s-4); }
+.share__points { margin: 0; padding-left: 1.2em; color: var(--ink-2); display: grid; gap: 6px; font-size: var(--fs-13); }
+.share__section { display: flex; flex-direction: column; gap: var(--s-2); }
+.share__h { margin: 0; font: 600 var(--fs-13)/1.3 var(--font-ui); color: var(--ink); }
+.share__hint { margin: 0; color: var(--ink-3); font-size: var(--fs-12); }
+.share__gate { padding-top: var(--s-2); border-top: 1px solid var(--line); }
+.share__linkrow, .share__addrow { display: flex; gap: var(--s-2); align-items: center; min-width: 0; }
+.share__link, .share__email-in { flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--r-2); background: var(--sunken); color: var(--ink); font: var(--fs-13) var(--font-ui); box-sizing: border-box; }
+.share__email-in { background: var(--raised); }
+.share__link:focus, .share__email-in:focus { outline: 2px solid var(--accent-line); outline-offset: 0; }
+.share__people { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: min(40vh, 320px); overflow: auto; border: 1px solid var(--line); border-radius: var(--r-2); }
+.share__person { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-top: 1px solid var(--line); min-width: 0; }
+.share__person:first-child { border-top: 0; }
+.share__person .cl-av { margin: 0; width: 28px; height: 28px; }
+.share__who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.share__email { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share__sub { color: var(--ink-3); font-size: var(--fs-12); }
+.share__role { color: var(--ink-2); font-size: var(--fs-13); padding: 0 6px; white-space: nowrap; }
+.share__select { height: 30px; flex: none; }
+.share__nox { width: 32px; flex: none; }
+.share__status { margin: 0; min-height: 1.2em; color: var(--pass); font-size: var(--fs-12); }
+.share__loading, .share__err { padding: 10px; color: var(--ink-3); list-style: none; }
+.share__err { color: var(--fail); }
+.share__foot { display: flex; gap: var(--s-2); justify-content: space-between; width: 100%; flex-wrap: wrap; }
+.share__add .form__error { margin: 6px 0 0; }
+
+/* ── Version history ── */
+.hist { display: flex; flex-direction: column; gap: var(--s-3); min-height: 0; }
+.hist__cols { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, 1.3fr); gap: var(--s-3); min-height: 0; }
+.hist__list { list-style: none; margin: 0; padding: 4px; max-height: min(50vh, 380px); overflow: auto; border: 1px solid var(--line); border-radius: var(--r-2); }
+.hist__row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--r-1); background: none; color: var(--ink); text-align: left; cursor: pointer; font: var(--fs-13) var(--font-ui); }
+.hist__row:hover { background: var(--hover); }
+.hist__row.is-picked { background: var(--accent-soft); }
+.hist__name { font-weight: 500; display: flex; gap: 6px; align-items: center; }
+.hist__tag { font-size: var(--fs-11); padding: 1px 6px; border-radius: 8px; background: var(--sunken); color: var(--ink-2); font-weight: 500; }
+.hist__sub { color: var(--ink-3); font-size: var(--fs-12); }
+.hist__detail { padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-2); display: flex; flex-direction: column; gap: var(--s-2); align-items: flex-start; min-width: 0; }
+.hist__detail .dialog__text { margin: 0; }
+@media (max-width: 699px) {
+  .hist__cols { grid-template-columns: 1fr; }
+  .hist__list { max-height: 30vh; }
+  .share__addrow { flex-wrap: wrap; }
+  .share__addrow .share__email-in { flex-basis: 100%; }
+}

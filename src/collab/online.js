@@ -24,9 +24,12 @@ export async function detectBackend({ timeout = 1500 } = {}) {
     if (typeof fetch !== 'function' || typeof WebSocket !== 'function') return null;
   } catch (e) { return null; }
   const ctl = typeof AbortController === 'function' ? new AbortController() : null;
-  const timer = setTimeout(() => ctl && ctl.abort(), timeout);
+  let timer = setTimeout(() => ctl && ctl.abort(), timeout);
   try {
     const r = await fetch(new URL('api/health', document.baseURI), { cache: 'no-store', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined });
+    // the server answered: the timeout guards against a host that never answers, not against a busy page (the 3D view
+    // boots on the main thread and can hold the body's read past `timeout`) — give the small body time of its own
+    clearTimeout(timer); timer = setTimeout(() => ctl && ctl.abort(), 10000);
     if (!r.ok) return null;
     const j = JSON.parse(await r.text());
     return j && j.ok === true && typeof j.user === 'string' ? j : null;

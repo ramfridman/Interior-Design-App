@@ -1,10 +1,10 @@
-# Public hosting plan — E7 House Designer
+# Hosting plan — E7 House Designer on the web, invite-only, with shared projects
 
-Status (13 Nov 2026, night): **the site build is ready; nothing is deployed.** Steps 1, 3 and 4 are done by `node dev/build-site.mjs`, which writes `dist/site/` with `robots.txt`, a `noindex` tag, and a `_headers` file (Content-Security-Policy, no-index header, cache rules) in the format Cloudflare Pages reads. The built site was booted locally with those headers applied (`node dev/build-site.mjs --serve`) — plan, 3D view with the light simulation in its worker, carpentry and the quotation document all loaded with no policy errors.
-
-What remains needs the owner: (1) decide whether the working branch is merged into the default branch first (a pull request), (2) the Cloudflare account and GitHub authorisation, (3) the list of invited email addresses. In Cloudflare Pages use build command `node dev/build-site.mjs`, output directory `dist/site`, no framework preset.
-
-Note: the later request for online saving with several people on one project (see `docs/TODO.md`) changes hosting from static-only to static + a small backend; this static deployment is still the right first step and stays valid.
+Status (14 Nov 2026): **everything is built and tested on this computer; nothing is deployed.** The app, a small backend
+(a Cloudflare Worker with Durable Objects, in `server/`) and the sharing features (Share, History, people in the top bar)
+run together under Cloudflare's own local runtime (`wrangler dev`) and pass the tests. What is left needs **your**
+Cloudflare account and takes about 30 minutes of clicking, following section 4 below. Steps that I could not try because
+they need your account are listed in section 9.
 
 ## Owner's decisions (13 Nov 2026)
 
@@ -15,128 +15,161 @@ Note: the later request for online saving with several people on one project (se
 | Address | **Free host subdomain** (no custom domain) |
 | Search engines | **Keep it out for now** (`robots.txt` + `noindex`) |
 
-**Chosen route: Cloudflare Pages + Cloudflare Access** (section 5, steps 0, 1, 2B, 3–6). Vercel is not used: its free plan does not offer invite-only access for the production site.
+**Chosen route: one Cloudflare Worker (the site + the backend) behind Cloudflare Access, on the free plan.** The address
+will be `https://e7-house-designer.<your-account-name>.workers.dev`. (The earlier plan used Cloudflare Pages for a static
+site; saved projects shared by several people need a backend, and a Worker serves both from one place.)
 
-Needed from the owner on the day:
-1. A free Cloudflare account (sign-up with an email address; no payment card is required for Pages or for Access on the free plan as far as I know — confirm at sign-up).
-2. Authorising Cloudflare's GitHub app for the `interior-design-app` repo (done by the owner in the browser).
-3. The list of email addresses to invite. Each invited person signs in with a one-time code sent to that address.
+## 1. What people get
 
-## 1. Where the app runs today
+* **Projects on this device** work as before: stored in the browser, private to that person.
+* **Online projects**: the project menu → **Share…** → **Put online**. The project is then saved on the server, and the
+  owner adds people by email as **can edit** or **can view**. Everyone in the project sees the others' changes within a
+  fraction of a second, their pointers and selections, and who is in the project (avatars in the top bar; on a phone, a
+  small number). Viewers see a "View only" banner and the editing tools are greyed out.
+* **History…** in the project menu: restore points are saved automatically (after a quiet spell and every 200 changes; the
+  last 20 kept) and by hand ("Save a version now"). **Restore** changes the project for everyone; the state just before is
+  saved first as "Before restoring …", so a restore can be undone by restoring that point.
+* **Copy link** in the Share dialog gives an address that opens the project directly (`…/?online=<id>`).
+* **Keep a copy on this device** (Share dialog, or project menu → Duplicate on this device) makes a private copy.
 
-| Copy | Where | Who can open it |
-| --- | --- | --- |
-| Claude artifact | `https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R` | Only you, until you share it from the page's Share menu |
-| Source | GitHub repo `ramfridman/interior-design-app`, branch `ccr-70c095fe-io3e41` | Whoever has access to the repo |
+Two gates protect a project: **Cloudflare Access** decides who can open the site at all (the invite list, section 5), and
+the **Share dialog** decides who can open each project. A person needs both.
 
-The app itself is **plain static files**: `index.html`, `src/`, `vendor/`. There is no server, no database, no build step and no dependency on Claude. The artifact is just one packaged copy of those files. Any static web host can serve it, and it will behave the same, with two differences that are improvements:
+## 2. What it costs
 
-* In the artifact, file downloads and printing go through the host's sandbox (a confirmation dialog, or a copy-to-clipboard fallback). On a normal host, "Save design", "Export PNG", "Export CSV" and "Print" work natively.
-* Mouse capture for the walk-through works without the sandbox restrictions.
+**Nothing**, on Cloudflare's free plans, at this size. No payment card should be needed for Workers Free; Cloudflare asks
+for one when you turn on Zero Trust (Access) on some accounts even for the free plan — if it does, the free plan still costs
+₪0 (confirm on the day; I could not see the sign-up form).
 
-## 2. What "other users" get
+Free-plan limits in plain words (checked 14 Nov 2026, links in `server/README.md`):
 
-Each visitor's design is stored **in their own browser** (localStorage). So:
+* **100,000 requests a day** to the backend. Loading the app's files does not count (static files are free and
+  unlimited). Opening a project, saving a change and each second of live dragging count a little (live messages are billed
+  20 for the price of 1). Two people designing all evening use a few thousand.
+* **100,000 saved changes ("rows written") a day** and **5 GB** of saved projects in all. A change writes about 2–3 rows.
+* **What happens if a limit is passed:** the backend refuses work until midnight UTC (02:00 / 03:00 in Israel). The site
+  still opens, projects on the device still work; online projects cannot be opened or saved until the reset. Nothing is
+  lost and nothing is charged — the free plan cannot run up a bill.
+* **Access:** the Zero Trust free plan covers a small team (Cloudflare has long said up to 50 users; I could not confirm the
+  number in the pages I read — check under Zero Trust → Settings → Account / Plan).
+* **Updates:** 3,000 build minutes a month; one update takes about 1 minute.
 
-* Everyone who opens the URL starts from the architect's layout of house 98 and works on their own private copy.
-* Nothing one person does is visible to another. To pass a design along, use Save design (a `.json` file) and Open design.
-* Clearing browser data or switching device loses the design unless it was saved to a file.
+## 3. Before you start
 
-If you later want people to see *your* design at a link, or to work on one design together, that is a separate feature (section 8).
+1. Merge the working branch into the default branch on GitHub (a pull request), so Cloudflare builds from a stable branch.
+2. Have the list of email addresses you want to invite.
 
-## 3. Decisions to make first
+## 4. Step by step
 
-1. **Who should be able to open it?**
-   * *Anyone with the link* — simplest; the URL is unguessable-ish but not secret.
-   * *Only people you invite* — needs an access layer (section 5, option B).
-2. **Is it acceptable that the site shows your house?** The app contains the full floor plan, the lot number, "Kibbutz Afikim", room sizes and the parking layout. It does not contain your family name or the architect's contact details; those are only in the two PDFs under `docs/reference/`, which must **not** be deployed.
-3. **Address:** a free host subdomain (`something.pages.dev`, `something.vercel.app`) or your own domain (about ₪40–60 a year for a `.com`; optional).
-4. **Search engines:** keep it out of Google (recommended for a private house) or allow indexing.
+### 4.1 Create the Cloudflare account
+1. Go to `https://dash.cloudflare.com/sign-up`, sign up with your email and a password, confirm the email.
+2. You land on the dashboard. You do not need to add a website / domain — skip anything that asks for one.
 
-## 4. Host options (all have a free tier for a site this size)
+### 4.2 Create the Worker from the GitHub repository
+1. Left menu: **Workers & Pages** (under "Compute") → **Create application** (the "Create" button).
+2. Choose **Import a repository** / **GitHub** → **Connect GitHub** and allow Cloudflare's GitHub app to see the repository
+   `interior-design-app` (you can limit it to that one repository).
+3. Pick the repository, then fill in:
+   * **Project / Worker name:** `e7-house-designer` — it **must** be exactly this (it is the `name` in
+     `server/wrangler.jsonc`; the build fails if they differ).
+   * **Production branch:** the default branch (usually `main`).
+   * **Root directory (path):** `server`
+   * **Build command:** `node ../dev/build-site.mjs`
+   * **Deploy command:** `npx wrangler deploy` (the default)
+   * Leave "Non-production branch deploy command" as it is, or turn off builds for other branches.
+4. **Save and Deploy**. The first build takes a minute or two. The two storage classes the backend needs are created by
+   this first deploy automatically (they are declared in `server/wrangler.jsonc`) — there is nothing to set up by hand.
+5. When it says the deployment succeeded, note the address it shows: `https://e7-house-designer.<account>.workers.dev`.
+   Opening it now shows the app working on its own: online sharing stays hidden until step 4.4 is done, and anyone with the
+   address can still open the site — do steps 4.3–4.4 straight away.
 
-The site is about 3 MB and fully static, so every option below handles it comfortably. Free-tier limits and what is paid change over time; **re-check the pricing page on the day**.
+### 4.3 Put Cloudflare Access in front of it (invite-only)
+1. Left menu: **Zero Trust**. The first time, choose a **team name** (for example `e7-family`) and the **Free** plan.
+2. **Sign-in method:** Zero Trust → **Integrations** (or Settings) → **Identity providers** → **Add new identity provider**
+   → **One-time PIN** → Save. (Invited people then sign in by typing their email and the 6-digit code they receive.)
+3. **Who is invited:** Zero Trust → **Access controls** → **Policies** → **Add a policy**: name `Invited people`, action
+   **Allow**, rule **Include → Emails** → type each invited address → Save.
+4. **Protect the Worker:** Workers & Pages → `e7-house-designer` → the **Access** tab (or Settings → Domains & Routes) →
+   **Protect this Worker behind Access** → traffic: **all traffic** (production and previews) → select the policy
+   `Invited people` → **Apply Access**.
+   *If your dashboard does not show that option:* Zero Trust → Access controls → **Applications** → **Create new
+   application** → **Self-hosted and private** → **Add public hostname** → subdomain `e7-house-designer`, domain
+   `<account>.workers.dev` → policy `Invited people` → identity provider One-time PIN → session duration e.g. 1 week →
+   **Create**.
+5. Check in a private browser window: the address now asks for an email first.
 
-| Host | Deploys from a private repo for free | Free access restriction | Notes |
-| --- | --- | --- | --- |
-| **Cloudflare Pages** | Yes | Yes — Cloudflare Access, free for a small team (email one-time code) | No bandwidth cap on static assets as far as I know. Best fit if you want invite-only. |
-| **Vercel** | Yes | Limited on the free plan (protection mainly for preview links) | A Vercel connector is already attached to this Claude session, so I can create the project and deploy for you. Free plan is for personal, non-commercial use. |
-| **Netlify** | Yes | Password protection is a paid feature | Comparable to Vercel; no advantage here. |
-| **GitHub Pages** | Only if the repo is public (private-repo Pages needs a paid GitHub plan) | No | Making the repo public would also expose the PDFs in `docs/reference/` and the full history. Not recommended unless the site is published from a separate, clean repo. |
+### 4.4 Tell the Worker which Access application to trust
+1. **Team domain:** Zero Trust → **Settings** → **Team name and domain** (or Custom pages) → copy it, e.g.
+   `e7-family.cloudflareaccess.com`.
+2. **AUD tag:** Zero Trust → **Access controls** → **Applications** → the application for `e7-house-designer` →
+   **Edit** (or Configure) → **Additional settings** / Overview → copy **Application Audience (AUD) Tag** (a long code).
+3. Workers & Pages → `e7-house-designer` → **Settings** → **Variables and Secrets** → **Add**:
+   * Type **Text**, name `ACCESS_TEAM_DOMAIN`, value `https://e7-family.cloudflareaccess.com`
+   * Type **Text**, name `ACCESS_AUD`, value the AUD tag
+   * Type **Text**, name `PRODUCTION`, value `1`
+   → **Deploy**. (These are not secrets: they only say which Access application to trust. Later updates keep them —
+   the configuration has `keep_vars`.)
+4. Check: open the address, sign in with the code, start designing. A **Share** button appears in the top bar. Share →
+   **Put online** → the status bar shows "Live · 1 person". If no Share button appears, the variables are wrong (the
+   backend answers "not configured" and the app quietly runs without sharing).
 
-**Recommendation**
+## 5. Inviting and removing people
 
-* Link-only access is fine → **Vercel**, because I can do the whole setup from here in a few minutes.
-* Invite-only access → **Cloudflare Pages + Cloudflare Access**.
+* **Invite:** (1) add their email to the Access policy (Zero Trust → Access controls → Policies → `Invited people` → Edit
+  → Include → Emails → add → Save), then (2) open the project → Share… → type their email → **Can edit** or **Can view**
+  → Add → **Copy link** and send it to them. They sign in with the code that arrives by email.
+* **Change what someone can do:** Share… → the selector next to their email. It takes effect at once, even while they are
+  in the project.
+* **Remove from one project:** Share… → the × next to their email. If they have it open, it closes on their screen.
+* **Remove from the site:** delete their email from the Access policy. (Sign-ins already made last until the Access
+  session expires — the session duration you chose; Zero Trust → My team → Users → the person → **Revoke** ends it at once.)
+* Only the owner (the person who put the project online) can change who has access or delete the online project.
 
-A simpler stop-gap that needs no hosting at all: use the artifact's own Share menu on claude.ai. Whether outside viewers get every feature there (for example file downloads) depends on their Claude access, so treat it as a quick preview link, not the long-term home.
+## 6. Updates
 
-## 5. Implementation steps
+Push (or merge) to the production branch on GitHub. Cloudflare builds and deploys by itself in about a minute
+(Workers & Pages → `e7-house-designer` → Deployments shows each one). People with the app open get the new version when
+they reload; if the collaboration protocol changed, the app asks them to reload.
 
-### Step 0 — Finish and merge (prerequisite)
-* Complete the features in progress (structure editing, sun controls, catalogue gaps, UX review).
-* Open a pull request from `ccr-70c095fe-io3e41` into the default branch and merge it, so the host deploys from a stable branch.
+## 7. Exporting and deleting
 
-### Step 1 — Add a site build script
-`dev/build-site.mjs` (sibling of the existing `dev/build-artifact.mjs`) that writes a clean `dist/site/` containing only what the browser needs:
+* **Export one project:** open it → project menu → **Export project file** (a `.json` file with the plan, furniture,
+  finishes, carpentry and the sketch). Re-import with **Import project file…**. Restore points are not in the file.
+* **A copy in the browser:** Share… → **Keep a copy on this device**.
+* **Export everything:** there is no single "export all" button; export each online project from its project menu.
+* **Delete an online project:** open it as its owner → project menu → **Delete online project…** → confirm. It is
+  removed from the server for everyone, with its history.
+* **Delete the whole site and data:** Workers & Pages → `e7-house-designer` → Settings → **Delete**; also delete the Access
+  application. (Whether deleting the Worker also erases its stored projects at once, I could not confirm — delete the
+  online projects first if that matters.)
 
-* Include: `index.html`, `src/**/*.js`, `src/styles/**`, `vendor/three/` (only the files actually imported), `vendor/fonts/`.
-* Exclude: `docs/` (especially `docs/reference/*.pdf`), `dev/`, `tests/`, `*.sources.md`, `dist/`, repo metadata.
-* Do **not** set `window.APP_ENV.sandboxed` (that flag is only for the artifact), so native download and print are used.
-* Add `robots.txt` with `Disallow: /` and `<meta name="robots" content="noindex">` if you chose to stay out of search engines.
-* Add a small "prices checked November 2026" note in the catalogue footer (prices are a snapshot).
-* Optional: fingerprint file names or set cache headers so updates reach visitors immediately (see step 4).
+## 8. Security and privacy (already in place)
 
-### Step 2A — Deploy on Vercel (link-only access)
-1. Create a Vercel project linked to the GitHub repo (or deploy `dist/site/` directly without Git integration).
-2. Settings: framework "Other", build command `node dev/build-site.mjs`, output directory `dist/site`.
-3. Production branch = the default branch. Every push redeploys automatically.
-4. Result: `https://<project>.vercel.app`. Optionally attach a custom domain.
+* Only people who pass Cloudflare Access reach the site; the backend additionally checks Access's signed token on every
+  request (signature, audience, expiry) and takes the email from it — nothing a browser can fake.
+* Each project's roles are checked on the server for every request and every live connection; viewers cannot change
+  anything. Connections from other websites are refused.
+* `robots.txt`, a `noindex` tag and an `X-Robots-Tag` header keep search engines out; a Content-Security-Policy allows only
+  the site itself (and its own live connection). `docs/` (with the architect's PDFs), `dev/` and `tests/` are not published.
+* No secrets are stored in the repository.
 
-### Step 2B — Deploy on Cloudflare Pages (invite-only access)
-1. Create a Cloudflare account, then Pages → connect the GitHub repo.
-2. Build command `node dev/build-site.mjs`, output directory `dist/site`.
-3. Zero Trust → Access → add an application for the site's hostname with a policy "emails in this list"; visitors sign in with a one-time code sent to their email.
-4. Result: `https://<project>.pages.dev`, reachable only by the people on the list.
+## 9. What I could not test (needs your account)
 
-### Step 3 — Security headers
-Add the host's headers file (`vercel.json` or `_headers`) with:
+* Signing up, Zero Trust plan selection and whether a payment card is asked for.
+* Workers Builds from GitHub: the exact menu wording, the root directory `server` + build command
+  `node ../dev/build-site.mjs`, and the first deploy creating the Durable Objects. (The configuration itself was checked
+  with `wrangler deploy --dry-run`, and everything ran under `wrangler dev`.)
+* The Worker's **Access** tab and the self-hosted application for a `workers.dev` hostname; One-time PIN sign-in; where the
+  AUD tag and team domain are shown. (The token check itself was tested with tokens signed by a locally generated key in
+  Cloudflare's own runtime.)
+* Real hibernation of idle rooms on Cloudflare (tested by simulation; the local runtime does not hibernate on demand).
+* Phones on a real mobile network; Safari (the app's own WebSocket address is spelled out in the CSP for older Safari).
+* Behaviour when a free-plan limit is actually exceeded.
+* Revoking a signed-in person's Access session (Zero Trust → My team → Users) — menu names from memory, not checked.
 
-* `Content-Security-Policy`: `default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'` (adjust after testing; the app loads nothing from other origins at runtime).
-* `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`.
-* Retailer links already open with `rel="noopener noreferrer"`.
+## 10. Things to keep in mind
 
-### Step 4 — Caching
-* `index.html`: `Cache-Control: no-cache` so visitors always get the current entry page.
-* `vendor/**`: long cache (`max-age=31536000, immutable`).
-* `src/**`: short cache (for example 5 minutes) unless file names are fingerprinted.
-
-### Step 5 — Verify the live site
-* Run the existing smoke test against the deployed URL (boot, 2D, 3D, walk, split, place / rotate / undo).
-* Manually on a real computer and a phone: walk-through with mouse capture, Save / Open design, PNG and CSV export, print, light and dark theme.
-* Check 3D frame rate on a real graphics card (so far it has only been measured on a software renderer).
-* Open ten random product links and confirm they land on the right retailer page.
-
-### Step 6 — Hand-over
-* Put the URL and the "how to update" note in the repo README.
-* Decide who gets the link, or add their emails to the access list.
-
-## 6. Things to settle before going public
-
-* **Product data.** Names, prices and links were read from retailer pages in November 2026 and will drift. Show the date, and plan a refresh (section 7). Retailer and brand names are used only to identify products; no retailer images are used (thumbnails are rendered from the app's own 3D models).
-* **Regulations panel.** It already carries a disclaimer that it is a design aid, not a permit review. Keep that visible on the public site.
-* **Licences.** Three.js (MIT) and the two fonts (OFL) are redistributable; their licence files are in `vendor/`.
-* **Your privacy.** Re-read section 3, point 2. If the site is public, anyone with the link can see the layout of your home.
-
-## 7. Keeping it current
-
-* **Updates:** push to the default branch → the host rebuilds and redeploys in about a minute.
-* **Prices:** the research scripts that collected the catalogue are not in the repo. If periodic refresh matters, add a small script per retailer (IKEA, ACE, Home Center and the Shopify / WooCommerce shops are scriptable) that re-reads price and availability for every catalogue URL and reports changes; run it monthly.
-* **Cost:** ₪0 on the free tiers at this size; a custom domain is the only optional cost.
-
-## 8. Possible later additions (not part of this plan)
-
-* **Share a design by link** — store a design on a small free backend (for example a Cloudflare Worker with KV, or Vercel Blob) and open it with `?design=<id>`.
-* **Accounts and cloud save** so a design follows the person across devices.
-* **Installable / offline app** (PWA manifest + service worker).
-* **Other houses** — the engine reads one plan file; supporting several plans or an import flow would turn it into a general tool.
+* **Product data** (names, prices, links) is a November 2026 snapshot and will drift.
+* **Regulations panel** is a design aid, not a permit review — it says so.
+* **Licences:** Three.js (MIT), the fonts (OFL) and the other bundled libraries' licence files are in `vendor/`.
+* **Privacy:** everyone you invite sees the layout of your home in the projects you share with them.

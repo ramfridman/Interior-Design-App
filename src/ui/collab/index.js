@@ -16,14 +16,14 @@ export function initCollabPanels(app, ctl) {
   const stage = document.getElementById('stage');
   const banner = h('div', { class: 'cl-banner', role: 'status', hidden: true },
     h('strong', null, 'View only'),
-    h('span', { class: 'cl-banner__text' }, ' — you can look around, measure and export, but not change this project. Ask its owner for edit access.'));
+    h('span', { class: 'cl-banner__text' }, ' — you can look around, measure and export, but not change this project. Ask its owner for edit access.'),
+    h('span', { class: 'cl-banner__short' }, ' — ask the owner for edit access'));
   if (stage) stage.prepend(banner);
 
   let offs = [];
   const setViewer = (on) => {
     if (root) root.classList.toggle('is-viewonly', on);
     banner.hidden = !on;
-    if (on && app.store && app.store.ui && app.store.ui.tool && !['select', 'pan', 'measure'].includes(app.store.ui.tool)) app.store.setUI({ tool: 'select' });
   };
   function start(session) {
     stop();

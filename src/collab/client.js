@@ -30,7 +30,7 @@ export const newCid = () => 'c' + Math.random().toString(36).slice(2, 10) + Date
  * @param {{ adapter: object, connect?: () => object, cid?: string, now?: () => number,
  *           schedule?: (fn, ms) => any, unschedule?: (t) => void, txInterval?: number, presenceInterval?: number }} o
  */
-export function createClient({ adapter, connect = null, cid = newCid(), now = () => Date.now(), schedule = (fn, ms) => setTimeout(fn, ms), unschedule = (t) => clearTimeout(t), txInterval = 66, presenceInterval = 66 } = {}) {
+export function createClient({ adapter, connect = null, cid = newCid(), now = () => Date.now(), schedule = (fn, ms) => setTimeout(fn, ms), unschedule = (t) => clearTimeout(t), txInterval = 66, presenceInterval = 67 } = {}) {
   const listeners = new Map();
   const emit = (ev, payload) => (listeners.get(ev) || []).forEach((fn) => { try { fn(payload); } catch (e) { console.error('[collab] listener failed', e); } });
 

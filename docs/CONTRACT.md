@@ -1259,7 +1259,7 @@ still in the log, else the full doc = **resync**) · `ops { seq, gid, cid, by, o
 Identity (`email`, `role`) comes from the server (Cloudflare Access header `Cf-Access-Authenticated-User-Email`); a name
 sent by a client is ignored.
 
-### Presence (never stored, ≤ 15 messages / s per person, the client sends at most every 66 ms)
+### Presence (never stored, ≤ 15 messages / s per person, the client sends at most every 67 ms)
 `p = { pointer: { x, y } | null, sel: itemIds, mode, room, lock: entityKey | null }`. Shown: initials + colour in the
 top bar (list on click), named pointers in the 2D plan, others' selections outlined in their colour (2D, 3D), their
 mode / room. **Soft lock**: while someone drags an item or edits a wall their presence holds `lock`; the others see
