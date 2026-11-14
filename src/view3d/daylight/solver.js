@@ -139,11 +139,12 @@ export function sceneInputFromPlan(plan, o = {}) {
 
 /**
  * Angled walls in the occlusion grid (stage A4 fallback): a cell is WALL when ≥ 2 of its 4 × 4 sub-samples lie in a
- * slant footprint (supercover: > 10 % of the cell), so a 7 cm wall at any angle stays 4-connected (no ray leaks through
+ * slant footprint outside its openings' gaps (supercover: > 10 % of the cell), so a 7 cm wall at any angle stays 4-connected (no ray leaks through
  * it; it thickens by up to ≈ 2.5 cm); then the gap of every opening in a slant: the cells whose centre is in its quad.
  */
 function rasteriseSlants(input, kind, reg, nx, ny, oxcm, ozcm) {
-  const ops = input.openings;
+  const ops = input.openings, quads = ops.map((o) => o.quad).filter(Boolean);
+  const inGap = (x, y) => quads.some((q) => pointInPolygon(x, y, q));   // a gap is not wall (its mouth stays open)
   for (const poly of input.slants) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const [x, y] of poly) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
@@ -152,7 +153,8 @@ function rasteriseSlants(input, kind, reg, nx, ny, oxcm, ozcm) {
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
       let hits = 0;
       for (let b = 0; b < 4 && hits < 2; b++) for (let a = 0; a < 4 && hits < 2; a++) {
-        if (pointInPolygon(oxcm + (i + (a + 0.5) / 4) * CELL_CM, ozcm + (j + (b + 0.5) / 4) * CELL_CM, poly)) hits++;
+        const x = oxcm + (i + (a + 0.5) / 4) * CELL_CM, y = ozcm + (j + (b + 0.5) / 4) * CELL_CM;
+        if (pointInPolygon(x, y, poly) && !inGap(x, y)) hits++;
       }
       if (hits >= 2) { const c = j * nx + i; kind[c] = WALL; reg[c] = -1; }
     }

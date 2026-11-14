@@ -811,6 +811,55 @@ view is pixel-identical to before (tests/fixtures/house98-plan-png.json).
   walls only.
 * Tests: `node tests/slants-2d.test.mjs`, `node tests/e2e.slants.mjs [--shots]`.
 
+### Regulations, carpentry and walking on angled walls (stage A5, additive; orthogonal plans byte-identical — `tests/geometry.test.mjs` pins House 98)
+* **Geometry** (`geometry.js`): `wallsHitByItem(it, plan)` returns the rect walls as before, THEN the `plan.slants` entries
+  whose solid part the footprint enters by > 0.5 cm (same tolerance as rects). `slantSolids(plan)` → `[{ id, slant, rings,
+  bb }]`: each slant's joined footprint minus the gap quads of its openings (quads taken 1 cm past both faces), cached.
+* **Regulations** (`src/regulations/geom.js`): `largestInnerRect(poly)` — a rectilinear polygon keeps the exact axis search
+  (same result, no new keys); any other polygon is searched in the frame of each distinct edge direction (`edgeDirections`,
+  plus the axes): the largest square by bisection (polygon ∩ its translates, confirmed by an exact containment test; ±0.05
+  cm), then each side pushed out; the result adds `angle` (deg of its x axis) and `poly` (4 plan corners). `polyEdges(poly)`
+  adds `A: [{ ux, uy, nx, ny, c, a, b }]` (angled edges, slits cancelled); `narrowPassages` also pairs facing parallel
+  angled edges (width measured across them; entries get `angle`); `narrowerThan(poly, w)` = the engine's polygon test
+  (offset −w/2 empty or split). `openingSides(o)` entries of an opening in a slant carry `poly` (the exact approach zone;
+  `rect` stays the AABB) — use `sideZone(side)`. `slantObstacles(plan)` = obstacle records of the solid pieces (`wall` =
+  `{ id, kind, cls, slant: true, t, x y w h }`) — added to the furniture clearances, the mamad door clearance, the fan rule.
+  `openingFacing(o, plan)` → `{ n, bearing, name }` from the wall's true outward normal (`plan.meta.northAngle` respected).
+  `building.js`: room sizes / corridor widths from the oriented rectangle; `roomSides` lists a slant along an edge as
+  `{ id, kind, slant: true, t }` (thickness = `t`), so the mamad wall / external-wall / door rules see angled walls; a door
+  in a slant opens outwards when its `swing` face (`openingFaceSign`) points along the side's outward normal; the ray to the
+  exterior stops in exterior slants and in 'a' gaps (true quad); setbacks add the true edge distance of slant footprints;
+  glazing = width × height whatever the angle, and a window in a slant is listed "… facing south-east". `interior.js`:
+  door approach / window zones are the exact quads, `rangesOverlap` uses the gap's true extent, the TV-on-external-wall test
+  sees exterior slants, a one-level plan with slants gets `ctx.coverage` from the polygon footprint (garden rules).
+* **Carpentry** (`src/carpentry/`): `wallSpanAt` on a slant face (`angledSpan`): the collinear faces of that wall merged
+  across its openings; the face normal is snapped to the slant's exact direction, `anchor.dir` = that direction (not
+  rounded to whole degrees; `frame(dir)` is exact for non-multiples of 90°, unchanged for 0/90/180/270), so units are laid
+  along it with that `rot`. A span end that meets the next wall at a non-square angle gets `ends[side]` from the corner
+  (concave → 'wall') and `span.corners[side] = { angle (room side, deg), with (that wall's normal), inset(depth) }`
+  (`inset` = depth / tan angle for an acute corner, 0 otherwise); spans with square corners never carry `corners`.
+  `cornerAt(run, side)`. `createRun` on a stretch with an acute end stays back by `cornerInsets(span, kind)` (exported) so the
+  front corner clears the angled wall; such ends are stored `{ type: 'wall', angle }`; runs on slants are named "… — angled
+  wall". Corner modules (`corner` / `cornerLeg`: blind, carousel, corner wall unit, corner pantries) as the first / last unit
+  of a row at a non-square end are refused: `"<module> needs a square (90°) corner, but the left end of this run meets the
+  wall at 62.9°. End the run with a scribed filler or panel instead."` (he too). Checks: new code `corner-angle` (info: scribe
+  the triangle / wedge on site; error: an end unit reaching into the angled wall), aisle rays hit slant edges (and turned
+  items by their outline), the return wall of an acute corner is not an aisle, door swings of doors in slants are the true
+  quarter circle, clashes with turned footprints are exact. Drawings: in the plan drawing slants (and, for a run on a slant,
+  all walls / openings) are clipped polygons in the run frame — the true angles; elevations unchanged; the quotation key
+  plan draws `slantPolys`. Islands: a footprint entering a slant is refused like a rect wall. The Carpentry picker
+  (`ui/carpentry`) uses the same insets.
+* **Walk** (`view3d/walk.js`): blockers already came from `walkBoxes` (slants as rotated boxes cut at doors, windows
+  blocking) — verified: blocked, passes doors in slants exactly, slides smoothly along slants and into the corners;
+  `defaultWalkStart` with the entrance in a slant starts on its swing side facing along the wall's true normal.
+* Tests: `node tests/slants-rules.test.mjs` (Wedge: inner rectangles vs analytic values, narrow rooms / passages, door
+  swing and approach zones, window area and bearing, furniture across / flush with s02, a mamad with a 25 cm angled wall,
+  setbacks and coverage; runs on s01 / s02 vs `seg.faces`, the window constraint, corner refusals, aisle, drawings, take-off,
+  estimate, quotation; the synthetic walker), `node tests/e2e.slants.mjs` (Checks tab, picking the angled wall, elevation).
+* Limits: the oriented rectangle search is exact for convex rooms (others: the bisection is confirmed, so it never
+  overstates, but it may miss a larger rectangle in a non-convex room); `seg.faces` is measured 0.5 cm outside the face, so it
+  is up to 0.5·cot(angle) shorter than the span at an acute corner; islands still turn in 90° steps.
+
 ### Notes for the view / UI teams
 * New opening kind `'opening'` (style `'open'`): draw it as a clear gap with jambs — no leaf, no swing arc; it is
   walkable (`walkBlockers()` only blocks walls and windows).

@@ -7,7 +7,8 @@
 // a ∥ guide while drawing, and its plan PNG export. With the switch off: the House 98 plan PNG identical to the capture
 // taken before stage A3 (tests/fixtures/house98-plan-png.json) and no new controls. A phone viewport: drawing by touch,
 // the read-out lifted above the finger. The Wedge in 3D (stage A4): orbit, cut-away on / off, a wall finish dropped on the
-// slanted wall, a walk into an angled wall (blocked). No console errors anywhere (THREE NaN warnings included).
+// slanted wall, a walk into an angled wall (blocked). Stage A5: the Checks tab on the Wedge, a carpentry run picked on
+// the angled wall s01 and its elevation. No console errors anywhere (THREE NaN warnings included).
 //   node tests/e2e.slants.mjs [--shots]      (screenshots go to dev/screens/e2e-slants-*.png)
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -322,9 +323,9 @@ async function main() {
     const checked = box ? !!box.querySelector('input[type="checkbox"]')?.checked || box.querySelector('[aria-checked="true"]') !== null : false;
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    return { found: !!box, checked, works: /Works: drawing walls at any angle.*angled walls in 3D/.test(text), approx: /Approximate: the light simulation/.test(text), notYet: /Not yet: the regulation/.test(text) && !/Not yet: angled walls in 3D/.test(text) };
+    return { found: !!box, checked, works: /Works: drawing walls at any angle.*angled walls in 3D/.test(text), approx: /Approximate: the light simulation/.test(text), notYet: /Not yet: importing them/.test(text) && !/Not yet: angled walls in 3D/.test(text) && !/Not yet: the regulation/.test(text), a5: /Also works: the regulation checks.*carpentry runs along angled walls.*walk-through/.test(text) };
   });
-  check('Settings → Experimental: "Angled walls (in development)", on, with what works (3D too), what is approximate (light) and what not yet', setting.found && setting.checked && setting.works && setting.approx && setting.notYet, JSON.stringify(setting));
+  check('Settings → Experimental: "Angled walls (in development)", on, with what works (3D too), what is approximate (light) and what not yet', setting.found && setting.checked && setting.works && setting.approx && setting.notYet && setting.a5, JSON.stringify(setting));
   await sleep(300);
 
   // ════════ the Wedge: dimensions, a ∥ guide, the plan PNG ════════
@@ -356,6 +357,37 @@ async function main() {
   await page.evaluate(() => window.app.store.setUI({ tool: 'select' }));
   const png = await exportPng(page);
   check('the Wedge plan PNG exports (A3 sheet)', png.length > 50000 && png.slice(1, 4).toString() === 'PNG', `${png.length} bytes`);
+  // ── stage A5: the Checks tab on the Wedge, and a carpentry run picked on the angled wall ──
+  await page.evaluate(() => { window.app.store.setUI({ mode: '2d' }); window.app.ui.openPanel('checks'); });
+  await page.waitForFunction(() => document.querySelectorAll('#panel-checks .checkrow').length > 5, null, { timeout: 20000 }).catch(() => {});
+  const chk = await page.evaluate(() => [...document.querySelectorAll('#panel-checks .checkrow')].map((r) => r.textContent));
+  check('Wedge: the Checks tab lists findings (the window in s01 read at its true angle, the rooms sized)', chk.length > 5 && chk.some((t) => /facing south-east/.test(t)) && chk.some((t) => /clear width/.test(t)), `${chk.length} rows`);
+  await shot(page, 'wedge-checks');
+  await page.evaluate(() => { window.app.ui.carpentry.enter(); window.app.ui.carpentry.startNewRun('kitchen'); });
+  await sleep(400);
+  const pickAt = await page.evaluate(async () => {
+    const SG = await import('/src/core/slant-geom.js');
+    const s = window.app.plan.slants.find((x) => x.id === 's01'), f = SG.slantFrame(s), [x, y] = SG.pointAt(s, 300);
+    return { x: x + f.nx * 25, y: y + f.ny * 25 };
+  });
+  const pp = await scr(page, pickAt.x, pickAt.y);
+  await page.mouse.move(pp.x, pp.y, { steps: 3 });
+  await sleep(150);
+  await page.mouse.click(pp.x, pp.y);
+  await page.waitForFunction(() => Object.values(window.app.store.carpentry.runs).some((r) => r.anchor.dir % 90), null, { timeout: 10000 }).catch(() => {});
+  const carp = await page.evaluate(() => {
+    const runs = Object.values(window.app.store.carpentry.runs), r = runs.find((q) => q.anchor.dir % 90);
+    const units = r ? r.unitIds.map((id) => window.app.store.getItem(id)).filter(Boolean) : [];
+    return { n: runs.length, dir: r && r.anchor.dir, name: r && r.name, units: units.length, rots: [...new Set(units.map((u) => u.rot))] };
+  });
+  check('Carpentry: picking the angled wall s01 creates a run along it (dir ≈ 117.15°, units turned to it)', carp.dir && Math.abs(carp.dir - 117.15) < 0.05 && carp.name === 'Kitchen — angled wall' && carp.rots.length <= 1 && (!carp.units || Math.abs(carp.rots[0] - carp.dir) < 1e-6), JSON.stringify(carp));
+  await page.locator('.cwb__tab', { hasText: 'Elevation' }).first().click().catch(() => {});
+  await page.waitForFunction(() => { const s = document.querySelector('.cwb svg.cdraw'); return s && s.querySelectorAll('*').length > 30; }, null, { timeout: 10000 }).catch(() => {});
+  const elev = await page.evaluate(() => { const s = document.querySelector('.cwb svg.cdraw'); const t = document.querySelector('.cwb__tab[aria-selected="true"]'); return { svg: !!s, n: s ? s.querySelectorAll('*').length : 0, tab: t && t.textContent }; });
+  check('Carpentry: the run\'s Elevation tab renders', elev.svg && elev.n > 30 && elev.tab === 'Elevation', JSON.stringify(elev));
+  await shot(page, 'wedge-carpentry');
+  await page.evaluate(() => window.app.ui.carpentry.exit());
+  await sleep(200);
   check('Wedge: no console errors', errors.length === 0, errors.slice(0, 5).join(' | '));
 
   // ════════ the Wedge in 3D (stage A4) ════════
@@ -414,9 +446,13 @@ async function main() {
   check('a wall finish dropped on the slanted wall (inside) goes to the east room', drop.target && drop.target.surface === 'wall' && drop.target.spaceId === drop.east && drop.prod && drop.applied === drop.prod, JSON.stringify(drop));
   await page.evaluate(() => window.app.store.setUI({ wallsCutaway: false }));
   await sleep(800);
-  await look([4.6, 1.2, 3.6], -2.6, 1.35, 4.2);
+  // inside the west room, looking at s02 and its door (the NW triangle and the west room have no window — the entry door
+  // is closed — so under the daylight solve they are dark: this shot uses the standard lighting)
+  await page.evaluate(() => window.app.store.setUI({ daylight: false }));
+  await look([1.62, 1.1, 1.62], Math.PI / 4 + 0.5, 1.3, 4.4);
   await sleep(1500);
   await shot3d('wedge-3d-interior');
+  await page.evaluate(() => window.app.store.setUI({ daylight: true }));
   // walk into s02 from the NW triangle, away from its door: blocked
   await page.evaluate(() => window.app.store.setUI({ mode: 'walk' }));
   await sleep(2500);

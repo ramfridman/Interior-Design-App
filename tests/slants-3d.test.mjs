@@ -337,7 +337,16 @@ group('Daylight fallback: slants occlude, angled faces read the room average');
   const V = D.computeVisibility(S, { coarse: true });
   const L = D.relight(S, V, { sky: 'overcast', sunDir: [0, 0.8, 0.6] });
   const mean = (room) => { let s = 0, n = 0; for (let p = 0; p < S.patch.count; p++) if (S.patch.region[p] === room && S.patch.surf[p] === D.SURF.FLOOR) { s += L.lightmap[S.texelOf[p] * 4 + 1]; n++; } return n ? s / n : 0; };
-  check('light enters through the window in s01: the east room\'s floor is lit (> 0)', mean(eastIdx) > 0, mean(eastIdx).toExponential(2));
+  // the same 120 × 120 window in a straight east wall of a larger box room: the angled one must not lose its light
+  // (a supercover that closed the gap's mouth once let through ~ 1/4)
+  const BOX = B.buildPlan({ walls: WEDGE.walls.concat([{ id: 'w05', x: 980, y: 20, w: 20, h: 760, kind: 'exterior' }, { id: 'w06', x: 600, y: 780, w: 400, h: 20, kind: 'exterior' }]),
+    openings: WEDGE.openings.filter((o) => o.axis !== 'a').concat([{ id: 'win-e', kind: 'window', style: 'sliding', axis: 'v', x: 980, y: 340, w: 20, h: 120, width: 120, height: 120, sill: 90 }]),
+    heights: WEDGE.heights, meta: { name: 'Box' } }).plan;
+  const Sb = D.buildScene(D.sceneInputFromPlan(BOX, { doorsOpen: true })), Lb = D.relight(Sb, D.computeVisibility(Sb, { coarse: true }), { sky: 'overcast', sunDir: [0, 0.8, 0.6] });
+  const boxEast = Sb.roomIds.indexOf(BOX.rooms.find((r) => r.polygon.some(([x]) => x > 900)).id);
+  let sb = 0, nb = 0; for (let p = 0; p < Sb.patch.count; p++) if (Sb.patch.region[p] === boxEast && Sb.patch.surf[p] === D.SURF.FLOOR) { sb += Lb.lightmap[Sb.texelOf[p] * 4 + 1]; nb++; }
+  check('light enters through the window in s01: the east room (20.4 m²) is lit at least as well as a 35 m² box room with the same window in a straight wall',
+    mean(eastIdx) > sb / nb, `${mean(eastIdx).toExponential(2)} vs ${(sb / nb).toExponential(2)}`);
   // House 98's solver input is unchanged (no slant keys)
   open(H98);
   const in98 = D.sceneInputFromPlan(PLAN, { doorsOpen: true });
