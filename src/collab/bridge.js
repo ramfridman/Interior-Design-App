@@ -14,7 +14,9 @@ import { normalizeOptionalKeys } from '../core/plan-schema.js';
 
 const clone = (o) => (o === undefined ? undefined : JSON.parse(JSON.stringify(o)));
 const TX_FIELDS = ['x', 'y', 'rot', 'elev', 'w', 'd', 'h'];
-const PLAN_CALLS = ['addWall', 'removeWallSegment', 'moveWallSegment', 'resizeWallSegment', 'addOpening', 'updateOpening', 'removeOpening', 'flipDoor', 'updateRoom', 'resetPlan'];
+// 'setActiveLevel' is recorded (on a plan with upper levels) before each call, so a re-run edits the same level
+const PLAN_CALLS = ['addWall', 'removeWallSegment', 'moveWallSegment', 'resizeWallSegment', 'addOpening', 'updateOpening', 'removeOpening', 'flipDoor', 'updateRoom', 'resetPlan',
+  'addLevel', 'removeLevel', 'updateLevel', 'setActiveLevel'];
 
 /**
  * Drawing order → `@z`: keep the values of the longest run of items already in increasing order, give the others values
@@ -149,10 +151,10 @@ export function createStoreBridge(store, { fetchUnderlay = async () => null, upl
         if ((baseKey && baseKey !== JSON.stringify(baseNow())) || v.phase !== PE.planPhase()) {
           PE.setBasePlan(v.base || baseNow(), { phase: v.phase });
           PE.applyPlanState(v.edits || null);
-          store._planChanged({ reason: 'phase', changed: { walls: true, openings: true, rooms: true } });
+          store._planChanged({ reason: 'phase', changed: { walls: true, openings: true, rooms: true, levels: true } });
         } else {
           const res = PE.applyPlanState(v.edits || null);
-          if (res.changed.walls || res.changed.openings || res.changed.rooms) store._planChanged({ reason: 'remote', changed: res.changed });
+          if (res.changed.walls || res.changed.openings || res.changed.rooms || res.changed.levels) store._planChanged({ reason: 'remote', changed: res.changed });
         }
       }
       // project
@@ -229,12 +231,16 @@ export function createStoreBridge(store, { fetchUnderlay = async () => null, upl
     /** Re-run recorded plan-engine calls on the current plan (after a conflict). */
     runIntent(list) {
       intents = [];
-      for (const call of list || []) {
-        if (!PLAN_CALLS.includes(call.name)) return { ok: false, reason: 'Unknown plan change.' };
-        const r = PE[call.name](...(call.args || []));
-        if (!r || !r.ok) return { ok: false, reason: (r && r.reason) || 'The plan engine refused it.' };
-      }
-      return { ok: true };
+      const mine = PE.activeLevel();          // the person's own level: calls start on L0 unless a recorded level says otherwise
+      PE.setActiveLevel('L0');
+      try {
+        for (const call of list || []) {
+          if (!PLAN_CALLS.includes(call.name)) return { ok: false, reason: 'Unknown plan change.' };
+          const r = PE[call.name](...(call.args || []));
+          if (!r || !r.ok) return { ok: false, reason: (r && r.reason) || 'The plan engine refused it.' };
+        }
+        return { ok: true };
+      } finally { PE.setActiveLevel(mine); }
     },
     /**
      * Open a room's doc as the store's project (base plan, phase, design; the underlay picture is fetched).

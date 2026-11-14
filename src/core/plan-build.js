@@ -20,11 +20,17 @@
  *             parking?, paths?, features? }
  *   outdoorAreas  optional [{ id, name, type, polygon }] (none by default)
  *   slants / stairs / levels   optional schema-2 data (docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md § 2, plan-schema.js) —
- *             carried into the plan UNCHANGED (nothing is derived from them, they are not moved with the origin) only with
- *             the option `passThrough: true`; `meta.floors` then becomes 1 + levels.length. Without it they are ignored
- *             and upper floors stay an error (today's behaviour).
+ *             carried into the plan (nothing is derived from them; they are moved with the origin like the walls) only
+ *             with the option `passThrough: true`; `meta.floors` then becomes 1 + levels.length. Without it they are
+ *             ignored and upper floors stay an error (today's behaviour).
+ *   levels    FIRST-CLASS upper floors (stage F1) with the option `levels: true` or while FEATURES.levels is on:
+ *             [{ id?: 'L1'…, name?, nameHe?, heights?: { ceiling, slab, parapet }, walls, openings, voids?, stairs?,
+ *             slants?, elevation? }] bottom-up — each level's walls + openings are read and derived exactly like L0's
+ *             (rooms, outline, opening sides; wall ids 'L1|w01'…; room and opening ids unique across levels);
+ *             heights default to L0's; elevation = level below's elevation + its ceiling + this level's slab (a different
+ *             given elevation is reported); the origin is the north-west corner of all levels together.
  *
- * OPTIONS  { passThrough?: boolean }
+ * OPTIONS  { passThrough?: boolean, levels?: boolean }
  *
  * OUTPUT  { ok, plan, warnings }  — never throws on user data.
  *   ok        false when any warning has level 'error' (something was left out); `plan` is still complete and usable.
@@ -34,6 +40,8 @@
  *   warnings  [{ level: 'error' | 'warning' | 'info', text, ref? }] — plain English, ready to show.
  */
 import { analyseWalls, wallBounds, BUILTIN_PLAN } from './plan-edit.js';
+import { FEATURES } from './features.js';
+import { isLevelId, recomputeElevations } from './levels.js';
 import { optionalKeysProblem, optionalPart, normalizeOptionalKeys, setOptionalKeys } from './plan-schema.js';
 import { polygonArea } from './geometry.js';
 
@@ -63,36 +71,36 @@ export const DEFAULT_HEIGHTS = Object.freeze({ ...BUILTIN_PLAN.heights });
  * Build a complete plan from walls and openings. See the file header for the shapes.
  * @returns {{ ok: boolean, plan: object, warnings: Array<{ level: 'error'|'warning'|'info', text: string, ref?: string }> }}
  */
-export function buildPlan(input = {}, { passThrough = false } = {}) {
+export function buildPlan(input = {}, { passThrough = false, levels: levelsOption } = {}) {
   const warnings = [];
   const say = (level, text, ref) => warnings.push(ref == null ? { level, text } : { level, text, ref });
   try {
     const src = input && typeof input === 'object' ? input : {};
-    const extra = passThrough ? readOptional(src, say) : null;
-    const meta = readMeta(src.meta, say, extra ? 1 + (extra.levels ? extra.levels.length : 0) : 1);
+    const firstClass = (levelsOption === true || (levelsOption !== false && FEATURES.levels)) && Array.isArray(src.levels) && src.levels.length > 0;
+    let extra = passThrough ? readOptional(firstClass ? { ...src, levels: undefined } : src, say) : null;
+    const meta = readMeta(src.meta, say, firstClass ? 1 + src.levels.length : extra ? 1 + (extra.levels ? extra.levels.length : 0) : 1);
     const heights = readHeights(src.heights, say);
+    const ups = firstClass ? readLevelInputs(src.levels, heights, say) : null;
     let walls = readWalls(src.walls, say);
-    let openings = readOpenings(src.openings, heights, say);
+    const openingIds = new Set();
+    let openings = readOpenings(src.openings, heights, say, openingIds);
+    if (ups) for (const u of ups) u.openings = readOpenings(u.rawOpenings, u.heightsAll, u.say, openingIds);
 
-    // origin = outer north-west corner of the house
-    const box = wallBounds(walls);
+    // origin = outer north-west corner of the house (of every level)
+    const box = wallBounds(ups ? [...walls, ...ups.flatMap((u) => u.walls)] : walls);
     let shift = { x: 0, y: 0 };
     if (box && (box.x !== 0 || box.y !== 0)) {
       shift = { x: -box.x, y: -box.y };
       walls = walls.map((w) => ({ ...w, x: w.x + shift.x, y: w.y + shift.y }));
       openings = openings.map((o) => ({ ...o, x: o.x + shift.x, y: o.y + shift.y }));
+      if (ups) for (const u of ups) { u.walls = u.walls.map((w) => ({ ...w, x: w.x + shift.x, y: w.y + shift.y })); u.openings = u.openings.map((o) => ({ ...o, x: o.x + shift.x, y: o.y + shift.y })); Object.assign(u.extra, shiftOptional(u.extra, shift)); }
+      if (extra) extra = shiftOptional(extra, shift);
       say('info', `The plan was moved by ${-shift.x} cm east–west and ${-shift.y} cm north–south so that the house's north-west corner is the origin.`);
     }
     const outdoorAreas = readOutdoorAreas(src.outdoorAreas, shift, say);
 
     // openings must sit in a wall: those that touch no wall at all are left out
-    openings = openings.filter((o) => {
-      const hit = walls.some((w) => w.x < o.x + o.w && o.x < w.x + w.w && w.y < o.y + o.h && o.y < w.y + w.h);
-      const near = hit || walls.some((w) => (w.x === o.x + o.w || o.x === w.x + w.w) && w.y < o.y + o.h && o.y < w.y + w.h)
-        || walls.some((w) => (w.y === o.y + o.h || o.y === w.y + w.h) && w.x < o.x + o.w && o.x < w.x + w.w);
-      if (!near) say('error', `The ${word(o)} ${o.id} is not in any wall — it was left out.`, o.id);
-      return near;
-    });
+    openings = openingsInWalls(walls, openings, say);
 
     let derived = analyseWalls(walls, openings, { outdoorAreas });
     const bad = new Map(derived.problems.map((p) => [p.id, p.type]));
@@ -107,14 +115,9 @@ export function buildPlan(input = {}, { passThrough = false } = {}) {
     }
 
     const rooms = nameRooms(derived.rooms, say);
-    const finalOpenings = derived.openings.map((o) => {
-      const d = OPENING_DEFAULTS[o.kind];
-      const next = { ...o };
-      if (o.kind === 'door' && o.exterior && !o.styleGiven && next.style === d.style) next.style = d.extStyle;
-      delete next.styleGiven;
-      return next;
-    });
-    const bounds = wallBounds(derived.walls, finalOpenings) || { x: 0, y: 0, w: 0, h: 0 };
+    const finalOpenings = derived.openings.map(finalOpening);
+    const levels = ups ? buildLevels(ups, rooms, heights) : null;
+    const bounds = (levels ? wallBounds([...derived.walls, ...levels.flatMap((l) => l.walls)], [...finalOpenings, ...levels.flatMap((l) => l.openings)]) : wallBounds(derived.walls, finalOpenings)) || { x: 0, y: 0, w: 0, h: 0 };
     const site = readSite(src.site, bounds, shift, say);
     if (!walls.length) say('info', 'There are no walls yet — draw the house with the Structure tools.');
     else if (!rooms.length) say('warning', 'No enclosed room was found: walls must meet (or cross) to close a room, and door / window gaps must be inside walls.');
@@ -131,10 +134,8 @@ export function buildPlan(input = {}, { passThrough = false } = {}) {
       site,
       assumptions: assumptionsFor(src, meta, heights),
     };
-    if (extra) {
-      setOptionalKeys(plan, extra);
-      if ((shift.x || shift.y) && (extra.slants || extra.stairs || extra.levels)) say('warning', 'The angled walls, stairs and upper floors were kept where they were given: they were not moved with the house.');
-    }
+    if (levels) setOptionalKeys(plan, optionalPart(normalizeOptionalKeys({ ...(extra || {}), levels })));
+    else if (extra) setOptionalKeys(plan, extra);
     return { ok: !warnings.some((w) => w.level === 'error'), plan, warnings };
   } catch (err) {
     say('error', 'The plan could not be built: ' + (err && err.message ? err.message : String(err)));
@@ -145,6 +146,104 @@ export function buildPlan(input = {}, { passThrough = false } = {}) {
 /** An empty lot (no walls): `lot` = { width, depth } in cm, the origin `margins.w` / `margins.n` in from its NW corner. */
 export function emptyPlan({ meta, heights, lot, margins, street } = {}) {
   return buildPlan({ walls: [], openings: [], meta, heights, site: { lot, margins, street } }).plan;
+}
+
+/** Exterior doors without a given style get the exterior style; the reader's marker goes. */
+function finalOpening(o) {
+  const d = OPENING_DEFAULTS[o.kind];
+  const next = { ...o };
+  if (o.kind === 'door' && o.exterior && !o.styleGiven && next.style === d.style) next.style = d.extStyle;
+  delete next.styleGiven;
+  return next;
+}
+
+/** Openings that touch no wall of their level are left out (an error each). */
+function openingsInWalls(walls, openings, say) {
+  return openings.filter((o) => {
+    const hit = walls.some((w) => w.x < o.x + o.w && o.x < w.x + w.w && w.y < o.y + o.h && o.y < w.y + w.h);
+    const near = hit || walls.some((w) => (w.x === o.x + o.w || o.x === w.x + w.w) && w.y < o.y + o.h && o.y < w.y + w.h)
+      || walls.some((w) => (w.y === o.y + o.h || o.y === w.y + w.h) && w.x < o.x + o.w && o.x < w.x + w.w);
+    if (!near) say('error', `The ${word(o)} ${o.id} is not in any wall — it was left out.`, o.id);
+    return near;
+  });
+}
+
+/** Optional data (slants, stairs, levels, voids…) moved by `shift` (the origin move): positions, outlines, labels. */
+function shiftOptional(data, shift) {
+  const dx = shift.x, dy = shift.y, P = (p) => [p[0] + dx, p[1] + dy];
+  const obj = (o) => {
+    if (!o || typeof o !== 'object') return o;
+    const n = { ...o };
+    if (num(n.x) && num(n.y) && n.axis !== 'a') { n.x += dx; n.y += dy; }
+    if (['x1', 'y1', 'x2', 'y2'].every((k) => num(n[k]))) { n.x1 += dx; n.y1 += dy; n.x2 += dx; n.y2 += dy; }
+    for (const k of ['poly', 'polygon']) if (Array.isArray(n[k])) n[k] = n[k].map(P);
+    if (Array.isArray(n.label) && n.label.length >= 2) n.label = P(n.label);
+    if (n.footprint && num(n.footprint.x) && num(n.footprint.y)) n.footprint = { ...n.footprint, x: n.footprint.x + dx, y: n.footprint.y + dy };
+    if (Array.isArray(n.zones)) n.zones = n.zones.map((z) => (z && Array.isArray(z.label) ? { ...z, label: P(z.label) } : z));
+    return n;
+  };
+  const list = (a) => (Array.isArray(a) ? a.map(obj) : a);
+  const out = { ...data };
+  for (const k of ['slants', 'stairs', 'voids', 'outdoorAreas', 'walls', 'openings', 'rooms']) if (out[k] !== undefined) out[k] = list(out[k]);
+  if (Array.isArray(out.wallOutline)) out.wallOutline = out.wallOutline.map((g) => (Array.isArray(g) && g.length >= 4 ? [g[0] + dx, g[1] + dy, g[2] + dx, g[3] + dy] : g));
+  if (Array.isArray(out.levels)) out.levels = out.levels.map((l) => shiftOptional(l, shift));
+  return out;
+}
+
+/** First-class upper levels: read (walls; openings are read later with the global id set), heights, ids, names. */
+function readLevelInputs(raw, heights, say) {
+  const out = [], ids = new Set();
+  raw.forEach((l0, i) => {
+    const l = l0 && typeof l0 === 'object' ? l0 : {};
+    let id = isLevelId(l.id) && !ids.has(l.id) ? l.id : null;
+    if (!id) { let n = i + 1; while (ids.has('L' + n)) n++; id = 'L' + n; if (l.id != null) say('warning', `Floor ${i + 1} was renamed ${id} (its id "${l.id}" is not usable).`); }
+    ids.add(id);
+    const label = typeof l.name === 'string' && l.name.trim() ? l.name.trim() : `Floor ${i + 1}`;
+    const lsay = (level, text, ref) => say(level, `${label}: ${text}`, ref);
+    const h = { ceiling: heights.ceiling, slab: heights.slab, parapet: heights.parapet };
+    if (l.heights && typeof l.heights === 'object') for (const [k, lo, hi] of [['ceiling', 200, 600], ['slab', 0, 100], ['parapet', 0, 200]]) {
+      const v = toNum(l.heights[k]);
+      if (v == null) continue;
+      if (num(v) && v >= lo && v <= hi) h[k] = Math.round(v); else lsay('warning', `Height "${k}" is not ${lo}–${hi} cm — ${h[k]} cm was used.`);
+    }
+    const extra = {};
+    for (const k of ['voids', 'stairs', 'slants']) if (Array.isArray(l[k]) && l[k].length) extra[k] = clone(l[k]);
+    out.push({ id, name: typeof l.name === 'string' && l.name.trim() ? l.name.trim() : null, nameHe: typeof l.nameHe === 'string' && l.nameHe.trim() ? l.nameHe.trim() : null,
+      givenElevation: num(toNum(l.elevation)) ? toNum(l.elevation) : null, heights: h, heightsAll: { ...heights, ...h }, say: lsay,
+      walls: readWalls(Array.isArray(l.walls) ? l.walls.map((w) => (w && typeof w === 'object' && !Array.isArray(w) && w.floor != null ? { ...w, floor: undefined } : w)) : l.walls, lsay),
+      rawOpenings: l.openings, extra });
+  });
+  return out;
+}
+
+/** Derive every upper level like L0 (rooms named, ids global), elevations from the heights. */
+function buildLevels(ups, groundRooms, heights) {
+  const taken = new Set(groundRooms.map((r) => r.id));
+  const built = ups.map((u) => {
+    let openings = openingsInWalls(u.walls, u.openings, u.say);
+    let derived = analyseWalls(u.walls, openings, { level: u.id, reservedRoomIds: taken });
+    const bad = new Map(derived.problems.map((p) => [p.id, p.type]));
+    if (bad.size) {
+      for (const [id, type] of bad) {
+        const o = openings.find((x) => x.id === id);
+        const text = type === 'overlap' ? 'overlaps another opening' : type === 'blocked' ? 'does not lead anywhere (a wall blocks one side)' : 'does not sit cleanly in one straight wall, or has less than 10 cm of wall beside it';
+        u.say('error', `The ${o ? word(o) : 'opening'} ${id} ${text} — it was left out.`, id);
+      }
+      openings = openings.filter((o) => !bad.has(o.id));
+      derived = analyseWalls(u.walls, openings, { level: u.id, reservedRoomIds: taken });
+    }
+    if (!u.walls.length) u.say('info', 'There are no walls on this floor yet.');
+    const rooms = nameRooms(derived.rooms, u.say);
+    for (const r of rooms) taken.add(r.id);
+    const lv = { id: u.id };
+    if (u.name) lv.name = u.name;
+    if (u.nameHe) lv.nameHe = u.nameHe;
+    Object.assign(lv, { elevation: 0, heights: u.heights, walls: derived.walls.map(({ cls, ...w }) => w), wallOutline: derived.wallOutline, openings: derived.openings.map(finalOpening), rooms }, u.extra);
+    return lv;
+  });
+  const levels = recomputeElevations(built, heights);
+  levels.forEach((l, i) => { const g = ups[i].givenElevation; if (g != null && g !== l.elevation) ups[i].say('warning', `The floor's elevation was computed from the heights: ${l.elevation} cm (${g} cm was given).`); });
+  return levels;
 }
 
 // ---------------------------------------------------------------- readers
@@ -214,8 +313,8 @@ function readWalls(raw, say) {
   return out;
 }
 
-function readOpenings(raw, heights, say) {
-  const out = [], ids = new Set();
+function readOpenings(raw, heights, say, ids = new Set()) {
+  const out = [];
   if (raw != null && !Array.isArray(raw)) { say('error', 'Openings must be a list.'); return out; }
   const counters = { door: 0, window: 0, 'sliding-door': 0, opening: 0 };
   (raw || []).forEach((o, i) => {

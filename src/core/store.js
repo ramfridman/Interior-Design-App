@@ -11,12 +11,15 @@
  *   'ui'         { keys: string[] }          – store.ui changed
  *   'project'    { keys: string[] }          – store.project changed (ceiling height, roof, name…)
  *   'finishes'   { ids: string[] }           – room floor / wall finish changed
- *   'plan'       { reason, changed: { walls, openings, rooms }, transient? }
+ *   'plan'       { reason, changed: { walls, openings, rooms, levels }, transient?, levelId? }
  *                                            – PLAN.walls / openings / rooms / wallOutline were REPLACED (core/plan-edit.js,
  *                                              undo / redo, load). reason: 'add-wall' | 'remove-wall' | 'move-wall' |
  *                                              'resize-wall' | 'add-opening' | 'update-opening' | 'remove-opening' |
- *                                              'update-room' | 'reset' | 'history' | 'load' | 'base' (another project's base plan:
+ *                                              'update-room' | 'add-level' | 'remove-level' | 'update-level' | 'reset' | 'history' |
+ *                                              'load' | 'base' (another project's base plan:
  *                                              EVERY part of PLAN was replaced, site and meta too) | 'phase' (draft ↔ fixed).
+ *                                              `changed.levels`: PLAN.levels (upper floors) changed — an edit on an upper
+ *                                              level changes only that (with `levelId` = the level edited).
  *                                              Rebuild everything drawn from PLAN.
  *   'carpentry'  { reason, runIds, transient? }  – store.carpentry (made-to-measure runs, src/carpentry/) changed.
  *                                              reason: an engine reason ('create-run', 'layout', 'adopt', …) | 'history' | 'load'
@@ -40,7 +43,8 @@
  */
 import { PLAN } from './plan.js';
 import { spaceAt } from './geometry.js';
-import { bindPlanHost, planState, planStateKey, applyPlanState, setBasePlan, setPlanPhase as setEnginePhase } from './plan-edit.js';
+import { bindPlanHost, planState, planStateKey, applyPlanState, setBasePlan, setPlanPhase as setEnginePhase, levelPlan, setActiveLevel, activeLevel } from './plan-edit.js';
+import { GROUND, upperLevels, levelOf } from './levels.js';
 
 const STORAGE_KEY = 'e7-interior-design/v1';
 const HISTORY_LIMIT = 200;
@@ -70,6 +74,9 @@ function normalizeItem(partial) {
   if ('level' in item && !(typeof item.level === 'string' && item.level)) delete item.level;   // optional: absent = ground level (L0)
   return item;
 }
+
+/** Did any part of the plan change? (`changed` of an engine result / 'plan' event) */
+const planChanged = (c) => !!(c && (c.walls || c.openings || c.rooms || c.levels));
 
 /** Today's calendar date at the house ('YYYY-MM-DD' in PLAN.meta.timeZone) — the default day for the 3D sun. */
 function siteToday() {
@@ -186,8 +193,26 @@ class Store {
   // ---------- read helpers ----------
   getItem(id) { return this.items.find((i) => i.id === id) || null; }
   getSelected() { return this.selection.map((id) => this.getItem(id)).filter(Boolean); }
-  /** Room / outdoor area / garden an item's centre sits in. */
-  spaceOf(item) { return spaceAt(item.x, item.y); }
+  /** Room / outdoor area / garden an item's centre sits in — on the item's own level (`item.level`, absent = L0). */
+  spaceOf(item) {
+    if (!item.level || item.level === GROUND) return spaceAt(item.x, item.y);
+    const plan = levelPlan(PLAN, item.level);
+    return plan ? spaceAt(item.x, item.y, plan) : null;
+  }
+  /** Space ids (rooms and outdoor areas) of every level. */
+  _spaceIds() {
+    const ids = new Set([...PLAN.rooms, ...PLAN.outdoorAreas].map((s) => s.id));
+    for (const l of upperLevels(PLAN)) { const v = levelPlan(PLAN, l.id); for (const s of [...v.rooms, ...v.outdoorAreas]) ids.add(s.id); }
+    return ids;
+  }
+  /**
+   * `ui.level` must name a level of the open plan: an unknown one (another project, a level removed by undo or by
+   * someone else) falls back to 'L0'. The plan engine's active level follows it. Silent (like activeSpace).
+   */
+  _syncLevel() {
+    if (this.ui.level !== GROUND && !levelOf(PLAN, this.ui.level)) this.ui.level = GROUND;
+    if (activeLevel() !== this.ui.level) setActiveLevel(this.ui.level);
+  }
 
   // ---------- history ----------
   _snapshot() { return `{"items":${JSON.stringify(this.items)},"finishes":${JSON.stringify(this.finishes)},"project":${JSON.stringify(this.project)},"plan":${planStateKey()},"carpentry":${JSON.stringify(this.carpentry)}}`; }
@@ -227,7 +252,8 @@ class Store {
     this.items = s.items; this.finishes = s.finishes || {}; this.project = { ...defaultProject(), ...s.project };
     this.carpentry = carp;
     this.selection = this.selection.filter((id) => this.getItem(id));
-    if (plan.changed.walls || plan.changed.openings || plan.changed.rooms) this.emit('plan', { reason: 'history', changed: plan.changed });
+    this._syncLevel();
+    if (planChanged(plan.changed)) this.emit('plan', { reason: 'history', changed: plan.changed });
     if (carpChanged) this.emit('carpentry', { reason: 'history', runIds: Object.keys(carp.runs) });
     this.emit('items', { type: 'reset', ids: this.items.map((i) => i.id) });
     this.emit('finishes', { ids: Object.keys(this.finishes) });
@@ -334,9 +360,11 @@ class Store {
 
   // ---------- ui / project / finishes ----------
   setUI(patch) {
+    if ('level' in patch && patch.level !== GROUND && !levelOf(PLAN, patch.level)) patch = { ...patch, level: GROUND };
     const keys = Object.keys(patch).filter((k) => this.ui[k] !== patch[k]);
     if (!keys.length) return;
     Object.assign(this.ui, patch);
+    if (keys.includes('level')) this._syncLevel();
     this.emit('ui', { keys });
   }
   setProject(patch, opts = {}) {
@@ -354,9 +382,17 @@ class Store {
   }
 
   // ---------- plan edits (see core/plan-edit.js) ----------
+  /**
+   * What stands on an upper level (plan-edit removeLevel asks before removing it): item ids with that `level`, carpentry
+   * run ids with that `level`, finishes of its rooms (`roomIds`).
+   */
+  _levelContent(id, roomIds = []) {
+    const runs = Object.values((this.carpentry && this.carpentry.runs) || {}).filter((r) => r && r.level === id).map((r) => r.id);
+    return { items: this.items.filter((i) => i.level === id).map((i) => i.id), runs, finishes: roomIds.filter((r) => this.finishes[r]) };
+  }
   /** Drop finishes of rooms that no longer exist (merged away by a plan edit). Returns the dropped space ids. */
   _pruneFinishes() {
-    const spaces = new Set([...PLAN.rooms, ...PLAN.outdoorAreas].map((s) => s.id));
+    const spaces = upperLevels(PLAN).length ? this._spaceIds() : new Set([...PLAN.rooms, ...PLAN.outdoorAreas].map((s) => s.id));
     const gone = Object.keys(this.finishes).filter((id) => !spaces.has(id));
     for (const id of gone) delete this.finishes[id];
     if (this.ui.activeSpace && !spaces.has(this.ui.activeSpace)) this.ui.activeSpace = null;
@@ -364,6 +400,7 @@ class Store {
   }
   /** plan-edit.js calls this right after it replaced the PLAN arrays. */
   _planChanged(payload) {
+    this._syncLevel();
     const gone = this._pruneFinishes();
     this.emit('plan', payload);
     if (gone.length) this.emit('finishes', { ids: gone, transient: !!payload.transient });
@@ -422,10 +459,11 @@ class Store {
     this.carpentryImages = data.carpentryImages && typeof data.carpentryImages === 'object' ? { ...data.carpentryImages } : {};
     this.project = { ...defaultProject(), ...(data.project || {}) };
     if (data.ui && opts.restoreUI) this.ui = { ...DEFAULT_UI, ...data.ui };
+    this._syncLevel();
     this.selection = [];
     this._pruneFinishes();
-    if (opts.base) this.emit('plan', { reason: 'base', changed: { walls: true, openings: true, rooms: true } });
-    else if (plan.changed.walls || plan.changed.openings || plan.changed.rooms) this.emit('plan', { reason: 'load', changed: plan.changed });
+    if (opts.base) this.emit('plan', { reason: 'base', changed: { walls: true, openings: true, rooms: true, levels: true } });
+    else if (planChanged(plan.changed)) this.emit('plan', { reason: 'load', changed: plan.changed });
     this.emit('carpentry', { reason: 'load', runIds: Object.keys(this.carpentry.runs) });
     this.emit('load', {});
     this.emit('items', { type: 'reset', ids: this.items.map((i) => i.id) });
@@ -476,7 +514,7 @@ class Store {
     if (!setEnginePhase(phase).changed) return false;
     this._undo = []; this._redo = []; this._batch = null;
     const gone = this._pruneFinishes();
-    this.emit('plan', { reason: 'phase', changed: { walls: true, openings: true, rooms: true } });
+    this.emit('plan', { reason: 'phase', changed: { walls: true, openings: true, rooms: true, levels: true } });
     if (gone.length) this.emit('finishes', { ids: gone });
     this.emit('history', this.historyState());
     return true;
@@ -505,6 +543,6 @@ class Store {
 }
 
 export const store = new Store();
-bindPlanHost({ record: (opts) => store._record(opts), changed: (payload) => store._planChanged(payload), intent: (name, args) => { if (store.collab && store.collab.planIntent) store.collab.planIntent(name, args); } });
+bindPlanHost({ record: (opts) => store._record(opts), changed: (payload) => store._planChanged(payload), content: (id, roomIds) => store._levelContent(id, roomIds), intent: (name, args) => { if (store.collab && store.collab.planIntent) store.collab.planIntent(name, args); } });
 export { DEFAULT_UI, DEFAULT_PROJECT, defaultProject, emptyCarpentry, normalizeItem, STORAGE_KEY };
 export default store;
