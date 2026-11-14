@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 16): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 18): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -72,6 +72,13 @@ Order of work:
 
 ## Version 16 (14 Nov 2026) — floors can be tried
 Settings → Experimental → "Several floors (in development)" switches floors on: floor switcher, add / rename / remove a floor (outer walls and windows copied up), walls / doors / furniture / carpentry / checks per floor, floors stacked in 3D with slabs and cut-away, "Show whole house". Not yet in this version: placing stairs in the plan (stage F4b, running), realistic light on upper floors (F6, running), walking between floors (F5), importing several floors (F8). Angled walls are complete in the engine (derive + editing) but have no drawing tools yet (A3) and no 3D (A4), so they stay off.
+
+## Version 18 (14 Nov 2026) — more suppliers
+- [x] Catalogue 1,108 products from 59 suppliers: +126 indoor (Habitat, KARE, StudioKnob, Tollman's DOT, Kado Home, Kkids, Design4You, Home 26, Zilber, Shpitzer, Tzemer Rugs, Beitili) and +104 outdoor / kitchen / bath / finishes (Argaman4U, Rocking Chair, Canopia, Izraela, Bol Parket, Bath Boutique, Golan Westline, Porcelanita and others). Evidence for every supplier and every skipped one is in `docs/CATALOG-RESEARCH.md`.
+- [x] Owner's decisions: no "boutique" category; the supplier filter stays; a small star (top-rated supplier, only with a recorded public rating ≥ 4.5 from ≥ 100 reviews) and gem (design studio / boutique) beside the supplier's name.
+- [x] Phone: catalogue category chips no longer overlap (version 17).
+- [ ] Second research pass on the suppliers that were skipped and the ones the owner named (Kaza, Ubject, Zaga…) [Sonnet, running]. Will return two lists for the owner: suppliers with no public price (carry them as "price on request"?) and sites that block automated reading.
+- [ ] "Add your own product": add any product from any shop by hand (link, shop, name, price or "price on request", kind of item, sizes), saved with the project and synced [Opus, running].
 
 ## Still waiting for the owner
 1. **Hosting** — a free Cloudflare account, authorising its GitHub app for the repo, the email addresses to invite, and whether the working branch is merged into the default branch first (a pull request). With live collaboration the site becomes a Cloudflare Worker with static files instead of plain Pages; steps will be updated when part C is done.
