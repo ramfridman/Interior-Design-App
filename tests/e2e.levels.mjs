@@ -394,7 +394,7 @@ async function main() {
     check('stairs: in 3D the stair stands on the ground floor', d3.mesh && d3.visible && d3.level === 'L0', JSON.stringify(d3));
     if (shots) {
       await page.evaluate(async () => {
-        window.app.store.setUI({ level: 'L1', showRoof: false, wallsCutaway: true });
+        window.app.store.setUI({ level: 'L1', showRoof: false, wallsCutaway: true, daylight: false });   // simple fill lights: no wait for the daylight solve
         const dbg = window.app.view3d.debug, m = dbg.scene.getObjectByName('stair:st1');
         m.geometry.computeBoundingBox();
         const box = new m.geometry.boundingBox.constructor().setFromObject(m), c = box.getCenter(dbg.camera.position.clone());
@@ -405,9 +405,10 @@ async function main() {
       await sleep(4000);
       await page.evaluate(() => window.app.view3d.debug.renderNow());
       await sleep(300);
+
       const box = await page.locator('#view3d, .view3d').first().boundingBox().catch(() => null);
       await page.screenshot({ path: path.join(shotDir, 'e2e-stairs-3d.png'), clip: box ? { x: box.x + box.width * 0.05, y: box.y + box.height * 0.08, width: box.width * 0.6, height: box.height * 0.8 } : undefined });
-      await page.evaluate(() => window.app.store.setUI({ level: 'L0', wallsCutaway: false }));
+      await page.evaluate(() => window.app.store.setUI({ level: 'L0', wallsCutaway: false, daylight: true }));
     }
     await page.keyboard.press('1'); await sleep(600);
     // move it by dragging (it snaps; the opening above follows), then undo
