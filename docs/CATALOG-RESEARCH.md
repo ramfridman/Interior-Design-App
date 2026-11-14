@@ -115,3 +115,39 @@ By category: sofas 14, armchairs 11, side tables 9, coffee tables 6, poufs/stool
 * Mashbir (fashion), Urban Home (gadgets), HomeWorkshop (password page): not relevant.
 
 Verification: 15 random new URLs re-fetched on 14 Nov 2026, all HTTP 200 with the recorded price on the page (Tollman's DOT and Beitili need WebFetch because curl is blocked or the pages were read that way; they were read in this session). Ratings: only Zilber has a read value (4.5 from 11 reviews); every other supplier is "rating not checked", so no product carries `top-rated`.
+
+## New-supplier pass, outdoor / garden / kitchen / bathroom / finishes, 14 Nov 2026
+
+Added 104 real products (outdoor-living 37, garden-landscape 9, kitchen-bath-appliances 32, finishes 26) from 13 suppliers that were not in the catalogue when the pass started. Catalogue before this pass 878; after it, with the parallel indoor pass included, 1,108 (60 retailers, no duplicate ids, no validation warnings from `loadCatalog()`). Details, URLs and per-supplier method are in the four `*.sources.md` files (sections dated 14 Nov 2026). Every product page was opened in this session; price (as displayed) and dimensions (as published) are on the page. Hex colours of finishes and some furniture are sampled from the product photo and tagged `hex-estimated`.
+
+| Supplier | What it is (own page) | Rating (value, reviews, source, 14 Nov 2026) | Products | File(s) |
+|---|---|---|---|---|
+| Argaman4U | grills / outdoor kitchens / pizza ovens store, showroom Rishon LeZion | Zap client card: 41 reviews (40 positive, 1 negative), no average shown; no tag | 13 | outdoor-living |
+| Tollman's DOT | chain of designer furniture stores, international design brands (about page read by the indoor pass: since 1986); `boutique` | not checked | 13 | outdoor-living |
+| Rocking Chair | "home and garden furniture from the importer to the consumer" | Google widget on its home page: 4.8 from 430 reviews; `top-rated` | 7 | outdoor-living |
+| Canopia Israel | Palram's consumer shop, aluminium pergolas, made in Israel | 5.0 from 1 review only, not recorded | 3 | outdoor-living |
+| Aviv Hegia Carpentry | carpentry workshop, wooden kits for garden and home; `boutique` | 19 Google reviews shown, no average; not recorded | 1 | outdoor-living |
+| Izraela | nursery in Kibbutz Gvat, importer of the Esschert garden brand | none on page | 5 | garden-landscape |
+| Shiruzka | handmade concrete pots, one concrete artist, local production; `boutique` | none on page | 2 | garden-landscape |
+| Camisa | wood / building-materials warehouse, decking and turf department | not checked | 2 | garden-landscape |
+| Golan Westline | official importer of SMEG and White Westinghouse, "30 years" (Smeg item `boutique`) | not checked | 8 | kitchen-bath-appliances |
+| Bath Boutique | importer of bathroom furniture and sanitary ware, 30+ years; listed as a boutique store on Easy; `boutique` | not checked (Zap lists 11 reviews, no aggregate; page not opened) | 11 | kitchen-bath-appliances |
+| Merkaz HaOdafim | discount appliance store, Petah Tikva, 20 years | 5-star icons, "excellent", based on 75 reviews, no numeric average; no tag | 7 | kitchen-bath-appliances |
+| Bol Parket | parquet / cladding / lighted-mirror showroom, Petah Tikva (Shopify); prices include VAT per its FAQ | product pages show 5.0 from 202 Google reviews; `top-rated` | 26 (20 finishes, 6 mirrors) | finishes, kitchen-bath-appliances |
+| Porcelanita | ceramics, flooring and bathroom showroom, Ashkelon | not checked | 6 | finishes |
+
+Counts by category: BBQ and outdoor kitchens 13 (outdoor-living / bbq), outdoor furniture 21, shade 3 (pergolas), planters 5, outdoor utility (bird baths) 2, surfaces 4 (decking, synthetic grass, basalt paving, large tile), kitchen appliances 15, bathroom 17 (vanities 2, toilets 2, basins 3, mirrors 8, tubs 2), floors / wall finishes / tiles 24.
+
+Earlier unsourced gaps:
+* Bird baths: partly filled (2 small dishes from Izraela, 125 and 260; no pedestal baths found).
+* Composite (WPC) decking: filled with one product (Camisa, per m2 with thickness and board size stated). Other Camisa deck pages show a price with no unit.
+* Concrete pavers: still unsourced (only natural-stone and large-format porcelain paving found: Porcelanita basalt crazy paving 325 per m2).
+* Heat-pump water heaters: still unsourced (guides and promotions only, no priced product page with dimensions found).
+* Date palms: not retried. Rotary clotheslines: Leifheit pages found via search show diameter and arms but no height, so still unsourced.
+
+Skipped, and why: SCAB (scab.co.il, 144 garden furniture / outdoor kitchen products; "from" prices with variants and no dimensions in the page text); Kolbogan synthetic grass (every page "out of stock"); Hezibank, Alony, Hamat, Negev (no prices on product pages or ex-VAT PDF price lists); Tambour and Nirlat (no online prices); Porcelanita vanities and Bath Boutique width-range vanities (size-dependent prices); Aviv Hegia made-to-measure items; Smeg products without dimensions in the page text; Camisa deck pages with no price unit; hammock chairs (no overall hanging height).
+Sites that blocked or throttled: Camisa returned a bot-check page for several minutes (resolved on retry); galor-online.co.il was behind a Cloudflare check; tollmansdot.co.il's WooCommerce API errors (product pages work); ambatshop.co.il returned 403.
+
+Schema notes (no schema change made): finishes sold by the sheet or roll are converted to per m2 with the arithmetic in `description`; set prices (rattan lounge sets) are modelled as the main sofa and the description says so; surface products use placeholder `dims` of the standard 400 x 300 / 300 x 300 cm area, as earlier surfaces do; pergola `h` uses the maximum published wall-connection height. Retailer names must match exactly across passes (a case difference "Tollman's dot" vs "DOT" was fixed so the shop appears once).
+
+Verification: 15 random new URLs re-fetched on 14 Nov 2026, all HTTP 200 and each still shows the recorded price.
