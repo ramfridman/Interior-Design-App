@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 13): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 14): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -48,10 +48,11 @@ Small follow-ups noted: island stools do not travel with the island; overlap of 
 3. Online work: **several people must work together at the same time** (live). Not yet answered: sign-in method and group size — default taken: people are identified by the email they sign in with through Cloudflare Access (the invite-only choice already made), small group (up to about ten at once).
 
 Order of work:
-- [ ] A. Live collaboration core: operations over the store, convergence rules, per-person undo, shared room logic, Node dev server, presence (pointers, selections, soft locks) [Opus, running].
-- [ ] B. DXF import with layers and true units [Opus, running].
-- [ ] C. Cloudflare Worker + Durable Object around the room logic, online storage adapter, sharing dialog and roles (owner / editor / viewer), version history, deployment steps.
-- [ ] D. Angled walls in the plan engine (2D, 3D, daylight, regulations, carpentry, import).
+- [x] A. Live collaboration core (in version 14, dormant until there is a backend): operations over the store, server-ordered convergence, per-person undo, shared room logic, Node dev server (`node dev/collab-server.mjs`), presence, soft locks. Tested locally with two browsers; not yet on real Cloudflare.
+- [x] B. DXF import (version 14): own reader with true units and layers, layer panel in the import dialog, Hebrew layer names; tested on generated files only, not on a real architect's DXF. DWG is explained, not parsed.
+- [x] Hebrew carpentry terms checked against Israeli trade sources (version 14): 5 corrected, 11 confirmed, 9 unverified — see `docs/HEBREW-TERMS.md`.
+- [ ] C. Cloudflare Worker + Durable Object around the room logic, online storage adapter, sharing dialog and roles (owner / editor / viewer), version history, deployment steps [Opus, running].
+- [ ] D. Angled walls in the plan engine (2D, 3D, daylight, regulations, carpentry, import) [design analysis running; implementation in stages after it].
 - [ ] E. Several floors (stairs, per-floor plans, 3D stacking, daylight and walk-through across floors).
 
 ## Still waiting for the owner
