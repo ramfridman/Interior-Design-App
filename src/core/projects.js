@@ -21,6 +21,7 @@
 import { BUILTIN_PLAN, BASE_PLAN, planPhase, isBuiltinBase } from './plan-edit.js';
 import { emptyPlan, DEFAULT_HEIGHTS } from './plan-build.js';
 import { initialLayout } from './initial-layout.js';
+import { optionalKeysProblem, normalizeOptionalKeys } from './plan-schema.js';
 import { STORAGE_KEY } from './store.js';
 
 export const PROJECT_FILE_APP = 'e7-house-designer';
@@ -34,10 +35,14 @@ const slug = (name) => (String(name || 'project').toLowerCase().replace(/[^a-z0-
 /** The summary kept in lists (no plan, no design). */
 export const summaryOf = (p) => ({ id: p.id, name: p.name, createdAt: p.createdAt, updatedAt: p.updatedAt, phase: p.phase || 'fixed', builtin: !!p.builtin, ...(p.thumbnail ? { thumbnail: p.thumbnail } : {}) });
 
-/** A plausible base plan (the minimum the app needs to open it). */
+/**
+ * A plausible base plan (the minimum the app needs to open it). The optional schema-2 keys (schema, slants, stairs,
+ * levels — plan-schema.js) may be present; when they are they must be readable.
+ */
 export function isPlanData(p) {
   return !!(p && typeof p === 'object' && p.meta && typeof p.meta === 'object' && p.heights && Array.isArray(p.walls) && Array.isArray(p.openings)
-    && Array.isArray(p.rooms) && Array.isArray(p.wallOutline) && Array.isArray(p.outdoorAreas) && p.site && Array.isArray(p.site.boundary) && p.bounds);
+    && Array.isArray(p.rooms) && Array.isArray(p.wallOutline) && Array.isArray(p.outdoorAreas) && p.site && Array.isArray(p.site.boundary) && p.bounds)
+    && !optionalKeysProblem(p);
 }
 
 // ---------------------------------------------------------------- adapters
@@ -345,7 +350,7 @@ export function createProjects({ store, adapter = createMemoryAdapter(), legacyK
       if (data && data.app === PROJECT_FILE_APP && data.project && isPlanData(data.project.basePlan)) {
         const p = data.project;
         rec = { ...clone(p), id: newId(), name: String(p.name || 'Imported project'), createdAt: p.createdAt || now(), updatedAt: now(), phase: p.phase === 'draft' ? 'draft' : 'fixed', design: p.design && Array.isArray(p.design.items) ? p.design : { items: [] } };
-        rec.builtin = JSON.stringify(rec.basePlan) === JSON.stringify(BUILTIN_PLAN);
+        rec.builtin = JSON.stringify(normalizeOptionalKeys(clone(rec.basePlan))) === JSON.stringify(BUILTIN_PLAN);
       } else if (data && Array.isArray(data.items)) {
         const name = (data.project && data.project.name) || BUILTIN_PLAN.meta.name;
         rec = { id: newId(), name, createdAt: now(), updatedAt: now(), phase: 'fixed', builtin: true, basePlan: clone(BUILTIN_PLAN), design: data };

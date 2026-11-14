@@ -10,6 +10,7 @@ import { PLAN } from '../core/plan.js';
 import * as PE from '../core/plan-edit.js';
 import { defaultProject, normalizeItem } from '../core/store.js';
 import { keyType, keyId, TYPE_ORDER, docToRecord } from './ops.js';
+import { normalizeOptionalKeys } from '../core/plan-schema.js';
 
 const clone = (o) => (o === undefined ? undefined : JSON.parse(JSON.stringify(o)));
 const TX_FIELDS = ['x', 'y', 'rot', 'elev', 'w', 'd', 'h'];
@@ -144,7 +145,7 @@ export function createStoreBridge(store, { fetchUnderlay = async () => null, upl
       // plan
       for (const [, v] of by('plan')) {
         if (!v) continue;
-        const baseKey = v.base ? JSON.stringify(v.base) : null;
+        const baseKey = v.base ? JSON.stringify(normalizeOptionalKeys(clone(v.base))) : null;   // BASE_PLAN holds the optional keys normalised
         if ((baseKey && baseKey !== JSON.stringify(baseNow())) || v.phase !== PE.planPhase()) {
           PE.setBasePlan(v.base || baseNow(), { phase: v.phase });
           PE.applyPlanState(v.edits || null);

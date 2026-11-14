@@ -11,6 +11,8 @@
  * clients apply verbatim with `applyOps()`.
  */
 
+import { optionalKeysProblem } from '../core/plan-schema.js';   // pure (no plan engine)
+
 export const PROTOCOL = 1;
 export const LIMITS = Object.freeze({
   groupBytes: 1024 * 1024,      // one op group (and one entity)
@@ -154,10 +156,11 @@ function checkEntity(k, v) {
     for (const f of ITEM_NUM) if (v[f] !== undefined && !num(v[f])) return `item.${f} must be a number`;
     if (!num(v['@z'])) return 'item @z must be a number';
     if (typeof v.type !== 'string') return 'item.type must be a string';
+    if (v.level !== undefined && typeof v.level !== 'string') return 'item.level must be a level id';
   } else if (t === 'plan') {
     if (v.phase !== 'draft' && v.phase !== 'fixed') return 'plan.phase';
-    if (v.edits != null && (!isObj(v.edits) || !Array.isArray(v.edits.walls) || !Array.isArray(v.edits.openings))) return 'plan.edits';
-    if (v.base != null && (!isObj(v.base) || !Array.isArray(v.base.walls))) return 'plan.base';
+    if (v.edits != null && (!isObj(v.edits) || !Array.isArray(v.edits.walls) || !Array.isArray(v.edits.openings) || optionalKeysProblem(v.edits))) return 'plan.edits';
+    if (v.base != null && (!isObj(v.base) || !Array.isArray(v.base.walls) || optionalKeysProblem(v.base))) return 'plan.base';
   } else if (t === 'run') {
     if (v.id !== undefined && v.id !== keyId(k)) return 'run id does not match its key';
   } else if (t === 'cimg') {

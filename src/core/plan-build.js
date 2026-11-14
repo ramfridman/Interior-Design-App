@@ -19,6 +19,12 @@
  *             sits at margins.w / margins.n from the lot's NW corner), street?: 'n'|'e'|'s'|'w', buildingLine?, setbacks?,
  *             parking?, paths?, features? }
  *   outdoorAreas  optional [{ id, name, type, polygon }] (none by default)
+ *   slants / stairs / levels   optional schema-2 data (docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md § 2, plan-schema.js) —
+ *             carried into the plan UNCHANGED (nothing is derived from them, they are not moved with the origin) only with
+ *             the option `passThrough: true`; `meta.floors` then becomes 1 + levels.length. Without it they are ignored
+ *             and upper floors stay an error (today's behaviour).
+ *
+ * OPTIONS  { passThrough?: boolean }
  *
  * OUTPUT  { ok, plan, warnings }  — never throws on user data.
  *   ok        false when any warning has level 'error' (something was left out); `plan` is still complete and usable.
@@ -28,6 +34,7 @@
  *   warnings  [{ level: 'error' | 'warning' | 'info', text, ref? }] — plain English, ready to show.
  */
 import { analyseWalls, wallBounds, BUILTIN_PLAN } from './plan-edit.js';
+import { optionalKeysProblem, optionalPart, normalizeOptionalKeys, setOptionalKeys } from './plan-schema.js';
 import { polygonArea } from './geometry.js';
 
 const DEFAULT_MARGIN = 300;               // cm of garden around the house on a default lot
@@ -56,12 +63,13 @@ export const DEFAULT_HEIGHTS = Object.freeze({ ...BUILTIN_PLAN.heights });
  * Build a complete plan from walls and openings. See the file header for the shapes.
  * @returns {{ ok: boolean, plan: object, warnings: Array<{ level: 'error'|'warning'|'info', text: string, ref?: string }> }}
  */
-export function buildPlan(input = {}) {
+export function buildPlan(input = {}, { passThrough = false } = {}) {
   const warnings = [];
   const say = (level, text, ref) => warnings.push(ref == null ? { level, text } : { level, text, ref });
   try {
     const src = input && typeof input === 'object' ? input : {};
-    const meta = readMeta(src.meta, say);
+    const extra = passThrough ? readOptional(src, say) : null;
+    const meta = readMeta(src.meta, say, extra ? 1 + (extra.levels ? extra.levels.length : 0) : 1);
     const heights = readHeights(src.heights, say);
     let walls = readWalls(src.walls, say);
     let openings = readOpenings(src.openings, heights, say);
@@ -123,6 +131,10 @@ export function buildPlan(input = {}) {
       site,
       assumptions: assumptionsFor(src, meta, heights),
     };
+    if (extra) {
+      setOptionalKeys(plan, extra);
+      if ((shift.x || shift.y) && (extra.slants || extra.stairs || extra.levels)) say('warning', 'The angled walls, stairs and upper floors were kept where they were given: they were not moved with the house.');
+    }
     return { ok: !warnings.some((w) => w.level === 'error'), plan, warnings };
   } catch (err) {
     say('error', 'The plan could not be built: ' + (err && err.message ? err.message : String(err)));
@@ -138,18 +150,26 @@ export function emptyPlan({ meta, heights, lot, margins, street } = {}) {
 // ---------------------------------------------------------------- readers
 const word = (o) => (o.kind === 'window' ? 'window' : o.kind === 'opening' ? 'passage' : o.kind === 'sliding-door' ? 'sliding door' : 'door');
 
-function readMeta(raw, say) {
+/** Optional schema-2 data (passThrough): a deep copy with the lazy schema applied, or {} when unreadable / absent. */
+function readOptional(src, say) {
+  const part = clone(optionalPart(src));
+  const problem = optionalKeysProblem(part);
+  if (problem) { say('error', `The angled walls, stairs or upper floors are not readable (${problem}) — they were left out.`); return {}; }
+  return optionalPart(normalizeOptionalKeys(part));
+}
+
+function readMeta(raw, say, floors = 1) {
   const m = raw && typeof raw === 'object' ? clone(raw) : {};
   const meta = {
     name: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : 'New house',
     location: typeof m.location === 'string' ? m.location : '',
-    floors: 1,
+    floors,
     northAngle: num(toNum(m.northAngle)) ? toNum(m.northAngle) : 0,
     latitude: num(toNum(m.latitude)) && Math.abs(toNum(m.latitude)) <= 90 ? toNum(m.latitude) : DEFAULT_LOCATION.latitude,
     longitude: num(toNum(m.longitude)) && Math.abs(toNum(m.longitude)) <= 180 ? toNum(m.longitude) : DEFAULT_LOCATION.longitude,
     timeZone: typeof m.timeZone === 'string' && validZone(m.timeZone) ? m.timeZone : DEFAULT_LOCATION.timeZone,
   };
-  if (m.floors != null && m.floors !== 1) say('error', 'Only one floor is supported: the plan engine models a single-storey house. The plan was built as one floor.');
+  if (m.floors != null && m.floors !== floors) say('error', 'Only one floor is supported: the plan engine models a single-storey house. The plan was built as one floor.');
   if (m.latitude != null && meta.latitude !== toNum(m.latitude)) say('warning', 'The latitude is not a number between −90 and 90 — the default location was used.');
   if (m.longitude != null && meta.longitude !== toNum(m.longitude)) say('warning', 'The longitude is not a number between −180 and 180 — the default location was used.');
   meta.northAngle = ((meta.northAngle % 360) + 540) % 360 - 180;

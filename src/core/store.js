@@ -67,6 +67,7 @@ function normalizeItem(partial) {
   };
   if (!item.id) item.id = newId();
   if (!item.params || typeof item.params !== 'object') item.params = {};
+  if ('level' in item && !(typeof item.level === 'string' && item.level)) delete item.level;   // optional: absent = ground level (L0)
   return item;
 }
 
@@ -112,6 +113,17 @@ const DEFAULT_UI = {
   carpentrySel: null,      // { runId, unitId? } — the run / unit selected in Carpentry mode
   carpentryTier: null,     // null (each run's suggested tier) | 'basic' | 'mid' | 'premium' — estimate tier override
   carpentryTab: 'run',     // Carpentry inspector tab: 'run' | 'unit' | 'checks' | 'estimate' | 'quantities'
+  // ── levels (several floors, docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md) — not used yet (features.js levels: false) ──
+  level: 'L0',             // the level shown / edited in 2D ('L0' = ground floor, 'L1'… = PLAN.levels[i].id)
+  ghostBelow: true,        // 2D: draw the level below faintly under the active one
+};
+/** UI keys left out of a saved design while they hold their default (so designs saved before them stay byte-identical). */
+const UI_SAVED_ONLY_IF_SET = ['level', 'ghostBelow'];
+const uiForSave = (ui) => {
+  if (UI_SAVED_ONLY_IF_SET.every((k) => ui[k] !== DEFAULT_UI[k])) return ui;
+  const out = { ...ui };
+  for (const k of UI_SAVED_ONLY_IF_SET) if (out[k] === DEFAULT_UI[k]) delete out[k];
+  return out;
 };
 
 const DEFAULT_PROJECT = {
@@ -386,9 +398,12 @@ class Store {
   }
 
   // ---------- persistence ----------
-  /** `planEdits` = { walls, openings, rooms } of an edited plan, null while the plan is the architect's. */
+  /**
+   * `planEdits` = { walls, openings, rooms } of an edited plan (+ the optional schema-2 keys schema / slants / stairs /
+   * levels when the plan carries them), null while the plan is the architect's.
+   */
   serialize() {
-    return { app: 'e7-interior-design', version: 1, savedAt: new Date().toISOString(), project: this.project, items: this.items, finishes: this.finishes, ui: this.ui, planEdits: planState(), carpentry: this.carpentry, carpentryImages: this.carpentryImages };
+    return { app: 'e7-interior-design', version: 1, savedAt: new Date().toISOString(), project: this.project, items: this.items, finishes: this.finishes, ui: uiForSave(this.ui), planEdits: planState(), carpentry: this.carpentry, carpentryImages: this.carpentryImages };
   }
   /** Replace the whole design. `data` is the output of serialize(). */
   load(data, opts = {}) {

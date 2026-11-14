@@ -25,6 +25,10 @@
  */
 import { PLAN } from './plan.js';
 import { pointInPolygon, polygonArea, invalidatePlanCaches } from './geometry.js';
+import { OPTIONAL_KEYS, optionalKeysProblem, optionalPart, setOptionalKeys, normalizeOptionalKeys } from './plan-schema.js';
+
+/** Plan keys written only when needed (schema 2: angled walls, several levels — see plan-schema.js). Never on House 98. */
+export { OPTIONAL_KEYS };
 
 // ---------------------------------------------------------------- constants
 const SNAP = 5;            // cm — every edit snaps to this grid
@@ -82,8 +86,11 @@ export let BASE_PLAN = deepFreeze(clone(PLAN));
 /** The built-in house (House 98, the architect's plan) — deep-frozen, never changes. */
 export const BUILTIN_PLAN = BASE_PLAN;
 const BUILTIN_KEY = JSON.stringify(BUILTIN_PLAN);
-/** Keys of a PLAN-shaped object, in PLAN's own order. */
+/** Keys of a PLAN-shaped object, in PLAN's own order (the built-in plan's: the optional keys are not among them). */
 export const PLAN_KEYS = Object.freeze(Object.keys(PLAN));
+/** Deep copy of the optional keys a plan carries (an empty object for a schema-1 plan). */
+const optionalCopy = (p) => clone(optionalPart(p));
+const sameOptional = (a, b) => JSON.stringify(optionalPart(a)) === JSON.stringify(optionalPart(b));
 
 /** Safe-room shell of a base plan (it is locked, so it never changes while that plan is the base). */
 function mamadOf(base) {
@@ -608,8 +615,9 @@ function sameSolid(a, b) {
   return A.cell.length === B.cell.length && A.cell.every((v, k) => v === B.cell[k]);
 }
 
-function isArchitectPlan(d) {
+function isArchitectPlan(d, opt = optionalPart(PLAN)) {
   const base = BASE_PLAN;
+  if (!sameOptional(opt, base)) return false;
   if (d.openings.length !== base.openings.length || d.rooms.length !== base.rooms.length) return false;
   for (const b of base.openings) { const o = d.openings.find((x) => x.id === b.id); if (!o || !sameOpening(o, b, GEOMETRY_KEYS) || !sameOpening(o, b, LOOK_KEYS)) return false; }
   for (const b of base.rooms) { const r = d.rooms.find((x) => x.id === b.id); if (!r || r.name !== b.name || r.type !== b.type || !!r.wet !== !!b.wet) return false; }
@@ -619,6 +627,7 @@ function isArchitectPlan(d) {
 function setBase() {
   PLAN.walls = clone(BASE_PLAN.walls); PLAN.openings = clone(BASE_PLAN.openings);
   PLAN.rooms = clone(BASE_PLAN.rooms); PLAN.wallOutline = clone(BASE_PLAN.wallOutline);
+  if (!sameOptional(PLAN, BASE_PLAN)) setOptionalKeys(PLAN, optionalCopy(BASE_PLAN));
   modified = false; analysis = null;
   syncBounds();
 }
@@ -636,11 +645,19 @@ function syncBounds() {
   if (JSON.stringify(b) !== JSON.stringify(PLAN.bounds)) PLAN.bounds = clone(b);
 }
 
-/** Install a derived plan as the live plan (no history, no event). Returns which parts changed. */
-function install(d) {
+/**
+ * Install a derived plan as the live plan (no history, no event). Returns which parts changed. `opt` = the optional
+ * schema-2 keys the plan must carry (from a saved state); undefined keeps the live ones (an edit never changes them).
+ */
+function install(d, opt) {
   const before = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
-  if (isArchitectPlan(d)) setBase();
-  else { PLAN.walls = d.walls; PLAN.openings = d.openings; PLAN.rooms = d.rooms; PLAN.wallOutline = d.wallOutline; modified = true; analysis = d; syncBounds(); }
+  if (opt === undefined) opt = optionalPart(PLAN);
+  if (isArchitectPlan(d, opt)) setBase();
+  else {
+    PLAN.walls = d.walls; PLAN.openings = d.openings; PLAN.rooms = d.rooms; PLAN.wallOutline = d.wallOutline; modified = true; analysis = d;
+    if (!sameOptional(PLAN, opt)) setOptionalKeys(PLAN, opt);
+    syncBounds();
+  }
   stateKey = null; invalidatePlanCaches();
   const after = [PLAN.walls, PLAN.openings, PLAN.rooms].map((a) => JSON.stringify(a));
   return { walls: before[0] !== after[0], openings: before[1] !== after[1], rooms: before[2] !== after[2] };
@@ -662,8 +679,11 @@ function commit(d, reason, res, opts = {}) {
 }
 
 // ---------------------------------------------------------------- persistence / history hooks (used by the store)
-/** `{ walls, openings, rooms }` of an edited plan, or null while the plan is the architect's. */
-export function planState() { return modified ? { walls: PLAN.walls, openings: PLAN.openings, rooms: PLAN.rooms } : null; }
+/**
+ * `{ walls, openings, rooms }` of an edited plan (plus each optional schema-2 key the plan carries — schema, slants,
+ * stairs, levels — only when present, so a schema-1 state is unchanged), or null while the plan is the architect's.
+ */
+export function planState() { return modified ? { walls: PLAN.walls, openings: PLAN.openings, rooms: PLAN.rooms, ...optionalPart(PLAN) } : null; }
 /** JSON of planState(), cached until the plan changes (cheap to compare in history snapshots). */
 export function planStateKey() { return stateKey || (stateKey = JSON.stringify(planState())); }
 
@@ -688,6 +708,8 @@ export function applyPlanState(state) {
   try {
     if (JSON.stringify(state) === planStateKey()) return { ok: true, changed: none };
     const s = clone(state);
+    if (optionalKeysProblem(s)) return toBase('The saved plan edits are not readable — the architect\'s plan was restored.');
+    const opt = optionalPart(normalizeOptionalKeys(s));
     if (!Array.isArray(s.walls) || !Array.isArray(s.openings) || !s.walls.every(validRect)
       || !s.openings.every((o) => validRect(o) && typeof o.id === 'string' && (o.axis === 'h' || o.axis === 'v'))) return toBase('The saved plan edits are not readable — the architect\'s plan was restored.');
     const prevRooms = Array.isArray(s.rooms) && s.rooms.length && s.rooms.every(validRoom) ? s.rooms : clone(BASE_PLAN.rooms);
@@ -703,7 +725,7 @@ export function applyPlanState(state) {
     // keep the saved rectangles (ids included) when they describe the same walls, so undo / redo is exact
     const area = (list) => list.reduce((a, r) => a + r.w * r.h, 0);
     if (s.walls.every((w) => typeof w.id === 'string' && typeof w.kind === 'string') && area(s.walls) === area(d.walls)) d.walls = s.walls;
-    return { ok: true, changed: install(d) };
+    return { ok: true, changed: install(d, opt) };
   } catch (e) {
     return toBase('The saved plan edits could not be applied — the architect\'s plan was restored.');
   }
@@ -1305,15 +1327,18 @@ export function recomputePlan(plan = PLAN) {
  * copy of `planData` (meta, heights, bounds, walls, wallOutline, openings, rooms, outdoorAreas, site, assumptions),
  * `BASE_PLAN` becomes a deep-frozen copy, the derived state (safe-room shell, classification, caches) follows, and the
  * live plan is the base plan unedited. No history, no event: the store's `openProject()` wraps this and announces it.
+ * The optional schema-2 keys (OPTIONAL_KEYS) are copied when present (lazy schema, see plan-schema.js) and DELETED from
+ * PLAN when `planData` has none, so switching back to House 98 leaves PLAN exactly as plan.js built it.
  * @param {object} planData  a complete PLAN-shaped object (from `plan-build.js` `buildPlan()` or a saved project)
  * @param {{ phase?: 'draft' | 'fixed' }} [opts]
  */
 export function setBasePlan(planData, opts = {}) {
-  const base = deepFreeze(clone(planData));
+  const base = deepFreeze(normalizeOptionalKeys(clone(planData)));
   BASE_PLAN = JSON.stringify(base) === BUILTIN_KEY ? BUILTIN_PLAN : base;
   phase = opts.phase === 'draft' ? 'draft' : 'fixed';
-  for (const k of Object.keys(PLAN)) if (!(k in BASE_PLAN)) delete PLAN[k];
-  for (const k of Object.keys(BASE_PLAN)) PLAN[k] = clone(BASE_PLAN[k]);
+  for (const k of Object.keys(PLAN)) if (!(k in BASE_PLAN)) delete PLAN[k];   // optional keys absent from the new base go too
+  for (const k of Object.keys(BASE_PLAN)) if (!OPTIONAL_KEYS.includes(k)) PLAN[k] = clone(BASE_PLAN[k]);
+  setOptionalKeys(PLAN, optionalCopy(BASE_PLAN));                            // last, in OPTIONAL_KEYS order (as the base)
   ENV = makeEnv(BASE_PLAN, phase);
   foreign = new WeakMap();
   modified = false; analysis = null; stateKey = null;
