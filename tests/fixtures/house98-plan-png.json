@@ -1,0 +1,5 @@
+{
+  "_note": "sha256 of the House 98 plan PNG export (view2d.exportPNG({ scale: 1 }), Chromium via Playwright, light palette) captured before stage A3; tests/e2e.slants.mjs compares the export with the angled-walls switch off. Recapture only for a deliberate change of the plan drawing.",
+  "plain": "b4b639f53fda89109340a5a144adf9997f733a6e37084acc00054701fd3919cd",
+  "nodims": "76972ed0c68abd082373ff188a136f925ffb0ace816dbf63b3b8ad5dd05b4795"
+}

@@ -160,6 +160,22 @@ group('the Wedge: structure data, removed-walls ghost, snapshot');
   E.moveWallSegment('seg:a:s02', -20);
 }
 
+group('the Wedge: the changes overlay (removed angled wall as a ghost polygon, a new one tinted)');
+{
+  const pal = exportPalette();
+  const rm = E.removeWallSegment('seg:a:s02');
+  const add = E.addWall({ x1: 600, y1: 400, x2: 760, y2: 240, thickness: 10, angled: true });
+  const env = { store, plan: PLAN, pal, ui: { ...store.ui, showPlanChanges: true, tool: 'select' } };
+  const Gx = createGfx(ctx2d, { scale: 0.8, dpr: 1, ox: 0, oy: 0, width: 1000, height: 800, font: 'sans-serif' });
+  const modified = E.isPlanModified();
+  ST.drawRemovedWalls(Gx, env);
+  const d = ST.structureOf(PLAN), ghost = (d.removed || []).filter((r) => r.poly);
+  check('removing s02 leaves a ghost of its footprint', rm.ok && modified && ghost.length === 1 && ghost[0].poly.length >= 4, JSON.stringify({ rm: rm.ok, modified, n: (d.removed || []).length }));
+  const fresh = d.segments.find((q) => q.axis === 'a' && q.isNew);
+  check('the new angled wall is marked new (tinted by the overlay)', add.ok && !!fresh && d.polys.has(fresh.id), add.reason || '');
+  E.resetPlan();
+}
+
 group('the Wedge: façade chains with a slanted side, dimensions of slanted rooms');
 {
   const east = D.facadeProfile(PLAN, 'e');

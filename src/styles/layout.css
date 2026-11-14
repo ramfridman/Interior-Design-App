@@ -268,5 +268,7 @@
 .sbar-float .stairopts > .icon { display: none; }
 .guide__stairs { display: grid; gap: var(--s-2); margin-top: var(--s-2); padding: var(--s-2); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--sunken); }
 .guide__stairs[hidden] { display: none; }
+.guide__anglenote { display: grid; gap: 6px; margin-top: var(--s-2); padding: var(--s-2); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--sunken); line-height: 1.6; }
+.guide__anglenote[hidden] { display: none; }
 .guide__stairs .stairopts { flex-wrap: wrap; }
 .guide__stairnote { margin: 0; }

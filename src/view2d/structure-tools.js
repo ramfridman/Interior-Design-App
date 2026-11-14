@@ -36,6 +36,34 @@ function polyDist(px, py, poly) {
   for (let i = 0; i < poly.length; i++) { const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % poly.length]; d = Math.min(d, segDist(px, py, x1, y1, x2, y2)); }
   return d;
 }
+/**
+ * Faces of other walls with the gaps the wall being changed cuts into them closed again (collinear pieces whose gap lies
+ * on its footprint are merged), so its end can go back to where it was or anywhere along those faces.
+ */
+function bridgeFaces(faces, poly, maxGap) {
+  const groups = new Map(), out = [];
+  for (const f of faces) {
+    const len = Math.hypot(f.x2 - f.x1, f.y2 - f.y1) || 1, ux = (f.x2 - f.x1) / len, uy = (f.y2 - f.y1) / len;
+    const [sx, sy] = ux < -1e-9 || (Math.abs(ux) <= 1e-9 && uy < 0) ? [-ux, -uy] : [ux, uy];
+    const key = `${sx.toFixed(5)}|${sy.toFixed(5)}|${(f.x1 * -sy + f.y1 * sx).toFixed(2)}`;
+    const a = f.x1 * sx + f.y1 * sy, b = f.x2 * sx + f.y2 * sy;
+    if (!groups.has(key)) groups.set(key, { sx, sy, c: f.x1 * -sy + f.y1 * sx, list: [] });
+    groups.get(key).list.push([Math.min(a, b), Math.max(a, b)]);
+  }
+  for (const g of groups.values()) {
+    // a point at t along (sx, sy) on the line { p : p · (−sy, sx) = c }
+    const P = (t) => [g.sx * t - g.sy * g.c, g.sy * t + g.sx * g.c];
+    const merged = [];
+    g.list.sort((p, q) => p[0] - q[0]);
+    for (const [a, b] of g.list) {
+      const cur = merged[merged.length - 1];
+      if (cur && a - cur[1] <= maxGap && polyDist(...P((a + cur[1]) / 2), poly) <= 1) cur[1] = Math.max(cur[1], b);
+      else merged.push([a, b]);
+    }
+    for (const [a, b] of merged) { const [x1, y1] = P(a), [x2, y2] = P(b); out.push({ x1, y1, x2, y2 }); }
+  }
+  return out;
+}
 /** Distance from a point to a wall segment: its footprint for an angled wall, its rectangle otherwise. */
 const segmentDist = (px, py, s) => (s.axis === 'a' ? polyDist(px, py, s.poly) : rectDist(px, py, s));
 /** Distance from a point to an opening: its gap quad in an angled wall, its rectangle otherwise. */
@@ -226,7 +254,7 @@ export function createStructureTools(V, io) {
     const near = (x, y) => polyDist(x, y, poly) <= 0.6;
     return {
       points: T.points.filter(([x, y]) => !near(x, y)),
-      faces: T.faces.filter((f) => !near((f.x1 + f.x2) / 2, (f.y1 + f.y2) / 2)),
+      faces: bridgeFaces(T.faces.filter((f) => !near((f.x1 + f.x2) / 2, (f.y1 + f.y2) / 2)), poly, (self.t || self.thickness || 10) * 3),
       ends: T.ends.filter((q) => !near(q.x, q.y)),
       lines: T.lines.filter((l) => l.id !== self.id),
     };
@@ -792,7 +820,7 @@ export function createStructureTools(V, io) {
       const sn = snapSlantEnd({ x: g.fixed[0], y: g.fixed[1] }, pp, { ...T, reach: angledReach(), scale: cam.scale, free: !snap || e.altKey, step: snap ? GRID : 1 });
       const pt = { x: r01(sn.x), y: r01(sn.y), angled: true };
       key = `${pt.x},${pt.y}`;
-      g.snapInfo = { angle: sn.shown, kind: sn.angleKind, guides: sn.guides, at: [pt.x, pt.y], length: sn.len };
+      g.snapInfo = { angle: sn.shown, kind: sn.angleKind, endKind: sn.endKind, guides: sn.guides, at: [pt.x, pt.y], length: sn.len };
       if (key === g.lastKey) { liveSlant(g, g.snapInfo); return; }
       res = call(rotateWallEnd, g.id, letter, pt, TRANSIENT);
     }

@@ -760,6 +760,57 @@ flipDoor(id, 'hinge' | 'swing')     // a ↔ b, l ↔ r (same cycle as rect door
   300-operation randomized run, collaboration with real stores, timings: every operation ≈ 2–5 ms on the Wedge and House
   98 + 2 slants; the orthogonal House 98 wall move ≈ 3.5 ms before and after).
 
+### Angled walls: the 2D plan (stage A3, additive; the tools that CREATE angled walls are behind `FEATURES.angledWalls`)
+Switch: `FEATURES.angledWalls` — `?angled=1` in the page URL, or Settings → Experimental → "Angled walls (in development)"
+(`setFeature('angledWalls', on)`, remembered like the floors switch). It guards only the creation entry points (the Wall
+tool at an angle, a straight wall's end dragged off its axis, typed length / angle); a plan that HAS angled walls is always
+drawn and editable (select, move, turn, resize, delete, openings, inspector). With the switch off and no slants the plan
+view is pixel-identical to before (tests/fixtures/house98-plan-png.json).
+* **Drawing.** Walls are filled from `plan.walls` rects + `slantPolys(plan)` (same poché / colours / mamad hatch, pixel-snapped
+  vertices; diagonal outline edges between the same corners); openings in slants use the usual symbols turned with
+  `openingFrame` (door leaf / arc by `hinge 'a'|'b'`, `swing 'l'|'r'`; window; passage); room floors under the gap quads; the
+  structure tints, hover, selection, "changes" overlay (new slants tinted, removed / moved base slants as hatched ghosts),
+  ghost of the floor below, PNG export and the walk mini-map all show slants. Dirty rectangles: a slant segment's
+  signature includes its joined `poly` (a neighbour's join repaints it); `planDirt(a, b).slants` = the changed slant
+  AABBs, repainted with ~52 CSS px of margin for their dimensions.
+* **Pure helpers** `src/view2d/slant-tools.js` (tests/slants-2d.test.mjs): `planAngle`, `shownAngle` (counter-clockwise from
+  east), `snapAngle(raw, { start, lines, free, lenPx })` (90° within 6°, 45° within 4.5° win outright; else the nearer of a
+  15° step within 2.5° and a direction parallel / perpendicular to a `referenceLines(segments)` line within 4 m within 3°;
+  a short line widens the reach), `snapWallEnd(start, pointer, ctx)` (order: existing point → direction → wall face hit
+  by the ray → extension line of a wall end → length on 5 cm; `axisOnly` = Shift, `free` = Alt, `typedLength`,
+  `typedAngle`), `snapTargets(plan, segments, wallFaces(plan))`, `slantHandles`, `handleAt`, `cursorFor`, `uprightAngle`
+  (text in [−90°, 90°)), `alignedDim`, `slantFaceDims(seg, openings)`, `angleToOrtho(seg, rectSegments)`,
+  `mainDirection(poly)`, `spanAlong`, `compass8`, `endNames`.
+* **Wall tool** (switch on): any direction with the snaps above (Shift = the old axis-locked tool exactly, Alt = free angle,
+  Ctrl / ⌘ = no snapping); a direction on an axis is drawn by the rect tool's own snapping. Each pointer move calls
+  `canAddWall({ x1…y2, thickness, angled: true })`: the ghost is the engine's `poly`, joined ends are dotted, a refusal
+  shows its reason chip. Read-out at the pointer "3.25 m · 45°" (lifted above a finger on touch). Typing while drawing:
+  digits = length (units shown), Tab = angle field, Backspace, Enter builds, Esc clears what was typed first.
+  `view2d._debug.state.struct.draft` = `{ readout, shown, angleKind, endKind, ok, reason, angled, joined, input, poly }`.
+* **Editing a slant** (structure tool): hit-test by footprint (then edges within tol); grips `move` (body; drag =
+  `moveWallSegment(id, (pointer − press) · n)` in 5 cm steps, cursor and dashed guide across the wall), `end0` / `end1`
+  (drag = `rotateWallEnd(id, 'a'|'b', point)` with the drawing snaps about the fixed end; Shift = along the wall only =
+  `resizeWallSegment`; the angle read-out follows the pointer). A straight wall's free end dragged > 10 px off its axis
+  (switch on) = `rotateWallEnd(rectId, end, { x, y, angled: true })`; the drag follows the segment through its id changes.
+  Arrows nudge 5 cm across the wall (the arrow's side; an arrow along the wall does nothing), Delete removes. Openings in a
+  slant: Door / Window / Passage ghosts from `canAddOpening` (`quad`; off the wall the cursor's side = swing, its half =
+  hinge), slide = `updateOpening(id, { x, y })`, jamb grips = `updateOpening(id, { at, width })` (5 cm widths).
+* **Dimensions** (dimensions display on, and for the selected slant): an aligned chain per exposed face (`seg.faces`),
+  broken at its openings, offset outwards, figures upright; the angle to the nearest straight wall at the nearer end
+  (arc + degrees; north when none within 60 cm). Exterior chains project a slanted side onto each side (one piece per
+  slant / slant opening, at its outermost depth; its openings count as openings only on the side it mainly faces).
+  Rooms with slanted sides (no zones) get clear dimensions along their main directions (`mainDirection`: 'h' / 'v'
+  `fixed` ones on an axis frame, `dir: 'a'` with `px, py, ux, uy, from, to` otherwise).
+* **Inspector** (ui/structure-inspector.js): an angled wall shows length (editable: its free end, else end 'b' moves),
+  thickness, angle (editable: turns about the end chosen in "Keep in place", length kept — `structure.rotateSegment`),
+  the spaces it separates, move buttons "5 cm into <room>"; an opening in one shows "From <compass> end" (= `at` −
+  width / 2, editable), and "Hinged at the north-east end, opens into Kitchen." (`slantDoorWords`).
+* **Furniture**: `buildRuns(plan)` appends diagonal runs `{ diag: true, nx, ny, ux, uy, c, a0, a1, openings }` (face line
+  p · n = c, extent along u); `snapItem` puts a backed floor item flush on the nearest face of any direction (rotation
+  `diagRot` to 0.1°), wall-mounted items glue to them, `clearances` stop at slant footprints. Stairs still snap to rect
+  walls only.
+* Tests: `node tests/slants-2d.test.mjs`, `node tests/e2e.slants.mjs [--shots]`.
+
 ### Notes for the view / UI teams
 * New opening kind `'opening'` (style `'open'`): draw it as a clear gap with jambs — no leaf, no swing arc; it is
   walkable (`walkBlockers()` only blocks walls and windows).

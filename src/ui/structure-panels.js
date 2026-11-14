@@ -11,7 +11,7 @@ import { phaseCard } from './projects.js';
 import { underlayCard } from './import/underlay-panel.js';
 import { planPhase, BASE_PLAN } from '../core/plan-edit.js';
 import { levelName } from '../core/levels.js';
-import { FEATURES } from '../core/features.js';
+import { FEATURES, onFeatureChange } from '../core/features.js';
 
 /** Structure tools: value = store.ui.tool. Shared by the top bar and the guide so the two can never drift apart. */
 export const STRUCTURE_TOOL_LIST = [
@@ -98,6 +98,14 @@ export function initStructureGuide(root, app) {
   store.on('ui', (e) => { if (e.keys.includes('tool') || e.keys.includes('level')) paintStairs(); });
   store.on('plan', (e) => { if (!e || !e.transient) paintStairs(); });
   paintStairs();
+  // angled walls (stage A3, only while the switch is on): how the Wall tool draws at an angle
+  const angleNote = h('div', { class: 'guide__anglenote sec__note', hidden: true },
+    h('p', null, 'Any angle: it snaps to 15° steps (45° and 90° first), parallel or square to a nearby wall (∥ ⟂), wall ends and faces, and 5 cm lengths.'),
+    h('p', null, kbd('Shift'), ' straight only · ', kbd('Alt'), ' free angle · type a length, ', kbd('Tab'), ' for the angle, ', kbd('Enter'), ' to build. Drag an end of a selected wall to turn it.'));
+  const paintAngle = () => { angleNote.hidden = !(FEATURES.angledWalls && store.ui.tool === 'wall'); };
+  store.on('ui', (e) => { if (e.keys.includes('tool')) paintAngle(); });
+  onFeatureChange((name) => { if (name === 'angledWalls') paintAngle(); });
+  paintAngle();
   const el = h('div', { class: 'guide', 'aria-label': 'Structure guide' },
     h('header', { class: 'side__head' }, h('h2', { class: 'cat__title display truncate' }, 'Structure'),
       iconBtn('panel-left', 'Hide this guide', { onClick: () => app.setPanelOpen('left', false) })),
@@ -107,7 +115,7 @@ export function initStructureGuide(root, app) {
       h('p', { class: 'guide__lead' }, 'Change the walls, doors and windows of your house, within what is allowed. Every wall and opening is one of four levels.'),
       floorNote,
       legend,
-      section('Tools', tools, stairBox),
+      section('Tools', tools, angleNote, stairBox),
       h('ul', { class: 'guide__notes' },
         h('li', null, kbd('Delete'), ' removes the selected wall or opening. ', kbd('Esc'), ' puts the tool down, then leaves Structure.'),
         h('li', { class: 'levels-only' }, 'A stair is drawn on the floor it starts from; its opening shows dashed on the floor above. Drag a stair to move it (it snaps flush to walls), its round grip turns it, the side grip sets its width.'),

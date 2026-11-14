@@ -29,6 +29,7 @@ export const SHORTCUTS = [
     [['B'], 'Switch between Furnish and Structure'], [['V'], 'Select walls and openings'], [['W'], 'Draw a wall'],
     [['D'], 'Place a door'], [['N'], 'Place a window'], [['P'], 'Place an open passage'],
     ...(FEATURES.levels ? [[['T'], 'Place a stair (R turns it)']] : []),
+    ...(FEATURES.angledWalls ? [[['Shift'], 'While drawing: straight walls only'], [['Alt'], 'While drawing: free angle'], [['0–9', 'Tab', 'Enter'], 'While drawing: type the length, Tab to the angle, Enter builds']] : []),
   ] },
   { group: 'Carpentry: runs and units', rows: [
     [['C'], 'Switch Carpentry mode on / off'], [['N'], 'New run'], [['←', '→'], 'Previous / next unit'], [['Alt', '←', '→'], 'Move the unit left / right'],
