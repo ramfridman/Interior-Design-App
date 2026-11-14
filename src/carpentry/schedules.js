@@ -2,7 +2,9 @@
  * schedules(runId | 'all') — row data for the carpenter's document (bilingual).
  * { headers, units, materials, hardware, worktops, appliances, questions }. Codes match the drawings (run code · unit code).
  */
-import { view } from './state.js';
+import { view, ceilingOf, runLevel, planHasLevels } from './state.js';
+import { PLAN } from '../core/plan.js';
+import { levelName } from '../core/levels.js';
 import { VOCAB, vocab, specText, hwVariantLabel } from './spec.js';
 import { takeoff } from './takeoff.js';
 import { MODULES } from './modules.js';
@@ -53,7 +55,8 @@ function questionsFor(run, rt, v) {
   const T = { site: L('Site measurement', 'מדידה באתר'), app: L('Appliances', 'מכשירים'), mep: L('Plumbing / electrical', 'אינסטלציה / חשמל'), wt: L('Worktop', 'משטח'), hw: L('Hardware', 'פרזול'), design: L('Design', 'תכנון') };
   add(T.site, `Verify the ${run.length} cm run length on site (walls are rarely square) — carcasses are made 3–5 mm under the measured size and fillers are scribed on site.`, `לאמת באתר את אורך הקו ${run.length} ס״מ (הקירות לרוב אינם בזווית ישרה) — הגופים מיוצרים 3–5 מ״מ פחות מהמידה ופילרים מותאמים באתר.`);
   const full = rt.units.some((u) => u.level === 'full' || u.level === 'tall');
-  if (full) add(T.site, 'Measure the ceiling height at both ends (designed to 300 cm) for the top line / top boxes; allow a scribed ceiling filler.', 'למדוד גובה תקרה בשני הקצוות (תוכנן ל-300 ס״מ) לקו העליון / לבוידעם; להשאיר פילר תקרה להתאמה.');
+  const ceil = ceilingOf(run);
+  if (full) add(T.site, `Measure the ceiling height at both ends (designed to ${ceil} cm) for the top line / top boxes; allow a scribed ceiling filler.`, `למדוד גובה תקרה בשני הקצוות (תוכנן ל-${ceil} ס״מ) לקו העליון / לבוידעם; להשאיר פילר תקרה להתאמה.`);
   add(T.site, 'Check the floor level along the run: adjustable legs take ±1.5 cm; tiles / skirting may need the plinth to be scribed.', 'לבדוק פילוס רצפה לאורך הקו: רגליות מתכווננות ±1.5 ס״מ; ייתכן שיידרש התאמת צוקל לריצוף / לפאנל.');
   for (const a of rt.appliances) if (!a.model) add(T.app, `${a.unit}: confirm the ${a.label.en.toLowerCase()} make / model — the niche is drawn ${n0(a.niche ? a.niche.w : 60)} × ${n0(a.niche ? a.niche.h : 0)} cm.`, `${a.unit}: לאשר יצרן / דגם ל${a.label.he} — הנישה שורטטה ${n0(a.niche ? a.niche.w : 60)} × ${n0(a.niche ? a.niche.h : 0)} ס״מ.`);
   const cut = rt.worktops.flatMap((p) => p.cutouts.map((c) => ({ ...c, piece: p.id })));
@@ -73,8 +76,9 @@ function questionsFor(run, rt, v) {
 export function schedules(runId = 'all', src) {
   const v = view(src), t = takeoff(runId, src);
   const units = [], materials = [], worktops = [], appliances = [], questions = [], features = [];
+  const floorOf = (run) => (planHasLevels() ? { floor: L(levelName(PLAN, runLevel(run), 'en') || runLevel(run), levelName(PLAN, runLevel(run), 'he') || runLevel(run)), floorId: runLevel(run) } : {});
   for (const rt of t.runs) {
-    const run = v.run(rt.runId), S = run.spec;
+    const run = v.run(rt.runId), S = run.spec, fl = floorOf(run);
     for (const u of rt.units) {
       const m = MODULES[u.module];
       if (m.virtual && !u.appliances.length) continue;
@@ -88,7 +92,7 @@ export function schedules(runId = 'all', src) {
       units.push({ runId: rt.runId, run: rt.code, code: u.code, ref: `${rt.code}·${u.code}`, unitId: u.unitId, module: u.name, level: vocab('level', u.level), operation, layout: cells, corner,
         size: { w: u.w, h: u.h, d: u.d }, sizeText: `${n0(u.w)} × ${n0(u.h)} × ${n0(u.d)}`, elev: u.elev,
         fronts: operation && ops.some((o) => o !== 'hinged') ? join([frontsSummary(u), operation]) : frontsSummary(u), internals: internalsSummary(u), hardware: hardwareSummary(u),
-        notes: u.notes.length ? join(u.notes) : L(u.elev ? `Bottom at ${n0(u.elev)} cm` : '', u.elev ? `תחתית בגובה ${n0(u.elev)} ס״מ` : '') });
+        notes: u.notes.length ? join(u.notes) : L(u.elev ? `Bottom at ${n0(u.elev)} cm` : '', u.elev ? `תחתית בגובה ${n0(u.elev)} ס״מ` : ''), ...fl });
       for (const a of u.appliances) appliances.push({ runId: rt.runId, ref: `${rt.code}·${u.code}`, appliance: a.label, make: [a.make, a.model].filter(Boolean).join(' ') || '—', niche: a.niche ? `${n0(a.niche.w)} × ${n0(a.niche.h)}` : '—' });
     }
     for (const a of rt.appliances.filter((x) => !x.unit)) appliances.push({ runId: rt.runId, ref: rt.code, appliance: a.label, make: [a.make, a.model].filter(Boolean).join(' ') || '—', niche: '—' });

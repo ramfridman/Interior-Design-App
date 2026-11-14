@@ -4,6 +4,8 @@
  */
 import { store as defaultStore } from '../core/store.js';
 import { PLAN } from '../core/plan.js';
+import { levelPlan, activeLevel } from '../core/plan-edit.js';
+import { GROUND, levelOf as levelObj, hasLevels } from '../core/levels.js';
 
 let S = defaultStore;
 /** Point the engine at another store instance (tests / workers). */
@@ -13,8 +15,31 @@ export function getStore() { return S; }
 export const clone = (o) => (o === undefined ? undefined : JSON.parse(JSON.stringify(o)));
 export const emptyCarpentry = () => ({ runs: {}, settings: {} });
 
-/** The ceiling height carpentry is designed to (PLAN.heights.ceiling, 300). */
-export const ceilingOf = () => (PLAN.heights && PLAN.heights.ceiling) || 300;
+/**
+ * Floors (stage F7). A run stands on `run.level` (absent = the ground floor 'L0'); its walls, openings, rooms and ceiling
+ * come from that level's view `levelPlan(PLAN, level)`. One-level plans: everything is PLAN, exactly as before.
+ */
+export const runLevel = (run) => (run && typeof run.level === 'string' && run.level && run.level !== GROUND ? run.level : GROUND);
+/** The PLAN-shaped view a run (or a level id) works on; PLAN for the ground floor or a level that has gone. */
+export function planOf(runOrLevel) {
+  const id = typeof runOrLevel === 'string' ? runOrLevel : runLevel(runOrLevel);
+  if (id === GROUND || !levelObj(PLAN, id)) return PLAN;
+  return levelPlan(PLAN, id) || PLAN;
+}
+/** The level new runs go on: the active level of the plan engine (follows store.ui.level). */
+export const currentLevel = () => { const id = activeLevel(); return id && levelObj(PLAN, id) ? id : GROUND; };
+/** True when the open plan has upper floors. */
+export const planHasLevels = () => hasLevels(PLAN);
+/** Floor of a store item: its own `level`, else (a carpentry unit) its run's, else the ground floor. */
+export function itemFloor(it, v) {
+  if (!it) return GROUND;
+  if (typeof it.level === 'string' && it.level) return it.level;
+  if (it.carp && v) { const r = v.run(it.carp.runId); if (r) return runLevel(r); }
+  return GROUND;
+}
+
+/** The ceiling height carpentry is designed to (the run's level's heights.ceiling; PLAN.heights.ceiling, 300). */
+export const ceilingOf = (run) => { const p = run ? planOf(run) : PLAN; return (p.heights && p.heights.ceiling) || 300; };
 
 /**
  * Read-only view of the state: `src` = { carpentry, items } (e.g. a parsed design file) or the bound store.

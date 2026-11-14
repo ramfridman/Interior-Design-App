@@ -8,7 +8,9 @@
  *   fronts (W, H from the front layout, 3 mm gaps), banded all round; hinges 2 / 3 / 4 / 5 for doors ≤ 900 / 1600 / 2200 / more mm
  *   drawers: one box system per drawer, runner = the longest standard length ≤ D − 10 mm
  */
-import { view } from './state.js';
+import { view, runLevel, planHasLevels } from './state.js';
+import { PLAN } from '../core/plan.js';
+import { levelName } from '../core/levels.js';
 import { MODULES, islandBays } from './modules.js';
 import { RULES, vocab } from './spec.js';
 import { unitsOf, positions, geometryOf, unitCodes, isFloorLevel } from './layout.js';
@@ -259,6 +261,8 @@ export function runTakeoff(run, v) {
     plinth: { m: r3(plinthCm / 100), height: spec.plinth.height, finish: spec.plinth.finish, pieces: Math.ceil(plinthCm / 300 - 1e-9) },
     lighting: { underWallM: r3(ledCm / 100), inCabinetM: r3(inCabCm / 100) },
     splashback: splashOf(run, worktops), appliances,
+    // several floors (stage F7): the run's floor
+    ...(planHasLevels() ? { floorId: runLevel(run), floor: L(levelName(PLAN, runLevel(run), 'en') || runLevel(run), levelName(PLAN, runLevel(run), 'he') || runLevel(run)) } : {}),
   };
 }
 function buttsOf(run, v) {

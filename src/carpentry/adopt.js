@@ -4,7 +4,7 @@
  * overall sizes. Free-standing appliances (fridge, washer, dryer) stay as items; their places become niche / space units.
  * Idempotent (a second call finds nothing left to adopt) and ONE undo step.
  */
-import { mutate, newId, clone } from './state.js';
+import { mutate, newId, clone, planOf } from './state.js';
 import { MODULES, splitEven, APPLIANCE_LABELS } from './modules.js';
 import { defaultSpec, deepMerge, RULES, VOCAB } from './spec.js';
 import { wallSpanAt, toPlan, toLocal, frame } from './walls.js';
@@ -15,7 +15,9 @@ import { PLAN } from '../core/plan.js';
 const L = (en, he) => ({ en, he });
 const r1 = (v) => Math.round(v * 10) / 10;
 const CARP_TYPES = new Set(['kitchen-base', 'kitchen-tall', 'kitchen-island', 'wardrobe', 'vanity']);
-const roomOf = (it) => { const s = spaceAt(it.x, it.y); return s && s.kind === 'room' ? s : null; };
+/** Floor of an item (absent = ground); the architect's pieces of every floor are adopted on their own floor. */
+const floorOfItem = (it) => (typeof it.level === 'string' && it.level ? it.level : 'L0');
+const roomOf = (it) => { const s = spaceAt(it.x, it.y, planOf(floorOfItem(it))); return s && s.kind === 'room' ? s : null; };
 
 /** Items the adoption converts (true) or uses as appliance markers ('marker'). */
 function role(it) {
@@ -39,9 +41,9 @@ function groupItems(list) {
   const groups = [];
   const keyed = list.map((it) => ({ it, k: backOf(it) })).sort((p, q) => p.k.dir - q.k.dir || p.k.back - q.k.back || p.k.a - q.k.a);
   for (const e of keyed) {
-    const g = groups.find((gr) => gr.dir === e.k.dir && Math.abs(gr.back - e.k.back) <= 2 && e.k.a <= gr.b + 6 && e.k.b >= gr.a - 6 && gr.island === (e.it.type === 'kitchen-island'));
+    const g = groups.find((gr) => gr.floor === floorOfItem(e.it) && gr.dir === e.k.dir && Math.abs(gr.back - e.k.back) <= 2 && e.k.a <= gr.b + 6 && e.k.b >= gr.a - 6 && gr.island === (e.it.type === 'kitchen-island'));
     if (g && e.it.type !== 'kitchen-island') { g.items.push(e); g.a = Math.min(g.a, e.k.a); g.b = Math.max(g.b, e.k.b); }
-    else groups.push({ dir: e.k.dir, back: e.k.back, a: e.k.a, b: e.k.b, items: [e], island: e.it.type === 'kitchen-island' });
+    else groups.push({ dir: e.k.dir, back: e.k.back, a: e.k.a, b: e.k.b, items: [e], island: e.it.type === 'kitchen-island', floor: floorOfItem(e.it) });
   }
   return groups.filter((g) => g.items.some((e) => role(e.it) === 'carp'));
 }
@@ -128,7 +130,7 @@ export function adoptArchitectLayout(opts = {}, mopts) {
       } else {
         // back line → wall stretch
         const mid = (g.a + g.b) / 2, bx = f.ux * mid + f.nx * g.back, by = f.uy * mid + f.ny * g.back;
-        const span = wallSpanAt(bx + f.nx * 2, by + f.ny * 2, { maxDist: 8 });
+        const span = wallSpanAt(bx + f.nx * 2, by + f.ny * 2, { maxDist: 8, plan: planOf(g.floor) });
         let a = g.a, b = g.b;
         if (span && span.anchor.dir === g.dir) {
           const s0 = toLocal(span.anchor, f.ux * g.a + f.nx * g.back, f.uy * g.a + f.ny * g.back)[0];
@@ -144,7 +146,7 @@ export function adoptArchitectLayout(opts = {}, mopts) {
         length = r1(b - a);
         side = { 0: L('north wall', 'קיר צפוני'), 90: L('east wall', 'קיר מזרחי'), 180: L('south wall', 'קיר דרומי'), 270: L('west wall', 'קיר מערבי') }[g.dir];
       }
-      const room = PLAN.rooms.find((r) => r.id === roomId);
+      const room = planOf(g.floor).rooms.find((r) => r.id === roomId);
       // depths from the architect's pieces
       const carpItems = sorted.filter((e) => role(e.it) === 'carp').map((e) => e.it);
       const dep = Math.max(...carpItems.map((it) => it.d)), front = spec.fronts.thickness / 10;
@@ -163,6 +165,7 @@ export function adoptArchitectLayout(opts = {}, mopts) {
         nameHe: kind === 'kitchen' ? `${kindL.he} — ${side.he}` : kind === 'island' ? kindL.he : `${kindL.he}${room ? ' — ' + (room.nameHe || room.name) : ''}`,
         roomId: roomId || null, anchor, length, levels: [...KIND_LEVELS[kind]], freeStanding: kind === 'island', spec, unitIds: [], worktops: [], ends, notes: '', source: 'architect',
       };
+      if (g.floor !== 'L0') run.level = g.floor;
       const used = new Set(Object.values(d.carpentry.runs).map((r) => r.code));
       for (let i = 1; ; i++) { const c = { kitchen: 'K', island: 'KI', wardrobe: 'WR', pantry: 'PN', vanity: 'VN', utility: 'UT', media: 'MW', entry: 'EN', shelving: 'SH', desk: 'DK', custom: 'CU' }[kind] + i; if (!used.has(c)) { run.code = c; break; } }
       // unit specs along the run

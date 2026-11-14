@@ -7,6 +7,7 @@
  */
 import { PLAN } from '../core/plan.js';
 import { wallFaces, spaceAt, inWall, openingFrame, openingPoint } from '../core/geometry.js';
+import { planOf } from './state.js';
 
 const DEG = Math.PI / 180;
 const rnd = (v) => Math.round(v * 1000) / 1000;
@@ -113,11 +114,11 @@ export function wallSpanAt(x, y, opts = {}) {
   };
 }
 
-/** The stretch a run stands on (null for free-standing runs or when the wall has gone). */
+/** The stretch a run stands on (null for free-standing runs or when the wall has gone), on the run's floor (`run.level`). */
 export function spanOfRun(run) {
   if (!run || run.kind === 'island' || run.freeStanding) return null;
   const [px, py] = toPlan(run.anchor, Math.min(5, run.length / 2), 2);
-  const s = wallSpanAt(px, py, { maxDist: 6 });
+  const s = wallSpanAt(px, py, { maxDist: 6, plan: planOf(run) });
   if (!s || s.anchor.dir !== run.anchor.dir) return null;
   const off = toLocal(s.anchor, run.anchor.x, run.anchor.y);
   if (Math.abs(off[1]) > 1) return null;

@@ -4,7 +4,8 @@
  * A refused call changes nothing; a successful one is ONE undo step and ONE 'carpentry' event.
  * Last optional argument everywhere: opts = { transient } (inside store.begin() … commit()).
  */
-import { mutate, view, newId, clone } from './state.js';
+import { mutate, view, newId, clone, planOf, runLevel, currentLevel } from './state.js';
+import { GROUND, levelOf as levelObj, levelName } from '../core/levels.js';
 import { MODULES } from './modules.js';
 import { defaultSpec, deepMerge, RULES, VOCAB } from './spec.js';
 import { wallSpanAt, spanOfRun, openingConflicts, toPlan, frame } from './walls.js';
@@ -131,9 +132,14 @@ const conflictReason = (c) => (c.code === 'door-crossing'
  *   Island / free-standing: { kind: 'island', x, y (centre), rot, length, depth }.
  *   Optional: name, nameHe, roomId, spec (deep-merged over the kind default), ends: { left, right } ('wall'|'open'|{type,runId,at}),
  *   levels, notes, units: [{ module, …addUnit options }].
+ *   level: the floor ('L0', 'L1'…; default = the active level of the plan, i.e. the floor shown). Walls, openings and
+ *     rooms come from that floor; the run stores `level` only above the ground floor.
  */
 export function createRun(opts = {}, mopts) {
   const kind = VOCAB.runKind[opts.kind] ? opts.kind : 'custom';
+  const floor = opts.level === undefined ? currentLevel() : (opts.level || GROUND);
+  if (floor !== GROUND && !levelObj(PLAN, floor)) return FAIL(`There is no floor ${floor}.`, `אין קומה ${floor}.`);
+  const fplan = planOf(floor);
   const levels = opts.levels || KIND_LEVELS[kind];
   const floorRun = levels.some(isFloorLevel);
   const freeStanding = kind === 'island' || !!opts.freeStanding;
@@ -151,7 +157,7 @@ export function createRun(opts = {}, mopts) {
     const [x, y] = toPlan({ x: +opts.x, y: +opts.y, dir }, -length / 2, -depth / 2);
     anchor = { x: r1(x), y: r1(y), dir };
   } else {
-    const span = wallSpanAt(+opts.x, +opts.y);
+    const span = wallSpanAt(+opts.x, +opts.y, { plan: fplan });
     if (!span) return FAIL('No wall face near this point.', 'לא נמצא קיר ליד הנקודה.');
     const tallOnly = !levels.includes('base') && levels.some((l) => l === 'tall' || l === 'full');
     const blocks = span.openings.filter((o) => (floorRun && o.kind !== 'window') || (tallOnly && o.kind === 'window'));
@@ -177,7 +183,7 @@ export function createRun(opts = {}, mopts) {
   }
   if (opts.ends) for (const s of ['left', 'right']) if (opts.ends[s]) ends[s] = typeof opts.ends[s] === 'string' ? { type: opts.ends[s] } : clone(opts.ends[s]);
   if (!roomId) {
-    const [cx, cy] = toPlan(anchor, length / 2, 20), sp = spaceAt(cx, cy);
+    const [cx, cy] = toPlan(anchor, length / 2, 20), sp = spaceAt(cx, cy, fplan);
     roomId = sp ? sp.id : null;
   }
   for (const u of opts.units || []) {
@@ -193,6 +199,7 @@ export function createRun(opts = {}, mopts) {
       name: opts.name || (side ? `${kindL.en} — ${side.en}` : kindL.en), nameHe: opts.nameHe || (side ? `${kindL.he} — ${side.he}` : kindL.he),
       roomId, anchor, length, levels: [...levels], freeStanding, spec, unitIds: [], worktops: [], ends, notes: opts.notes || '', source: opts.source || 'user',
     };
+    if (floor !== GROUND) run.level = floor;
     d.carpentry.runs[id] = run;
     for (const u of opts.units || []) { const it = makeUnit(run, u.module, u); d.add(it); run.unitIds.push(it.id); }
     const runIds = relayout(d, [id]);
@@ -237,7 +244,7 @@ export function duplicateRun(runId, opts = {}, mopts) {
   if (!src) return FAIL('No such run.', 'קו ארונות לא קיים.');
   let anchor;
   if (opts.anchor) anchor = { ...src.anchor, ...opts.anchor };
-  else if (opts.x != null) { const s = wallSpanAt(opts.x, opts.y); if (!s) return FAIL('No wall face near this point.', 'לא נמצא קיר ליד הנקודה.'); const [x, y] = toPlan(s.anchor, Math.min(s.at, Math.max(0, s.length - src.length)), 0); anchor = { x, y, dir: s.anchor.dir }; }
+  else if (opts.x != null) { const s = wallSpanAt(opts.x, opts.y, { plan: planOf(src) }); if (!s) return FAIL('No wall face near this point.', 'לא נמצא קיר ליד הנקודה.'); const [x, y] = toPlan(s.anchor, Math.min(s.at, Math.max(0, s.length - src.length)), 0); anchor = { x, y, dir: s.anchor.dir }; }
   else { const f = frame(src.anchor.dir); anchor = { ...src.anchor, x: src.anchor.x + f.nx * 100, y: src.anchor.y + f.ny * 100 }; }
   return mutate('duplicate-run', (d) => {
     const id = newId('run'), run = { ...clone(src), id, code: nextCode(d.carpentry, src.kind), anchor, unitIds: [], ends: { left: { type: 'open' }, right: { type: 'open' } }, name: src.name + ' (copy)', nameHe: (src.nameHe || '') + ' (העתק)', source: 'user' };
@@ -260,22 +267,24 @@ export const isFreeRun = (run) => !!run && (run.kind === 'island' || !!run.freeS
 function placementError(run, d, roomId) {
   const units = (run.unitIds || []).map((id) => d.peek(id)).filter((u) => u && !u.hidden);
   if (!units.length) return null;
-  const room = roomId && PLAN.rooms.find((r) => r.id === roomId);
+  const plan = planOf(run), room = roomId && plan.rooms.find((r) => r.id === roomId);
   for (const u of units) {
     if (room && !itemCorners(u).every(([x, y]) => pointInPolygon(x, y, room.polygon))) {
       return FAIL(`${run.code} would leave the ${room.name}: keep it inside the room.`, `${run.code} יוצא מגבולות ${room.nameHe || room.name}: יש להשאירו בתוך החדר.`);
     }
     const b = itemAABB(u);
-    const wall = PLAN.walls.find((w) => rectsOverlap(b, w, 0.5));
+    const wall = plan.walls.find((w) => rectsOverlap(b, w, 0.5));
     if (wall) return FAIL(`${run.code} would run into a wall.`, `${run.code} נכנס לתוך קיר.`);
-    const op = PLAN.openings.find((o) => rectsOverlap(b, o, 0.5));
+    const op = plan.openings.find((o) => rectsOverlap(b, o, 0.5));
     if (op) return FAIL(`${run.code} would block the ${op.kind === 'window' ? 'window' : 'doorway'} ${op.id}.`, `${run.code} חוסם את ${op.kind === 'window' ? 'החלון' : 'הפתח'} ${op.id}.`);
-    const door = doorSwingHit(u);
+    const door = doorSwingHit(u, plan);
     if (door) return FAIL(`${run.code} would stand in the swing of the door ${door.id}.`, `${run.code} נמצא בתחום הפתיחה של הדלת ${door.id}.`);
   }
-  const own = new Set(run.unitIds);
+  const own = new Set(run.unitIds), lv = runLevel(run);
   for (const o of d.items()) {
     if (!o.carp || o.hidden || own.has(o.id) || o.carp.runId === run.id) continue;
+    const other0 = d.carpentry.runs[o.carp.runId];
+    if (other0 && runLevel(other0) !== lv) continue;                     // another floor
     const ob = itemAABB(o), lo = o.elev || 0, hi = lo + (o.h || 0);
     const hit = units.find((u) => { const ub = itemAABB(u), ul = u.elev || 0; return rectsOverlap(ub, ob, 0.5) && ul < hi - 1 && lo < ul + (u.h || 0) - 1; });
     if (hit) { const other = d.carpentry.runs[o.carp.runId]; return FAIL(`${run.code} would overlap ${other ? other.code : 'another run'}.`, `${run.code} חופף ל-${other ? other.code : 'קו ארונות אחר'}.`); }
@@ -301,7 +310,7 @@ export function moveRun(runId, { dx = 0, dy = 0, rot = 0 } = {}, mopts) {
   const fp = runFootprint(run0);
   return mutate('move-run', (d) => {
     const run = d.carpentry.runs[runId];
-    const roomId = run.roomId || (fp && (spaceAt(fp.x + fp.w / 2, fp.y + fp.h / 2) || {}).id) || null;
+    const roomId = run.roomId || (fp && (spaceAt(fp.x + fp.w / 2, fp.y + fp.h / 2, planOf(run)) || {}).id) || null;
     const cx = fp ? fp.x + fp.w / 2 : 0, cy = fp ? fp.y + fp.h / 2 : 0, c = Math.cos(turn * Math.PI / 180), s = Math.sin(turn * Math.PI / 180);
     const place = (x, y) => (turn && fp ? [cx + (x - cx) * c - (y - cy) * s, cy + (x - cx) * s + (y - cy) * c] : [x, y]);
     // the stools (any floor furniture) at the island's seating side travel with it
@@ -320,6 +329,52 @@ export function moveRun(runId, { dx = 0, dy = 0, rot = 0 } = {}, mopts) {
   }, mopts);
 }
 
+/**
+ * Move a run to another floor (stage F7) — e.g. "move everything to the floor below" when a floor is removed. One undo
+ * step, reason 'move-run'. The run keeps its place on the plan; its units follow (`level` on every unit item).
+ * A wall-bound run needs a wall at the same place on the target floor, long enough and without a doorway the run would
+ * cross — otherwise it is refused with a reason. Free-standing runs (islands) move freely. Links to runs that stay
+ * behind (L corners) become open ends.
+ */
+export function moveRunToLevel(runId, levelId, mopts) {
+  const run0 = view().run(runId);
+  if (!run0) return FAIL('No such run.', 'קו ארונות לא קיים.');
+  const to = levelId || GROUND;
+  if (to !== GROUND && !levelObj(PLAN, to)) return FAIL(`There is no floor ${to}.`, `אין קומה ${to}.`);
+  if (runLevel(run0) === to) return { ok: true, changed: false, ids: [], runIds: [], warnings: [] };
+  const nameEn = levelName(PLAN, to, 'en') || to, nameHe = levelName(PLAN, to, 'he') || to;
+  const target = planOf(to), free = isFreeRun(run0);
+  let roomId = null;
+  if (!free) {
+    const span = spanOfRun({ ...run0, level: to });
+    if (!span) return FAIL(`${run0.code} stands against a wall that ${nameEn} does not have at the same place.`, `ב${nameHe} אין קיר באותו מקום שעליו עומד ${run0.code}.`);
+    if (span.runFrom < -0.5 || span.runTo > span.length + 0.5) return FAIL(`The wall on ${nameEn} is too short for ${run0.code} (${r1(span.length)} cm free, the run is ${run0.length} cm).`, `הקיר ב${nameHe} קצר מדי עבור ${run0.code} (${r1(span.length)} ס״מ פנויים, הקו ${run0.length} ס״מ).`);
+    roomId = span.roomId;
+  } else {
+    const fp = runFootprint(run0), sp = fp && spaceAt(fp.x + fp.w / 2, fp.y + fp.h / 2, target);
+    roomId = sp ? sp.id : null;
+  }
+  return mutate('move-run', (d) => {
+    const run = d.carpentry.runs[runId];
+    if (to === GROUND) delete run.level; else run.level = to;
+    run.roomId = roomId;
+    const touched = [];
+    for (const side of ['left', 'right']) if (run.ends[side] && run.ends[side].type === 'run') {
+      const o = d.carpentry.runs[run.ends[side].runId];
+      if (!o || runLevel(o) !== to) run.ends[side] = { type: 'open' };
+    }
+    for (const r of Object.values(d.carpentry.runs)) for (const s of ['left', 'right']) {
+      if (r.id !== runId && r.ends[s] && r.ends[s].type === 'run' && r.ends[s].runId === runId && runLevel(r) !== to) { r.ends[s] = { type: 'open' }; touched.push(r.id); }
+    }
+    const runIds = relayout(d, [runId, ...touched]);
+    if (!free) {
+      const bad = run.unitIds.length ? hardConflicts(run, d, run.unitIds) : [];
+      if (bad.length) { const why = conflictReason(bad[0]); return { ok: false, reason: L(`On ${nameEn}: ${why.en}`, `ב${nameHe}: ${why.he}`) }; }
+    }
+    return { runIds, ids: [runId], runId };
+  }, mopts);
+}
+
 /** Seating side of an island: ordinary floor furniture (not carpentry) within SEAT_REACH cm of it, along its length. */
 const SEAT_REACH = 60;
 function seatedAt(d, run, fp) {
@@ -332,6 +387,7 @@ function seatedAt(d, run, fp) {
   const out = [];
   for (const it of d.items()) {
     if (it.carp || it.hidden || (it.placement && it.placement !== 'floor')) continue;
+    if ((it.level || GROUND) !== runLevel(run)) continue;                // furniture of another floor
     const b = itemAABB(it), pts = [[b.x, b.y], [b.x + b.w, b.y], [b.x, b.y + b.h], [b.x + b.w, b.y + b.h]];
     const near = Math.min(...pts.map(([x, y]) => proj(f, x, y))), c = proj(f, it.x, it.y), t = proj(al, it.x, it.y);
     // tucked under the overhang or standing up to SEAT_REACH cm out, centred beside the island

@@ -6,7 +6,7 @@
 import { MODULES } from './modules.js';
 import { unitSpec, derivedHeights, RULES, VOCAB } from './spec.js';
 import { toPlan } from './walls.js';
-import { ceilingOf } from './state.js';
+import { ceilingOf, runLevel } from './state.js';
 import { applyOperation, cornerTrueFronts } from './bespoke.js';
 
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -24,7 +24,7 @@ export const isFloorLevel = (lvl) => FLOOR.has(lvl);
  * Everything about one unit's geometry, in cm: { mod, spec, H, level, w, d, dc (carcass depth), h, elev, t, frontD,
  * zone: { y0, y1 } (front zone, floor-up), top?: { y0, y1 } (top boxes), carcassY: [y0, y1], fronts, inner, model }.
  */
-export function geometryOf(run, unit, ceiling = ceilingOf()) {
+export function geometryOf(run, unit, ceiling = ceilingOf(run)) {
   const carp = unit.carp, mod = MODULES[carp.module] || MODULES.custom;
   const spec = unitSpec(run, unit), H = derivedHeights(spec, ceiling), level = levelOf(unit);
   const t = spec.carcass.thickness / 10, frontD = spec.fronts.thickness / 10, G = RULES.topGap;
@@ -129,7 +129,7 @@ export function positions(run, units) {
 }
 
 /** Item fields for a unit at `at` along the run. */
-export function itemFields(run, unit, at, ceiling = ceilingOf()) {
+export function itemFields(run, unit, at, ceiling = ceilingOf(run)) {
   const g = geometryOf(run, unit, ceiling);
   const [x, y] = toPlan(run.anchor, at + g.w / 2, g.d / 2);
   return {
@@ -144,15 +144,18 @@ export function layoutInDraft(draft, runId, worktopsFn) {
   const run = draft.carpentry.runs[runId];
   if (!run) return [];
   run.unitIds = (run.unitIds || []).filter((id) => { const u = draft.peek(id); return u && u.carp && u.carp.runId === runId; });
-  const units = unitsOf(run, draft), pos = positions(run, units), ceiling = ceilingOf();
+  const units = unitsOf(run, draft), pos = positions(run, units), ceiling = ceilingOf(run);
+  // the floor the run stands on (absent on the ground floor, so one-level designs keep their exact items)
+  const floor = runLevel(run) === 'L0' ? undefined : runLevel(run);
   for (const u of units) {
     const p = pos.get(u.id), f = itemFields(run, u, p.at, ceiling);
     const cur = draft.peek(u.id);
-    const same = cur.carp.at === p.at && cur.carp.level === p.level && Object.keys(f).every((k) => JSON.stringify(cur[k]) === JSON.stringify(f[k]));
+    const same = cur.carp.at === p.at && cur.carp.level === p.level && cur.level === floor && Object.keys(f).every((k) => JSON.stringify(cur[k]) === JSON.stringify(f[k]));
     if (same) continue;
     const it = draft.item(u.id);
     Object.assign(it, f);
     it.carp.at = p.at; it.carp.level = p.level;
+    if (floor) it.level = floor; else delete it.level;
   }
   run.worktops = worktopsFn ? worktopsFn(run, unitsOf(run, draft)) : run.worktops || [];
   return units.map((u) => u.id);

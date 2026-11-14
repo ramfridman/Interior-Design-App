@@ -14,7 +14,8 @@
  * DimChain = { id, axis: 'x'|'y', pts: number[], values: number[], total, at (line coordinate), lanes }.
  */
 import { PLAN } from '../core/plan.js';
-import { view, ceilingOf } from './state.js';
+import { view, ceilingOf, planOf, runLevel, planHasLevels } from './state.js';
+import { levelName } from '../core/levels.js';
 import { islandBays } from './modules.js';
 import { VOCAB } from './spec.js';
 import { layoutGrid } from './bespoke.js';
@@ -223,7 +224,7 @@ function frontSymbol(D, f, x0, g) {
 }
 
 function elevation(run, G, v, opts = {}) {
-  const ceiling = ceilingOf(), Lr = run.length, H = G.H;
+  const ceiling = ceilingOf(run), Lr = run.length, H = G.H;
   const scale = pickScale(Lr + 60, ceiling + 40);
   const D = Ops(scale), k = D.k;
   const internal = !!opts.internal;
@@ -389,8 +390,9 @@ function plan(run, G, v) {
   };
   const rectPts = (r) => [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]].map(([a, b]) => P(a, b));
   if (run.kind !== 'island') {
-    for (const w of PLAN.walls) { const c = clipRect(rectPts(w)); if (c) D.rect(...c, LW.heavy, { fill: 'wall', role: 'wall' }); }
-    for (const o of PLAN.openings) {
+    const fplan = planOf(run);
+    for (const w of fplan.walls) { const c = clipRect(rectPts(w)); if (c) D.rect(...c, LW.heavy, { fill: 'wall', role: 'wall' }); }
+    for (const o of fplan.openings) {
       const c = clipRect(rectPts(o));
       if (!c) continue;
       D.rect(...c, LW.thin, { role: 'opening', fill: o.kind === 'window' ? 'glass' : undefined });
@@ -538,7 +540,7 @@ function worktopDrawing(run, G) {
 
 // ───────────────────────── side section ─────────────────────────
 function section(run, G) {
-  const ceiling = ceilingOf();
+  const ceiling = ceilingOf(run);
   const pick = (lvl) => G.list.find((x) => x.level === lvl && !x.g.mod.virtual && !['filler', 'panel'].includes(x.g.mod.id));
   const base = pick('base') || pick('island'), wall = pick('wall'), tall = pick('tall'), full = pick('full');
   const maxD = Math.max(60, ...[base, wall, tall, full].filter(Boolean).map((x) => x.g.d));
@@ -627,5 +629,10 @@ export function drawings(runId, src) {
   const wt = worktopDrawing(run, G);
   if (wt) out.push(wt);
   if (G.list.some((x) => ((x.level === 'full' || x.level === 'tall') && x.g.inner.length && !x.g.mod.virtual) || (x.g.mod.id === 'custom' && x.u.carp.internals && x.u.carp.internals.layout))) out.push(internalElevation(run, G, v));
+  // several floors (stage F7): every title names the run's floor, and each drawing carries `level`
+  if (planHasLevels()) {
+    const id = runLevel(run), en = levelName(PLAN, id, 'en') || id, he = levelName(PLAN, id, 'he') || id;
+    for (const d of out) { d.title = L(`${d.title.en} · ${en}`, `${d.title.he} · ${he}`); d.level = id; }
+  }
   return out;
 }

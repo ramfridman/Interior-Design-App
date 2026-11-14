@@ -6,11 +6,11 @@
  */
 export { VOCAB, RULES, DEFAULT_SPEC, KIND_SPEC, defaultSpec, unitSpec, derivedHeights, deepMerge, vocab, SPEC_TEXT_HE, specText, hwVariantLabel } from './spec.js';
 export { MODULES, modulesFor, splitEven, islandBays, APPLIANCE_LABELS } from './modules.js';
-export { bindStore, view, emptyCarpentry } from './state.js';
+export { bindStore, view, emptyCarpentry, planOf, runLevel, itemFloor, currentLevel } from './state.js';
 export { wallSpanAt, spanOfRun, openingConflicts, toPlan, toLocal, frame } from './walls.js';
 export { geometryOf, positions, unitCodes, rowExtents, levelOf, itemFields } from './layout.js';
 export { computeWorktops, cutoutOf } from './worktop.js';
-export { KIND_LEVELS, toCustom, createRun, updateRun, removeRun, duplicateRun, layoutRun, addUnit, updateUnit, setUnitWidth, removeUnit, moveUnit, fitRun, moveRun, isFreeRun } from './runs.js';
+export { KIND_LEVELS, toCustom, createRun, updateRun, removeRun, duplicateRun, layoutRun, addUnit, updateUnit, setUnitWidth, removeUnit, moveUnit, fitRun, moveRun, moveRunToLevel, isFreeRun } from './runs.js';
 export { adoptArchitectLayout } from './adopt.js';
 export { applyOperation, OPERATION_HARDWARE, BY_CARPENTER, cornerShape, validateCustomLayout, layoutGrid, customLayoutTemplate, CUSTOM_TEMPLATES, frontsToLayout } from './bespoke.js';
 export { addFeature, updateFeature, removeFeature, listFeatures, featureImage, circled } from './features.js';

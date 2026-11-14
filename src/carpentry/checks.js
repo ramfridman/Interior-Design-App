@@ -5,7 +5,7 @@
  */
 import { PLAN } from '../core/plan.js';
 import { itemAABB, openingHinge } from '../core/geometry.js';
-import { view } from './state.js';
+import { view, planOf, ceilingOf, runLevel, itemFloor } from './state.js';
 import { RULES } from './spec.js';
 import { unitsOf, positions, geometryOf, unitCodes, isFloorLevel } from './layout.js';
 import { spanOfRun, openingConflicts, toPlan, frame } from './walls.js';
@@ -32,7 +32,7 @@ function findingsFor(run, v) {
   const add = (severity, code, en, he, units = []) => out.push({ severity, code, text: L(en, he), unitIds: units.map((x) => x.id || x), runId: run.id });
   const floor = list.filter((x) => isFloorLevel(x.level)).sort((a, b) => a.at - b.at), wall = list.filter((x) => !isFloorLevel(x.level)).sort((a, b) => a.at - b.at);
   const C = (x) => x.code;
-  const ceiling = PLAN.heights.ceiling || 300;
+  const ceiling = ceilingOf(run), plan = planOf(run), floor = runLevel(run);
 
   // ── sizes and fit ──
   for (const row of [['floor', floor], ['wall', wall]]) {
@@ -237,7 +237,7 @@ function findingsFor(run, v) {
 
   // ── room: aisle, door swings, clashes ──
   const runIds = new Set(list.map((x) => x.id)), markers = new Set(list.map((x) => x.u.carp.appliance && x.u.carp.appliance.itemId).filter(Boolean));
-  const others = v.items.filter((it) => !it.hidden && !runIds.has(it.id) && !markers.has(it.id) && it.zone !== 'outdoor' && !NOT_CLASHING.has(it.type) && !(it.carp && it.carp.runId === run.id));
+  const others = v.items.filter((it) => !it.hidden && !runIds.has(it.id) && !markers.has(it.id) && it.zone !== 'outdoor' && !NOT_CLASHING.has(it.type) && !(it.carp && it.carp.runId === run.id) && itemFloor(it, v) === floor);
   const linked = new Set();
   for (const r of v.runs()) for (const sd of ['left', 'right']) { const e = r.ends && r.ends[sd]; if (e && e.type === 'run') { if (r.id === run.id) linked.add(e.runId); if (e.runId === run.id) linked.add(r.id); } }
   const aisleNeed = ['kitchen', 'island'].includes(run.kind) ? RULES.aisleMin : ['wardrobe', 'entry', 'utility', 'pantry'].includes(run.kind) ? RULES.wardrobeAisle : 70;
@@ -247,7 +247,7 @@ function findingsFor(run, v) {
     for (const x of floor.filter((y) => !y.virtual && !y.mod.corner)) {
       for (let s = x.at + 5; s <= x.end - 5 + 0.01; s += Math.max(5, (x.w - 10) / 2 || 5)) {
         const [px, py] = toPlan(run.anchor, s, x.g.d + 0.5);
-        const dist = rayClear(px, py, f.nx, f.ny, others.filter((o) => (o.elev || 0) < 120 && o.h > 30 && !(o.carp && linked.has(o.carp.runId))), 400);
+        const dist = rayClear(px, py, f.nx, f.ny, others.filter((o) => (o.elev || 0) < 120 && o.h > 30 && !(o.carp && linked.has(o.carp.runId))), 400, plan);
         if (dist != null && (!worst || dist.d < worst.d)) worst = { ...dist, x };
       }
     }
@@ -261,7 +261,7 @@ function findingsFor(run, v) {
     if (worst && worst.d < aisleNeed) add(worst.d < aisleNeed - 15 ? 'error' : 'warning', 'aisle', `Only ${r1(worst.d)} cm clear on the ${SIDE_NAME[worst.side].en} side of ${run.code} (to ${worst.what}) — ≥ ${aisleNeed} cm needed, ${RULES.aisleRecommended}–${RULES.aisleTwoCooks} cm recommended, to open doors and pass.`,
       `רק ${r1(worst.d)} ס״מ פנויים בצד ה${SIDE_NAME[worst.side].he} של ${run.code} (עד ${worst.whatHe}) — נדרש ≥ ${aisleNeed} ס״מ, מומלץ ${RULES.aisleRecommended}–${RULES.aisleTwoCooks} ס״מ, לפתיחת דלתות ולמעבר.`, list.filter((x) => !x.virtual));
   }
-  for (const o of PLAN.openings.filter((q) => q.kind === 'door')) {
+  for (const o of plan.openings.filter((q) => q.kind === 'door')) {
     const sw = swingRect(o);
     if (!sw) continue;
     const hits = list.filter((x) => !x.virtual && x.elev < (o.height || 210) && itemHitsSwing(x.u, sw));
@@ -281,8 +281,9 @@ const SIDE_NAME = { n: L('north', 'צפוני'), e: L('east', 'מזרחי'), s: 
 function obstaclesFor(run, v) {
   const own = new Set(run.unitIds || []);
   const markers = new Set((run.unitIds || []).map((id) => { const u = v.item(id); return u && u.carp && u.carp.appliance && u.carp.appliance.itemId; }).filter(Boolean));
+  const floor = runLevel(run);
   return v.items.filter((it) => !it.hidden && !own.has(it.id) && !markers.has(it.id) && it.zone !== 'outdoor' && !NOT_CLASHING.has(it.type)
-    && !(it.carp && it.carp.runId === run.id) && (it.elev || 0) < 120 && it.h > 30);
+    && !(it.carp && it.carp.runId === run.id) && (it.elev || 0) < 120 && it.h > 30 && itemFloor(it, v) === floor);
 }
 /** Plan footprint (axis-aligned box) of a run's visible units, or null. */
 export function runFootprint(run, v = view()) {
@@ -298,7 +299,7 @@ export function runFootprint(run, v = view()) {
 function clearancesOf(run, v) {
   const b = runFootprint(run, v);
   if (!b) return [];
-  const obs = obstaclesFor(run, v), out = [];
+  const obs = obstaclesFor(run, v), out = [], plan = planOf(run);
   const sides = [
     ['n', 0, -1, (t) => [b.x + t * b.w, b.y - 0.5], b.w], ['s', 0, 1, (t) => [b.x + t * b.w, b.y + b.h + 0.5], b.w],
     ['w', -1, 0, (t) => [b.x - 0.5, b.y + t * b.h], b.h], ['e', 1, 0, (t) => [b.x + b.w + 0.5, b.y + t * b.h], b.h],
@@ -307,7 +308,7 @@ function clearancesOf(run, v) {
     let best = null;
     const inset = Math.min(0.45, 5 / Math.max(len, 1));
     for (const t of [inset, 0.25, 0.5, 0.75, 1 - inset]) {
-      const [px, py] = at(t), hit = rayClear(px, py, dx, dy, obs, 400);
+      const [px, py] = at(t), hit = rayClear(px, py, dx, dy, obs, 400, plan);
       if (hit && (!best || hit.d < best.d)) best = { ...hit, from: [px - dx * 0.5, py - dy * 0.5], to: [px + dx * hit.d, py + dy * hit.d] };
     }
     out.push(best ? { side, d: r1(best.d + 0.5), what: best.what, whatHe: best.whatHe, from: best.from, to: best.to }
@@ -325,9 +326,9 @@ export function runClearances(runId, src) {
   if (!run) return [];
   return clearancesOf(run, v).map((c) => ({ ...c, level: c.d == null || c.d >= RULES.aisleRecommended ? 'ok' : c.d >= RULES.aisleMin ? 'tight' : 'short' }));
 }
-/** The hinged door whose swing an item's footprint enters (plan only), or null. */
-export function doorSwingHit(item) {
-  for (const o of PLAN.openings) {
+/** The hinged door whose swing an item's footprint enters (plan only — `plan` = the item's floor), or null. */
+export function doorSwingHit(item, plan = PLAN) {
+  for (const o of plan.openings) {
     if (o.kind !== 'door') continue;
     const sw = swingRect(o);
     if (sw && itemHitsSwing(item, sw)) return o;
@@ -362,14 +363,14 @@ function rayToRect(px, py, dx, dy, r) {
   }
   return t1 < t0 ? null : t0;
 }
-/** Clear distance along a ray (unit direction) to the first wall / item. */
-export function rayClear(px, py, dx, dy, items, max) {
+/** Clear distance along a ray (unit direction) to the first wall (of `plan`, the run's floor) / item. */
+export function rayClear(px, py, dx, dy, items, max, plan = PLAN) {
   let best = { d: max, what: 'nothing', whatHe: 'מכשול' }, hit = false;
   const test = (r, what, whatHe) => {
     const d = rayToRect(px, py, dx, dy, r);
     if (d != null && d >= -0.5 && d < best.d) { best = { d: Math.max(0, d), what, whatHe }; hit = true; }
   };
-  for (const w of PLAN.walls) test(w, 'a wall', 'קיר');
+  for (const w of plan.walls) test(w, 'a wall', 'קיר');
   for (const it of items) test(itemAABB(it), it.carp ? 'another run' : (it.name || it.type), it.carp ? 'קו ארונות אחר' : (it.name || it.type));
   return hit ? best : null;
 }
