@@ -12,8 +12,8 @@
  *
  * Conventions as slant-geom.js: u = unit x1 → x2, n = (−uy, ux) is the RIGHT ('r') side, `at` = cm from (x1, y1).
  */
-import { joinSlants, slantJoins, slantFrame, openingQuad } from './slant-geom.js';
-import { difference, rings } from './polykernel.js';
+import { joinSlants, slantJoins, slantFrame, openingQuad, freePoly } from './slant-geom.js';
+import { difference, rings, offset as polyOffset } from './polykernel.js';
 
 export const isAngledOpening = (o) => !!o && o.axis === 'a';
 /** True when a plan / level / plan state carries at least one slant. */
@@ -259,4 +259,160 @@ export function slantSolids(level, openings) {
     if (g && o.width > 0 && Number.isFinite(o.at)) { quads.push(openingQuad(g.s, o.at, o.width)); cuts.push(openingQuad({ ...g.s, t: g.s.t + 0.02 }, o.at, o.width)); }
   }
   return { polys, quads, cuts };
+}
+
+// ---------------------------------------------------------------- editing helpers (stage A2)
+/*
+ * Pure helpers for the editing calls on angled walls (plan-edit.js "angled walls: editing"). Same conventions: u = unit
+ * x1 → x2, n = (−uy, ux) = the right ('r') side, `at` = cm from (x1, y1). Centre lines are kept on 0.1 cm.
+ */
+/** Centre-line precision of an edited slant (cm). */
+export const r01 = (v) => Math.round(v * 10) / 10 + 0;
+/** Degrees: an angled wall this close to an axis is a rect wall (same tolerance as plan-build). */
+export const AXIS_TOL = 0.5;
+/** 'h' | 'v' when the centre line (x1, y1) → (x2, y2) is within AXIS_TOL of an axis, else null. */
+export function nearAxis(x1, y1, x2, y2) {
+  const off = (Math.atan2(Math.abs(y2 - y1), Math.abs(x2 - x1)) * 180) / Math.PI;
+  return off <= AXIS_TOL ? 'h' : off >= 90 - AXIS_TOL ? 'v' : null;
+}
+const cross2 = (ax, ay, bx, by) => ax * by - ay * bx;
+/** Intersection of the lines P + s·u and Q + r·v (null when within 5° of parallel). */
+export function lineCross(px, py, ux, uy, qx, qy, vx, vy) {
+  const cr = cross2(ux, uy, vx, vy), lu = Math.hypot(ux, uy), lv = Math.hypot(vx, vy);
+  if (!lu || !lv || Math.abs(cr) < Math.sin((5 * Math.PI) / 180) * lu * lv) return null;
+  const s = cross2(qx - px, qy - py, vx, vy) / cr;
+  return [px + ux * s, py + uy * s];
+}
+/** Distance along the ray (px, py) + h·(dx, dy) to where it enters rect r (Infinity if it does not; 0 if it starts inside). */
+export function rayRect(px, py, dx, dy, r) {
+  let t0 = -Infinity, t1 = Infinity;
+  for (const [p, d, lo, hi] of [[px, dx, r.x, r.x + r.w], [py, dy, r.y, r.y + r.h]]) {
+    if (Math.abs(d) < 1e-12) { if (p < lo || p > hi) return Infinity; continue; }
+    let a = (lo - p) / d, b = (hi - p) / d;
+    if (a > b) [a, b] = [b, a];
+    t0 = Math.max(t0, a); t1 = Math.min(t1, b);
+  }
+  return t1 < Math.max(t0, 0) ? Infinity : Math.max(t0, 0);
+}
+/** Distance along the ray to the first crossing of a polygon edge (Infinity if none). */
+export function rayPoly(px, py, dx, dy, poly) {
+  let best = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const [ax, ay] = poly[i], [bx, by] = poly[(i + 1) % poly.length], ex = bx - ax, ey = by - ay, den = dx * ey - dy * ex;
+    if (Math.abs(den) < 1e-12) continue;
+    const h = ((ax - px) * ey - (ay - py) * ex) / den, u = ((ax - px) * dy - (ay - py) * dx) / den;
+    if (h >= 0 && u >= 0 && u <= 1 && h < best) best = h;
+  }
+  return best;
+}
+
+/**
+ * Snap end `k` (0 = (x1, y1), 1 = (x2, y2)) of a slant being drawn / dragged, among the level's other slants and rect
+ * solids (walls + rect openings). Returns the point [x, y] (0.1 cm):
+ *   1. within 1.5 t (the thicker wall's) of another slant's end → exactly that end point (the two share it);
+ *   2. joined as it is (slant-geom: a T onto a slant side, an end on / in a rect — within the join reach t) → as given;
+ *   3. else extended along its own direction to the nearest wall face (rect or slant) ahead within 1.5 t;
+ *   4. else as given (a free end).
+ */
+export function snapSlantEnd(s, k, others, rects) {
+  const P = k ? [s.x2, s.y2] : [s.x1, s.y1];
+  let best = null, bd = Infinity;
+  for (const o of others) for (const q of [[o.x1, o.y1], [o.x2, o.y2]]) {
+    const d = Math.hypot(q[0] - P[0], q[1] - P[1]);
+    if (d <= 1.5 * Math.max(s.t, o.t) && d < bd) { bd = d; best = q; }
+  }
+  if (best) return [best[0], best[1]];
+  const f = slantFrame(s);
+  if (!(f.len > 1)) return [r01(P[0]), r01(P[1])];
+  const near = nearRects(s, rects);
+  const j = slantJoins([s, ...others], near)[0].ends[k];
+  if (j.type === 'tee' || j.type === 'rect') return [r01(P[0]), r01(P[1])];
+  const dx = k ? f.ux : -f.ux, dy = k ? f.uy : -f.uy, reach = 1.5 * s.t;
+  let h = Infinity;
+  for (const r of near) { const q = rayRect(P[0], P[1], dx, dy, r); if (q > 1e-9 && q < h) h = q; }
+  for (const o of others) { const q = rayPoly(P[0], P[1], dx, dy, freePoly(o)); if (q > 1e-9 && q < h) h = q; }
+  return h <= reach ? [r01(P[0] + dx * h), r01(P[1] + dy * h)] : [r01(P[0]), r01(P[1])];
+}
+/** The rects that can take part in a join of slant s (within 3 t of its free footprint's bounds). */
+export function nearRects(s, rects) {
+  const m = 3 * Math.max(1, s.t), b = { x: Math.min(s.x1, s.x2) - m, y: Math.min(s.y1, s.y2) - m, w: Math.abs(s.x2 - s.x1) + 2 * m, h: Math.abs(s.y2 - s.y1) + 2 * m };
+  return rects.filter((r) => boxHit(r, b));
+}
+
+/** Parameter intervals [a0, a1] (cm from (x1, y1), clipped to the centre line) where the centre line runs inside `ring`. */
+export function centreIn(s, ring) {
+  const f = slantFrame(s);
+  return lineIn(s.x1, s.y1, f.ux, f.uy, ring).map(([a, b]) => [Math.max(0, a), Math.min(f.len, b)]).filter(([a, b]) => b > a);
+}
+
+/** Smallest distance between two polygons (0 when they overlap or touch). */
+export function polyGap(a, b) {
+  const inside = (p, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > p[1]) !== (yj > p[1]) && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) c = !c; } return c; };
+  if (a.some((p) => inside(p, b)) || b.some((p) => inside(p, a))) return 0;
+  const segD = (p, q0, q1) => { const dx = q1[0] - q0[0], dy = q1[1] - q0[1], L = dx * dx + dy * dy, t = L ? Math.max(0, Math.min(1, ((p[0] - q0[0]) * dx + (p[1] - q0[1]) * dy) / L)) : 0; return Math.hypot(p[0] - q0[0] - t * dx, p[1] - q0[1] - t * dy); };
+  const cross = (p0, p1, q0, q1) => { const d1 = cross2(p1[0] - p0[0], p1[1] - p0[1], q0[0] - p0[0], q0[1] - p0[1]), d2 = cross2(p1[0] - p0[0], p1[1] - p0[1], q1[0] - p0[0], q1[1] - p0[1]), d3 = cross2(q1[0] - q0[0], q1[1] - q0[1], p0[0] - q0[0], p0[1] - q0[1]), d4 = cross2(q1[0] - q0[0], q1[1] - q0[1], p1[0] - q0[0], p1[1] - q0[1]); return d1 * d2 < 0 && d3 * d4 < 0; };
+  let best = Infinity;
+  for (let i = 0; i < a.length; i++) {
+    const a0 = a[i], a1 = a[(i + 1) % a.length];
+    for (let j = 0; j < b.length; j++) {
+      const b0 = b[j], b1 = b[(j + 1) % b.length];
+      if (cross(a0, a1, b0, b1)) return 0;
+      best = Math.min(best, segD(a0, b0, b1), segD(b0, a0, a1));
+    }
+  }
+  return best;
+}
+
+/**
+ * Extent along an axis ('h': x, 'v': y) of the part of polygon `poly` inside the band c0 ≤ cross ≤ c1 (y for 'h', x for
+ * 'v'): [min, max], or null when the polygon does not enter the band.
+ */
+export function bandExtent(poly, axis, c0, c1) {
+  const A = axis === 'h' ? 0 : 1, C = 1 - A;
+  let p = poly;
+  for (const [lim, sg] of [[c0, 1], [c1, -1]]) {
+    const out = [];
+    for (let i = 0; i < p.length; i++) {
+      const a = p[i], b = p[(i + 1) % p.length], da = (a[C] - lim) * sg, db = (b[C] - lim) * sg;
+      if (da >= 0) out.push(a);
+      if ((da >= 0) !== (db >= 0)) { const k = da / (da - db); out.push([a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k]); }
+    }
+    p = out;
+    if (!p.length) return null;
+  }
+  let lo = Infinity, hi = -Infinity;
+  for (const q of p) { if (q[A] < lo) lo = q[A]; if (q[A] > hi) hi = q[A]; }
+  return hi > lo ? [lo, hi] : null;
+}
+
+/** Number of pieces left when a room shrinks by `half` cm (0: nothing that wide; > 1: a neck narrower than 2·half). */
+export const clearPieces = (polygon, half) => polyOffset([{ polygon }], -half).length;
+
+/**
+ * Free stretches of an angled wall where an opening can sit: the parts of the centre line where BOTH faces border open
+ * space (segment `faces`), as [[a0, a1]…] in cm from (x1, y1).
+ */
+export function bothFaces(faces) {
+  const out = [];
+  for (const [p, q] of faces.l) for (const [r, s] of faces.r) { const a = Math.max(p, r), b = Math.min(q, s); if (b > a) out.push([a, b]); }
+  return out.sort((x, y) => x[0] - y[0]);
+}
+/**
+ * Allowed ranges of the CENTRE `at` of an opening of `width` in a wall with free stretches `free` and other openings
+ * `taken` ([[a0, a1]…] gap extents): ≥ jamb cm of wall on both faces beside it and between it and every other opening.
+ */
+export function openingRanges(free, taken, width, jamb) {
+  const out = [];
+  for (const [p, q] of free) {
+    let lo = p + jamb + width / 2;
+    const hiAll = q - jamb - width / 2;
+    for (const [a0, a1] of taken.slice().sort((x, y) => x[0] - y[0])) {
+      if (a1 + jamb + width / 2 <= lo || a0 - jamb - width / 2 >= hiAll) { if (a1 + jamb + width / 2 > lo && a1 <= hiAll + width) lo = Math.max(lo, a1 + jamb + width / 2); continue; }
+      const hi = a0 - jamb - width / 2;
+      if (hi >= lo - EPS) out.push([lo, hi]);
+      lo = Math.max(lo, a1 + jamb + width / 2);
+    }
+    if (hiAll >= lo - EPS) out.push([lo, hiAll]);
+  }
+  return out;
 }

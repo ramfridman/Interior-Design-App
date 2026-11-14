@@ -20,10 +20,10 @@ export const DISCLAIMER =
   'and engineer of record always govern — confirm anything marked as a warning with them before you build or buy.';
 
 export const CATEGORIES = [
-  'Changes to the approved plan', 'Rooms & dimensions', 'Light & ventilation', 'Doors & circulation', 'Safe room (Mamad)', 'Kitchen', 'Bathrooms',
+  'Changes to the approved plan', 'Rooms & dimensions', 'Light & ventilation', 'Doors & circulation', 'Stairs', 'Safe room (Mamad)', 'Kitchen', 'Bathrooms',
   'Furniture clearances', 'Site & parking', 'Garden & outdoor structures', 'Assumptions',
 ];
-const [CHANGES, ROOMS, LIGHT, DOORS, MAMAD, KITCHEN, BATH, FURN, SITE, GARDEN, ASSUME] = CATEGORIES;
+const [CHANGES, ROOMS, LIGHT, DOORS, STAIRS, MAMAD, KITCHEN, BATH, FURN, SITE, GARDEN, ASSUME] = CATEGORIES;
 
 const wiki = (title) => encodeURI('https://he.wikisource.org/wiki/' + title);
 
@@ -61,6 +61,10 @@ const SRC = {
   NHBC: { name: 'Arboricultural rule of thumb (e.g. NHBC Standards ch. 4.2 "Building near trees"); mature canopy radius of the species', url: 'https://nhbc-standards.co.uk/' },
   FIRE: { name: 'Grill manufacturers\' instructions and NFPA 1 Fire Code §10.10.6 (3 m / 10 ft from structures for multi-family dwellings)', url: 'https://www.nfpa.org/' },
   WATER: { name: 'Water-wise gardening practice (hydrozoning) as promoted by the Israel Water Authority — גינון חסכוני במים', url: 'https://www.gov.il/he/departments/water_authority' },
+  // stairs (stage F4a): the secondary source for the SI 1142 heights, and the drawn stair itself
+  SI1142_SEC: { name: 'ת"י 1142 מעקים ומסעדים — SI 1142 guard heights as quoted by pro.co.il, "תכנון מדרגות לבית" (updated 19.01.2025; the standard itself is not open-access)',
+    url: 'https://www.pro.co.il/general-contractors/guide/designing-stairs-for-the-house' },
+  STAIRGEO: { name: 'The stair as drawn (src/core/stairs.js — geometry from the plan data)', url: null },
   PLAN: { name: 'Architect drawing E7 / site plan for lot 98 (the data in src/core/plan.js) and the local detailed plan (תב"ע)', url: null },
 };
 
@@ -145,6 +149,34 @@ export const RULES = [
     'Main routes through a home should be 80–90 cm wide (NKBA: 36 in / 91 cm walkway); 60 cm is the absolute minimum for one person.',
     'NKBA_K', 'Guideline 7 (walkway ≥ 36 in); Neufert circulation widths (60 cm minimum)', 'medium'),
 
+  // ───────────── Stairs (stage F4a; inside a dwelling: Part C §3.8.5.1 applies sign ב' of chapter ב' with the §3.8.5.7 exceptions) ─────────────
+  R('stair-riser', STAIRS, 'regulation', 'Stair riser height', 'Every riser at least 10 cm and at most 17.5 cm, the same in the whole flight (riser = floor-to-floor rise ÷ number of risers).',
+    'PBR', 'Second Schedule, Part C §3.2.2.5(א), (ד); inside a dwelling by §3.8.5.1 and §3.8.5.7(א)', 'high'),
+  R('stair-going', STAIRS, 'regulation', 'Tread depth (going)', 'The going — nosing to nosing, measured square to the step — at least 26 cm.',
+    'PBR', 'Second Schedule, Part C §3.2.2.5(ב); definition "שלח מדרגה" §3.1.1.1', 'high'),
+  R('stair-comfort', STAIRS, 'regulation', 'Riser and going in proportion (2R + G)', 'Two risers plus one going between 61 and 63 cm, uniform along the flight.',
+    'PBR', 'Second Schedule, Part C §3.2.2.5(ד) ("2 רומים + שלח = 61 סנטימטרים עד 63 סנטימטרים")', 'high'),
+  R('stair-width', STAIRS, 'regulation', 'Stair width inside a dwelling', 'Stairs inside a dwelling at least 0.80 m wide.',
+    'PBR', 'Second Schedule, Part C §3.2.2.2(1), §3.8.5.7(ב); measured as §3.2.2.3 (the checker uses the drawn width: a handrail projecting more than 9 cm from a wall, or a guard rail more than 7 cm, would reduce it)', 'high'),
+  R('stair-headroom', STAIRS, 'regulation', 'Headroom over the stair', 'At least 2.10 m clear above the stair, measured vertically from the line through the nosings (above a landing: from the landing).',
+    'PBR', 'Second Schedule, Part C §3.2.2.4; definition "מזקף ראש" §3.1.1.1; Part B §2.03(ג)', 'high'),
+  R('stair-void', STAIRS, 'regulation', 'Opening in the floor above the stair', 'The opening in the floor above must cover every part of the stair where its slab would come lower than the 2.10 m headroom. It may be larger, never smaller.',
+    'PBR', 'Second Schedule, Part C §3.2.2.4 applied to the slab of the upper floor (computed by src/core/stairs.js requiredVoid)', 'high'),
+  R('stair-flight', STAIRS, 'regulation', 'Steps in one flight', 'At most 18 steps in one flight inside a dwelling (the 3–16 rule of §3.2.2.6 does not apply in a dwelling). Counted here as risers, the stricter reading.',
+    'PBR', 'Second Schedule, Part C §3.8.5.7(ד); §3.8.5.2', 'high'),
+  R('stair-landing', STAIRS, 'regulation', 'Landing depth', 'A landing at least as deep, in the direction of travel, as the minimum stair width (0.80 m in a dwelling). The 1.20 m between two straight flights (§3.2.2.10(2)) does not apply inside a dwelling.',
+    'PBR', 'Second Schedule, Part C §3.2.2.10(1), §3.8.5.7(א), (ג)', 'high'),
+  R('stair-handrail', STAIRS, 'regulation', 'Handrail', 'A flight of 3 or more steps needs a handrail; inside a dwelling one side is enough (a guard\'s top rail counts).',
+    'PBR', 'Second Schedule, Part C §3.2.2.15, §3.8.5.6', 'high'),
+  R('stair-nosing', STAIRS, 'regulation', 'Nosing', 'A tread may project at most 4 cm over the riser below; the riser face at least 60° from the horizontal.',
+    'PBR', 'Second Schedule, Part C §3.2.2.11', 'high'),
+  R('stair-guard', STAIRS, 'regulation', 'Guard at the open sides and the opening', 'A guard to SI 1142 wherever two adjacent levels differ by 60 cm or more: along the open sides of the stair and round the opening in the floor above, except where the stair arrives.',
+    'SAFETY', 'Reg. 4(א), 7; PBR Part C §3.2.2.17', 'high'),
+  R('stair-guard-height', STAIRS, 'standard', 'Guard height — unverified (secondary source)', 'Unverified — SI 1142 as quoted by secondary sources: guard 1.05 m high at level edges (the opening), 0.90 m along a stair measured from the nosing line, gaps no wider than 10 cm. The 3D model uses these heights.',
+    'SI1142_SEC', 'SI 1142 (standard not open-access); heights as quoted in the article; see also docs/REGULATIONS.md §1.4', 'medium'),
+  R('stair-geometry', STAIRS, 'best-practice', 'The stair as drawn', 'The stair must fit between its two floors: a whole number of risers, a landing between its first and last riser, a quarter landing at least as deep as the stair is wide, a floor above to arrive at.',
+    'STAIRGEO', 'Geometry check (stairProblems)', 'high'),
+
   // ───────────── Safe room (Mamad) ─────────────
   R('mamad-area', MAMAD, 'regulation', 'Mamad area and volume', 'Net floor area ≥ 9 m² (walls excluded) and volume ≥ 22.5 m³.', 'HAGA', 'Reg. 197א(1)', 'high'),
   R('mamad-height', MAMAD, 'regulation', 'Mamad height and width', 'Clear height not less than 2.50 m and not more than 2.80 m unless the competent authority (Home Front Command) approved otherwise; width ≥ 1.60 m.',
@@ -218,6 +250,8 @@ export const RULES = [
   R('setbacks', SITE, 'regulation', 'Setbacks from the property line', 'Setbacks written on the site plan (lot 98): 4.00 m west, 3.00 m north, east and south.', 'PLAN', 'Site plan dimensions (plan.site.setbacks)', 'high'),
   R('lot-boundary', SITE, 'regulation', 'Everything inside the lot', 'Nothing may be placed beyond the property line; gates may not open beyond it.', 'EXEMPT', 'Reg. 10(a)(2); general planning law', 'high'),
   R('entry-path', SITE, 'best-practice', 'Path to the front door', 'Keep the path from the street / parking to the entrance at least 90 cm clear.', 'NEUFERT', 'External circulation widths', 'medium'),
+  R('built-area', SITE, 'regulation', 'Built area and coverage (several floors)', 'The ground the house covers (all floors projected) and the floor area of all floors must stay within the coverage (תכסית) and building percentages (אחוזי בנייה) of the local plan for the lot.',
+    'PLAN', 'Local plan (תב"ע) — building rights of the lot; computed from the plan (ground floor ∪ projection of the upper floors)', 'medium'),
   R('energy-roof', SITE, 'regulation', 'Hot water and solar', 'A dwelling needs a hot-water system (solar per SI 579, heat pump or equivalent). A new ground-attached house with a roof over 100 m² must also get a photovoltaic system of 5 kVA unless the engineer exempts it.',
     'GREEN', 'Reg. 8א(a)(2), 8ב(a)(2); Sanitation regs. 10, 12, 24', 'medium'),
 

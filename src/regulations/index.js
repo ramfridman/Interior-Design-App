@@ -9,7 +9,9 @@
  * rules.js and explained in docs/REGULATIONS.md.
  *
  * Finding = { id, ruleId, severity: 'pass'|'info'|'warn'|'fail', category, kind, title, detail,
- *             reference: string, spaceId?, itemIds?, at?: { x, y } }
+ *             reference: string, spaceId?, itemIds?, at?: { x, y }, level?, scope? }
+ * Several floors (plan.levels, stage F7): every finding carries `level` (the floor it is on) and, for site / whole-house
+ * rules, `scope: 'site' | 'house'` — see levels.js.
  *
  * The plan may be edited at runtime (src/core/plan-edit.js): call runChecks again on the store's 'plan' event.
  * Results are always computed for the plan as it is at the time of the call; nothing is recomputed while the plan,
@@ -22,6 +24,8 @@ import { planRev } from './geom.js';
 import { planPhase } from '../core/plan-edit.js';
 import { buildContext, checkInterior } from './interior.js';
 import { checkOutdoor } from './outdoor.js';
+import { hasLevels } from '../core/levels.js';
+import { levelsBuilding, levelsInterior, levelsOutdoor } from './levels.js';
 
 export { RULES, DISCLAIMER, CATEGORIES, ruleById };
 
@@ -64,12 +68,13 @@ function guarded(label, fn, out) {
 export function runChecks(args) {
   const out = [];
   if (!args || !args.plan || !Array.isArray(args.plan.rooms)) return out;
-  guarded('building', () => buildingFindings(args), out);
+  const floors = hasLevels(args.plan);              // several floors (stage F7): per level, see levels.js
+  guarded('building', () => (floors ? levelsBuilding(args) : buildingFindings(args)), out);
   let ctx = null;
   guarded('layout', () => { ctx = buildContext(args); return []; }, out);
   if (ctx) {
-    guarded('interior layout', () => checkInterior(ctx), out);
-    guarded('garden', () => checkOutdoor(ctx), out);
+    guarded('interior layout', () => (floors ? levelsInterior(args, ctx) : checkInterior(ctx)), out);
+    guarded('garden', () => (floors ? levelsOutdoor(ctx) : checkOutdoor(ctx)), out);
   }
   const cat = (f) => { const i = CATEGORIES.indexOf(f.category); return i < 0 ? CATEGORIES.length : i; };
   return out

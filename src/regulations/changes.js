@@ -8,15 +8,24 @@ import { PLAN } from '../core/plan.js';
 import { BASE_PLAN, planDiff, isPlanModified, planPhase, isBuiltinBase } from '../core/plan-edit.js';
 import { finding, roomMetrics, planMetrics, sizeVerdict, HABITABLE, SERVICE } from './building.js';
 import { m } from './geom.js';
+import { GROUND, hasLevels } from '../core/levels.js';
+import { levelViews } from './footprint.js';
 
 const RULE_OF = { free: 'plan-change-free', warn: 'plan-change-structural', permit: 'plan-change-permit' };
 const SEVERITY_OF = { free: 'info', warn: 'warn', permit: 'warn' };
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-let baseMetrics = null, baseOf = null;
-/** Size and daylight of the base plan's rooms, by id (computed once per base plan — it changes only when a project is opened). */
+let baseMetrics = null, baseOf = null, baseLevels = null;
+/**
+ * Size and daylight of the base plan's rooms, by id (computed once per base plan — it changes only when a project is
+ * opened). Several floors: the rooms of every level of the base plan (room ids are unique across levels).
+ */
 function baseline() {
-  if (!baseMetrics || baseOf !== BASE_PLAN) { baseOf = BASE_PLAN; baseMetrics = new Map(BASE_PLAN.rooms.map((r) => [r.id, { room: r, shape: JSON.stringify(r.polygon), ...roomMetrics(BASE_PLAN, r) }])); }
+  if (!baseMetrics || baseOf !== BASE_PLAN || baseLevels !== BASE_PLAN.levels) {
+    baseOf = BASE_PLAN; baseLevels = BASE_PLAN.levels;
+    const views = hasLevels(BASE_PLAN) ? levelViews(BASE_PLAN) : [{ id: GROUND, view: BASE_PLAN }];
+    baseMetrics = new Map(views.flatMap(({ view }) => view.rooms.map((r) => [r.id, { room: r, shape: JSON.stringify(r.polygon), ...roomMetrics(view, r) }])));
+  }
   return baseMetrics;
 }
 
@@ -43,6 +52,9 @@ function detailOf(item) {
 export function checkChanges({ plan }) {
   const out = [];
   if (plan !== PLAN) return out;
+  // several floors (stage F7): every finding names its floor (`level`); the summary is about the whole house
+  const multi = hasLevels(plan);
+  const lv = (id) => (multi ? { level: id || GROUND } : {});
   if (planPhase() === 'draft') {
     out.push(finding('plan-change-summary', 'info', 'all', 'Not checked: changes to the plan (the plan is still a draft)',
       'While you are still drawing the existing house nothing counts as a change. Fix the plan ("This is the house as built") to start tracking changes against it.'));
@@ -66,14 +78,16 @@ export function checkChanges({ plan }) {
     if (seen.has(key)) key += `:${i}`;
     seen.add(key);
     const head = level === 'permit' ? 'Permit: ' : level === 'warn' ? 'Structural engineer: ' : '';
-    out.push(finding(RULE_OF[level], SEVERITY_OF[level], key, head + item.text, detailOf(item), item.at ? { at: { x: item.at.x, y: item.at.y } } : undefined));
+    const extra = { ...(item.at ? { at: { x: item.at.x, y: item.at.y } } : {}), ...lv(item.levelId) };
+    out.push(finding(RULE_OF[level], SEVERITY_OF[level], key, head + item.text, detailOf(item), Object.keys(extra).length ? extra : undefined));
   });
 
   // consequences: regulation checks that a change broke (rooms the owner created or reshaped, windows lost)
-  const base = baseline(), metrics = planMetrics(plan);
+  const base = baseline();
   const broken = new Set();
-  for (const r of plan.rooms) {
-    const now = metrics.get(r);
+  const rooms = multi ? levelViews(plan).flatMap(({ id, view }) => { const mt = planMetrics(view); return view.rooms.map((r) => ({ r, now: mt.get(r), id })); })
+    : (() => { const mt = planMetrics(plan); return plan.rooms.map((r) => ({ r, now: mt.get(r), id: GROUND })); })();
+  for (const { r, now, id: floorId } of rooms) {
     const was = base.get(r.id);
     const isNew = !was;
     const reshaped = was && (was.shape !== JSON.stringify(r.polygon) || was.room.type !== r.type);
@@ -89,7 +103,7 @@ export function checkChanges({ plan }) {
           `${r.name} ${origin} and is ${now.area.toFixed(2)} m² with ${m(now.width)} m between walls`
           + (was ? ` (it was ${was.area.toFixed(2)} m² and ${m(was.width)} m)` : '') + `. A room of this type needs ${v.need}. `
           + (HABITABLE.has(r.type) ? (v.half ? 'As it stands it can only be counted as a "small room" (חדרון, 6.0 m² and 2.00 m), not as a full room. ' : '')
-            + 'Move the wall to give it the minimum size, or — if it is meant as a walk-in closet or store — set its type accordingly: those have no minimum size and need no window.' : 'Move the wall back.'), { spaceId: r.id, at }));
+            + 'Move the wall to give it the minimum size, or — if it is meant as a walk-in closet or store — set its type accordingly: those have no minimum size and need no window.' : 'Move the wall back.'), { spaceId: r.id, at, ...lv(floorId) }));
       }
     }
 
@@ -101,13 +115,13 @@ export function checkChanges({ plan }) {
       out.push(finding('plan-change-light', 'fail', r.id, now.windows.length ? `${r.name}: windows are now only ${(now.ratio * 100).toFixed(1)}% of the floor` : `${r.name} has no window after the change`,
         `${r.name} ${isNew || reshaped ? origin + (lost ? ' and ' : '') : ''}${lost ? `lost ${plural(lost, 'window')}` : isNew || reshaped ? '' : 'has less window area than before'}: it now has ${now.glazing.toFixed(2)} m² of window for ${now.area.toFixed(2)} m² of floor. `
         + `A habitable room or kitchen must have windows to the open air of at least ${share * 100}% of its floor (${(now.area * share).toFixed(2)} m² here). `
-        + 'Put a window in one of its exterior walls (a permit matter), move the wall so the room keeps a window, or make it a closet room / store, which needs neither light nor ventilation.', { spaceId: r.id, at }));
+        + 'Put a window in one of its exterior walls (a permit matter), move the wall so the room keeps a window, or make it a closet room / store, which needs neither light nor ventilation.', { spaceId: r.id, at, ...lv(floorId) }));
     } else if (SERVICE.has(r.type) && was && SERVICE.has(was.room.type)) {
       const need = Math.max(now.area * 0.1, 0.3), needWas = Math.max(was.area * 0.1, 0.3);
       if (now.glazing < need - 1e-6 && was.glazing >= needWas - 1e-6) {
         broken.add(r.id);
         out.push(finding('plan-change-light', 'warn', r.id, `${r.name} can no longer be ventilated by its window alone`,
-          `After the change ${r.name} has ${now.glazing.toFixed(2)} m² of window but needs ${need.toFixed(2)} m² (10% of the floor, not less than 0.3 m²). A vent duct or mechanical extractor is now required.`, { spaceId: r.id, at }));
+          `After the change ${r.name} has ${now.glazing.toFixed(2)} m² of window but needs ${need.toFixed(2)} m² (10% of the floor, not less than 0.3 m²). A vent duct or mechanical extractor is now required.`, { spaceId: r.id, at, ...lv(floorId) }));
       }
     }
   }
@@ -124,6 +138,7 @@ export function checkChanges({ plan }) {
     + (count.permit ? ' Changes to exterior openings must go into the building permit before they are built.' : '')
     + (count.warn ? ' Changes to thick interior walls need the structural engineer\'s confirmation first.' : '')
     + (broken.size ? ` ${plural(broken.size, 'room')} no longer meet${broken.size === 1 ? 's' : ''} the size or daylight rules because of the changes — see the findings in this group.` : n ? ' The changed rooms still meet the size and daylight rules.' : '')
-    + ' Building work must follow the permit (Planning and Building Law §145(a)) — give the architect this list so the drawings are updated before anything is built.'));
+    + ' Building work must follow the permit (Planning and Building Law §145(a)) — give the architect this list so the drawings are updated before anything is built.',
+    multi ? { level: GROUND, scope: 'house' } : undefined));
   return out;
 }

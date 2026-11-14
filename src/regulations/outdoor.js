@@ -79,7 +79,7 @@ function checkParking(ctx, out) {
 function checkStructures(ctx, list, out) {
   const { plan } = ctx, site = plan.site;
   const lotArea = areaM2(site.boundary);
-  const built = num(plan.meta && plan.meta.grossFloorArea, areaM2(rectPoly(plan.bounds)));
+  const built = ctx.coverage != null ? ctx.coverage : num(plan.meta && plan.meta.grossFloorArea, areaM2(rectPoly(plan.bounds)));
   const freeQuarter = Math.max(0, lotArea - built) / 4;
 
   for (const it of list.filter((i) => i.type === 'pergola')) {
@@ -229,7 +229,7 @@ function checkTrees(ctx, list, out) {
         : 'Low-water and high-water plants are kept apart, so each group can have its own irrigation line.', { itemIds: ids(mixed.map((p) => p.i)) }));
   }
   const lawn = list.filter((i) => i.type === 'surface' && i.params.kind === 'lawn').reduce((s, i) => s + i.w * i.d / 1e4, 0);
-  const garden = areaM2(site.boundary) - num(ctx.plan.meta && ctx.plan.meta.grossFloorArea, 0);
+  const garden = areaM2(site.boundary) - (ctx.coverage != null ? ctx.coverage : num(ctx.plan.meta && ctx.plan.meta.grossFloorArea, 0));
   if (lawn > 0.4 * garden) {
     out.push(finding('hydrozones', 'info', 'lawn', `Lawn covers ${lawn.toFixed(0)} m² (${Math.round(lawn / garden * 100)}% of the garden)`,
       `Natural lawn needs roughly 0.8–1 m³ of water per m² a year in the Jordan Valley. Consider keeping lawn to the area you actually use and covering the rest with drought-tolerant planting, gravel or deck.`));

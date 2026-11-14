@@ -347,7 +347,7 @@ export function moveRunToLevel(runId, levelId, mopts) {
   let roomId = null;
   if (!free) {
     const span = spanOfRun({ ...run0, level: to });
-    if (!span) return FAIL(`${run0.code} stands against a wall that ${nameEn} does not have at the same place.`, `ב${nameHe} אין קיר באותו מקום שעליו עומד ${run0.code}.`);
+    if (!span) return FAIL(`There is no wall on ${nameEn} where ${run0.code} stands, so it cannot move there.`, `ב${nameHe} אין קיר במקום שבו עומד ${run0.code}, ולכן אי אפשר להעבירו לשם.`);
     if (span.runFrom < -0.5 || span.runTo > span.length + 0.5) return FAIL(`The wall on ${nameEn} is too short for ${run0.code} (${r1(span.length)} cm free, the run is ${run0.length} cm).`, `הקיר ב${nameHe} קצר מדי עבור ${run0.code} (${r1(span.length)} ס״מ פנויים, הקו ${run0.length} ס״מ).`);
     roomId = span.roomId;
   } else {

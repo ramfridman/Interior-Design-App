@@ -80,7 +80,7 @@ const dimsOf = (o) => `${m(o.width)} × ${m(o.height)} m`;
 
 // ───────────────────────── rooms ─────────────────────────
 
-function checkRooms(plan, H, out, metrics) {
+function checkRooms(plan, H, out, metrics, multi = false) {
   let big = null;
   const mismatches = [];
   const kitchenIn = kitchenRoom(plan);
@@ -128,7 +128,7 @@ function checkRooms(plan, H, out, metrics) {
         { spaceId: r.id, at }));
     }
   }
-  if (big) {
+  if (big && !multi) {                 // several floors: one check for the whole dwelling (regulations/levels.js)
     out.push(finding('room-size-habitable', big.area >= 12 ? 'pass' : 'fail', 'largest', `Largest room: ${big.r.name}, ${big.area.toFixed(1)} m²`,
       `A dwelling with two or more rooms needs at least one habitable room of 12.0 m²; ${big.r.name} has ${big.area.toFixed(1)} m².`, { spaceId: big.r.id, at: spot(big.r) }));
   }
@@ -187,7 +187,8 @@ function checkLight(plan, out, metrics) {
   }
 
   // window sills / fall protection
-  const drop = num(plan.heights && plan.heights.floorAboveGround, 0);
+  // an upper floor (level view, stage F7) is its elevation higher above the garden
+  const drop = num(plan.heights && plan.heights.floorAboveGround, 0) + num(plan.elevation, 0);
   const windows = plan.openings.filter((o) => o.kind === 'window' && o.exterior);
   if (windows.length) {
     const lowest = windows.reduce((a, b) => (b.sill < a.sill ? b : a));
@@ -210,7 +211,7 @@ function checkLight(plan, out, metrics) {
 
 // ───────────────────────── doors & corridors ─────────────────────────
 
-function checkDoors(plan, out) {
+function checkDoors(plan, out, multi = false) {
   const doors = plan.openings.filter((o) => isDoor(o) || isPassage(o));
   let wideToiletDoor = false;
   const serviceDoors = [];
@@ -259,7 +260,7 @@ function checkDoors(plan, out) {
         `The door to ${name} is ${o.width} cm wide and ${o.height} cm high${assumed} — ${ok ? 'above' : 'below'} the 70 cm clear width and 1.98 m height required for room doors.`, { at, spaceId: other && other.id }));
     }
   }
-  if (serviceDoors.length && !wideToiletDoor) {
+  if (serviceDoors.length && !wideToiletDoor && !multi) {      // several floors: checked for the whole dwelling
     out.push(finding('door-service', 'fail', 'one-wide', 'No bathroom door of 70 cm', 'At least one room with a toilet must have a door 70 cm wide.'));
   }
 
@@ -493,10 +494,11 @@ export function boundaryEdge(boundary, side) {
 }
 const SIDE_NAME = { n: 'north', e: 'east', s: 'south', w: 'west' };
 
-function checkSite(plan, out) {
+function checkSite(plan, out, outlines) {
   const site = plan.site;
   if (!site || !site.boundary) return;
-  const wallOutlines = wallPolys(plan);
+  // several floors (stage F7): the ground footprint united with the projections of the upper floors
+  const wallOutlines = outlines || wallPolys(plan);
 
   // setbacks of the house from each property line
   const parts = [];
@@ -571,16 +573,21 @@ function checkAssumptions(plan, out) {
   }
 }
 
-/** All plan-only findings. */
-export function checkBuilding({ plan, store, catalog }) {
+/**
+ * All plan-only findings. `level` (several floors, stage F7 — see levels.js): { id, outlines } — the plan is that level's
+ * view; an upper level uses its own ceiling height and leaves the site, the assumptions and the dwelling-wide rules
+ * (largest room, one 70 cm toilet door) to the caller; the ground level checks the site against `outlines`.
+ */
+export function checkBuilding({ plan, store, catalog, level }) {
   const out = [];
-  const H = num(store && store.project && store.project.ceilingHeight, num(plan.heights && plan.heights.ceiling, 300));
+  const upper = !!level && level.id !== 'L0';
+  const H = upper ? num(plan.heights && plan.heights.ceiling, 300) : num(store && store.project && store.project.ceilingHeight, num(plan.heights && plan.heights.ceiling, 300));
   const metrics = planMetrics(plan);
-  checkRooms(plan, H, out, metrics);
+  checkRooms(plan, H, out, metrics, !!level);
   checkLight(plan, out, metrics);
-  checkDoors(plan, out);
+  checkDoors(plan, out, !!level);
   checkMamad(plan, H, store, catalog, out, metrics);
-  checkSite(plan, out);
-  checkAssumptions(plan, out);
+  if (!upper) checkSite(plan, out, level && level.outlines);
+  if (!upper) checkAssumptions(plan, out);
   return out;
 }

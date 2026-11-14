@@ -3,6 +3,8 @@
  */
 import { itemCorners, polygonBounds, pointInPolygon, convexOverlap, wallsHitByItem, wallFaces, itemLocalToPlan, DEG, openingFrame, openingPoly, rectExtent, wallPolys } from '../core/geometry.js';
 import { finding } from './building.js';
+import { GROUND, hasLevels } from '../core/levels.js';
+import { coverageM2 } from './footprint.js';
 import {
   rectPoly, wallObstacle, openingObstacle, m, num, cmStr, segDist, polyDist, faceFrame, freeDepth, compass, doorSwing, openingSides,
   makeGrid, cloneGrid, fillPoly, clearance, flood, reachedNear, cellsNear, planRev,
@@ -21,11 +23,17 @@ const at = (it) => ({ x: Math.round(it.x), y: Math.round(it.y) });
  * @returns {{ plan, items: object[], byRoom: Map, walls: object[], H: number, roomOf: Function }}
  */
 export function buildContext({ store, plan, catalog }) {
-  const H = num(store && store.project && store.project.ceilingHeight, num(plan.heights && plan.heights.ceiling, 300));
+  // several floors (stage F7): a level view (`plan.levelId`) or a plan with upper levels takes only the items of its
+  // own floor (`item.level`, absent = ground; a carpentry unit without one: its run's) and its own ceiling height
+  const floor = plan.levelId || (hasLevels(plan) ? GROUND : null);
+  const H = floor && floor !== GROUND ? num(plan.heights && plan.heights.ceiling, 300) : num(store && store.project && store.project.ceilingHeight, num(plan.heights && plan.heights.ceiling, 300));
   const items = [];
   const raw = (store && Array.isArray(store.items) ? store.items : []);
+  const runs = (store && store.carpentry && store.carpentry.runs) || {};
+  const floorOf = (it) => (typeof it.level === 'string' && it.level ? it.level : it.carp && runs[it.carp.runId] && runs[it.carp.runId].level ? runs[it.carp.runId].level : GROUND);
   raw.forEach((src, idx) => {
     if (!src || src.hidden || !(num(src.w, 0) > 0) || !(num(src.d, 0) > 0)) return;
+    if (floor && floorOf(src) !== floor) return;
     const it = { ...src, id: src.id || `item-${idx}`, x: num(src.x, 0), y: num(src.y, 0), rot: num(src.rot, 0), h: num(src.h, 0), elev: num(src.elev, 0), params: src.params || {}, placement: src.placement || 'floor' };
     it.poly = itemCorners(it);
     it.bb = polygonBounds(it.poly);
@@ -44,7 +52,9 @@ export function buildContext({ store, plan, catalog }) {
     ...plan.walls.map((w, i) => wallObstacle(plan, i, { wall: w })),
     ...plan.openings.filter((o) => o.kind === 'window').map((o) => openingObstacle(o, { opening: o })),
   ];
-  return { plan, store, catalog, items, byRoom, walls, H };
+  const ctx = { plan, store, catalog, items, byRoom, walls, H };
+  if (floor === GROUND) ctx.coverage = coverageM2(plan);       // ground covered by the house, all floors projected (m²)
+  return ctx;
 }
 
 const hitName = (hit) => (!hit ? 'open floor' : hit.item ? (hit.item.name || hit.item.type) : hit.opening ? 'the window wall' : 'the wall');

@@ -8,6 +8,8 @@ import { Builder, ST, TP, lh, region, textFurniture } from './kit.js';
 import { S, tr, INCLUDED, EXCLUDED, ALTERNATIVES, fmtDate, fmtInt, fmtCm } from './strings.js';
 import { sheetGeometry, packDrawings, drawSheet } from './sheets.js';
 import { keyPlanOps } from './keyplan.js';
+import { hasLevels, levelName, levelIds } from '../../core/levels.js';
+import { levelPlan } from '../../core/plan-edit.js';
 
 const L = (en, he) => ({ en, he });
 const { vocab } = Carp;
@@ -59,6 +61,8 @@ const roomOf = (plan, run, lang) => {
   return r ? tr(L(r.name, r.nameHe || r.name), lang) : '—';
 };
 const runName = (run, lang) => tr(L(run.name, run.nameHe || run.name), lang);
+/** Floor of a run (stage F7): 'L0' when absent. */
+const runFloor = (run) => (run && typeof run.level === 'string' && run.level ? run.level : 'L0');
 
 /**
  * @param {object} o see CONTRACT § 9
@@ -81,6 +85,13 @@ export function composeQuotation(o = {}) {
     ownerName: o.project && o.project.ownerName, phone: o.project && o.project.phone, email: o.project && o.project.email,
     date, dateText: fmtDate(date, lang), reference: (o.project && o.project.reference) || `H98-CARP-RFQ-${date}`,
   };
+  // several floors (stage F7): each run is drawn on its own floor's plan and its title names the floor
+  const multi = hasLevels(plan);
+  const floorPlan = (id) => (id === 'L0' || !multi ? plan : levelPlan(plan, id) || plan);
+  const planOfRun = (r) => floorPlan(runFloor(r));
+  const floorL = (r) => L(levelName(plan, runFloor(r), 'en') || runFloor(r), levelName(plan, runFloor(r), 'he') || runFloor(r));
+  const titleOf = (r) => (multi ? L(`${r.code} · ${r.name} · ${floorL(r).en}`, `${r.code} · ${r.nameHe || r.name} · ${floorL(r).he}`) : L(`${r.code} · ${r.name}`, `${r.code} · ${r.nameHe || r.name}`));
+  const itemsOn = (id) => (multi ? items.filter((it) => { const lv = typeof it.level === 'string' && it.level ? it.level : (it.carp ? runFloor(all.find((x) => x.id === it.carp.runId)) : 'L0'); return lv === id; }) : items);
   const B = new Builder({ lang, project, paper: o.paper });
   const T = (v) => tr(v, lang);
   const cmU = lang === 'he' ? 'ס״מ' : 'cm';
@@ -122,7 +133,17 @@ export function composeQuotation(o = {}) {
     R.text(0, kpTop, T(S.keyPlan), ST.label, 'start');
     R.hline(kpTop + 2, 0, R.W, 0.12, 'rule');
     const box = [TP.x0, kpTop + 6, TP.x1 - TP.x0, kpH - 6];
-    B.page.ops.push(...keyPlanOps({ plan, items, runs, box, lang, labels: true, rooms: true }).ops);
+    if (!multi) B.page.ops.push(...keyPlanOps({ plan, items, runs, box, lang, labels: true, rooms: true }).ops);
+    else {
+      // one key plan per floor that has runs, side by side
+      const floors = levelIds(plan).filter((id) => runs.some((r) => runFloor(r) === id));
+      const n = Math.max(1, floors.length), gap = 6, w = (box[2] - gap * (n - 1)) / n;
+      floors.forEach((id, i) => {
+        const x = box[0] + i * (w + gap);
+        B.page.ops.push(...keyPlanOps({ plan: floorPlan(id), items: itemsOn(id), runs: runs.filter((r) => runFloor(r) === id), box: [x, box[1] + 6, w, box[3] - 6], lang, labels: true, rooms: true, north: i === n - 1 }).ops);
+        R.text(x - TP.x0, kpTop + 8, levelName(plan, id, lang) || id, { ...ST.label, color: 'ink' }, 'start');
+      });
+    }
     R.text(0, TP.bottom - 4, T(S.keyPlanNote), ST.small, 'start');
   }
 
@@ -133,7 +154,7 @@ export function composeQuotation(o = {}) {
   const tocAdd = (num, title, key, level = 1) => toc.push({ num, title, key, level });
   tocAdd(sec.scope, S.scope, 'scope'); if (sec.features) tocAdd(sec.features, S.special, 'features'); tocAdd(sec.spec, S.spec, 'spec'); tocAdd(sec.inclusions, L('Included and excluded', 'כלול ולא כלול'), 'inclusions');
   tocAdd(sec.runs, S.runSheets, 'runs');
-  runs.forEach((r, i) => tocAdd(`${sec.runs}.${i + 1}`, L(`${r.code}  ${r.name}`, `${r.code}  ${r.nameHe || r.name}`), `run:${r.id}`, 2));
+  runs.forEach((r, i) => tocAdd(`${sec.runs}.${i + 1}`, multi ? L(`${r.code}  ${r.name} · ${floorL(r).en}`, `${r.code}  ${r.nameHe || r.name} · ${floorL(r).he}`) : L(`${r.code}  ${r.name}`, `${r.code}  ${r.nameHe || r.name}`), `run:${r.id}`, 2));
   tocAdd(sec.appliances, S.appliances, 'appliances');
   if (sec.cut) tocAdd(sec.cut, S.cutLists, 'cut');
   if (sec.questions) tocAdd(sec.questions, S.questions, 'questions');
@@ -166,7 +187,7 @@ export function composeQuotation(o = {}) {
     cols: [{ key: 'code', title: S.code, w: 8, st: ST.tdb }, { key: 'name', title: S.name, w: 22 }, { key: 'room', title: S.room, w: 15 }, { key: 'kind', title: S.kind, w: 12 },
       { key: 'len', title: S.lengthCm, w: 9, align: 'end' }, { key: 'units', title: S.unitsN, w: 7, align: 'end' }, { key: 'fronts', title: S.fronts, w: 17 }, { key: 'wt', title: S.worktop, w: 19 }],
     rows: runsX.map((r) => ({ cells: {
-      code: r.code, name: runName(r, lang), room: roomOf(plan, r, lang), kind: vocab('runKind', r.kind), len: fmtCm(r.length),
+      code: r.code, name: multi ? `${runName(r, lang)} · ${T(floorL(r))}` : runName(r, lang), room: roomOf(planOfRun(r), r, lang), kind: vocab('runKind', r.kind), len: fmtCm(r.length),
       units: String(sched.units.filter((u) => u.runId === r.id).length), fronts: vocab('frontMaterial', r.spec.fronts.material),
       wt: r.spec.worktop.material === 'none' || !r.worktops.length ? '—' : vocab('worktopMaterial', r.spec.worktop.material),
     } })),
@@ -212,16 +233,16 @@ export function composeQuotation(o = {}) {
     packed.forEach((s, si) => {
       const vs = s.items.map((it) => views.find((v) => v.d === it.d));
       const layout = { ...s.layout, rows: s.layout.rows.map((row) => ({ ...row, items: row.items.map((it) => views.find((v) => v.d === it.d)) })) };
-      drawSheet({ B, run, plan, items, runs, roomName: roomOf(plan, run, lang), kindLabel: vocab('runKind', run.kind), sheetCode: `${run.code}-${String(si + 1).padStart(2, '0')}`, views: vs, layout });
+      drawSheet({ B, run, plan: planOfRun(run), items: itemsOn(runFloor(run)), runs: multi ? runs.filter((r) => runFloor(r) === runFloor(run)) : runs, roomName: roomOf(planOfRun(run), run, lang), kindLabel: vocab('runKind', run.kind), sheetCode: `${run.code}-${String(si + 1).padStart(2, '0')}`, views: vs, layout });
       if (si === 0) B.marks[`run:${run.id}`] = B.pages.length;
     });
     // schedules
     B.textPage();
     if (!packed.length) B.marks[`run:${run.id}`] = B.pages.length;
-    B.heading(num, L(`${run.code} · ${run.name}`, `${run.code} · ${run.nameHe || run.name}`));
+    B.heading(num, titleOf(run));
     const S1 = Carp.schedules(run.id, esrc);
     const levels = [...new Set((run.levels || []).map((l) => T(vocab('level', l))))].join(', ');
-    B.para(`${T(S.roomLabel)}: ${roomOf(plan, run, lang)}  ·  ${T(vocab('runKind', run.kind))}  ·  ${T(S.lengthLabel)} ${fmtCm(run.length)} ${cmU}  ·  ${T(S.unitsLabel)}: ${S1.units.length}${levels ? `  ·  ${levels}` : ''}`, ST.body, { gap: 1.5 });
+    B.para(`${T(S.roomLabel)}: ${roomOf(planOfRun(run), run, lang)}${multi ? `  ·  ${T(floorL(run))}` : ''}  ·  ${T(vocab('runKind', run.kind))}  ·  ${T(S.lengthLabel)} ${fmtCm(run.length)} ${cmU}  ·  ${T(S.unitsLabel)}: ${S1.units.length}${levels ? `  ·  ${levels}` : ''}`, ST.body, { gap: 1.5 });
     if (run.notes) B.para(run.notes, ST.small, { auto: true });
     const rf = features.filter((f) => f.runId === run.id);
     if (rf.length) {
@@ -311,7 +332,7 @@ export function composeQuotation(o = {}) {
         const g = groups.get(key); g.rows.push({ u, p }); g.area += p.areaM2 || 0; g.qty += p.qty || 0;
       }
       if (!groups.size) continue;
-      B.heading('', L(`${run.code} · ${run.name}`, `${run.code} · ${run.nameHe || run.name}`), { level: 3 });
+      B.heading('', titleOf(run), { level: 3 });
       const order = { carcass: 0, back: 1, front: 2, glass: 3 };
       const rows = [];
       for (const g of [...groups.values()].sort((a, b) => (order[a.p.group] ?? 9) - (order[b.p.group] ?? 9))) {
