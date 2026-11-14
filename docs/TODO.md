@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 12): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 13): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -40,7 +40,7 @@ Small follow-ups noted: island stools do not travel with the island; overlap of 
 
 ## Done in version 12 (14 Nov 2026)
 - [x] Check-and-fix pass on the night's features: two-finger pan and an offset loupe when measuring on a phone; no shader errors after switching projects several times; project name stays visible in Structure mode; lamp thumbnails always lit; stools move and turn with the kitchen island; duplicate price-tier selector removed. Verified working: re-align of the sketch underlay, dark theme, password-protected PDF message, project create / switch / duplicate / rename / export / import / delete on phone and desktop, the whole carpentry path on a phone, real drag of finishes onto the 3D view.
-- [ ] Carpentry on a phone: drawings sheet covers the bottom navigation, the Runs sheet stays open after picking a run, a long elevation is unreadable when fitted to the phone width [in progress, Sonnet].
+- [x] Carpentry on a phone (version 13): the drawings are a half / full bottom sheet that leaves the bottom navigation free, picking a run closes the Runs sheet and opens its drawings, elevations open at a readable size with one-finger pan (press and hold to reorder units). At half height the elevation text is still small; full height is clearly readable.
 
 ## Waiting for the owner
 1. **Sketch import scope** — built as: vector PDFs read exactly, photos / scans traced with guidance, straight right-angled walls, one floor. Confirm, or say what matters more (DXF / DWG, angled walls, several floors).
