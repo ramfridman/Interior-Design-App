@@ -1,7 +1,8 @@
 /**
  * LIVE COLLABORATION — presence and the small collaboration UI (CONTRACT § 13): connection status in the status bar,
  * people in the top bar (initials + colour, list on click), each person's pointer and selection in the 2D plan, their
- * selection in 3D, soft locks ("being edited by …"), toasts, and the temporary "Put online" action.
+ * selection in 3D, soft locks ("being edited by …"), toasts, and the "Share" entry point (the Share dialog itself is
+ * src/ui/collab/share.js; while it has not loaded the button falls back to putting the project online).
  * Loaded only when a backend answered (src/collab/online.js).
  */
 import { itemCorners } from '../core/geometry.js';
@@ -52,8 +53,8 @@ export function initCollabUI(app, ctl) {
   const topbar = document.getElementById('topbar');
   const people = el('div', 'topbar__group cl-people');
   const avatars = el('button', 'cl-avatars'); avatars.type = 'button'; avatars.setAttribute('aria-label', 'People in this project');
-  const golive = el('button', 'cl-golive', 'Put online'); golive.type = 'button';
-  golive.title = 'Put this project online so the people you invite can work on it with you, live';
+  const golive = el('button', 'cl-golive', 'Share'); golive.type = 'button';
+  golive.title = 'Share this project: put it online so the people you invite can work on it with you, live';
   people.append(avatars, golive);
   const end = topbar && topbar.querySelector('.topbar__end');
   if (topbar) { if (end) topbar.insertBefore(people, end); else topbar.appendChild(people); }
@@ -67,6 +68,7 @@ export function initCollabUI(app, ctl) {
   if (pane3d) pane3d.appendChild(layer3d);
 
   golive.addEventListener('click', async () => {
+    if (typeof ctl.openShare === 'function') { ctl.openShare(); return; }
     golive.disabled = true;
     const r = await ctl.putOnline();
     golive.disabled = false;
@@ -104,6 +106,9 @@ export function initCollabUI(app, ctl) {
     const all = everyone();
     for (const p of all.slice(0, 5)) avatars.appendChild(avatar(p));
     if (all.length > 5) avatars.appendChild(el('span', 'cl-more', `+${all.length - 5}`));
+    const chip = el('span', 'cl-count', String(all.length)); chip.setAttribute('aria-hidden', 'true');   // phones: a count instead of faces
+    avatars.appendChild(chip);
+    avatars.setAttribute('aria-label', `People in this project: ${all.length}`);
     const st = S.client.status();
     const n = Math.max(1, st.people);
     const text = st.state === 'live' ? `Live · ${n} ${n === 1 ? 'person' : 'people'}${st.role === 'viewer' ? ' · view only' : ''}`
@@ -127,9 +132,15 @@ export function initCollabUI(app, ctl) {
     for (const p of everyone()) {
       const row = el('div', 'cl-pop__row'), who = el('div', 'cl-pop__who');
       const where = p.p ? [p.p.mode, p.p.room].filter(Boolean).join(' · ') : '';
-      who.append(el('span', 'cl-pop__name', `${p.name || p.email}${p.me ? ' (you)' : ''}`), el('span', 'cl-pop__sub', [p.email, p.role === 'viewer' ? 'view only' : p.role, where].filter(Boolean).join(' · ')));
+      who.append(el('span', 'cl-pop__name', `${p.name || p.email}${p.me ? ' (you)' : ''}`), el('span', 'cl-pop__sub', [p.email, { owner: 'owner', editor: 'can edit', viewer: 'can view' }[p.role] || p.role, where ? 'in ' + where : ''].filter(Boolean).join(' · ')));
       row.append(avatar(p), who);
       pop.appendChild(row);
+    }
+    if (typeof ctl.openShare === 'function') {
+      const share = el('button', 'cl-pop__share', S && S.client.role() === 'owner' ? 'Share… (people and roles)' : 'Who has access…');
+      share.type = 'button';
+      share.addEventListener('click', () => { closePop(); ctl.openShare(); });
+      pop.appendChild(share);
     }
   }
 

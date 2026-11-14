@@ -1,0 +1,13 @@
+{
+  "name": "e7-house-designer-server",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker + Durable Objects for E7 House Designer (dev-only tooling; nothing here ships to the browser).",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.156.0"
+  }
+}

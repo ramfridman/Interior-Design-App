@@ -13,6 +13,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRoom } from '../src/collab/room.js';
 import { LIMITS, sizeOf } from '../src/collab/ops.js';
+import { summarizeVersion } from '../src/collab/version-summary.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -42,9 +43,10 @@ const saveRegistry = () => fsp.writeFile(registryFile, JSON.stringify(registry, 
 const rooms = new Map();   // id → Promise<{ room, chain, sockets: Set }>
 function roomFor(id, seed = null) {
   if (!rooms.has(id)) rooms.set(id, (async () => {
-    const room = createRoom({ id, storage: fileKV(path.join(dataDir, 'rooms', safe(id))), record: seed });
+    const storage = fileKV(path.join(dataDir, 'rooms', safe(id)));
+    const room = createRoom({ id, storage, record: seed });
     await room.load();
-    return { room, chain: Promise.resolve(), sockets: new Set() };
+    return { room, storage, chain: Promise.resolve(), sockets: new Set() };
   })());
   return rooms.get(id);
 }
@@ -71,6 +73,7 @@ function readBody(req, limit) {
   });
 }
 const newId = () => 'p_' + Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
+const peopleIn = async (id) => { const seen = new Map(); for (const p of (await rooms.get(id)).room.peers()) if (!seen.has(p.email)) seen.set(p.email, { email: p.email, name: p.name, color: p.color, role: p.role }); return [...seen.values()]; };
 const summary = (p, email) => ({ id: p.id, name: p.name, createdAt: p.createdAt, updatedAt: p.updatedAt, phase: p.phase || 'fixed', owner: p.owner, role: roleOf(p, email), online: true });
 
 async function api(req, res, url, email) {
@@ -80,7 +83,12 @@ async function api(req, res, url, email) {
   if (parts[1] !== 'projects') return json(res, 404, { ok: false, reason: 'Not found.' });
   const id = parts[2], sub = parts[3], p = id ? registry[id] : null;
   if (!id) {
-    if (req.method === 'GET') return json(res, 200, Object.values(registry).filter((x) => roleOf(x, email)).map((x) => summary(x, email)).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))));
+    if (req.method === 'GET') {
+      const mine = Object.values(registry).filter((x) => roleOf(x, email));
+      const out = [];
+      for (const x of mine) out.push({ ...summary(x, email), people: rooms.has(x.id) ? await peopleIn(x.id) : [] });   // who is in the room now (same as the Worker)
+      return json(res, 200, out.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))));
+    }
     if (req.method === 'POST') {
       const body = await readBody(req, 40 * 1024 * 1024);
       const rec = body.record;
@@ -94,7 +102,7 @@ async function api(req, res, url, email) {
         const { image, ...meta } = underlay;
         await serial(r, () => r.room.putUnderlay({ type: image.slice(5, image.indexOf(';')), data: image, meta }, { email, cid: 'server' }));
       }
-      return json(res, 201, { ok: true, id: pid, project: summary(registry[pid], email) });
+      return json(res, 201, { ok: true, id: pid, project: { ...summary(registry[pid], email), people: [] } });
     }
     return json(res, 405, { ok: false });
   }
@@ -124,6 +132,10 @@ async function api(req, res, url, email) {
       return json(res, 200, { ok: true, members: next });
     }
     return json(res, 405, { ok: false });
+  }
+  if (sub === 'versions' && parts[4] && req.method === 'GET') {     // what restoring this point would change
+    const saved = r.room.listVersions().some((v) => v.id === parts[4]) ? await r.storage.get('version:' + parts[4]) : null;
+    return saved ? json(res, 200, { ok: true, id: parts[4], ...summarizeVersion(r.room.doc(), saved) }) : json(res, 404, { ok: false, reason: 'No such restore point.' });
   }
   if (sub === 'underlay') {
     if (req.method === 'GET') { const u = await r.room.getUnderlay(); return u ? json(res, 200, u) : json(res, 404, { ok: false }); }

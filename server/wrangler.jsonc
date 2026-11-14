@@ -1,0 +1,31 @@
+// E7 House Designer — Cloudflare Worker configuration (see server/README.md and docs/HOSTING-PLAN.md).
+// Workers Builds: root directory "server", build command "node ../dev/build-site.mjs", deploy command "npx wrangler deploy".
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "e7-house-designer",            // must equal the Worker's name in the Cloudflare dashboard
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,                     // https://e7-house-designer.<account>.workers.dev
+  "preview_urls": false,                   // no extra public preview addresses to protect
+  "assets": {
+    "directory": "../dist/site",           // written by `node dev/build-site.mjs`
+    "binding": "ASSETS",
+    // the API (and the entry page, whose CSP gets this host's wss:// origin) always run the Worker;
+    // every other file is served straight from the assets (free, and `_headers` applies)
+    "run_worker_first": ["/api/*", "/", "/index.html"]
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOMS", "class_name": "ProjectRoom" },   // one per online project (src/collab/room.js inside)
+      { "name": "INDEX", "class_name": "ProjectIndex" }   // one in all: owners, members, roles, who is in which room
+    ]
+  },
+  // Free plan: only SQLite-backed Durable Objects. This migration runs by itself on the first deploy.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ProjectRoom", "ProjectIndex"] }
+  ],
+  // ACCESS_TEAM_DOMAIN and ACCESS_AUD are set in the dashboard (Worker → Settings → Variables and Secrets);
+  // keep_vars stops a deploy from wiping them. They are not secrets, but they belong to the owner's account.
+  "keep_vars": true,
+  "observability": { "enabled": true }
+}

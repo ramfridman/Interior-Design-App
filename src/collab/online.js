@@ -5,10 +5,12 @@
  *   initCollaboration(app)        // main.js, after the UI is up
  *   app.projects.openOnline(id)   // open an online project through its room   → Promise<{ ok, reason? }>
  *   app.projects.putOnline()      // copy the open local project to the server and open it online → Promise<{ ok, id?, reason? }>
- *   app.collab                    // the live session: { client, bridge, projectId } | null
+ *   app.collab                    // the controller: { user, session(), online (adapter-online.js), linkFor(id),
+ *                                 //   removeOnline(id), leaveToLocal(), on(fn), … }; session() = { client, bridge, projectId, role } | null
  */
 import { createStoreBridge } from './bridge.js';
 import { createClient } from './client.js';
+import { createOnlineAdapter } from './adapter-online.js';
 
 /**
  * Is there a collaboration backend? `GET api/health` → `{ ok: true, user }` within `timeout` ms. Static hosts answer
@@ -51,6 +53,7 @@ export async function initCollaboration(app) {
     return null;
   }
   const { store, projects } = app;
+  const online = createOnlineAdapter({ rest });
   let session = null;                    // { client, bridge, projectId }
   const listeners = new Set();
   const emit = (ev) => listeners.forEach((fn) => { try { fn(ev); } catch (e) { console.error('[collab]', e); } });
@@ -109,21 +112,46 @@ export async function initCollaboration(app) {
     const exp = cur ? await projects.exportFile(cur.id) : null;
     if (!exp || !exp.ok) return { ok: false, reason: 'The project could not be read.' };
     const record = JSON.parse(exp.text).project;
-    const r = await rest('POST', 'projects', { record }).catch(() => null);
-    if (!r || !r.ok) return { ok: false, reason: (r && r.body && r.body.reason) || 'The server did not take the project.' };
-    const res = await openOnline(r.body.id);
-    return res.ok ? { ok: true, id: r.body.id } : res;
+    let made;
+    try { made = await online.put(record); } catch (e) { return { ok: false, reason: e.message || 'The server did not take the project.' }; }
+    const res = await openOnline(made.id);
+    return res.ok ? { ok: true, id: made.id } : res;
+  }
+
+  /** Leave the online project and open the most recent project on this device (or a fresh copy of House 98). */
+  async function leaveToLocal() {
+    leave();
+    let list = [];
+    try { list = await projects.list(); } catch (e) { list = []; }
+    if (list.length && await projects.open(list[0].id)) return true;
+    const r = await projects.create({ from: 'house98', name: 'House 98' });
+    return !!(r && r.ok);
+  }
+  /** Delete an online project on the server (owner). Leaves it first when it is open here. */
+  async function removeOnline(id) {
+    try { await online.remove(id); } catch (e) { return { ok: false, reason: e.message }; }
+    if (session && session.projectId === id) await leaveToLocal();
+    return { ok: true };
+  }
+  /** The address that opens an online project (for "Copy link"). */
+  function linkFor(id) {
+    const u = new URL(location.href);
+    u.search = ''; u.hash = '';
+    u.searchParams.set('online', id);
+    return u.toString();
   }
 
   const ctl = {
     user: health.user,
     session: () => session,
-    openOnline, putOnline, leave,
+    online,
+    openOnline, putOnline, leave, leaveToLocal, removeOnline, linkFor,
     on(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     rest,
   };
   const { initCollabUI } = await import('./presence.js');
   initCollabUI(app, ctl);
+  try { const ui = await import('../ui/collab/index.js'); ui.initCollabPanels(app, ctl); } catch (e) { console.error('[collab] sharing UI', e); }
   projects.openOnline = openOnline;
   projects.putOnline = putOnline;
   app.collab = ctl;

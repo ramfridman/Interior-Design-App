@@ -51,30 +51,78 @@ export function projectSwitcher(app) {
   return el;
 }
 
-/** The project menu: the open project, the others (newest first), then the commands. */
+/** The live-collaboration controller (src/collab/online.js) when a backend answered, else null. */
+const collabOf = (app) => app.collab || (typeof window !== 'undefined' && window.app && window.app.collab) || null;
+const ROLE_LABEL = { owner: 'owner', editor: 'can edit', viewer: 'can view' };
+
+/** The project menu: the open project, the others (newest first; with a backend: on this device / online), then the commands. */
 export async function openProjectMenu(app, anchor) {
   const { projects, store } = app;
   if (!projects) return;
   const cur = projects.current();
-  let list = [];
-  try { list = await projects.list(); } catch (e) { list = []; }
+  const collab = collabOf(app);
+  let list = [], online = null;
+  const [l, o] = await Promise.all([
+    projects.list().catch(() => []),
+    collab ? collab.online.list().catch(() => null) : Promise.resolve(null),
+  ]);
+  list = l; online = o;
   const others = list.filter((p) => !cur || p.id !== cur.id).slice(0, 12);
+  const isOnline = !!(cur && cur.online);
+  const session = collab && collab.session();
+  const myRole = session ? session.client.role() : null;
+  const onlineRow = (p) => {
+    const here = (p.people || []).filter((x) => x.email !== collab.user);
+    const who = here.length ? ` · ${here.map((x) => x.name || x.email).slice(0, 2).join(', ')}${here.length > 2 ? ` +${here.length - 2}` : ''} here` : '';
+    return { label: p.name, icon: 'site', kbd: `${ROLE_LABEL[p.role] || p.role}${who}`, onSelect: () => openOnlineProject(app, p.id) };
+  };
+  const onlineOthers = online ? online.filter((p) => !cur || p.id !== cur.id) : [];
+  const mine = onlineOthers.filter((p) => p.role === 'owner'), shared = onlineOthers.filter((p) => p.role !== 'owner');
   openMenu(anchor, [
-    { heading: 'Current project' },
-    { label: store.project.name, icon: 'home', checked: true, onSelect: () => {} },
-    others.length ? { heading: 'Open another project' } : null,
+    { heading: isOnline ? `Current project · online${myRole ? ' · ' + ROLE_LABEL[myRole] : ''}` : 'Current project' },
+    { label: store.project.name, icon: isOnline ? 'site' : 'home', checked: true, onSelect: () => {} },
+    others.length ? { heading: collab ? 'On this device' : 'Open another project' } : null,
     ...others.map((p) => ({ label: p.name, icon: p.builtin ? 'home' : 'plan', kbd: when(p.updatedAt), onSelect: () => switchTo(app, p.id) })),
+    mine.length ? { heading: 'Online · owned by me' } : null,
+    ...mine.slice(0, 12).map(onlineRow),
+    shared.length ? { heading: 'Online · shared with me' } : null,
+    ...shared.slice(0, 12).map(onlineRow),
+    collab && online === null ? { label: 'Online projects could not be listed', icon: 'warn', disabled: true, onSelect: () => {} } : null,
     { separator: true },
     { label: 'New project…', icon: 'plus', onSelect: () => openNewProject(app) },
     { label: 'Import a sketch…', icon: 'image', onSelect: () => openSketchImport(app) },
-    { label: 'Rename…', icon: 'note', onSelect: () => openRename(app) },
-    { label: 'Duplicate', icon: 'duplicate', onSelect: () => duplicateCurrent(app) },
+    { label: 'Rename…', icon: 'note', disabled: myRole === 'viewer', onSelect: () => openRename(app) },
+    { label: isOnline ? 'Duplicate on this device' : 'Duplicate', icon: 'duplicate', onSelect: () => duplicateCurrent(app) },
+    collab ? { separator: true } : null,
+    collab ? { label: 'Share…', icon: 'external', onSelect: () => collab.openShare && collab.openShare() } : null,
+    collab && isOnline ? { label: 'History…', icon: 'rotate-ccw', onSelect: () => collab.openHistory && collab.openHistory() } : null,
     { separator: true },
     { label: 'Export project file', icon: 'download', onSelect: () => exportCurrent(app) },
     { label: 'Import project file…', icon: 'open', onSelect: () => openImportProject(app) },
     { separator: true },
-    { label: 'Delete project…', icon: 'trash', danger: true, onSelect: () => deleteCurrent(app) },
+    isOnline
+      ? (myRole === 'owner' ? { label: 'Delete online project…', icon: 'trash', danger: true, onSelect: () => deleteOnline(app) }
+        : { label: 'Leave this online project', icon: 'close', onSelect: () => collab.leaveToLocal() })
+      : { label: 'Delete project…', icon: 'trash', danger: true, onSelect: () => deleteCurrent(app) },
   ], { placement: 'bottom-start' });
+}
+
+async function openOnlineProject(app, id) {
+  const res = await collabOf(app).openOnline(id);
+  if (res.ok) toast(`Opened “${app.store.project.name}” (online)`, { kind: 'success' });
+  else toast(res.reason, { kind: 'error' });
+}
+
+/** Delete the open online project from the server (owner). Everyone in it is disconnected. */
+async function deleteOnline(app) {
+  const collab = collabOf(app), cur = app.projects.current();
+  const name = app.store.project.name;
+  const ok = await confirmDialog({ title: `Delete “${name}” for everyone?`, confirmLabel: 'Delete online project', danger: true,
+    message: 'The online project — its plan, furniture, finishes, carpentry and restore points — is removed from the server, and everyone you shared it with loses access. This cannot be undone. Use “Duplicate on this device” or “Export project file” first if you may want it back.' });
+  if (!ok) return;
+  const res = await collab.removeOnline(cur.id);
+  if (res.ok) toast(`Deleted “${name}” from the server. Now showing “${app.store.project.name}”.`);
+  else toast(res.reason, { kind: 'error' });
 }
 
 async function switchTo(app, id) {
