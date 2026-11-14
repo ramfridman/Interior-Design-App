@@ -69,7 +69,8 @@ Order of work:
   - [x] A2 editing angled walls: add, move, resize, rotate an end, remove, doors and windows in angled walls (`tests/slants-edit.test.mjs`, incl. 300 random operations)
   - [x] A3 drawing / editing angled walls in the plan: any-direction wall tool with angle snapping and typed length / angle, grips, openings, aligned dimensions, furniture snapping; Settings → Experimental → "Angled walls (in development)" (`tests/slants-2d.test.mjs`, `tests/e2e.slants.mjs`)
   - [x] A5 regulation checks, carpentry runs and the walk-through on angled walls (`tests/slants-rules.test.mjs`)
-  - [ ] A4 angled walls in 3D [running]
+  - [x] A4 angled walls in 3D: watertight shell at any angle, doors / windows / floors / skirting / roof, finishes by side (`tests/slants-3d.test.mjs`). Light on angled faces is approximate (room average) until A7.
+  - [ ] A6b angled and curved walls through the import dialog [running]
   - [ ] later: A2 editing angled walls · A3 2D tools · A4 3D shell · A5 regulations / carpentry / walk · A6b import dialog · A7 exact daylight on angled faces
   - Will still not be supported afterwards: true curves (short straight pieces within 2 cm), sloped roofs / attics, basements, split levels, spiral stairs.
 
