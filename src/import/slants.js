@@ -256,6 +256,19 @@ function pairOffsetCurves(curves, used, o) {
 }
 
 // ---------------------------------------------------------------- band geometry
+/** Group index per band: collinear straight bands (direction ±1°, centre lines < 2 cm apart, thickness ±1 cm) share one. */
+export function bandGroups(bands) {
+  const gid = bands.map((_, i) => i);
+  const find = (i) => (gid[i] === i ? i : (gid[i] = find(gid[i])));
+  for (let i = 0; i < bands.length; i++) for (let j = i + 1; j < bands.length; j++) {
+    const a = bands[i], b = bands[j];
+    if (a.type !== 'line' || b.type !== 'line' || thDiff(a.th, b.th) > SLANT_TOL.parallelDeg * DEG || Math.abs(a.t - b.t) > 1) continue;
+    const [, k] = proj(a, ...unproj(b, (b.s0 + b.s1) / 2, b.kc));
+    if (Math.abs(k - a.kc) < 2) gid[find(j)] = find(i);
+  }
+  return bands.map((_, i) => find(i));
+}
+
 /** Is (x, y) on the band (within its half thickness + e, and its length ± e)? */
 export function touch(b, x, y, e) {
   if (b.type === 'line') {
@@ -330,8 +343,11 @@ export function findBands(odd, fillBands, o) {
   bands.push(...pa.bands);
   const usedCurves = new Set([...pa.used].map((a) => a.curve));
   bands.push(...pairOffsetCurves(curves, usedCurves, o));
-  // what is not on a band stays unsupported (caps and jamb lines of a band are part of it)
-  const unsupported = odd2.filter((s) => !bands.some((b) => touch(b, s.x1, s.y1, 1.5) && touch(b, s.x2, s.y2, 1.5)));
+  // what is not on a band stays unsupported (caps and jamb lines of a band are part of it; a face line running past a
+  // junction may end on two collinear bands)
+  const gid = bandGroups(bands);
+  const groupsAt = (x, y) => new Set(bands.map((b, i) => (touch(b, x, y, 1.5) ? gid[i] : -1)).filter((g) => g >= 0));
+  const unsupported = odd2.filter((s) => { const A = groupsAt(s.x1, s.y1); if (!A.size) return true; const B = groupsAt(s.x2, s.y2); return ![...A].some((g) => B.has(g)); });
   return { bands, lines, ortho: { H, V }, unsupported };
 }
 
@@ -367,10 +383,12 @@ export function closeAtBands(H0, V0, bands, o) {
   // caps and jogs lying on a band
   const keep = lines.filter((L) => !bands.some((b) => L.b - L.a <= 1.5 * b.t + 1 && touch(b, ...pt(L, 'a'), e) && touch(b, ...pt(L, 'b'), e)));
   const ends = [];
+  const gid = bandGroups(bands);
   for (const L of keep) for (const end of ['a', 'b']) {
     const [x, y] = pt(L, end);
-    const bi = bands.findIndex((b) => touch(b, x, y, e));
-    if (bi < 0) continue;
+    const hit = bands.findIndex((b) => touch(b, x, y, e));
+    if (hit < 0) continue;
+    const bi = gid[hit];
     const sg = end === 'b' ? 1 : -1;
     ends.push({ L, end, x, y, dx: L.h ? sg : 0, dy: L.h ? 0 : sg, bi });
   }
@@ -392,7 +410,7 @@ export function closeAtBands(H0, V0, bands, o) {
       const Hh = P.L.h ? P : Q, Vv = P.L.h ? Q : P;
       const X = Vv.L.k, Y = Hh.L.k;
       const eh = (X - Hh.x) * Hh.dx, ev = (Y - Vv.y) * Vv.dy;
-      if (eh >= -0.5 && ev >= -0.5 && eh <= 2 * t + 5 && ev <= 2 * t + 5 && touch(b, X, Y, 1.5)) cands.push({ type: 'corner', Hh, Vv, X, Y, cost: Math.max(0, eh) + Math.max(0, ev) });
+      if (eh >= -0.5 && ev >= -0.5 && eh <= 2 * t + 5 && ev <= 2 * t + 5 && bands.some((q, i) => gid[i] === P.bi && touch(q, X, Y, 1.5))) cands.push({ type: 'corner', Hh, Vv, X, Y, cost: Math.max(0, eh) + Math.max(0, ev) });
     }
   }
   cands.sort((p, q) => p.cost - q.cost);

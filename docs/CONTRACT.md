@@ -1060,6 +1060,14 @@ orthogonal-only result** (byte for byte; angled / curved pieces only in `unsuppo
   openings, slants, … }` with `slants` **omitted when there is none** (then the object is today's, also with the option
   on). `stats` gains `slants`, `chains`, `slantOpenings`, `curveMaxDev` only when slants were found; `unsupported`
   shrinks accordingly. `detectWalls` (frame cm) adds `slants`, `slantOpenings`, `chains` when the option is on.
+* **Limits** (honest): the drawing needs at least one orthogonal wall (the origin and the grid come from the rectangles;
+  slants further north / west than the rectangles get negative coordinates). Two different parallel walls whose
+  facing faces are 7–40 cm apart, or wall-pen hatch lines drawn as separate lines ≥ 7 cm apart, can pair into a false
+  slant (a line pairs on one side only, the nearer partner first; more than 4 000 angled lines: no slant detection).
+  A passage between a rectangle's end and a slant, and openings in curved walls, are not found. Slant ends inside a
+  rectangle are left there (the plan engine's joins extend / clip them). With the option on, straight orthogonal runs
+  inside a curved PDF path feed the orthogonal fill, so a drawing with such paths can differ from the default run
+  even without slants. Tested on generated drawings only.
 * **Not for `buildPlan` yet**: the plan engine does not take slants until stage A1; the import dialog keeps treating
   angled / curved walls as "redraw by hand" (it does not pass the option).
 * Measured (tests/import.test.mjs, tests/import.dxf.test.mjs; fixtures in tests/import-slant-fixtures.mjs): the design's
@@ -1067,10 +1075,12 @@ orthogonal-only result** (byte for byte; angled / curved pieces only in `unsuppo
   both slants on the design centre lines (end points ≤ 0.05 cm off the lines), thickness exact, kinds right; the window
   in s01 and the door in s02 at their design positions (≤ 0.1 cm), hinge / swing / outside right; rectangles = the
   design's (symmetric difference 0) and identical to the drawing of the rectangles alone; rotation by 90°, both mirrors
-  and 270° + mirror consistent. A quarter-circle wall of centre radius 300 cm → 7 pieces, chord 67 cm, largest deviation
+  and 270° + mirror consistent; a wall abutting s01 stops at its first corner on s01's face and s01 stays one slant
+  across the junction; s02's gap drawn without a swing → a passage. A quarter-circle wall of centre radius 300 cm → 7 pieces, chord 67 cm, largest deviation
   from the true circle 1.9 cm (PDF Béziers and DXF ARC / bulge alike). Lot 98 / lot 99 give the same output with the
-  option on (no angled wall pieces there). Cost: nothing on the default path; with the option, lot 98 detectWalls +
-  detectOpenings within the timing noise (≈ 60 ms either way).
+  option on (no angled wall pieces there). Cost: nothing on the default path (lot 98 detectWalls + detectOpenings +
+  normalise ≈ 50–70 ms before and after, within the noise); with the option ≈ 5 ms more on lot 98 (thin angled lines
+  collected for window evidence).
 
 **`readImage(image, { cmPerPx? | points + cm, deskew = true, propose = true, threshold?, walls?, rotate?, mirror? })`**
 (raster: PNG / JPG / a scanned page rendered to pixels; `image` = ImageData-like `{ width, height, data }` or

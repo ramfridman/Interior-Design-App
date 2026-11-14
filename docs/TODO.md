@@ -56,7 +56,7 @@ Order of work:
   - [x] G1 geometry seams (golden test `tests/geometry.test.mjs`)
   - [x] G2 schema / persistence seams (golden test `tests/schema.test.mjs`)
   - [x] A0 polygon kernel and wall joins (`tests/polykernel.test.mjs`; Clipper 6.4.2 vendored)
-  - [ ] A6a import of angled and curved walls, engine side, off by default [running]
+  - [x] A6a import of angled and curved walls, engine side, off by default (generated test drawings only; end points within 0.05 cm on the angled test house, curves within 2 cm)
   - [ ] F1 levels in the engine [running] · F2 2D per level · F3 3D stacking · F4 stairs · F5 walk across floors · F6 daylight per level · F7 regulations / carpentry per level · F8 import per floor
   - [ ] A1 mixed derive · A2 editing angled walls · A3 2D tools · A4 3D shell · A5 regulations / carpentry / walk · A6b import dialog · A7 exact daylight on angled faces
   - Will still not be supported afterwards: true curves (short straight pieces within 2 cm), sloped roofs / attics, basements, split levels, spiral stairs.

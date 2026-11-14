@@ -253,6 +253,20 @@ function arcPts(cx, cy, r, a0, a1, n = 12) { const o = []; for (let i = 0; i <= 
   check(rf.slants && rf.slants.length === 2 && WEDGE.slants.every((s) => rf.slants.some((q) => q.t === s.t && q.kind === s.kind && distLine(q.x1, q.y1, s) <= 2 && distLine(q.x2, q.y2, s) <= 2)) &&
     rf.openings.some((x) => x.axis === 'a' && x.kind === 'window') && rf.openings.some((x) => x.axis === 'a' && x.kind === 'door'), 'filled angled wall bands → slants (window and door found in them)');
 
+  // a 10 cm wall abutting s01 from the west (y 600–610) and s02's door drawn without its swing: the wall stops at its
+  // first corner on s01's face, s01 stays one slant across the junction, the plain gap in s02 is a passage
+  {
+    const polys = [...wedgeSolids(), [[510, 600], [685, 600], [685, 610], [510, 610]]];
+    const rj = analysePrims(pdfPrims({ lines: unionOutline(polys), symLines: [...d.winLines, ...d.doorLines.slice(1)], symArcs: d.arcs.slice(1) }), { slants: true });
+    const s1 = WEDGE.slants[0], yAt = 610, xFace = 973.63 - (yAt - 20) * (973.63 - 583.89) / 760;
+    const tw = rj.walls.find((x) => x.y === 600 && x.h === 10);
+    const pas = rj.openings.find((x) => x.axis === 'a' && x.kind === 'opening');
+    console.log(`== T-junction on s01 + plain gap in s02: wall ${JSON.stringify(tw)} (face at y 610: x ${xFace.toFixed(1)}), slants ${rj.slants.length}, passage ${JSON.stringify(pas)}`);
+    check(tw && tw.x === 510 && tw.x + tw.w === Math.floor(xFace / 5) * 5 && tw.kind === 'interior' && rj.slants.length === 2 && rj.slants.some((q) => q.t === 20 && distLine(q.x1, q.y1, s1) <= 2 && distLine(q.x2, q.y2, s1) <= 2 && Math.hypot(q.x2 - q.x1, q.y2 - q.y1) > 850) &&
+      rj.unsupported.length === 0, 'a wall abutting a slant stops at its first corner on the slant face; the slant stays whole across the junction');
+    check(pas && pas.style === 'open' && Math.abs(pas.width - 80) <= 0.5 && pas.assumed.includes('height') && rj.openings.filter((x) => x.axis === 'a').length === 2, 'a plain gap between collinear slants → a passage (opening / open)');
+  }
+
   // a quarter-circle wall (Béziers flattened as in a PDF) → a chain of slants
   const q = quarterOutline();
   const rq = analysePrims(pdfPrims({ lines: q.lines, wallArcs: q.arcs }), { slants: true });
