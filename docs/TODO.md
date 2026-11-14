@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 14): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 15): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -57,8 +57,9 @@ Order of work:
   - [x] G2 schema / persistence seams (golden test `tests/schema.test.mjs`)
   - [x] A0 polygon kernel and wall joins (`tests/polykernel.test.mjs`; Clipper 6.4.2 vendored)
   - [x] A6a import of angled and curved walls, engine side, off by default (generated test drawings only; end points within 0.05 cm on the angled test house, curves within 2 cm)
-  - [ ] F1 levels in the engine [running] · F2 2D per level · F3 3D stacking · F4 stairs · F5 walk across floors · F6 daylight per level · F7 regulations / carpentry per level · F8 import per floor
-  - [ ] A1 mixed derive · A2 editing angled walls · A3 2D tools · A4 3D shell · A5 regulations / carpentry / walk · A6b import dialog · A7 exact daylight on angled faces
+  - [x] F1 levels in the engine (`tests/levels.test.mjs`)
+  - [ ] F2 2D per level [running] · F3 3D stacking [running] · F4 stairs · F5 walk across floors · F6 daylight per level · F7 regulations / carpentry per level · F8 import per floor
+  - [ ] A1 mixed derive [running] · A2 editing angled walls · A3 2D tools · A4 3D shell · A5 regulations / carpentry / walk · A6b import dialog · A7 exact daylight on angled faces
   - Will still not be supported afterwards: true curves (short straight pieces within 2 cm), sloped roofs / attics, basements, split levels, spiral stairs.
 
 ## Still waiting for the owner
