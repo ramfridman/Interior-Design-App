@@ -4,12 +4,14 @@
 //      underlay is stored and aligned with the engine's page → plan transform; the built-in project is untouched;
 //      a reload keeps the project and its underlay.
 //   2. a PNG rendering of the same page: the flow completes with the low-confidence banner and an underlay.
+//   3. a broken file and a password-protected PDF give plain messages; re-align is exercised with real clicks.
 //      node tests/import.ui.test.mjs [--shots]      (screenshots → $SHOTS_DIR or dev/screens/import-*.png)
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
@@ -40,6 +42,33 @@ function compareWalls(found, plan, tol = 5) {
   const stickOut = found.filter((f) => [...cells([f])].some((k) => !puGrown.has(k)));
   const within = plan.filter((p) => exact.includes(p) || covered.includes(p));
   return { within: within.length, plan: plan.length, found: found.length, stickOut: stickOut.length };
+}
+
+// ── a one-page PDF locked with a user password (standard security handler, revision 2 / RC4 40-bit; pdf-lib cannot
+//    encrypt). The page has no content stream, so nothing else needs encrypting. ──
+function encryptedPdf(userPw, ownerPw = userPw + '-owner') {
+  const PAD = Buffer.from('28bf4e5e4e758a4164004e56fffa01082e2e00b6d0683e802f0ca9fe6453697a', 'hex');
+  const padded = (pw) => Buffer.concat([Buffer.from(pw, 'latin1'), PAD]).subarray(0, 32);
+  const md5 = (...b) => crypto.createHash('md5').update(Buffer.concat(b)).digest();
+  const rc4 = (key, data) => {
+    const s = [...Array(256).keys()]; let j = 0;
+    for (let i = 0; i < 256; i++) { j = (j + s[i] + key[i % key.length]) & 255; [s[i], s[j]] = [s[j], s[i]]; }
+    const out = Buffer.alloc(data.length); let i = 0; j = 0;
+    for (let k = 0; k < data.length; k++) { i = (i + 1) & 255; j = (j + s[i]) & 255; [s[i], s[j]] = [s[j], s[i]]; out[k] = data[k] ^ s[(s[i] + s[j]) & 255]; }
+    return out;
+  };
+  const P = -44, id = crypto.randomBytes(16);
+  const O = rc4(md5(padded(ownerPw)).subarray(0, 5), padded(userPw));
+  const pLE = Buffer.alloc(4); pLE.writeInt32LE(P);
+  const U = rc4(md5(padded(userPw), O, pLE, id).subarray(0, 5), PAD);
+  const objs = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>',
+    `<< /Filter /Standard /V 1 /R 2 /O <${O.toString('hex')}> /U <${U.toString('hex')}> /P ${P} >>`];
+  let body = '%PDF-1.4\n'; const offs = [];
+  objs.forEach((o, k) => { offs.push(body.length); body += `${k + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = body.length;
+  body += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map((o) => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+  body += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R /Encrypt 4 0 R /ID [<${id.toString('hex')}> <${id.toString('hex')}>] >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(body, 'latin1');
 }
 
 const server = spawn(process.execPath, [path.join(root, 'dev', 'serve.mjs'), String(PORT)], { stdio: 'ignore' });
@@ -209,6 +238,51 @@ try {
   });
   check('underlay is skipped when exporting', exportClean);
 
+  // re-align (Structure guide → Sketch underlay → Re-align…) with real clicks: two-point scale, point → wall corner move,
+  // Reset / Cancel leave the stored transform alone, Apply offers Undo in its toast (the underlay is outside the history)
+  {
+    const T0 = await page.evaluate(() => window.app.store.underlay.transform);
+    const openRealign = async () => { await page.getByRole('button', { name: 'Re-align…' }).click(); await page.waitForSelector('.importdlg--realign'); await sleep(500); };
+    const dlgR = page.locator('.importdlg--realign');
+    const toScr = (pp) => page.evaluate(async (pp) => {
+      const { affInv, affApply } = await import('/src/ui/import/affine.js');
+      const R = document.querySelector('.importdlg--realign')._realign, inv = affInv(R.transform), rect = R.sheet.canvas.getBoundingClientRect();
+      return pp.map(([x, y]) => { const p = affApply(inv, x, y), q = R.sheet.toScreen(p[0], p[1]); return [rect.left + q[0], rect.top + q[1]]; });
+    }, pp);
+    const T = () => page.evaluate(() => document.querySelector('.importdlg--realign')._realign.transform);
+    const ap = (M, x, y) => [M[0] * x + M[2] * y + M[4], M[1] * x + M[3] * y + M[5]];
+    const det = T0[0] * T0[3] - T0[1] * T0[2];
+    const inv0 = (X, Y) => [(T0[3] * (X - T0[4]) - T0[2] * (Y - T0[5])) / det, (-T0[1] * (X - T0[4]) + T0[0] * (Y - T0[5])) / det];
+    const near = (p, q, tol = 1) => Math.hypot(p[0] - q[0], p[1] - q[1]) <= tol;
+    const nw = inv0(0, 0), ne = inv0(1535, 0);           // drawing points now under the plan's outer NW / NE corners
+    await openRealign();
+    await dlgR.getByRole('button', { name: 'Pick two points' }).click();
+    let [a, b] = await toScr([[0, 0], [1535, 0]]);
+    await page.mouse.click(a[0], a[1]); await page.mouse.click(b[0], b[1]);
+    await page.getByLabel('Real distance in centimetres').fill('3070');
+    await dlgR.getByRole('button', { name: 'Scale the sketch' }).click();
+    let t = await T();
+    check('re-align: two-point scale doubles about the first point', near(ap(t, ...nw), [0, 0]) && near(ap(t, ...ne), [3070, 0]), JSON.stringify(t));
+    await dlgR.getByRole('button', { name: 'Reset', exact: true }).click();
+    check('re-align: Reset restores the stored alignment', JSON.stringify(await T()) === JSON.stringify(T0));
+    await dlgR.getByRole('button', { name: 'Pick the points' }).click();
+    [a] = await toScr([[0, 0]]); await page.mouse.click(a[0], a[1]);
+    [b] = await toScr([[933, 4]]); await page.mouse.click(b[0], b[1]);       // a few cm off the plan corner (930, 0): snaps
+    t = await T();
+    check('re-align: a drawing point moved onto a wall corner (snapped)', near(ap(t, ...nw), [930, 0]), JSON.stringify(ap(t, ...nw)));
+    await dlgR.getByRole('button', { name: 'Cancel' }).click(); await sleep(300);
+    check('re-align: Cancel keeps the stored alignment', JSON.stringify(await page.evaluate(() => window.app.store.underlay.transform)) === JSON.stringify(T0));
+    await openRealign();
+    await dlgR.getByRole('button', { name: 'Pick the points' }).click();
+    [a] = await toScr([[0, 0]]); await page.mouse.click(a[0], a[1]);
+    [b] = await toScr([[1535, 0]]); await page.mouse.click(b[0], b[1]);
+    await dlgR.getByRole('button', { name: 'Apply' }).click(); await sleep(300);
+    const T1 = await page.evaluate(() => window.app.store.underlay.transform);
+    check('re-align: Apply stores the move', near(ap(T1, ...nw), [1535, 0]), JSON.stringify(T1));
+    await page.locator('.toast__action', { hasText: 'Undo' }).click(); await sleep(200);
+    check('re-align: the toast’s Undo puts the sketch back', JSON.stringify(await page.evaluate(() => window.app.store.underlay.transform)) === JSON.stringify(T0));
+  }
+
   // ─────────── 2. raster: a PNG rendering of the page ───────────
   const pngB64 = await page.evaluate(async (pdfUrl) => {
     const eng = await import('/src/import/index.js');
@@ -264,6 +338,11 @@ try {
   await page.setInputFiles('#import-sketch-file', BAD);
   st = await until((s) => !s.busy && s.error, 20000);
   check('a broken file gives a plain message, not a stuck dialog', st && /could not be read as a PDF/.test(st.error) && !st.busy, st && st.error);
+  const LOCKED = path.join(tmp, 'locked.pdf');
+  fs.writeFileSync(LOCKED, encryptedPdf('open-sesame'));
+  await page.setInputFiles('#import-sketch-file', LOCKED);
+  st = await until((s) => !s.busy && s.error, 20000);
+  check('a password-protected PDF gives the plain message', st && /password-protected/.test(st.error) && !st.busy, st && st.error);
   await page.setInputFiles('#import-sketch-file', BLANK);
   st = await until((s) => s.sheet && !s.busy, 30000);
   await nextBtn().click();
@@ -281,6 +360,65 @@ try {
   await page.waitForFunction(() => !document.querySelector('.importdlg') && window.app.projects.current().name === 'Blank trace', null, { timeout: 30000 }).catch(() => {});
   const blank = await page.evaluate(() => ({ name: window.app.projects.current().name, phase: window.app.projects.current().phase, walls: window.app.plan.walls.length, underlay: !!(window.app.store.underlay && window.app.store.underlay.image), lot: window.app.plan.site.bounds }));
   check('…an empty draft with the underlay, the lot covering the picture', blank.name === 'Blank trace' && blank.phase === 'draft' && blank.walls === 0 && blank.underlay && blank.lot.w > 1500, JSON.stringify(blank));
+
+  // ─────────── 4. phone (390 × 800, touch): pinch zooms, two fingers pan, one finger picks a snapped corner ───────────
+  {
+    const pctx = await browser.newContext({ viewport: { width: 390, height: 800 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true });
+    const pp = await pctx.newPage();
+    pp.on('pageerror', (e) => errors.push('phone pageerror: ' + e.message));
+    await pp.goto(`http://localhost:${PORT}/index.html`);
+    await pp.waitForFunction(() => document.documentElement.classList.contains('app-ready') && window.app && window.app.projects && window.app.projects.current(), null, { timeout: 90000 });
+    await sleep(800);
+    await pp.getByRole('button', { name: 'Start designing' }).tap({ timeout: 5000 }).catch(() => {});
+    for (let i = 0; i < 3 && await pp.locator('.scrim').count(); i++) { await pp.keyboard.press('Escape'); await sleep(300); }
+    await pp.getByRole('button', { name: 'File and export' }).tap(); await sleep(300);
+    await pp.locator('.menu__item', { hasText: 'Projects' }).first().tap(); await sleep(300);
+    await pp.locator('.menu__item', { hasText: /Import a sketch/ }).first().tap();
+    await pp.waitForSelector('.importdlg');
+    await pp.setInputFiles('#import-sketch-file', PDF);
+    await pp.waitForFunction(() => { const s = document.querySelector('.importdlg')?._import?.state; return s && s.sheet && s.first && !s.busy; }, null, { timeout: 90000 });
+    await pp.locator('.importdlg .dialog__foot .btn--primary').tap();
+    await pp.locator('.iopt', { hasText: 'Measure a known length' }).locator('input[type=radio]').check();
+    await sleep(300);
+    const cdp = await pctx.newCDPSession(pp);
+    const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y], id) => ({ x, y, id })) });
+    const geo = () => pp.evaluate(async () => {
+      const { affInv, affApply } = await import('/src/ui/import/affine.js');
+      const d = document.querySelector('.importdlg'), r = d._import.state.first, b = r.stats.bounds, rect = d._import.sheet.canvas.getBoundingClientRect();
+      const inv = affInv(r.transform);
+      return { rect: [rect.left, rect.top, rect.width, rect.height], c: [[b.x, b.y], [b.x + b.w, b.y]].map(([x, y]) => { const p = affApply(inv, x, y), q = d._import.sheet.toScreen(p[0], p[1]); return [rect.left + q[0], rect.top + q[1]]; }) };
+    });
+    const g0 = await geo(), [L, T, Wd, Ht] = g0.rect, mid = [L + Wd / 2, T + Ht / 2];
+    await touch('touchStart', [[mid[0] - 40, mid[1]], [mid[0] + 40, mid[1]]]);
+    for (let i = 1; i <= 6; i++) await touch('touchMove', [[mid[0] - 40 - 12 * i, mid[1]], [mid[0] + 40 + 12 * i, mid[1]]]);
+    await touch('touchEnd', []);
+    await sleep(150);
+    const g1 = await geo(), f = (g1.c[1][0] - g1.c[0][0]) / (g0.c[1][0] - g0.c[0][0]);
+    const tgt = [L + Wd * 0.35, T + Ht * 0.7], dx = tgt[0] - g1.c[0][0], dy = tgt[1] - g1.c[0][1];
+    await touch('touchStart', [[mid[0] - 30, mid[1]], [mid[0] + 30, mid[1]]]);
+    for (let i = 1; i <= 8; i++) await touch('touchMove', [[mid[0] - 30 + dx * i / 8, mid[1] + dy * i / 8], [mid[0] + 30 + dx * i / 8, mid[1] + dy * i / 8]]);
+    await touch('touchEnd', []);
+    await sleep(150);
+    const g2 = await geo();
+    check('phone: pinch zooms the drawing', f > 2, f.toFixed(2));
+    check('phone: two fingers pan it (while picking)', Math.hypot(g2.c[0][0] - tgt[0], g2.c[0][1] - tgt[1]) < 3, JSON.stringify(g2.c[0]));
+    const c0 = g2.c[0];
+    await touch('touchStart', [[c0[0] + 14, c0[1] + 11]]);
+    for (let i = 1; i <= 5; i++) await touch('touchMove', [[c0[0] + 14 - 2.6 * i, c0[1] + 11 - 2 * i]]);
+    await touch('touchEnd', []);
+    await sleep(200);
+    const picked = await pp.evaluate(() => document.querySelector('.importdlg')._import.state.measure.pts);
+    const want = await pp.evaluate(async () => {
+      const { affInv, affApply } = await import('/src/ui/import/affine.js');
+      const r = document.querySelector('.importdlg')._import.state.first;
+      return affApply(affInv(r.transform), r.stats.bounds.x, r.stats.bounds.y);
+    });
+    check('phone: a finger slid onto the corner picks it (no pick from the gestures)', picked.length === 1 && Math.hypot(picked[0][0] - want[0], picked[0][1] - want[1]) < 1.5, JSON.stringify({ picked, want }));
+    const lay = await pp.evaluate(() => ({ scroll: document.scrollingElement.scrollTop + document.documentElement.scrollWidth - innerWidth,
+      foot: [...document.querySelectorAll('.importdlg .dialog__foot button')].filter((b) => b.offsetWidth).every((b) => { const r = b.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }) }));
+    check('phone: no page scroll, footer buttons on screen', lay.scroll === 0 && lay.foot, JSON.stringify(lay));
+    await pctx.close();
+  }
 
   check('no request left this machine', foreign.length === 0, foreign.join(' '));
   check('no errors in the console', errors.length === 0, errors.slice(0, 5).join(' | '));

@@ -64,11 +64,9 @@ export function initCarpentryInspector(right, app, C) {
   const tab = () => (CTABS.some((t) => t.id === store.ui.carpentryTab) ? store.ui.carpentryTab : 'run');
 
   /* ───────── slots (estimate, quantities) ───────── */
-  const tierSeg = segmented({ options: [{ value: null, label: 'Suggested' }, { value: 'basic', label: 'Basic' }, { value: 'mid', label: 'Mid' }, { value: 'premium', label: 'Premium' }],
-    value: store.ui.carpentryTier || null, label: 'Price tier', cls: 'seg--block seg--mini', onChange: (v) => store.setUI({ carpentryTier: v }) });
+  // (the price tier is chosen inside the Estimate tab — its "Quality level" — so no second selector here)
   const estHost = h('div', { class: 'cslot' }), qtyHost = h('div', { class: 'cslot' });
-  panels.get('estimate').append(h('div', { class: 'ctier' }, h('span', { class: 'ctier__label' }, 'Price tier'), tierSeg,
-    h('p', { class: 'ctier__hint' }, 'Suggested = each run’s tier from its materials and hardware.')), estHost);
+  panels.get('estimate').append(estHost);
   panels.get('quantities').append(qtyHost);
   let estSlot = null, qtySlot = null;
   const selNow = () => { const s = store.ui.carpentrySel || {}; return { runId: s.runId || null, unitId: s.unitId || null }; };
@@ -522,7 +520,7 @@ export function initCarpentryInspector(right, app, C) {
     syncHead(cur);
     const t = tab();
     for (const x of CTABS) { const on = x.id === t; tabBtns.get(x.id).setAttribute('aria-selected', String(on)); tabBtns.get(x.id).tabIndex = on ? 0 : -1; panels.get(x.id).hidden = !on; }
-    if (t === 'estimate' || t === 'quantities') { tierSeg.set(store.ui.carpentryTier || null); ensureSlots(); return; }
+    if (t === 'estimate' || t === 'quantities') { ensureSlots(); return; }
     const p = panels.get(t);
     const focusKey = p.contains(document.activeElement) ? document.activeElement.dataset.fk : null;
     const scroll = body.scrollTop;

@@ -92,9 +92,11 @@ export function createSheet(o = {}) {
     ctx.beginPath(); ctx.moveTo(sx - 9, sy); ctx.lineTo(sx + 9, sy); ctx.moveTo(sx, sy - 9); ctx.lineTo(sx, sy + 9); ctx.stroke();
     if (snapped) { ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI * 2); ctx.stroke(); }
     // the loupe: up-right of the cursor (flipped when it would leave the canvas)
-    let lx = cursor.x + 22, ly = cursor.y - 22 - LOUPE;
-    if (lx + LOUPE > cw - 4) lx = cursor.x - 22 - LOUPE;
-    if (ly < 4) ly = cursor.y + 22;
+    // a finger: further away, and never below it (the hand would cover it) — at the top edge it moves to the side
+    const gap = cursor.touch ? 36 : 22;
+    let lx = cursor.x + gap, ly = cursor.y - gap - LOUPE;
+    if (lx + LOUPE > cw - 4) lx = cursor.x - gap - LOUPE;
+    if (ly < 4) ly = cursor.touch ? 4 : cursor.y + 22;
     const z = zoom * LOUPE_ZOOM;
     ctx.save();
     ctx.beginPath(); ctx.arc(lx + LOUPE / 2, ly + LOUPE / 2, LOUPE / 2, 0, Math.PI * 2); ctx.clip();
@@ -127,10 +129,10 @@ export function createSheet(o = {}) {
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), zoom, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
-      drag = null; return;
+      drag = null; cursor = null; redraw(); return;
     }
     drag = { x0: p.x, y0: p.y, tx, ty, moved: false, touch: e.pointerType !== 'mouse' };
-    if (drag.touch) { cursor = p; redraw(); }
+    if (drag.touch) { cursor = { ...p, touch: true }; redraw(); }
   });
   canvas.addEventListener('pointermove', (e) => {
     const p = local(e);
@@ -138,12 +140,15 @@ export function createSheet(o = {}) {
     if (pinch && pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
-      if (pinch.d > 0) { const f = (pinch.zoom * d / pinch.d) / zoom; zoomAt(pinch.cx, pinch.cy, f); }
+      // two fingers zoom about their midpoint and pan with it (the only way to pan while picking with a finger)
+      const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+      tx += cx - pinch.cx; ty += cy - pinch.cy; pinch.cx = cx; pinch.cy = cy;
+      if (pinch.d > 0) zoomAt(cx, cy, (pinch.zoom * d / pinch.d) / zoom); else redraw();
       return;
     }
     if (drag) {
       // touch in pick mode: the finger moves the crosshair (loupe above it) instead of panning
-      if (drag.touch && mode === 'pick') { cursor = p; drag.moved = true; redraw(); return; }
+      if (drag.touch && mode === 'pick') { cursor = { ...p, touch: true }; drag.moved = true; redraw(); return; }
       if (!drag.moved && Math.hypot(p.x - drag.x0, p.y - drag.y0) > 4) drag.moved = true;
       if (drag.moved) { tx = drag.tx + p.x - drag.x0; ty = drag.ty + p.y - drag.y0; canvas.style.cursor = 'grabbing'; }
     }

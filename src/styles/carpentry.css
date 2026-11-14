@@ -306,9 +306,6 @@
 .cchk__units { color: var(--accent); font-size: var(--fs-11); font-weight: 600; }
 
 /* estimate tier + slots */
-.ctier { display: flex; flex-direction: column; gap: 4px; padding-bottom: var(--s-2); border-bottom: 1px solid var(--line); }
-.ctier__label { font-size: var(--fs-11); font-weight: 600; color: var(--ink-3); }
-.ctier__hint { color: var(--ink-3); font-size: var(--fs-11); }
 .cslot__loading { color: var(--ink-3); font-size: var(--fs-12); padding: var(--s-3) 0; }
 .cslot__ph { padding: var(--s-4); border: 1px dashed var(--line-strong); border-radius: var(--r-2); text-align: center; }
 .cslot__phtitle { font-family: var(--font-display); font-size: var(--fs-16); }

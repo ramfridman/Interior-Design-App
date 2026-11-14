@@ -396,6 +396,31 @@ group('Island: move and turn on the plan (moveRun, runClearances)');
   check('a drag (begin … transient moves … commit) is ONE undo step', store._undo.length === undo1 + 1 && near(C.runFootprint(C.getRun(island.id).run).x, fp0.x + 20));
   store.undo();
   check('… and undoes in one go', state() === snap1);
+
+  // the bar stools at the island's seating side ride along (same move / turn, same undo step); nothing else moves
+  const fpS = C.runFootprint(C.getRun(island.id).run), cxS = fpS.x + fpS.w / 2, cyS = fpS.y + fpS.h / 2;
+  const stools = store.items.filter((i) => i.type === 'bar-stool').map((i) => ({ ...i }));
+  const others = () => JSON.stringify(store.items.filter((i) => i.type !== 'bar-stool' && !(i.carp && i.carp.runId === island.id)));
+  const others0 = others(), undoS = store._undo.length;
+  check('the architect’s layout has stools at the island', stools.length >= 3 && stools.every((s) => s.y > fpS.y + fpS.h - 20 && s.y < fpS.y + fpS.h + 60), JSON.stringify(stools.map((s) => [s.x, s.y])));
+  r = C.moveRun(island.id, { dx: 30, dy: -15 });
+  const moved = store.items.filter((i) => i.type === 'bar-stool');
+  check('moving the island moves its stools by the same distance', r.ok && moved.every((m, k) => near(m.x, stools[k].x + 30) && near(m.y, stools[k].y - 15) && m.rot === stools[k].rot), JSON.stringify(moved.map((m) => [m.x, m.y])));
+  check('… nothing else moves, one undo step', others() === others0 && store._undo.length === undoS + 1);
+  store.undo();
+  check('… and undo puts the stools back with the island', state() === snap1);
+  r = C.moveRun(island.id, { rot: 180 });
+  const turned = store.items.filter((i) => i.type === 'bar-stool');
+  check('turning the island 180° takes the stools round its centre (now on the other side, facing it)', r.ok
+    && turned.every((m, k) => near(m.x, 2 * cxS - stools[k].x) && near(m.y, 2 * cyS - stools[k].y) && m.rot === (stools[k].rot + 180) % 360) && others() === others0,
+  JSON.stringify(turned.map((m) => [m.x, m.y, m.rot])));
+  store.undo();
+  store.begin();
+  for (let i = 1; i <= 4; i++) C.moveRun(island.id, { dx: 5 }, { transient: true });
+  store.cancel(); C.moveRun(island.id, { dx: 20 });
+  check('a drag of the island carries the stools the whole distance in one step', store.items.filter((i) => i.type === 'bar-stool').every((m, k) => near(m.x, stools[k].x + 20)) && store._undo.length === undoS + 1);
+  store.undo();
+  check('… undone in one go', state() === snap1);
 }
 
 group('Performance');

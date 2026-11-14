@@ -97,7 +97,19 @@ function renderModel(s, src, px) {
   s.blob.visible = grounded && !flat;
   s.blob.position.set((box.min.x + box.max.x) / 2, box.min.y + 0.002, (box.min.z + box.max.z) / 2);
   s.blob.scale.set(size.x * 1.45 + 0.05, 1, size.z * 1.45 + 0.05);
-  const url = shoot(s, px);
+  // lamps always look lit here: the 3D view's lights switch dims the glowing shades / bulbs by changing the shared
+  // (cached) materials in place (items.js, base kept in userData.lampEmissive) — put the glow back for this shot only
+  const dimmed = new Map();
+  model.traverse((o) => {
+    if (!o.isMesh || !o.material) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (m && m.userData && m.userData.lampEmissive !== undefined && m.emissiveIntensity !== m.userData.lampEmissive && !dimmed.has(m)) {
+        dimmed.set(m, m.emissiveIntensity); m.emissiveIntensity = m.userData.lampEmissive;
+      }
+    }
+  });
+  let url;
+  try { url = shoot(s, px); } finally { for (const [m, v] of dimmed) m.emissiveIntensity = v; }
   s.scene.remove(model);
   return url;
 }

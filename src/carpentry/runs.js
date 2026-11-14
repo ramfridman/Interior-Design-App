@@ -285,7 +285,8 @@ function placementError(run, d, roomId) {
 
 /**
  * Move and / or turn a free-standing run (kitchen island) on the plan: { dx, dy } (cm) and rot (degrees, a multiple of 90,
- * clockwise on the plan) about the centre of its footprint. One undo step, reason 'move-run'.
+ * clockwise on the plan) about the centre of its footprint. One undo step, reason 'move-run'. Ordinary floor furniture at
+ * an island's seating side (within 60 cm — the bar stools) moves and turns with it in the same step; nothing else moves.
  * Refused: wall-bound runs (they are positioned by their wall — updateRun / fitRun), turns that are not 90° steps, and a
  * footprint that would leave its room, enter a wall / opening / door swing or overlap another run.
  */
@@ -301,17 +302,42 @@ export function moveRun(runId, { dx = 0, dy = 0, rot = 0 } = {}, mopts) {
   return mutate('move-run', (d) => {
     const run = d.carpentry.runs[runId];
     const roomId = run.roomId || (fp && (spaceAt(fp.x + fp.w / 2, fp.y + fp.h / 2) || {}).id) || null;
-    let { x, y } = run.anchor;
-    if (turn && fp) {
-      const cx = fp.x + fp.w / 2, cy = fp.y + fp.h / 2, c = Math.cos(turn * Math.PI / 180), s = Math.sin(turn * Math.PI / 180);
-      [x, y] = [cx + (x - cx) * c - (y - cy) * s, cy + (x - cx) * s + (y - cy) * c];
-    }
+    const cx = fp ? fp.x + fp.w / 2 : 0, cy = fp ? fp.y + fp.h / 2 : 0, c = Math.cos(turn * Math.PI / 180), s = Math.sin(turn * Math.PI / 180);
+    const place = (x, y) => (turn && fp ? [cx + (x - cx) * c - (y - cy) * s, cy + (x - cx) * s + (y - cy) * c] : [x, y]);
+    // the stools (any floor furniture) at the island's seating side travel with it
+    const riders = fp && run.kind === 'island' ? seatedAt(d, run0, fp) : [];
+    const [x, y] = place(run.anchor.x, run.anchor.y);
     run.anchor = { ...run.anchor, x: r1(x + dx), y: r1(y + dy), dir: (run.anchor.dir + turn) % 360 };
+    for (const id of riders) {
+      const it = d.item(id), [ix, iy] = place(it.x, it.y);
+      it.x = r1(ix + dx); it.y = r1(iy + dy);
+      if (turn) it.rot = (((it.rot || 0) + turn) % 360 + 360) % 360;
+    }
     const runIds = relayout(d, [runId]);
     const err = placementError(run, d, roomId);
     if (err) return err;
     return { runIds, ids: [runId], runId };
   }, mopts);
+}
+
+/** Seating side of an island: ordinary floor furniture (not carpentry) within SEAT_REACH cm of it, along its length. */
+const SEAT_REACH = 60;
+function seatedAt(d, run, fp) {
+  const a = (run.anchor.dir || 0) * Math.PI / 180;
+  const f = [Math.round(-Math.sin(a)), Math.round(Math.cos(a))], al = [f[1], -f[0]];     // seating (front) and along axes
+  const proj = (v, x, y) => v[0] * x + v[1] * y;
+  const box = [[fp.x, fp.y], [fp.x + fp.w, fp.y], [fp.x, fp.y + fp.h], [fp.x + fp.w, fp.y + fp.h]];
+  const edge = Math.max(...box.map(([x, y]) => proj(f, x, y)));
+  const a0 = Math.min(...box.map(([x, y]) => proj(al, x, y))), a1 = Math.max(...box.map(([x, y]) => proj(al, x, y)));
+  const out = [];
+  for (const it of d.items()) {
+    if (it.carp || it.hidden || (it.placement && it.placement !== 'floor')) continue;
+    const b = itemAABB(it), pts = [[b.x, b.y], [b.x + b.w, b.y], [b.x, b.y + b.h], [b.x + b.w, b.y + b.h]];
+    const near = Math.min(...pts.map(([x, y]) => proj(f, x, y))), c = proj(f, it.x, it.y), t = proj(al, it.x, it.y);
+    // tucked under the overhang or standing up to SEAT_REACH cm out, centred beside the island
+    if (near - edge <= SEAT_REACH && c >= edge - 20 && t >= a0 - 10 && t <= a1 + 10) out.push(it.id);
+  }
+  return out;
 }
 
 // ───────────────────────── units ─────────────────────────

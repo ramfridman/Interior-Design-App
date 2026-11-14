@@ -472,6 +472,7 @@ moveRun(runId, { dx, dy, rot })               // free-standing runs (island) onl
 //   clockwise) about the footprint centre. Refused: wall-bound runs (positioned by their wall), other angles, a footprint that would
 //   leave its room or enter a wall / opening / door swing or overlap another run. A drag = transient moveRun()s inside
 //   store.begin() … then cancel() and ONE moveRun() of the whole distance (one undo step, a full 'carpentry' event).
+//   An island takes along the ordinary floor furniture at its seating side (within 60 cm: the stools), same move / turn.
 //   isFreeRun(run) → run.kind === 'island' || run.freeStanding
 fitRun(runId, { mode: 'fillers' | 'stretch' | 'units', unitIds, length, toSpan })
 //   'fillers' (default): a 5 cm filler (3 cm handle-less) at every end against a wall / another run, adjustable units absorb the rest,

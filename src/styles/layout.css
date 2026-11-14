@@ -99,9 +99,10 @@
 .topbar.fit1 .toggles-menu { display: inline-grid; }
 .topbar.fit2 .budget__label, .topbar.fit2 .budget__meta { display: none; }
 .app.is-structure .topbar.fit2 .budget { display: none; }
-.topbar.fit3 .projname { display: none; }
-.topbar.fit3 .topbar__brand { flex: none; }
-.topbar.fit4 .seg--views .seg__label { display: none; }
+/* the view labels go before the project name: the name says which project is open (Structure mode fills the bar) */
+.topbar.fit3 .seg--views .seg__label { display: none; }
+.topbar.fit4 .projname { display: none; }
+.topbar.fit4 .topbar__brand { flex: none; }
 .topbar.fit5 .planchip__label, .topbar.fit5 .planchip__count::before { display: none; }
 .topbar.fit6 { gap: var(--s-2); }
 .topbar.fit7 { gap: 2px; }

@@ -75,6 +75,24 @@ async function main() {
   });
   check('add / rotate / undo round-trip', roundTrip === 'ok', roundTrip);
 
+  // Catalogue thumbnails of lamps look lit whatever the 3D view's Lights setting (it dims the shared glow materials)
+  const lampThumb = async (lights, size) => page.evaluate(async ({ lights, size }) => {
+    const { store, catalog } = window.app;
+    let it = store.items.find((i) => i.id === window.__e2eLamp);
+    if (!it) { const p = catalog.allProducts().find((x) => x.type === 'floor-lamp'); it = store.addItem(catalog.itemFromProduct(p, { x: 700, y: 950 })); window.__e2eLamp = it.id; }
+    store.setUI({ mode: '3d', lights });
+    await new Promise((r) => setTimeout(r, 2500));
+    const { getThumbnail } = await import('/src/view3d/thumbs.js');
+    const img = new Image(); img.src = await getThumbnail(it, size); await img.decode();
+    const c = document.createElement('canvas'); c.width = c.height = size; const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+    const d = x.getImageData(0, 0, size, size).data; let n = 0, lum = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200) { n++; lum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]; }
+    return lum / Math.max(1, n);
+  }, { lights, size });
+  const thumbOff = await lampThumb('off', 150), thumbOn = await lampThumb('on', 151);
+  await page.evaluate(() => { const { store } = window.app; store.removeItems([window.__e2eLamp]); store.setUI({ mode: '2d', lights: 'auto' }); });
+  check('lamp thumbnail is lit with the lights off too', Math.abs(thumbOff - thumbOn) < 4, `off ${thumbOff.toFixed(1)}, on ${thumbOn.toFixed(1)}`);
+
   // Projects: an empty project, two walls drawn programmatically, 3D, then back to House 98 with its design intact.
   const before = await page.evaluate(() => ({ id: window.app.projects.current().id, items: JSON.stringify(window.app.store.items), plan: JSON.stringify(window.app.plan) }));
   const made = await page.evaluate(async () => {
@@ -89,6 +107,16 @@ async function main() {
   await page.evaluate(() => window.app.store.setUI({ mode: '3d' }));
   await sleep(4000);
   check('empty project in 3D without console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+  // switching back and forth in 3D rebuilds the views each time; shared materials must not collect the daylight patch
+  // again with every rebuild (that broke their shaders after a few switches)
+  const switches = await page.evaluate(async (id) => {
+    const { projects } = window.app, other = projects.current().id;
+    const out = [];
+    for (let i = 0; i < 6; i++) { out.push(await projects.open(i % 2 ? other : id)); await new Promise((r) => setTimeout(r, 2500)); }
+    return out;
+  }, before.id);
+  await sleep(2000);
+  check('six project switches in 3D without console errors', switches.every(Boolean) && errors.length === 0, errors.slice(0, 1).join(' | ').slice(0, 300));
   const back = await page.evaluate(async (id) => {
     const { projects, store } = window.app;
     store.setUI({ mode: '2d' });
@@ -99,6 +127,22 @@ async function main() {
     return r;
   }, before.id);
   await sleep(1500);
+  await page.evaluate(() => window.app.store.setUI({ mode: '3d' }));
+  await sleep(4000);
+  // after the switches, on House 98 in 3D: each patched material applies the patch exactly once (a stacked patch redeclares its varyings)
+  const stacked = await page.evaluate(() => {
+    const scene = window.app.view3d.debug && window.app.view3d.debug.scene, seen = new Set(), counts = [];
+    if (!scene) return null;
+    scene.traverse((o) => { for (const m of [].concat(o.material || [])) {
+      if (seen.has(m) || !m.customProgramCacheKey || !/^daylight-field/.test(m.customProgramCacheKey())) continue;
+      seen.add(m);
+      const sh = { uniforms: {}, vertexShader: '#include <project_vertex>', fragmentShader: '#include <lights_fragment_begin>\n#include <lights_fragment_maps>' };
+      m.onBeforeCompile(sh, null);
+      counts.push(sh.vertexShader.split('varying vec3 vDlW').length - 1);
+    } });
+    return { materials: counts.length, maxPatches: Math.max(0, ...counts) };
+  });
+  check('shared materials carry the daylight patch once', stacked && stacked.materials > 0 && stacked.maxPatches === 1, JSON.stringify(stacked));
   check('back on House 98: design and plan intact', back.ok && back.items === before.items && back.plan === before.plan && !back.canUndo);
   check('no console errors overall', errors.length === 0, errors.slice(0, 5).join(' | '));
   await browser.close();

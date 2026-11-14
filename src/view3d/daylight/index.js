@@ -46,6 +46,7 @@ const MAX_ADAPT_NIGHT = 500;                     // night (lamp light ≈ 50–3
 const DOLL_TARGET_NIGHT = 0.12, DOLL_MAX_NIGHT = 600;  // dollhouse at night: lamp-lit rooms (not the dark ones) set the gain
 const WINDOW_GAIN_NIGHT = 60;                    // orbit view, roof on, at night: lit windows glow (the eye is adapted to the dark garden)
 const OCCLUDER_DEBOUNCE_MS = 300;
+const FIELD_HOLDER = new WeakMap();               // shared material → { U } of the daylight instance it reads (patched once)
 const FADE_S = 0.45, SLIDER_FADE_S = 0.12, ADAPT_S = 0.45;
 const smooth = (a, b, v) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
 const INTERIOR = (name) => name.startsWith('floor:') || name.startsWith('wall:room:') || name === 'ceilings' || name === 'wall:skirting';
@@ -315,8 +316,14 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
     for (const m of list) {
       if (!m || !m.isMeshStandardMaterial || fieldPatched.has(m) || m.userData.daylightBase) continue;
       fieldPatched.add(m);
+      // shared materials (model caches) outlive this instance: the 3D view is rebuilt on every project switch. Patch a
+      // material only once ever and point it at the newest instance's uniforms (wrapping again stacked the patch).
+      const holder = FIELD_HOLDER.get(m);
+      if (holder) { holder.U = U; m.needsUpdate = true; continue; }
+      const ref = { U };
+      FIELD_HOLDER.set(m, ref);
       const prev = m.onBeforeCompile, prevKey = m.customProgramCacheKey;
-      m.onBeforeCompile = (shader, r) => { if (prev && prev !== THREE.Material.prototype.onBeforeCompile) prev.call(m, shader, r); patchFieldShader(shader, U); };
+      m.onBeforeCompile = (shader, r) => { if (prev && prev !== THREE.Material.prototype.onBeforeCompile) prev.call(m, shader, r); patchFieldShader(shader, ref.U); };
       m.customProgramCacheKey = () => 'daylight-field|' + (prevKey ? prevKey.call(m) : '');
       m.needsUpdate = true;
     }
