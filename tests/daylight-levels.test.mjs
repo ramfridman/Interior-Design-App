@@ -121,7 +121,8 @@ group('Massing between levels: the L0 north window under the upper storey');
   // the same ground floor as a one-storey house: what the north window sees of the sky
   const solo = B.buildPlan({ walls: DUPLEX.walls, openings: DUPLEX.openings, heights: DUPLEX.heights, meta: { name: 'Solo', ...META } }).plan;
   store.openProject({ basePlan: solo, phase: 'draft', design: { items: [], project: { ceilingHeight: 280 } } });
-  const Ssolo = D.buildScene(D.sceneInputFromPlan(PLAN, { doorsOpen: true })); const t0 = now(); const Vsolo = D.computeVisibility(Ssolo); const soloMs = now() - t0;
+  const Ssolo = D.buildScene(D.sceneInputFromPlan(PLAN, { doorsOpen: true })); const t0 = now(); const Vsolo = D.computeVisibility(Ssolo); let soloMs = now() - t0;
+  { const t1 = now(); D.computeVisibility(Ssolo); soloMs = Math.min(soloMs, now() - t1); }   // best of two (timing noise)
   // the floor patch 40 cm inside the window centre (plans are re-based by buildPlan: read the window's position)
   const winAt = () => { const o = PLAN.openings.find((q) => q.id === 'win-north'); return { x0: o.x / 100, x1: (o.x + o.w) / 100, plane: (o.y + o.h / 2) / 100, inner: (o.y + o.h) / 100 }; };
   const pick = (S, w = winAt()) => patchNear(S, (w.x0 + w.x1) / 2, 0, w.inner + 0.4, D.SURF.FLOOR);
@@ -157,8 +158,10 @@ group('Massing between levels: the L0 north window under the upper storey');
   const r0 = roomOfPoint(L0.S, 750, 300), r1 = roomOfPoint(Ob.S, 750, 300 + dz * 100);
   const m0 = mean(L0.S, floorOf(L0.S, r0), (p) => lum(lo0.outside, p * 3) + lum(lo0.indirect, p * 3)), m1 = mean(Ob.S, floorOf(Ob.S, r1), (p) => lum(lo1.outside, p * 3) + lum(lo1.indirect, p * 3));
   check('…and its room is darker under the overcast sky', m1 < m0 * 0.95, `${lux(m0)} → ${lux(m1)}`);
-  check('performance: two storeys ≈ 2 × one storey of visibility (≤ 2.6 ×)', (L0.ms + L1.ms) <= 2.6 * soloMs + 150,
-    `one storey ${soloMs.toFixed(0)} ms; Duplex L0 ${L0.ms.toFixed(0)} ms + L1 ${L1.ms.toFixed(0)} ms`);
+  const again = (S) => { const t1 = now(); D.computeVisibility(S); return now() - t1; };
+  const v0 = Math.min(L0.ms, again(L0.S)), v1 = Math.min(L1.ms, again(L1.S));
+  check('performance: two storeys ≈ 2 × one storey of visibility (≤ 2.6 ×, best of two runs each)', (v0 + v1) <= 2.6 * soloMs + 150,
+    `one storey ${soloMs.toFixed(0)} ms; Duplex L0 ${v0.toFixed(0)} ms + L1 ${v1.toFixed(0)} ms`);
 }
 
 group('Massing between levels: an upper window over a terrace sees the terrace as its ground');

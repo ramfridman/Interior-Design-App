@@ -239,10 +239,10 @@ export function createView3D(container, ctx) {
     const undoStudio = carpentry.beginFrame(camera, { env });   // carpentry 3D tab "Studio light": this render only
     renderer.render(scene, camera);
     if (undoStudio) undoStudio();
-    if (dlBusy) { dirty = true; schedule(); }
     interaction.renderOverlay(renderer);
     carpentry.update(camera, canvas);
     dirty = false;
+    if (dlBusy) { dirty = true; schedule(); }                         // daylight fade / adaptation running: next frame too (set after the reset above, or orbit fades stalled)
     stats.renderMs += (performance.now() - t0 - stats.renderMs) * 0.1;
     stats.frames++;
     if (!lastCam.equals(camera.matrixWorld)) { lastCam.copy(camera.matrixWorld); emit('camera', {}); }

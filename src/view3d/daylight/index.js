@@ -135,7 +135,9 @@ function patchLightmapShader(shader, U) {
       + 'float dlSunMask = mix(1.0, smoothstep(0.0, 0.2, dlTexel.a) * dlGlass, dlOn);\n' + begin)
     .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n' + indirect('dlOn', 'dlTexel.rgb * dlGain'));
 }
-function patchFieldShader(shader, U) {
+/** `outside`: the indoor test of the sun-through-glass factor is made 15 cm in front of the surface (like the field
+ *  lookup) instead of at it — for structure that also faces outdoors (an upper slab's edge band). */
+function patchFieldShader(shader, U, outside = false) {
   Object.assign(shader.uniforms, { dlFieldA: U.dlFieldA, dlFieldB: U.dlFieldB, dlFieldBox: U.dlFieldBox, dlFieldN: U.dlFieldN, dlFieldH: U.dlFieldH, dlLevelA: U.dlLevelA, dlLevelB: U.dlLevelB, dlLevels: U.dlLevels, dlMix: U.dlFieldMix, dlOn: U.dlOn, dlGain: U.dlGain, dlSpec: U.dlSpec, dlGlass: U.dlGlass });
   shader.vertexShader = FIELD_VERTEX_DECL + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
 	vec4 dlWp = vec4( transformed, 1.0 );
@@ -150,7 +152,7 @@ function patchFieldShader(shader, U) {
   const begin = THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );',
     'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= dlSunGlass;');
   shader.fragmentShader = COMMON_FRAG_DECL + FIELD_FRAG_DECL + shader.fragmentShader
-    .replace('#include <lights_fragment_begin>', 'float dlSunGlass = mix(1.0, dlGlass, dlOn * clamp(dlTap(dlFieldB, (vDlW.xz - dlFieldBox.xy) / dlFieldBox.z, 2.0, dlLevelOf(vDlW.y) * 2.0).a, 0.0, 1.0) * dlBelowTop(vDlW));\n' + begin)
+    .replace('#include <lights_fragment_begin>', `float dlSunGlass = mix(1.0, dlGlass, dlOn * clamp(dlTap(dlFieldB, (vDlW.xz${outside ? ' + inverseTransformDirection(normal, viewMatrix).xz * 0.15' : ''} - dlFieldBox.xy) / dlFieldBox.z, 2.0, dlLevelOf(vDlW.y) * 2.0).a, 0.0, 1.0) * dlBelowTop(vDlW));\n` + begin)
     .replace('#include <lights_fragment_maps>',
     '#include <lights_fragment_maps>\nvec4 dlF = dlField(vDlW, normalize(inverseTransformDirection(normal, viewMatrix)));\n' + indirect('dlOn * clamp(dlF.a, 0.0, 1.0) * dlBelowTop(vDlW)', 'dlF.rgb * dlGain'));
 }
@@ -389,8 +391,8 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
     return m;
   }
   /** Patch a (shared) material in place so it reads the irradiance field indoors. */
-  function fieldMaterial(material) {
-    const list = Array.isArray(material) ? material : [material];
+  function fieldMaterial(material, opts = {}) {
+    const list = Array.isArray(material) ? material : [material], outside = !!opts.outside;
     for (const m of list) {
       if (!m || !m.isMeshStandardMaterial || fieldPatched.has(m) || m.userData.daylightBase) continue;
       fieldPatched.add(m);
@@ -401,8 +403,8 @@ export function createDaylight({ ctx, renderer, scene, invalidate = () => {} }) 
       const ref = { U };
       FIELD_HOLDER.set(m, ref);
       const prev = m.onBeforeCompile, prevKey = m.customProgramCacheKey;
-      m.onBeforeCompile = (shader, r) => { if (prev && prev !== THREE.Material.prototype.onBeforeCompile) prev.call(m, shader, r); patchFieldShader(shader, ref.U); };
-      m.customProgramCacheKey = () => 'daylight-field|' + (prevKey ? prevKey.call(m) : '');
+      m.onBeforeCompile = (shader, r) => { if (prev && prev !== THREE.Material.prototype.onBeforeCompile) prev.call(m, shader, r); patchFieldShader(shader, ref.U, outside); };
+      m.customProgramCacheKey = () => 'daylight-field' + (outside ? '-out' : '') + '|' + (prevKey ? prevKey.call(m) : '');
       m.needsUpdate = true;
     }
     return material;

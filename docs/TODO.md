@@ -60,7 +60,8 @@ Order of work:
   - [x] F1 levels in the engine (`tests/levels.test.mjs`)
   - [x] F2 2D per level (`tests/levels-2d.test.mjs`, `tests/e2e.levels.mjs`) · [x] F3 3D stacking (`tests/levels-3d.test.mjs`)
   - [x] F4a stairs: geometry (straight / L / U), 3D model, regulation checks sourced from the Planning and Building Regulations (`tests/stairs.test.mjs`; guard heights are from a secondary source and reported as info)
-  - [ ] F4b stair tool in the plan [running] · F6 light simulation per floor [running] 
+  - [x] F6 light simulation on every floor, with light passing through stair openings (`tests/daylight-levels.test.mjs`)
+  - [ ] F4b stair tool in the plan [running] 
   - [x] F7 regulations, carpentry, checks, runs, budget per floor + Settings → Experimental → "Several floors (in development)" (`tests/levels-rules.test.mjs`)
   - [ ] later: F4 stairs · F5 walk across floors · F6 daylight per level · F7 regulations / carpentry per level · F8 import per floor
   - [x] A1 mixed derive (`tests/slants.test.mjs`)

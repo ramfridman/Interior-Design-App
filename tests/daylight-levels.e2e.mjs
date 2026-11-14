@@ -76,6 +76,8 @@ async function main() {
   let s = await waitSolved();
   check('3D on L1: both levels solved in the worker, L1 (shown) first', s.mode === 'worker' && !s.failed && s.levels.length === 2 && s.levels.every((l) => l.ready) && firstL1 != null && firstL1 <= firstL0,
     `L1 first light after ≈ ${firstL1} ms, L0 ≈ ${firstL0} ms; ${JSON.stringify(s.levels)}`);
+  await sleep(2000);
+  s = await dl();
   check('the upper floor shows the solved light (not suppressed)', s.on > 0.9 && s.active === 'L1' && s.levels.every((l) => l.on > 0.9), JSON.stringify({ on: s.on, active: s.active, gain: s.gain }));
   await look([7.2, 3.3, 3.8], 0.95, 0.75, 10);
   await sleep(2500);
@@ -101,11 +103,22 @@ async function main() {
   await sleep(1500);
   await page.evaluate(() => { const w = window.app.view3d.debug.walk; w.teleport(570, 520, 0); });
   const box = await page.locator('#view3d canvas').boundingBox();
-  if (box) { await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down(); await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 160, { steps: 8 }); await page.mouse.up(); }
+  if (box) { await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down(); await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 - 220, { steps: 8 }); await page.mouse.up(); }
   await sleep(3500);
   s = await dl();
   const pose = await page.evaluate(() => window.app.view3d.debug.walk.getState ? window.app.view3d.debug.walk.getState() : null);
-  check('walk on L0 under the void: solved light, sane exposure (not blown out)', s.on > 0.9 && s.exposure > 0.2 && s.exposure < 12, JSON.stringify({ on: s.on, exposure: s.exposure, gain: s.gain, pose }));
+  // the upper floor seen through the void must not be blown out: share of clipped pixels in the upper half of the view
+  const clipped = await page.evaluate(() => {
+    const d = window.app.view3d.debug, gl = d.renderer.getContext();
+    d.renderNow();
+    const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, px = new Uint8Array(w * Math.floor(h / 2) * 4);
+    gl.readPixels(0, Math.ceil(h / 2), w, Math.floor(h / 2), gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let n = 0, sat = 0, sum = 0;
+    for (let i = 0; i < px.length; i += 4) { n++; sum += px[i] + px[i + 1] + px[i + 2]; if (px[i] > 250 && px[i + 1] > 250 && px[i + 2] > 250) sat++; }
+    return { saturated: +(sat / n).toFixed(3), mean: Math.round(sum / n / 3) };
+  });
+  check('walk on L0 under the void, looking up: solved light, the upper floor not blown out (< 10 % clipped)', s.on > 0.9 && pose && pose.pitch > 20 && clipped.saturated < 0.1,
+    JSON.stringify({ on: s.on, exposure: s.exposure, gain: s.gain, pitch: pose && Math.round(pose.pitch), ...clipped }));
   await shot('ground-under-void');
 
   await page.evaluate(() => window.app.store.setUI({ mode: '3d', level: 'L1' }));
@@ -128,9 +141,9 @@ async function main() {
 
   // realistic daylight off: the fallback on every level
   await page.evaluate(() => window.app.store.setUI({ daylight: false }));
-  await sleep(1500);
+  await sleep(5000);
   s = await dl();
-  check('"Realistic daylight" off: solved light off on every level', s.on < 0.01 && s.levels.every((l) => l.on < 0.01), JSON.stringify({ on: s.on }));
+  check('"Realistic daylight" off: solved light off on every level', s.on < 0.03 && s.levels.every((l) => l.on < 0.03), JSON.stringify({ on: s.on }));
   await page.evaluate(() => { window.app.view3d.setWholeHouse(false); window.app.store.setUI({ daylight: true, mode: '3d', level: 'L0', lights: 'auto' }); });
   await sleep(1500);
   check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));

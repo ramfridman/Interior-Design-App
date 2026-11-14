@@ -624,7 +624,13 @@ function buildStorey(ctx, opts) {
     assign('wall:ext', exterior); assign('roof:ext', exterior);
     assign('wall:plinth', own.plinth); assign('wall:cap', own.cap); assign('wall:skirting', own.skirting);
     assign('roof:top', surfaceMaterial('roof')); assign('roof:coping', own.coping);
-    if (!ground) { assign('slab', exterior); assign('railing', own.railing); }
+    if (!ground) {
+      // the slab's void edges and the guard rail are seen from inside: with daylight they read the probe field (F6);
+      // the slab gets its own copy of the render (its outer band must keep the plain facade look: `outside` variant)
+      if (own.slabBase !== exterior) { if (own.slab) own.slab.dispose(); own.slab = exterior.clone(); own.slabBase = exterior; }
+      assign('slab', own.slab); assign('railing', own.railing);
+      if (daylight && daylight.fieldMaterial) { daylight.fieldMaterial(own.slab, { outside: true }); daylight.fieldMaterial(own.railing); }
+    }
     for (const room of plan.rooms) {
       assign('floor:' + room.id, floorMaterial(finishParams(ctx, room.id, 'floor')));
       assign('wall:room:' + room.id, wallMaterial(finishParams(ctx, room.id, 'wall')));
@@ -739,7 +745,7 @@ function buildStorey(ctx, opts) {
       for (const mesh of casterMeshes.values()) if (!mesh.userData.shared) mesh.geometry.dispose();
       meshes.clear(); casterMeshes.clear(); floorMeshes.length = 0;
       openings.dispose();
-      Object.values(own).forEach((m) => m.dispose());
+      Object.values(own).forEach((m) => m && m.dispose && m !== own.slabBase && m.dispose());
       if (!keepShared) disposeMaterials();
       group.clear();
     },
@@ -781,6 +787,8 @@ export function buildHouse(ctx) {
     study: !store.ui || store.ui.sunStudy !== false, doors: false,
   };
   let daylight = null, fakeShading = true;
+  /** Daylight hooks of one level: `dl.level(id)` (one solve per level, stage F6); a controller without it: L0 only. */
+  const hooksOf = (id) => (!daylight ? null : typeof daylight.level === 'function' ? daylight.level(id) : (id === GROUND ? daylight : null));
 
   const ids = () => levelIds(plan);
   const multi = () => ids().length > 1;
@@ -897,6 +905,7 @@ export function buildHouse(ctx) {
     if (stairsGroup) for (const m of [...stairsGroup.children]) { m.geometry.dispose(); stairsGroup.remove(m); }
     if (!all.length) return;
     if (!stairsGroup) { stairsGroup = new THREE.Group(); stairsGroup.name = 'house-stairs'; group.add(stairsGroup); stairMats = stairMaterials(); }
+    if (daylight) hooksOf(GROUND).patchTree(stairsGroup);               // stairs indoors read the daylight probe field (F6)
     for (const { st, id, i } of all) {
       const to = st.to && list.includes(st.to) ? st.to : (st.to ? null : list[i + 1]);
       if (!to) continue;
@@ -925,8 +934,6 @@ export function buildHouse(ctx) {
   syncStairs();
   applyView();
 
-  /** Daylight hooks of one level: `dl.level(id)` (one solve per level, stage F6); a controller without it: L0 only. */
-  const hooksOf = (id) => (!daylight ? null : typeof daylight.level === 'function' ? daylight.level(id) : (id === GROUND ? daylight : null));
   return {
     group,
     floorMeshes,
@@ -968,7 +975,7 @@ export function buildHouse(ctx) {
      * Attach / detach the daylight solver: `dl.level(id)` → that level's hooks { prepareMesh, lightmapMaterial,
      * fieldMaterial, patchTree } (every level is solved, stage F6); a `dl` without `level` attaches to L0 only.
      */
-    setDaylight(dl) { daylight = dl || null; for (const [id, rec] of storeys) rec.s.setDaylight(hooksOf(id)); },
+    setDaylight(dl) { daylight = dl || null; for (const [id, rec] of storeys) rec.s.setDaylight(hooksOf(id)); if (daylight && stairsGroup) hooksOf(GROUND).patchTree(stairsGroup); },
     /** Visit the interior meshes of every level (or of level `only`) — `fn(name, mesh, levelId)`. */
     forEachInterior(fn, only = null) { for (const [id, rec] of storeys) if (!only || only === id) rec.s.forEachInterior((name, mesh) => fn(name, mesh, id)); },
     /** Baked contact strips on / off — on every level, or on level `id` only (it shows solved light or not). */
