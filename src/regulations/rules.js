@@ -176,6 +176,8 @@ export const RULES = [
     'SI1142_SEC', 'SI 1142 (standard not open-access); heights as quoted in the article; see also docs/REGULATIONS.md §1.4', 'medium'),
   R('stair-geometry', STAIRS, 'best-practice', 'The stair as drawn', 'The stair must fit between its two floors: a whole number of risers, a landing between its first and last riser, a quarter landing at least as deep as the stair is wide, a floor above to arrive at.',
     'STAIRGEO', 'Geometry check (stairProblems)', 'high'),
+  R('item-in-void', STAIRS, 'best-practice', 'Furniture over an opening in the floor', 'Nothing can stand over the opening in a floor (the void over a stair): move the furniture onto the floor.',
+    'STAIRGEO', 'Placement check (item footprint against the voids of its floor)', 'high'),
 
   // ───────────── Safe room (Mamad) ─────────────
   R('mamad-area', MAMAD, 'regulation', 'Mamad area and volume', 'Net floor area ≥ 9 m² (walls excluded) and volume ≥ 22.5 m³.', 'HAGA', 'Reg. 197א(1)', 'high'),

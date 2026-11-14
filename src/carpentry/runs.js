@@ -16,7 +16,7 @@ import { validateCustomLayout, frontsToLayout } from './bespoke.js';
 import { toLocal } from './walls.js';
 import { PLAN } from '../core/plan.js';
 import { itemAABB, itemCorners, pointInPolygon, rectsOverlap } from '../core/geometry.js';
-import { runFootprint, doorSwingHit } from './checks.js';
+import { runFootprint, doorSwingHit, stairConflicts } from './checks.js';
 
 const L = (en, he) => ({ en, he });
 const FAIL = (en, he) => ({ ok: false, reason: L(en, he) });
@@ -116,9 +116,11 @@ function hardConflicts(run, draft, unitIds) {
     const g = geometryOf(run, u);
     return { id: u.id, level: levelOf(u), at: pos.get(u.id).at, w: u.carp.width, elev: g.elev, h: g.h, virtual: !!g.mod.virtual };
   });
-  return openingConflicts(run, list).filter((c) => c.code === 'door-crossing' || c.code === 'window-tall');
+  const stairs = stairConflicts(run, units.filter((u) => unitIds.includes(u.id))).map((c) => ({ code: 'stair', ...c }));   // stage F4b
+  return [...openingConflicts(run, list).filter((c) => c.code === 'door-crossing' || c.code === 'window-tall'), ...stairs];
 }
-const conflictReason = (c) => (c.code === 'door-crossing'
+const conflictReason = (c) => (c.code === 'stair' ? (c.kind === 'stair' ? L(`A unit cannot stand on the stair ${c.ref}.`, `ארון אינו יכול לעמוד על המדרגות ${c.ref}.`) : L(`A unit cannot stand over the opening in the floor (${c.ref}).`, `ארון אינו יכול לעמוד מעל הפתח ברצפה (${c.ref}).`))
+  : c.code === 'door-crossing'
   ? L(`A unit cannot cross the doorway ${c.opening.id}.`, `ארון אינו יכול לחסום את הפתח ${c.opening.id}.`)
   : L(`A tall unit cannot cover the window ${c.opening.id} (sill ${c.opening.sill} cm).`, `ארון גבוה אינו יכול לכסות את החלון ${c.opening.id} (אדן ${c.opening.sill} ס״מ).`));
 

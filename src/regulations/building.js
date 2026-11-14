@@ -2,7 +2,8 @@
  * Checks that depend only on the building and the lot (plan data + ceiling height + mamad wall finish).
  * Everything is computed from `plan` — no coordinates are hard-coded.
  */
-import { areaM2, pointInPolygon, polygonBounds, pointInRect, convexOverlap, edgeNormal, rectExtent, inWallOrOpening, openingFrame, openingPoint, openingPoly, wallPolys } from '../core/geometry.js';
+import { roomFloorArea } from '../core/levels.js';
+import { areaM2, polygonArea, pointInPolygon, polygonBounds, pointInRect, convexOverlap, edgeNormal, rectExtent, inWallOrOpening, openingFrame, openingPoint, openingPoly, wallPolys } from '../core/geometry.js';
 import { ruleById, refString } from './rules.js';
 import { m, num, planRev, rectPoly, wallObstacle, openingObstacle, freeDepth, largestInnerRect, narrowPassages, overshoot, segDist, polyInside } from './geom.js';
 
@@ -36,7 +37,8 @@ const openingArea = (o) => (o.width * o.height) / 1e4;
  * @returns {{ area, rect, width, windows, glazing, ratio }} area m², width cm (shorter side of the largest clear rectangle)
  */
 export function roomMetrics(plan, r) {
-  const area = areaM2(r.polygon);
+  // a void (the opening over a stair, stage F4b) is not floor: the room's area is its polygon less its voids
+  const area = Array.isArray(plan.voids) && plan.voids.length ? roomFloorArea(plan, r, polygonArea) / 1e4 : areaM2(r.polygon);
   const rect = largestInnerRect(r.polygon);
   const windows = roomGlazing(plan, r.id);
   const glazing = windows.reduce((s, o) => s + openingArea(o), 0);

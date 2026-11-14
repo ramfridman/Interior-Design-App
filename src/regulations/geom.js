@@ -9,7 +9,7 @@ export const cmStr = (cm) => `${Math.round(cm)} cm`;
 export const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 
 const REV = new WeakMap();
-const REV_KEYS = ['walls', 'openings', 'rooms', 'wallOutline', 'outdoorAreas', 'site', 'bounds', 'heights', 'assumptions', 'meta'];
+const REV_KEYS = ['walls', 'openings', 'rooms', 'wallOutline', 'outdoorAreas', 'site', 'bounds', 'heights', 'assumptions', 'meta', 'voids'];   // voids: stage F4b (absent on the ground floor)
 /**
  * Revision number of a plan, for caches. The `plan` object stays the same when the owner edits it — plan-edit.js
  * REPLACES `plan.walls / openings / rooms / wallOutline` with new arrays — so everything cached "per plan" must be

@@ -113,10 +113,14 @@ function mergeGrouped(soups) {
  * The soups (treads, body, rails) of one stair, in metres relative to its bottom level.
  * @param {object} stair  the stair data
  * @param {object} geo    stairGeometry(stair, { rise })
- * @param {{ sides?: object[], underside?: number }} opts  sides = stairSides(...); underside = the upper slab's
- *        underside above the lower floor (cm) — the arrival riser is drawn only below it
+ * @param {{ sides?: object[], underside?: number, slabEdge?: (out: [x, y], inside: [x, y]) => boolean }} opts
+ *        sides = stairSides(...); underside = the upper slab's underside above the lower floor (cm) — the arrival riser is
+ *        drawn only below it; slabEdge (stage F4b): true where the floor above runs beside the stair (`out`, 5 cm outside
+ *        a side) with the void's guard rail along its edge (`inside`, 5 cm inside it is in a railed void). An open side's
+ *        guard stops where its top meets the slab there: from that point on the slab edge and the void railing on it are
+ *        the guard — one continuous railing instead of two running side by side at the top of the stair.
  */
-export function stairSoups(stair, geo, { sides = [], underside = Infinity } = {}) {
+export function stairSoups(stair, geo, { sides = [], underside = Infinity, slabEdge = null } = {}) {
   const treads = new Soup(), body = new Soup(), rail = new Soup();
   const R = geo.riser, G = geo.going, W = geo.width, nosing = Number.isFinite(stair.nosing) ? Math.max(0, stair.nosing) : 3;
   geo.flights.forEach((f, fi) => {
@@ -147,7 +151,9 @@ export function stairSoups(stair, geo, { sides = [], underside = Infinity } = {}
     prism(treads, l.poly, l.h - TREAD_T, l.h);
   }
   // handrails and guards
-  for (const sd of sides) {
+  for (const side of sides) {
+    const sd = side.wall || !slabEdge ? side : guardUntilSlab(side, slabEdge, underside);
+    if (!sd) continue;
     const L = Math.hypot(sd.b[0] - sd.a[0], sd.b[1] - sd.a[1]);
     if (L < 1) continue;
     const u = [(sd.b[0] - sd.a[0]) / L, (sd.b[1] - sd.a[1]) / L], inward = mul(sd.outward, -1);
@@ -176,6 +182,27 @@ export function stairSoups(stair, geo, { sides = [], underside = Infinity } = {}
     }
   }
   return { treads, body, rail };
+}
+
+/**
+ * An open side cut where the guard meets the floor above: the part of the side (from its low end) up to the first point
+ * where the guard top reaches the slab underside AND the floor above runs beside it with its void railing. null when
+ * nothing of the side is left; the side itself when the slab never takes over.
+ */
+function guardUntilSlab(sd, slabEdge, underside) {
+  const L = Math.hypot(sd.b[0] - sd.a[0], sd.b[1] - sd.a[1]);
+  if (!(L > 1) || !Number.isFinite(underside)) return sd;
+  const rising = sd.hb >= sd.ha, u = [(sd.b[0] - sd.a[0]) / L, (sd.b[1] - sd.a[1]) / L];
+  const at = (x) => add(sd.a, mul(u, x)), pitch = (x) => sd.ha + ((sd.hb - sd.ha) * x) / L;
+  const covered = (x) => pitch(x) + GUARD_H >= underside - 0.5 && slabEdge(add(at(x), mul(sd.outward, 5)), add(at(x), mul(sd.outward, -5)));
+  const n = Math.max(2, Math.ceil(L / 2));
+  for (let i = 0; i <= n; i++) {
+    const t = rising ? (L * i) / n : L - (L * i) / n;                     // from the low end up
+    if (!covered(t)) continue;
+    if (rising) return t < 5 ? null : { ...sd, b: at(t), hb: pitch(t) };
+    return L - t < 5 ? null : { ...sd, a: at(t), ha: pitch(t) };
+  }
+  return sd;
 }
 
 /**

@@ -175,7 +175,7 @@ group('Wedge (tests/fixtures/houses.mjs)');
   const s02 = byId.s02, door = WEDGE.openings[1];
   const L2 = sideSpace(s02, door.at, 'l'), R2 = sideSpace(s02, door.at, 'r');
   check('door in s02 joins the NW triangle (l) and the west room (r)', L2 >= 0 && R2 >= 0 && near(rooms[L2].area, Math.abs(K.area(tri)), 1) && near(rooms[R2].area, Math.abs(K.area(west)), 1));
-  check('Duplex fixture present (data only, used from F1 on)', DUPLEX.levels.length === 1 && DUPLEX.levels[0].elevation === 300 && DUPLEX.expect.l1EastRoomFloorArea === 670 * 760 - 100 * 374);
+  check('Duplex fixture present (data only, used from F1 on)', DUPLEX.levels.length === 1 && DUPLEX.levels[0].elevation === 300 && DUPLEX.expect.l1EastRoomFloorArea === 670 * 760 - 100 * 404);
 }
 function interiorOf(poly) { const c = poly.reduce((s, p) => [s[0] + p[0] / poly.length, s[1] + p[1] / poly.length], [0, 0]); return c; }
 

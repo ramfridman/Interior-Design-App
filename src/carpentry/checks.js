@@ -4,7 +4,10 @@
  * Errors = cannot be built / installed as drawn; warnings = against best practice; info = notes for the designer.
  */
 import { PLAN } from '../core/plan.js';
-import { itemAABB, openingHinge } from '../core/geometry.js';
+import { itemAABB, openingHinge, itemCorners } from '../core/geometry.js';
+import { allStairs, stairInfo } from '../core/plan-edit.js';
+import { voidsOf } from '../core/levels.js';
+import { intersectArea } from '../core/polykernel.js';
 import { view, planOf, ceilingOf, runLevel, itemFloor } from './state.js';
 import { RULES } from './spec.js';
 import { unitsOf, positions, geometryOf, unitCodes, isFloorLevel } from './layout.js';
@@ -267,6 +270,11 @@ function findingsFor(run, v) {
     const hits = list.filter((x) => !x.virtual && x.elev < (o.height || 210) && itemHitsSwing(x.u, sw));
     if (hits.length) add('error', 'door-swing', `The door ${o.id} swings into ${hits.map(C).join(', ')}.`, `הדלת ${o.id} נפתחת לתוך ${hits.map(C).join(', ')}.`, hits);
   }
+  for (const c of stairConflicts(run, list.filter((x) => !x.virtual).map((x) => x.u))) {
+    const x = list.find((y) => y.id === c.id);
+    add('error', 'stair', c.kind === 'stair' ? `${C(x)} stands on the stair ${c.ref}.` : `${C(x)} stands over the opening in the floor (${c.ref}).`,
+      c.kind === 'stair' ? `${C(x)} עומד על המדרגות ${c.ref}.` : `${C(x)} עומד מעל הפתח ברצפה (${c.ref}).`, [x]);
+  }
   for (const it of others) {
     if (it.carp) continue;
     const bb = itemAABB(it), lo = it.elev || 0, hi = lo + (it.h || 0);
@@ -381,4 +389,26 @@ export function checkRun(runId = 'all', src) {
   const runs = runId === 'all' ? v.runs() : [v.run(runId)].filter(Boolean);
   const order = { error: 0, warning: 1, info: 2 };
   return runs.flatMap((r) => findingsFor(r, v)).sort((a, b) => order[a.severity] - order[b.severity]);
+}
+
+/**
+ * Units that stand on a stair of the run's floor or over an opening in that floor (stage F4b): the existing clash check
+ * extended to stairs. `units` = unit items. @returns {Array<{ id, kind: 'stair' | 'void', ref }>}
+ */
+export function stairConflicts(run, units) {
+  const floor = runLevel(run), plan = planOf(run), shapes = [];
+  for (const { stair, levelId } of allStairs()) {
+    if (levelId !== floor) continue;
+    const info = stairInfo(stair.id);
+    if (info && info.geo && info.geo.footprint.length >= 3) shapes.push({ kind: 'stair', ref: stair.id, poly: info.geo.footprint });
+  }
+  for (const v of voidsOf(plan)) shapes.push({ kind: 'void', ref: v.id, poly: v.polygon });
+  if (!shapes.length) return [];
+  const out = [];
+  for (const u of units) {
+    if (!u || u.hidden) continue;
+    const c = itemCorners(u), hit = shapes.find((sh) => intersectArea([c], [sh.poly]) > 1);
+    if (hit) out.push({ id: u.id, kind: hit.kind, ref: hit.ref });
+  }
+  return out;
 }

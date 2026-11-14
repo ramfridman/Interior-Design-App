@@ -45,7 +45,7 @@ import { floorMaterial, wallMaterial, surfaceMaterial, disposeMaterials } from '
 import { Soup, buildOpenings, openingFrame, mergeSoups, casterMaterial, casterMesh } from './openings.js';
 import { levelIds, levelElevation, levelHeights, footprintOf, GROUND } from '../core/levels.js';
 import { levelPlan } from '../core/plan-edit.js';
-import { difference, offset, union } from '../core/polykernel.js';
+import { difference, offset, union, pointInPolys } from '../core/polykernel.js';
 import { stairArrivalDir, stairGeometry, stairSides } from '../core/stairs.js';
 import { buildStairMesh, stairMaterials } from './stairs.js';
 
@@ -902,10 +902,17 @@ export function buildHouse(ctx) {
       if (!to) continue;
       const rise = levelElevation(plan, to) - levelElevation(plan, id), geo = stairGeometry(st, { rise });
       if (!geo) continue;
-      const mesh = buildStairMesh(st, geo, stairMats, { sides: stairSides(st, geo, viewOf(id)), underside: rise - (levelHeights(plan, to).slab || 0), levelId: id });
+      const mesh = buildStairMesh(st, geo, stairMats, { sides: stairSides(st, geo, viewOf(id)), underside: rise - (levelHeights(plan, to).slab || 0), levelId: id, slabEdge: slabEdgeOf(viewOf(to)) });
       mesh.position.y = elevationOf(id);
       stairsGroup.add(mesh);
     }
+  }
+  /** Stage F4b: where the floor of `up` runs beside a stair with its void railing (the stair's guard stops there). */
+  function slabEdgeOf(up) {
+    const fp = footprintOf(up).polygons, voids = (up.voids || []).filter((v) => v && Array.isArray(v.polygon) && v.polygon.length >= 3);
+    const railed = voids.filter((v) => v.railing !== false);
+    if (!railed.length || !fp.length) return null;
+    return (out, inside) => !!pointInPolys(out[0], out[1], fp) && !voids.some((v) => pointInPolygon(out[0], out[1], v.polygon)) && railed.some((v) => pointInPolygon(inside[0], inside[1], v.polygon));
   }
   /** A stair belongs to its bottom level and is shown with it (so also while a level above it is the one shown). */
   function applyStairsView() {

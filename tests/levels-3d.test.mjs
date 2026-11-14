@@ -124,11 +124,11 @@ open(DUPLEX_PLAN);
   check('levels(): y / wall top / roof top', L.length === 2 && near(L[1].y, 3) && near(L[1].wallTop, 5.8) && near(L[1].top, 6.4) && near(L[0].wallTop, 2.8), JSON.stringify(L));
   const slab = meshOf(house, 'L1', 'slab'), sb = boundsOf(g1, (n) => n === 'slab');
   const slabArea = slab ? flatArea(slab, -1) : 0;
-  check('slab under L1: 2.80 → 3.00, area = footprint − void (1000×800 − 100×374 cm²)', slab && near(sb.min.y, 2.8) && near(sb.max.y, 3) && near(slabArea, 1000 * 800 - 100 * 374, 1), `${slabArea.toFixed(1)} cm²`);
-  check('slab volume = (footprint − void) × 0.20 m', near(slabArea / 1e4 * 0.2, (80 - 3.74) * 0.2, 1e-4), (slabArea / 1e4 * 0.2).toFixed(4) + ' m³');
+  check('slab under L1: 2.80 → 3.00, area = footprint − void (1000×800 − 100×404 cm²)', slab && near(sb.min.y, 2.8) && near(sb.max.y, 3) && near(slabArea, 1000 * 800 - 100 * 404, 1), `${slabArea.toFixed(1)} cm²`);
+  check('slab volume = (footprint − void) × 0.20 m', near(slabArea / 1e4 * 0.2, (80 - 4.04) * 0.2, 1e-4), (slabArea / 1e4 * 0.2).toFixed(4) + ' m³');
   const fl = PLAN.levels[0].rooms.map((r) => meshOf(house, 'L1', 'floor:' + r.id)).reduce((s, m) => s + flatArea(m, 1), 0);
   const rooms1 = PLAN.levels[0].rooms.reduce((s, r) => s + Math.abs(r.polygon.reduce((a, p, i) => { const b = r.polygon[(i + 1) % r.polygon.length]; return a + p[0] * b[1] - b[0] * p[1]; }, 0)) / 2, 0);
-  check('L1 floor finish has the void hole (rooms + the 90 × 10 door threshold − 100×374)', near(fl, rooms1 + 900 - 100 * 374, 1), `${fl} vs ${rooms1 + 900 - 100 * 374}`);
+  check('L1 floor finish has the void hole (rooms + the 90 × 10 door threshold − 100×404)', near(fl, rooms1 + 900 - 100 * 404, 1), `${fl} vs ${rooms1 + 900 - 100 * 404}`);
   const ceil0 = meshOf(house, 'L0', 'ceilings');
   check('L0 ceiling is open under the void', ceil0 && !ceil0.geometry.attributes.position.array.some(() => false) && (() => {
     const p = ceil0.geometry.attributes.position, idx = ceil0.geometry.index.array;
@@ -138,7 +138,7 @@ open(DUPLEX_PLAN);
   const r0 = meshOf(house, 'L0', 'roof:top'), r1 = meshOf(house, 'L1', 'roof:top');
   check('roof only over the top level (L1 covers all of L0)', (!r0 || !r0.visible || !r0.geometry.index.count) && r1 && r1.visible && near(flatArea(r1, 1), 1000 * 800, 1), r1 ? flatArea(r1, 1).toFixed(0) : 'none');
   const rb = boundsOf(g1, (n) => n === 'railing'), rail = meshOf(house, 'L1', 'railing');
-  check('railing all round the void (no stair): 1.05 m high, 5 cm onto the floor', rail && near(rb.min.y, 3) && near(rb.max.y, 4.05) && near(rb.min.x, 5.15 - 0.025, 1e-3) && near(rb.max.x, 6.25 + 0.025, 1e-3) && near(rb.min.z, 2.61 - 0.025, 1e-3) && near(rb.max.z, 6.45 + 0.025, 1e-3),
+  check('railing all round the void (no stair): 1.05 m high, 5 cm onto the floor', rail && near(rb.min.y, 3) && near(rb.max.y, 4.05) && near(rb.min.x, 5.15 - 0.025, 1e-3) && near(rb.max.x, 6.25 + 0.025, 1e-3) && near(rb.min.z, 2.61 - 0.025, 1e-3) && near(rb.max.z, 6.75 + 0.025, 1e-3),
     `x ${rb.min.x.toFixed(3)}..${rb.max.x.toFixed(3)} z ${rb.min.z.toFixed(3)}..${rb.max.z.toFixed(3)} y ${rb.min.y}..${rb.max.y}`);
   // view per level
   house.setLevel('L0');
@@ -161,7 +161,7 @@ group('Duplex with its stair: the arrival edge of the void stays open');
   open(plan);
   const house = buildHouse({ store, plan: PLAN, catalog });
   const rb = boundsOf(house.group.getObjectByName('level:L1'), (n) => n === 'railing');
-  check('no rail along the north edge (y 266), rails on the other three', near(rb.min.z, 2.66, 1e-3) && near(rb.max.z, 6.45 + 0.025, 1e-3), `z ${rb.min.z.toFixed(3)}..${rb.max.z.toFixed(3)}`);
+  check('no rail along the north edge (y 266), rails on the other three', near(rb.min.z, 2.66, 1e-3) && near(rb.max.z, 6.75 + 0.025, 1e-3), `z ${rb.min.z.toFixed(3)}..${rb.max.z.toFixed(3)}`);
   house.dispose();
 }
 

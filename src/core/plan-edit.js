@@ -927,7 +927,7 @@ export function levelPlan(plan = PLAN, id = activeLevel()) {
   v.site = plan.site; v.assumptions = plan.assumptions;
   if (lv.slants) v.slants = lv.slants; else delete v.slants;
   if (lv.stairs) v.stairs = lv.stairs; else delete v.stairs;
-  v.voids = lv.voids || v.voids || [];
+  v.voids = lv.voids || (Array.isArray(v.voids) && !v.voids.length ? v.voids : []);   // never a removed level's old voids (F4b)
   v.levelId = lv.id; v.elevation = lv.elevation;
   return v;
 }
@@ -2568,6 +2568,519 @@ function updateLevelImpl(id, patch, opts) {
   return { ok: true, level: permit ? 'permit' : 'free', warnings: permit ? [REASONS.level] : [], ids: [id] };
 }
 
+// ---------------------------------------------------------------- stairs and voids (stage F4b)
+/*
+ * A stair is stored on its bottom level (PLAN.stairs for L0, levels[i].stairs above) with its data fields only
+ * (core/stairs.js); everything else is derived from stairGeometry. The opening it needs in the floor above (a void of
+ * the upper level, `{ id, polygon, stair, railing }`) is created / grown by these calls: never smaller than the part of
+ * the stair where the upper slab would leave less than 2.10 m headroom (requiredVoid), its free edges rounded OUT to the
+ * 5 cm grid (edges flush with the stair's own sides / arrival stay exact). A void the user enlarged stays enlarged.
+ * Every call is one undo step + one 'plan' event (changed.stairs, changed.levels), a tracked collaboration intent, and
+ * 'permit' in a fixed plan (free while drafting). Rooms keep their outline; `room.voids` says which voids cut their floor.
+ */
+const STAIR_TOL = 1;               // cm² — overlaps smaller than this are touching, not crossing
+const COVER_TOL = 2;               // cm² — an opening covers what a stair needs up to this (kernel rounding)
+const AUTO_TOL = 60;               // cm² — an opening this close to what its stair needs was made for it (not enlarged)
+const VOID_GRID = 5;               // cm — free void edges are rounded out to this grid
+const ARRIVAL_CLEAR = 30;          // cm of floor that must be free beyond the top step
+/** The stair fields a caller may set (everything else is derived). */
+const STAIR_INPUT = ['shape', 'x', 'y', 'rot', 'width', 'risers', 'going', 'landing', 'turn', 'gap', 'nosing', 'guard', 'handrail'];
+const STAIR_DATA = ['id', 'to', ...STAIR_INPUT];
+const normRot = (r) => (((Math.round((num(r) ? r : 0) / 90) * 90) % 360) + 360) % 360;
+const stairsOn = (plan, id) => { const lv = levelOf(plan, id); return lv && Array.isArray(lv.stairs) ? lv.stairs : []; };
+const stairsOf = (plan) => levelIds(plan).flatMap((id) => stairsOn(plan, id).filter((s) => s && typeof s.id === 'string').map((stair) => ({ stair, levelId: id })));
+const stairHolder = (id) => stairsOf(PLAN).find((x) => x.stair.id === id) || null;
+function voidHolder(id) {
+  for (const lid of levelIds(PLAN)) { const v = voidsOf(levelOf(PLAN, lid)).find((x) => x.id === id); if (v) return { void: v, levelId: lid }; }
+  return null;
+}
+const levelAboveId = (id) => { const ids = levelIds(PLAN), i = ids.indexOf(id); return i >= 0 && i < ids.length - 1 ? ids[i + 1] : null; };
+/** The level a stair arrives at (`to`, else the level above its own), or null. */
+function stairTarget(stair, levelId) {
+  const ids = levelIds(PLAN);
+  if (stair.to == null) return levelAboveId(levelId);
+  return ids.includes(stair.to) && ids.indexOf(stair.to) > ids.indexOf(levelId) ? stair.to : null;
+}
+const floorName = (id) => levelName(PLAN, id) || id;
+const lowerFirst = (t) => t.charAt(0).toLowerCase() + t.slice(1);
+/** Next free id 'p<n>' over the live and the base plan (an id of a removed base stair is not re-used). */
+function nextId(prefix, ids) {
+  let n = 0;
+  for (const id of ids) { const m = new RegExp(`^${prefix}(\\d+)$`).exec(id); if (m) n = Math.max(n, +m[1]); }
+  return prefix + (n + 1);
+}
+const newStairId = () => nextId('st', [...stairsOf(PLAN), ...stairsOf(BASE_PLAN)].map((x) => x.stair.id));
+const allVoids = (plan) => levelIds(plan).flatMap((id) => voidsOf(levelOf(plan, id)).map((v) => ({ void: v, levelId: id })));
+const newVoidId = () => nextId('v', [...allVoids(PLAN), ...allVoids(BASE_PLAN)].map((x) => x.void.id));
+
+/** The stored shape of a stair: its data fields with the defaults of its shape (derived fields are never stored). */
+function cleanStair(s) {
+  const shape = STAIR_SHAPES.includes(s.shape) ? s.shape : 'straight';
+  const out = { id: s.id };
+  if (s.to != null) out.to = s.to;
+  Object.assign(out, { shape, x: r01(num(s.x) ? s.x : 0), y: r01(num(s.y) ? s.y : 0), rot: normRot(s.rot), width: s.width, risers: s.risers, going: s.going });
+  const L = s.landing && typeof s.landing === 'object' ? s.landing : null;
+  if (shape !== 'straight') {
+    out.landing = { at: L && num(L.at) ? L.at : Math.ceil(s.risers / 2), size: L && num(L.size) ? L.size : s.width };
+    out.turn = s.turn === 'left' ? 'left' : 'right';
+    if (shape === 'U' && num(s.gap) && s.gap > 0) out.gap = s.gap;
+  } else if (L) out.landing = { at: L.at, size: L.size };
+  if (num(s.nosing)) out.nosing = s.nosing;
+  for (const k of ['guard', 'handrail']) if (typeof s[k] === 'boolean') out[k] = s[k];
+  return out;
+}
+/** Data fields only, for comparisons (a loaded stair may carry derived fields such as `up` or `footprint`). */
+const stairData = (s) => { const o = {}; for (const k of STAIR_DATA) if (s[k] !== undefined) o[k] = s[k]; return o; };
+
+const segShape = (g) => (g.axis === 'a' && Array.isArray(g.poly) ? { poly: g.poly } : { x: g.x, y: g.y, w: g.w, h: g.h });
+/** The floor of a level view: its rooms, less its voids (except those of `skipStair`). */
+function floorOf(view, skipStair = null) {
+  const rooms = (view.rooms || []).filter((r) => Array.isArray(r.polygon) && r.polygon.length >= 3).map((r) => r.polygon);
+  if (!rooms.length) return [];
+  const all = polyUnion(rooms), cut = voidsOf(view).filter((v) => !skipStair || v.stair !== skipStair).map((v) => v.polygon);
+  return cut.length ? polyDifference(all, cut) : all;
+}
+const roomsOf = (view) => { const rooms = (view.rooms || []).filter((r) => Array.isArray(r.polygon) && r.polygon.length >= 3).map((r) => r.polygon); return rooms.length ? polyUnion(rooms) : []; };
+const piecesOf = (geo) => [...geo.flights.filter((f) => f.length > 1e-6).map((f) => f.poly), ...geo.landings.map((l) => l.poly)];
+const sameRegion = (a, b) => netArea(a.length ? polyDifference(a, b.length ? b : []) : []) + netArea(b.length ? polyDifference(b, a.length ? a : []) : []) <= AUTO_TOL;
+const ringsOfEx = (ex) => ex.map((e) => e.outer);
+
+/**
+ * Round the free edges of an orthogonal ring OUT to the 5 cm grid (edges whose coordinate is in `keepX` / `keepY` — the
+ * stair's own sides and arrival — stay exact). A ring with a slanted edge is returned as it is.
+ */
+function snapRingOut(ring, keepX, keepY) {
+  const n = ring.length;
+  let a2 = 0;
+  for (let i = 0; i < n; i++) { const p = ring[i], q = ring[(i + 1) % n]; a2 += p[0] * q[1] - q[0] * p[1]; }
+  const sg = Math.sign(a2) || 1, has = (set, v) => [...set].some((k) => Math.abs(k - v) < 1e-3);
+  const ex = new Array(n), ey = new Array(n);                                   // snapped coordinate of edge i (or null)
+  for (let i = 0; i < n; i++) {
+    const p = ring[i], q = ring[(i + 1) % n], dx = q[0] - p[0], dy = q[1] - p[1];
+    if (Math.abs(dx) < 1e-6 && Math.abs(dy) > 1e-6) {                           // vertical edge at x
+      const out = sg * dy > 0 ? 1 : -1, x = p[0];
+      ex[i] = has(keepX, x) ? x : out > 0 ? Math.ceil(x / VOID_GRID - 1e-6) * VOID_GRID : Math.floor(x / VOID_GRID + 1e-6) * VOID_GRID;
+    } else if (Math.abs(dy) < 1e-6 && Math.abs(dx) > 1e-6) {                    // horizontal edge at y
+      const out = -sg * dx > 0 ? 1 : -1, y = p[1];
+      ey[i] = has(keepY, y) ? y : out > 0 ? Math.ceil(y / VOID_GRID - 1e-6) * VOID_GRID : Math.floor(y / VOID_GRID + 1e-6) * VOID_GRID;
+    } else return ring;
+  }
+  return ring.map((p, i) => {
+    const prev = (i - 1 + n) % n;
+    const x = ex[i] != null ? ex[i] : ex[prev] != null ? ex[prev] : p[0];
+    const y = ey[i] != null ? ey[i] : ey[prev] != null ? ey[prev] : p[1];
+    return [x, y];
+  });
+}
+/** A void outline in its stored form: 0.001 cm (the kernel's unit), clockwise on screen, from its north-west-most corner. */
+const r001 = (v) => Math.round(v * 1000) / 1000 + 0;
+function voidRing(ring) {
+  let r = ring.map((p) => [r001(p[0]), r001(p[1])]);
+  r = r.filter((p, i) => { const q = r[(i + 1) % r.length]; return p[0] !== q[0] || p[1] !== q[1]; });
+  let a2 = 0;
+  for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a2 += p[0] * q[1] - q[0] * p[1]; }
+  if (a2 < 0) r.reverse();
+  let k = 0;
+  r.forEach((p, i) => { if (p[1] < r[k][1] || (p[1] === r[k][1] && p[0] < r[k][0])) k = i; });
+  return [...r.slice(k), ...r.slice(0, k)];
+}
+/** One outline for a region (expolygons): itself when it is one piece, else the box round it clipped to `clip`. */
+function oneRing(ex, clip) {
+  const pieces = ex.filter((e) => e.outer.length >= 3 && Math.abs(netArea([e])) > STAIR_TOL);
+  if (!pieces.length) return null;
+  if (pieces.length === 1) return voidRing(pieces[0].outer);
+  const xs = pieces.flatMap((e) => e.outer.map((p) => p[0])), ys = pieces.flatMap((e) => e.outer.map((p) => p[1]));
+  const box = [[Math.min(...xs), Math.min(...ys)], [Math.max(...xs), Math.min(...ys)], [Math.max(...xs), Math.max(...ys)], [Math.min(...xs), Math.max(...ys)]];
+  const inside = clip && clip.length ? polyIntersection([box], clip) : [{ outer: box, holes: [] }];
+  const best = inside.slice().sort((a, b) => Math.abs(netArea([b])) - Math.abs(netArea([a])))[0];
+  return best ? voidRing(best.outer) : null;
+}
+
+/** Rise, geometry, the level above and the opening a stair needs there (no refusals): null when it cannot be built. */
+function stairSetup(stair, levelId) {
+  const to = stairTarget(stair, levelId);
+  if (!to) return null;
+  const rise = levelElevation(PLAN, to) - levelElevation(PLAN, levelId);
+  const geo = rise > 0 && !stairProblems(stair, null, { rise }).length ? stairGeometry(stair, { rise }) : null;
+  if (!geo || geo.footprint.length < 3) return null;
+  const up = levelPlan(PLAN, to), underside = rise - ((levelHeights(PLAN, to) || {}).slab || 0);
+  const req = requiredVoid(stair, geo, { slabUnderside: underside });
+  const upFp = req.length ? footprintOf(up).polygons : [];
+  const reqIn = upFp.length ? polyIntersection(req, upFp) : [];
+  let need = [];
+  if (netArea(reqIn) > STAIR_TOL) {
+    const keepX = new Set(), keepY = new Set();
+    for (const poly of piecesOf(geo)) for (const p of poly) { keepX.add(Math.round(p[0] * 1e3) / 1e3); keepY.add(Math.round(p[1] * 1e3) / 1e3); }
+    const snapped = polyUnion(ringsOfEx(reqIn).map((r) => snapRingOut(r, keepX, keepY)));
+    const rooms = roomsOf(up);
+    need = rooms.length ? polyIntersection(snapped, rooms) : [];
+  }
+  return { to, rise, geo, up, underside, req, reqIn, need };
+}
+
+/**
+ * Can this stair stand on level `levelId`? `{ ok: true, setup }` or `{ ok: false, reason, code }`. Codes: 'no-level-above',
+ * 'problems' (stairProblems), 'opening', 'wall', 'outside', 'stair' (overlaps another stair), 'arrival', 'locked' (its
+ * opening would cut a locked wall of the floor above), 'upper-wall' (… another wall up there).
+ */
+function stairFits(stair, levelId, ignoreId = null) {
+  const to = stairTarget(stair, levelId);
+  if (!to) return { ok: false, code: 'no-level-above', reason: stair.to != null && levelAboveId(levelId) ? `There is no floor ${stair.to} above ${lowerFirst(floorName(levelId))}.` : `A stair needs a floor above it — the ${lowerFirst(floorName(levelId))} is the top floor. Add a floor above first.` };
+  const rise = levelElevation(PLAN, to) - levelElevation(PLAN, levelId);
+  const problems = stairProblems(stair, null, { rise });
+  if (problems.length) return { ok: false, code: 'problems', reason: problems[0].en, problems };
+  const setup = stairSetup(stair, levelId);
+  if (!setup) return { ok: false, code: 'problems', reason: 'The stair cannot be built from these numbers.' };
+  const { geo, up } = setup, view = levelPlan(PLAN, levelId), pieces = piecesOf(geo);
+  const opens = view.openings.filter((o) => o.axis !== 'a' && num(o.x));
+  if (opens.length && intersectArea(pieces, opens) > STAIR_TOL) return { ok: false, code: 'opening', reason: 'The stair would stand in a doorway or a window — move it clear of the openings.' };
+  const solids = wallSegments(view).map(segShape);
+  if (solids.length && intersectArea(pieces, solids) > STAIR_TOL) return { ok: false, code: 'wall', reason: 'The stair would run into a wall — move it clear of the walls.' };
+  const floor = floorOf(view);
+  if (!floor.length || netArea(polyDifference(pieces, floor)) > STAIR_TOL) return { ok: false, code: 'outside', reason: `The stair must stand inside the house, on the floor of the ${lowerFirst(floorName(levelId))}${voidsOf(view).length ? ' (not over an opening)' : ''}.` };
+  for (const other of stairsOn(PLAN, levelId)) {
+    if (other.id === ignoreId) continue;
+    const og = stairSetup(other, levelId);
+    if (og && intersectArea(pieces, piecesOf(og.geo)) > STAIR_TOL) return { ok: false, code: 'stair', reason: `The stair would overlap stair ${other.id}.` };
+  }
+  // the top step must arrive on floor of the level above (not against a wall, not over an opening, not outside)
+  const a = geo.arrival, d = a.dir, probe = [a.a, a.b, [a.b[0] + d[0] * ARRIVAL_CLEAR, a.b[1] + d[1] * ARRIVAL_CLEAR], [a.a[0] + d[0] * ARRIVAL_CLEAR, a.a[1] + d[1] * ARRIVAL_CLEAR]];
+  const upSegs = wallSegments(up), upFloor = floorOf(up, stair.id);
+  if ((upSegs.length && intersectArea([probe], upSegs.map(segShape)) > STAIR_TOL) || !upFloor.length || netArea(polyDifference([probe], upFloor)) > STAIR_TOL) {
+    return { ok: false, code: 'arrival', reason: `The top of the stair would arrive against a wall, over an opening or outside the ${lowerFirst(floorName(to))} — leave at least ${ARRIVAL_CLEAR} cm of floor beyond its last step.` };
+  }
+  // the opening it needs up there must not cut a wall (a locked one names its reason)
+  if (netArea(setup.reqIn) > STAIR_TOL) {
+    const hit = upSegs.filter((g) => intersectArea(setup.reqIn, [segShape(g)]) > STAIR_TOL);
+    if (hit.length) {
+      const locked = hit.find((g) => g.policy.level === 'locked');
+      const what = `The opening the stair needs in the floor of the ${lowerFirst(floorName(to))} (for ${(DEFAULT_HEADROOM_CM / 100).toFixed(2)} m headroom)`;
+      return locked ? { ok: false, code: 'locked', reason: `${what} would cut a locked wall there. ${locked.policy.reason}` }
+        : { ok: false, code: 'upper-wall', reason: `${what} would cut a wall there — move the stair, or move that wall first.` };
+    }
+  }
+  return { ok: true, setup };
+}
+const DEFAULT_HEADROOM_CM = 210;
+
+/**
+ * The voids of the upper level after `stair` was added / changed (`old` = { stair, levelId } before, or null): its own
+ * void follows it — replaced by the new requirement while it is exactly what the old stair needed, else (enlarged by the
+ * user) moved with the stair and grown where it no longer covers. A plain void it overlaps is adopted.
+ * @returns {{ list, voidId, note }}
+ */
+function voidsAfter(stair, setup, old) {
+  const to = setup.to, lv = levelOf(PLAN, to), list = Array.isArray(lv.voids) ? lv.voids.slice() : [];
+  const need = setup.need, rooms = roomsOf(setup.up);
+  const at = list.findIndex((v) => v && v.stair === stair.id);
+  if (at < 0) {
+    if (!need.length) return { list, voidId: null };
+    const plain = list.findIndex((v) => v && Array.isArray(v.polygon) && (!v.stair || !stairHolder(v.stair)) && intersectArea([v.polygon], need) > STAIR_TOL);
+    if (plain >= 0) {
+      const v = list[plain], ring = oneRing(polyUnion([v.polygon, ...ringsOfEx(need)]), rooms);
+      list[plain] = { ...v, polygon: ring, stair: stair.id };
+      return { list, voidId: v.id };
+    }
+    const id = newVoidId();
+    list.push({ id, polygon: oneRing(need, rooms), stair: stair.id, railing: true });
+    return { list, voidId: id };
+  }
+  const v = list[at], before = old ? stairSetup(old.stair, old.levelId) : null;
+  const auto = !before || sameRegion([v.polygon], before.need);
+  if (auto) {
+    if (!need.length) { list.splice(at, 1); return { list, voidId: null }; }
+    list[at] = { ...v, polygon: oneRing(need, rooms) };
+    return { list, voidId: v.id };
+  }
+  // enlarged by the user: it moves with the stair (a plain move), stays inside the rooms and grows where it must
+  let region = [v.polygon];
+  if (old && old.stair.rot === stair.rot && old.stair.shape === stair.shape && (old.stair.x !== stair.x || old.stair.y !== stair.y)) {
+    const dx = stair.x - old.stair.x, dy = stair.y - old.stair.y;
+    region = [v.polygon.map((p) => [p[0] + dx, p[1] + dy])];
+    if (rooms.length) region = ringsOfEx(polyIntersection(region, rooms));
+  }
+  if (need.length && netArea(polyDifference(ringsOfEx(need), region.length ? region : [])) > COVER_TOL) region = ringsOfEx(polyUnion([...region, ...ringsOfEx(need)]));
+  const ring = oneRing(polyUnion(region), rooms);
+  if (ring) list[at] = { ...v, polygon: ring }; else list.splice(at, 1);
+  return { list, voidId: ring ? v.id : null };
+}
+
+/** Cached level data survives a stairs / voids change of a level whose walls did not change. */
+function carryStairLevels(before) {
+  for (const l of upperLevels(PLAN)) {
+    const o = before.find((x) => x.id === l.id);
+    if (!o || o === l || o.walls !== l.walls || !levelData.has(o) || levelData.has(l)) continue;
+    const st = levelData.get(o);
+    levelData.set(l, { arrays: Array.isArray(l.rooms) && Array.isArray(l.wallOutline) ? l : st.arrays, d: st.d });
+  }
+}
+/**
+ * Record, install new stairs / voids lists (`changes` = [{ levelId, stairs?, voids? }]), announce. Rooms of a level whose
+ * voids changed get their `voids` note (installOptional).
+ */
+function commitStairs(changes, reason, res, opts = {}) {
+  host.record(opts);
+  const before = upperLevels(PLAN), opt = { ...optionalPart(PLAN) };
+  let levels = before;
+  for (const c of changes) {
+    if (c.levelId === GROUND) { if (c.stairs) opt.stairs = c.stairs; continue; }
+    levels = levels.map((l) => {
+      if (l.id !== c.levelId) return l;
+      const n = { ...l };
+      for (const k of ['stairs', 'voids']) if (c[k]) { if (c[k].length) n[k] = c[k]; else delete n[k]; }
+      return n;
+    });
+  }
+  if (levels !== before) opt.levels = levels;
+  const changed = installOptional(opt);
+  carryStairLevels(before);
+  host.changed({ reason, changed, transient: !!opts.transient, levelId: res.levelId });
+  return { ok: true, level: res.level, warnings: res.warnings || [], ids: res.ids || [], ...(res.extra || {}) };
+}
+const stairPolicy = () => (phase === 'draft' ? { level: 'free', warnings: [] } : { level: 'permit', warnings: [REASONS.stair] });
+
+/**
+ * The defaults for a new stair on `level` (default: the active level): proposeStair for the rise to the level above,
+ * then the caller's fields. Never stored; see addStair. @returns {object|null} null when there is no level above
+ */
+function stairDraft(p) {
+  const levelId = p.level != null ? p.level : activeLevel();
+  if (!levelOf(PLAN, levelId)) return { levelId, error: fail(`There is no level ${levelId}.`) };
+  const to = p.to != null ? p.to : levelAboveId(levelId);
+  const draft = { id: p.id || 'new', to, shape: STAIR_SHAPES.includes(p.shape) ? p.shape : 'straight' };
+  const target = to ? stairTarget(draft, levelId) : null;
+  if (!target) return { levelId, error: { ok: false, code: 'no-level-above', reason: stairFits(draft, levelId).reason } };
+  const rise = levelElevation(PLAN, target) - levelElevation(PLAN, levelId);
+  const base = proposeStair({ rise, shape: draft.shape, width: num(p.width) ? p.width : undefined, turn: p.turn }) || {};
+  const input = {};
+  for (const k of STAIR_INPUT) if (p[k] !== undefined && p[k] !== null) input[k] = p[k];
+  const stair = { ...base, ...input, id: draft.id, to: target, shape: draft.shape };
+  if (p.landing === null) delete stair.landing;
+  return { levelId, stair: cleanStair(stair), rise };
+}
+
+/**
+ * Dry run of addStair (live feedback while placing): `{ ok: true, stair, geo, need, level, levelId, to }` or
+ * `{ ok: false, reason, code, stair?, geo? }` (stair / geo also when refused, to draw the ghost in the refusal colour).
+ */
+export function canAddStair(input) {
+  const dr = stairDraft(input || {});
+  if (dr.error) return dr.error;
+  const fit = stairFits(dr.stair, dr.levelId);
+  const setup = fit.ok ? fit.setup : stairSetup(dr.stair, dr.levelId);
+  const out = { stair: dr.stair, geo: setup ? setup.geo : null, levelId: dr.levelId, to: dr.stair.to };
+  if (!fit.ok) return { ok: false, reason: fit.reason, code: fit.code, ...out };
+  return { ok: true, ...out, need: ringsOfEx(setup.need), level: stairPolicy().level };
+}
+
+/**
+ * Add a stair on `level` (default: the active level) up to the level above it. input = { level?, shape?, x, y, rot?,
+ * width?, risers?, going?, landing?, turn?, gap?, nosing?, guard?, handrail? }: missing fields come from proposeStair for
+ * the rise. Creates (or grows, adopting a plain void it overlaps) the opening in the floor above. ids = [stairId, voidId?].
+ * Refused (`code`): no level above ('no-level-above' — offer to add a floor), stairProblems, a footprint off the level's
+ * floor / through a wall or an opening / over another stair, the top step not arriving on floor, the opening above
+ * cutting a wall up there ('locked' when that wall is locked).
+ */
+export function addStair(...args) { return tracked('addStair', addStairImpl, args); }
+function addStairImpl(input, opts) {
+  const dr = stairDraft({ ...(input || {}), id: undefined });
+  if (dr.error) return dr.error;
+  const stair = cleanStair({ ...dr.stair, id: newStairId() });
+  const fit = stairFits(stair, dr.levelId);
+  if (!fit.ok) return { ok: false, reason: fit.reason, code: fit.code };
+  const vo = voidsAfter(stair, fit.setup, null), pol = stairPolicy();
+  return commitStairs([{ levelId: dr.levelId, stairs: [...stairsOn(PLAN, dr.levelId), stair] }, { levelId: fit.setup.to, voids: vo.list }], 'add-stair',
+    { level: pol.level, warnings: pol.warnings, ids: vo.voidId ? [stair.id, vo.voidId] : [stair.id], levelId: dr.levelId, extra: { stairId: stair.id, voidId: vo.voidId } }, opts);
+}
+
+/**
+ * Change a stair: patch { x, y (centre of its bounding box), rot (90° steps), shape, turn, width, risers, going, landing
+ * ({ at, size } | null), gap, nosing, guard, handrail, fit: true (re-run proposeStair for its rise, shape, width and turn,
+ * keeping its position) }. Same checks as addStair; its opening follows (see voidsAfter) and never ends up smaller than
+ * the stair needs. ids = [stairId, voidId?].
+ */
+export function updateStair(...args) { return tracked('updateStair', updateStairImpl, args); }
+function updateStairImpl(id, patch, opts) {
+  const h = stairHolder(id);
+  if (!h) return fail('There is no such stair.');
+  const old = h.stair, p = patch || {}, was = cleanStair(old);
+  const next = { ...was };
+  for (const k of STAIR_INPUT) if (p[k] !== undefined && p[k] !== null) next[k] = p[k];
+  if (p.landing === null) delete next.landing;
+  const n = num(next.risers) ? next.risers : was.risers;
+  if (p.shape !== undefined && p.shape !== was.shape && p.landing === undefined) {
+    if (next.shape === 'straight') { delete next.landing; delete next.turn; delete next.gap; if (n > 18) next.landing = { at: Math.ceil(n / 2), size: next.width }; }
+    else next.landing = { at: Math.ceil(n / 2), size: next.width };
+  } else if (next.landing && p.landing === undefined) {
+    // risers / width changed: a landing that was in the middle stays in the middle; an L's landing stays as deep as the stair is wide
+    const L = { ...next.landing };
+    if (p.risers !== undefined && was.landing && was.landing.at === Math.ceil(was.risers / 2)) L.at = Math.ceil(n / 2);
+    else if (num(L.at)) L.at = Math.min(Math.max(1, L.at), n - 1);
+    if (p.width !== undefined && was.landing && was.landing.size === was.width) L.size = next.width;
+    if (next.shape === 'L' && num(L.size) && L.size < next.width) L.size = next.width;
+    next.landing = L;
+  }
+  if (p.fit) {
+    const to = stairTarget(next, h.levelId), rise = to ? levelElevation(PLAN, to) - levelElevation(PLAN, h.levelId) : 0;
+    const prop = rise > 0 ? proposeStair({ rise, shape: next.shape, width: next.width, turn: next.turn }) : null;
+    if (prop) { next.risers = prop.risers; next.going = prop.going; next.width = prop.width; if (prop.landing) next.landing = prop.landing; else delete next.landing; }
+  }
+  const stair = cleanStair(next);
+  if (JSON.stringify(stair) === JSON.stringify(was)) return { ok: true, level: 'free', warnings: [], ids: [id] };
+  const fit = stairFits(stair, h.levelId, id);
+  if (!fit.ok) return { ok: false, reason: fit.reason, code: fit.code };
+  const vo = voidsAfter(stair, fit.setup, h), pol = stairPolicy();
+  const changes = [{ levelId: h.levelId, stairs: stairsOn(PLAN, h.levelId).map((s) => (s === old ? stair : s)) }, { levelId: fit.setup.to, voids: vo.list }];
+  return commitStairs(changes, 'update-stair', { level: pol.level, warnings: pol.warnings, ids: vo.voidId ? [id, vo.voidId] : [id], levelId: h.levelId, extra: { stairId: id, voidId: vo.voidId } }, opts);
+}
+
+/**
+ * Remove a stair. Its opening goes with it — unless the user had enlarged it: then it stays as a plain opening
+ * (`stair: null`, with its railing) and `keptVoid` names it (a warning says so).
+ */
+export function removeStair(...args) { return tracked('removeStair', removeStairImpl, args); }
+function removeStairImpl(id, opts) {
+  const h = stairHolder(id);
+  if (!h) return fail('There is no such stair.');
+  const changes = [{ levelId: h.levelId, stairs: stairsOn(PLAN, h.levelId).filter((s) => s !== h.stair) }];
+  const pol = stairPolicy(), warnings = [...pol.warnings];
+  let keptVoid = null;
+  for (const lid of levelIds(PLAN)) {
+    const lv = levelOf(PLAN, lid), list = voidsOf(lv);
+    if (!list.some((v) => v.stair === id)) continue;
+    const setup = stairSetup(h.stair, h.levelId);
+    const next = [];
+    for (const v of lv.voids) {
+      if (!v || v.stair !== id) { next.push(v); continue; }
+      if (setup && sameRegion([v.polygon], setup.need)) continue;            // exactly what the stair needed: it goes
+      next.push({ ...v, stair: null }); keptVoid = v.id;
+    }
+    changes.push({ levelId: lid, voids: next });
+  }
+  if (keptVoid) warnings.push(`The opening in the floor above was enlarged, so it stays as a plain opening with its railing (${keptVoid}). Remove it on that floor if it is no longer wanted.`);
+  return commitStairs(changes, 'remove-stair', { level: pol.level, warnings, ids: [id], levelId: h.levelId, extra: { keptVoid } }, opts);
+}
+
+/** The stairs that need (part of) void `v` of level `levelId`: its own stair and any whose opening overlaps it. */
+function stairsNeeding(levelId, v) {
+  return stairsOf(PLAN).map((x) => ({ ...x, setup: stairSetup(x.stair, x.levelId) }))
+    .filter((x) => x.setup && x.setup.to === levelId && x.setup.need.length && (x.stair.id === v.stair || intersectArea([v.polygon], x.setup.need) > STAIR_TOL));
+}
+
+/**
+ * Enlarge / reshape an opening in a floor: patch { polygon: [[x, y]…] } (plan cm, 0.1 cm). It must stay on the floor of
+ * its level (not through a wall or an opening), and never become smaller than what a stair it serves needs.
+ */
+export function updateVoid(...args) { return tracked('updateVoid', updateVoidImpl, args); }
+function updateVoidImpl(id, patch, opts) {
+  const h = voidHolder(id);
+  if (!h) return fail('There is no such opening in a floor.');
+  const raw = patch && patch.polygon;
+  if (!Array.isArray(raw) || raw.length < 3 || !raw.every((p) => Array.isArray(p) && num(p[0]) && num(p[1]))) return fail('An opening in a floor needs an outline of at least three points.');
+  const ring = voidRing(raw);
+  if (ring.length < 3 || Math.abs(polygonArea(ring)) < 100) return fail('The opening is too small.');
+  if (JSON.stringify(ring) === JSON.stringify(h.void.polygon)) return { ok: true, level: 'free', warnings: [], ids: [id] };
+  const view = levelPlan(PLAN, h.levelId), segs = wallSegments(view);
+  const hit = segs.filter((g) => intersectArea([ring], [segShape(g)]) > STAIR_TOL);
+  if (hit.length) {
+    const locked = hit.find((g) => g.policy.level === 'locked');
+    return fail(locked ? `An opening in the floor cannot cut a locked wall. ${locked.policy.reason}` : 'An opening in the floor cannot cut a wall or a doorway — keep it inside the room.');
+  }
+  const rooms = roomsOf(view);
+  if (!rooms.length || netArea(polyDifference([ring], rooms)) > STAIR_TOL) return fail(`The opening must stay inside the rooms of the ${lowerFirst(floorName(h.levelId))}.`);
+  for (const x of stairsNeeding(h.levelId, h.void)) {
+    if (netArea(polyDifference(ringsOfEx(x.setup.need), [ring])) > COVER_TOL) {
+      const b = bboxOf(ringsOfEx(x.setup.need));
+      return fail(`The opening cannot be smaller than stair ${x.stair.id} needs for ${(DEFAULT_HEADROOM_CM / 100).toFixed(2)} m headroom (x ${b.x0}–${b.x1}, y ${b.y0}–${b.y1}).`);
+    }
+  }
+  const pol = stairPolicy(), lv = levelOf(PLAN, h.levelId);
+  const list = lv.voids.map((v) => (v === h.void ? { ...v, polygon: ring } : v));
+  return commitStairs([{ levelId: h.levelId, voids: list }], 'update-void', { level: pol.level, warnings: pol.warnings, ids: [id], levelId: h.levelId }, opts);
+}
+const bboxOf = (rings) => { const xs = rings.flat().map((p) => r01(p[0])), ys = rings.flat().map((p) => r01(p[1])); return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) }; };
+
+/** Close an opening in a floor (refused while a stair needs it). */
+export function removeVoid(...args) { return tracked('removeVoid', removeVoidImpl, args); }
+function removeVoidImpl(id, opts) {
+  const h = voidHolder(id);
+  if (!h) return fail('There is no such opening in a floor.');
+  const rest = voidsOf(levelOf(PLAN, h.levelId)).filter((v) => v !== h.void).map((v) => v.polygon);
+  for (const x of stairsNeeding(h.levelId, h.void)) {
+    if (x.stair.id === h.void.stair || netArea(polyDifference(ringsOfEx(x.setup.need), rest.length ? rest : [])) > COVER_TOL) return fail(`Stair ${x.stair.id} needs this opening — remove the stair first.`);
+  }
+  const pol = stairPolicy(), lv = levelOf(PLAN, h.levelId);
+  return commitStairs([{ levelId: h.levelId, voids: lv.voids.filter((v) => v !== h.void) }], 'remove-void', { level: pol.level, warnings: pol.warnings, ids: [id], levelId: h.levelId }, opts);
+}
+
+/**
+ * Everything the 2D view and the inspector need about one stair (read-only): `{ stair, levelId, to, rise, geo, need
+ * (rings of the opening it needs above), voids (its voids on the level above), covers, data }` or null.
+ */
+export function stairInfo(id) {
+  const h = stairHolder(id);
+  if (!h) return null;
+  const setup = stairSetup(h.stair, h.levelId), to = stairTarget(h.stair, h.levelId);
+  const voids = to ? voidsOf(levelOf(PLAN, to)).filter((v) => v.stair === id) : [];
+  const need = setup ? ringsOfEx(setup.need) : [];
+  return { stair: h.stair, data: cleanStair(h.stair), levelId: h.levelId, to, rise: setup ? setup.rise : (to ? levelElevation(PLAN, to) - levelElevation(PLAN, h.levelId) : null),
+    geo: setup ? setup.geo : null, need, voids, covers: !need.length || (voids.length > 0 && netArea(polyDifference(need, voids.map((v) => v.polygon))) <= COVER_TOL) };
+}
+/** One void with its level and the stair that needs it: `{ void, levelId, stair: info | null, need, covers }` or null. */
+export function voidInfo(id) {
+  const h = voidHolder(id);
+  if (!h) return null;
+  const users = stairsNeeding(h.levelId, h.void);
+  const x = users.find((u) => u.stair.id === h.void.stair) || users[0] || null;
+  const need = x ? ringsOfEx(x.setup.need) : [];
+  return { void: h.void, levelId: h.levelId, stairId: x ? x.stair.id : null, need, covers: !need.length || netArea(polyDifference(need, [h.void.polygon])) <= COVER_TOL };
+}
+/** Every stair of the plan: `[{ stair, levelId }]` (bottom-up). */
+export function allStairs() { return stairsOf(PLAN); }
+
+// ---------------------------------------------------------------- planDiff entries for stairs and voids
+const SHAPE_WORD = { straight: 'straight', L: 'L-shaped', U: 'U-shaped' };
+const stairAt = (s) => ({ x: s.x, y: s.y });
+function stairChanges(a, b) {
+  const what = [];
+  if (a.x !== b.x || a.y !== b.y) what.push(`moved ${Math.round(Math.abs(b.x - a.x) + Math.abs(b.y - a.y))} cm`);
+  if ((a.rot || 0) !== (b.rot || 0)) what.push(`turned to ${b.rot}°`);
+  if (a.shape !== b.shape || a.turn !== b.turn) what.push(`now ${SHAPE_WORD[b.shape] || b.shape}${b.turn ? ` turning ${b.turn}` : ''}`);
+  if (a.width !== b.width) what.push(`width ${a.width} → ${b.width} cm`);
+  if (a.risers !== b.risers || a.going !== b.going) what.push(`${b.risers} risers, going ${b.going} cm`);
+  if (JSON.stringify(a.landing || null) !== JSON.stringify(b.landing || null)) what.push('landing changed');
+  return what.length ? what : ['changed'];
+}
+/** Stairs and floor openings added / removed / changed against the base plan; every entry with `levelId`. */
+function diffStairs() {
+  const items = [];
+  const was = new Map(stairsOf(BASE_PLAN).map((x) => [x.stair.id, x])), now = new Map(stairsOf(PLAN).map((x) => [x.stair.id, x]));
+  const route = (x, plan) => { const to = x.stair.to || levelIds(plan)[levelIds(plan).indexOf(x.levelId) + 1]; return `from the ${lowerFirst(levelName(plan, x.levelId) || x.levelId)} to the ${lowerFirst(levelName(plan, to) || to || '?')}`; };
+  for (const [id, b] of was) {
+    const n = now.get(id);
+    if (!n) { items.push({ kind: 'stair-removed', level: 'permit', text: `Removed the stair ${route(b, BASE_PLAN)}`, at: stairAt(b.stair), ref: id, levelId: b.levelId }); continue; }
+    const A = cleanStair(stairData(b.stair)), B = cleanStair(stairData(n.stair));
+    if (JSON.stringify(A) !== JSON.stringify(B)) items.push({ kind: 'stair-changed', level: 'permit', text: `Stair ${route(n, PLAN)}: ${stairChanges(A, B).join(', ')}`, at: stairAt(n.stair), ref: id, levelId: n.levelId });
+  }
+  for (const [id, n] of now) if (!was.has(id)) {
+    const s = cleanStair(stairData(n.stair));
+    items.push({ kind: 'stair-added', level: 'permit', text: `New ${SHAPE_WORD[s.shape] || ''} stair ${route(n, PLAN)} (${s.risers} risers, ${s.width} cm wide)`, at: stairAt(s), ref: id, levelId: n.levelId });
+  }
+  const vwas = new Map(allVoids(BASE_PLAN).map((x) => [x.void.id, x])), vnow = new Map(allVoids(PLAN).map((x) => [x.void.id, x]));
+  const size = (v) => { const b = bboxOf([v.polygon]); return `${((b.x1 - b.x0) / 100).toFixed(2)} × ${((b.y1 - b.y0) / 100).toFixed(2)} m`; };
+  const vat = (v) => { const b = bboxOf([v.polygon]); return { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 }; };
+  const where = (x, plan) => `in the floor of the ${lowerFirst(levelName(plan, x.levelId) || x.levelId)}`;
+  for (const [id, b] of vwas) {
+    const n = vnow.get(id);
+    if (!n) items.push({ kind: 'void-removed', level: 'permit', text: `Closed the opening ${where(b, BASE_PLAN)} (${size(b.void)})`, at: vat(b.void), ref: id, levelId: b.levelId });
+    else if (JSON.stringify(n.void.polygon) !== JSON.stringify(b.void.polygon) || (n.void.stair || null) !== (b.void.stair || null) || n.void.railing !== b.void.railing) {
+      items.push({ kind: 'void-changed', level: 'permit', text: `Opening ${where(n, PLAN)}: ${size(b.void)} → ${size(n.void)}`, at: vat(n.void), ref: id, levelId: n.levelId });
+    }
+  }
+  for (const [id, n] of vnow) if (!vwas.has(id)) items.push({ kind: 'void-added', level: 'permit', text: `New opening ${where(n, PLAN)} (${size(n.void)})${n.void.stair ? ` for the stair` : ''}`, at: vat(n.void), ref: id, levelId: n.levelId });
+  return items;
+}
+
 // ---------------------------------------------------------------- diff against the architect's plan
 let diffBase = null;               // the base (level) planDiff compares with: BASE_PLAN, or a base level's view
 const spaceName = (id) => {
@@ -2609,6 +3122,7 @@ export function planDiff() {
       });
     }
   }
+  items.push(...diffStairs());                          // stage F4b: stairs and openings in floors
   return { changed: true, items };
 }
 

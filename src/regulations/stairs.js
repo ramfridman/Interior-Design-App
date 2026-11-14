@@ -6,7 +6,8 @@
  * Every finding carries `level` (the stair's bottom level) and `stairId`; ids are `<rule>:<stairId>` (stair ids are
  * unique across levels).
  */
-import { levelIds, levelOf, levelElevation, levelHeights, footprintOf, GROUND } from '../core/levels.js';
+import { levelIds, levelOf, levelElevation, levelHeights, footprintOf, GROUND, voidsOf, levelName } from '../core/levels.js';
+import { itemCorners } from '../core/geometry.js';
 import { levelPlan } from '../core/plan-edit.js';
 import { intersection, difference, intersectArea, netArea } from '../core/polykernel.js';
 import { stairGeometry, stairProblems, requiredVoid, stairSides, DEFAULT_HEADROOM } from '../core/stairs.js';
@@ -156,10 +157,33 @@ function checkStair(plan, { stair, level, to, rise }) {
  * @param {{ plan: object }} args
  * @returns {object[]}
  */
-export function checkStairs({ plan }) {
+export function checkStairs({ plan, store }) {
   if (!plan) return [];
   const list = stairsOfPlan(plan);
-  return list.flatMap((s) => checkStair(plan, s));
+  return [...list.flatMap((s) => checkStair(plan, s)), ...itemsInVoids(plan, store)];
+}
+
+/**
+ * Furniture standing over an opening in the floor (stage F4b): every item (not hidden) on a level whose footprint
+ * overlaps one of that level's voids by more than 1 cm². Findings `item-in-void:<itemId>` with `level` and `itemIds`.
+ */
+function itemsInVoids(plan, store) {
+  const items = (store && Array.isArray(store.items)) ? store.items : [];
+  if (!items.length) return [];
+  const out = [];
+  for (const id of levelIds(plan)) {
+    const voids = voidsOf(levelOf(plan, id));
+    if (!voids.length) continue;
+    for (const it of items) {
+      if (!it || it.hidden || (it.level || GROUND) !== id || !(it.w > 0 && it.d > 0)) continue;
+      const v = voids.find((q) => intersectArea([itemCorners(it)], [q.polygon]) > 1);
+      if (!v) continue;
+      out.push(finding('item-in-void', 'fail', it.id, `${it.name || it.type || 'An item'} stands over the opening in the floor`,
+        `It overlaps the opening ${v.id}${v.stair ? ` above stair ${v.stair}` : ''} on the ${String(levelName(plan, id) || id).toLowerCase()}: move it onto the floor.`,
+        { level: id, itemIds: [it.id], at: { x: it.x, y: it.y } }));
+    }
+  }
+  return out;
 }
 
 export { GROUND };

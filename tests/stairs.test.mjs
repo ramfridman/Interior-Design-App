@@ -3,11 +3,11 @@
 // bare 'three' imports are mapped to vendor/three, procedural textures get a no-op canvas (as tests/levels-3d.test.mjs).
 //   node tests/stairs.test.mjs
 //
-// NOTE on the Duplex void v1 (y 266–640). The design expected it to satisfy the headroom; with the sourced rule (PBR
-// Second Schedule §3.2.2.4: 2.10 m measured vertically above the nosing line) and the L1 slab underside at 2.80 m the
-// slab must be open down to y = 666.2 — v1 leaves 1.95 m at its south edge. The shared fixture is not changed here
-// (other suites pin its 100 × 374 hole); these tests assert what the regulation gives and use v1 extended to y 670
-// for the "everything passes" case.
+// NOTE on the Duplex void v1. The design drew it y 266–640; with the sourced rule (PBR Second Schedule §3.2.2.4: 2.10 m
+// measured vertically above the nosing line) and the L1 slab underside at 2.80 m the slab must be open down to y = 666.2
+// — y 640 left 1.95 m at its south edge. Since stage F4b the shared fixture's v1 is y 266–670 (what addStair creates:
+// the free edge rounded out to 5 cm), so the fixture stair passes every rule; V640 below keeps the old hole for the
+// "too short" checks.
 import { register } from 'node:module';
 register('data:text/javascript,' + encodeURIComponent(`
   const base = ${JSON.stringify(new URL('../vendor/three/', import.meta.url).href)};
@@ -79,13 +79,15 @@ group('floorHeightAt / pitchHeightAt');
 group('Headroom envelope and the required void (2.10 m, slab underside 2.80 m)');
 const required = S.requiredVoid(ST1, geo, { slabUnderside: UNDERSIDE });
 const V1 = DUPLEX.levels[0].voids[0];
+const V640 = { ...V1, polygon: [[520, 266], [620, 266], [620, 640], [520, 640]] };   // the design's original hole
 {
   const yEdge = 759 - ((UNDERSIDE - 210 - 300 / 18) * 29) / (300 / 18);   // pitch(s) = 280 − 210 ⇒ s = 92.8
   check(`required void = x 520–620, y 266–${yEdge.toFixed(1)} (one rectangle)`, required.length === 1 && sameBox(bbox(required[0]), { x0: 520, x1: 620, y0: 266, y1: yEdge }, 2e-3), JSON.stringify(required));
   const env = S.headroomEnvelope(ST1, geo);
   check('envelope: one flight piece, 2.10 m above the pitch line', env.pieces.length === 1 && near(env.pieces[0].base, 300 / 18 + 210) && near(S.envelopeHeightAt(ST1, geo, 570, 266), 510));
-  check('fixture v1 (y 266–640) does NOT cover it (sourced 2.10 m — see the note at the top)', !S.voidCovers(V1, required), `${(S.uncoveredVoid(V1, required).reduce((s, e) => s + ringArea(e.outer), 0)).toFixed(1)} cm² short`);
-  check('…v1 would be enough only for a headroom ≤ 1.949 m', S.voidCovers(V1, S.requiredVoid(ST1, geo, { slabUnderside: UNDERSIDE, headroom: 194.9 })) && !S.voidCovers(V1, S.requiredVoid(ST1, geo, { slabUnderside: UNDERSIDE, headroom: 195 })));
+  check('fixture v1 (y 266–670 since F4b) covers it', S.voidCovers(V1, required), `${(S.uncoveredVoid(V1, required).reduce((s, e) => s + ringArea(e.outer), 0)).toFixed(1)} cm² short`);
+  check('the design\'s original hole (y 266–640) does NOT cover it (sourced 2.10 m — see the note at the top)', !S.voidCovers(V640, required), `${(S.uncoveredVoid(V640, required).reduce((s, e) => s + ringArea(e.outer), 0)).toFixed(1)} cm² short`);
+  check('…y 640 would be enough only for a headroom ≤ 1.949 m', S.voidCovers(V640, S.requiredVoid(ST1, geo, { slabUnderside: UNDERSIDE, headroom: 194.9 })) && !S.voidCovers(V640, S.requiredVoid(ST1, geo, { slabUnderside: UNDERSIDE, headroom: 195 })));
   const v670 = { ...V1, polygon: [[520, 266], [620, 266], [620, 670], [520, 670]] }, v560 = { ...V1, polygon: [[520, 266], [620, 266], [620, 560], [520, 560]] };
   check('a void x 520–620, y 266–670 covers it; enlarging further still covers', S.voidCovers(v670, required) && S.voidCovers([[500, 200], [700, 200], [700, 700], [500, 700]], required));
   check('a void shortened to y 266–560 does not', !S.voidCovers(v560, required));
@@ -113,7 +115,9 @@ const bad = (fs) => fs.filter((f) => f.severity === 'fail' || f.severity === 'wa
   const fx = checkStairs({ plan: duplex([ST1]) });
   check('fixture: riser, going, 2R + G, width, flight, nosing, handrail, guards pass', ['stair-riser', 'stair-going', 'stair-comfort', 'stair-width', 'stair-flight', 'stair-nosing', 'stair-handrail', 'stair-guard', 'stair-geometry'].every((r) => sev(fx, r) === 'pass'), bad(fx).join(', '));
   check('fixture: 2R + G finding says 62.3 cm', fx.find((f) => f.ruleId === 'stair-comfort').title.includes('62.3'));
-  check('fixture v1: headroom (1.95 m) and void findings fail — the sourced 2.10 m', sev(fx, 'stair-headroom') === 'fail' && sev(fx, 'stair-void') === 'fail' && /1\.95 m/.test(fx.find((f) => f.ruleId === 'stair-headroom').title));
+  check('fixture v1 (y 266–670): headroom and void pass', sev(fx, 'stair-headroom') === 'pass' && sev(fx, 'stair-void') === 'pass', bad(fx).join(', '));
+  const fx640 = checkStairs({ plan: duplex([ST1], V640.polygon) });
+  check('the original hole y 266–640: headroom (1.95 m) and void findings fail — the sourced 2.10 m', sev(fx640, 'stair-headroom') === 'fail' && sev(fx640, 'stair-void') === 'fail' && /1\.95 m/.test(fx640.find((f) => f.ruleId === 'stair-headroom').title));
   check('every finding carries level L0 and the stair id; guard height is info', fx.every((f) => f.level === 'L0' && f.stairId === 'st1' && f.id.endsWith(':st1')) && sev(fx, 'stair-guard-height') === 'info');
   const ok670 = checkStairs({ plan: duplex([ST1], [[520, 266], [620, 266], [620, 670], [520, 670]]) });
   check('v1 extended to y 670: no fail or warn at all', bad(ok670).length === 0 && sev(ok670, 'stair-headroom') === 'pass' && sev(ok670, 'stair-void') === 'pass', bad(ok670).join(', '));
@@ -224,7 +228,10 @@ group('3D: the Duplex with its stair');
   }
   check('every part of the stair above the slab underside (2.80 m) lies inside the void in plan', above > 0 && outside === 0, `${above} vertices above, ${outside} outside`);
   const rails = partBox('rail');
-  check('guards on both open sides (no wall within 5 cm), 0.90 m above the pitch line: top at 3.90', rails.min.x >= 5.2 - 1e-4 && rails.max.x <= 6.2 + 1e-4 && near(rails.max.y, 3.9, 0.03), `x ${rails.min.x.toFixed(3)}..${rails.max.x.toFixed(3)} top ${rails.max.y.toFixed(3)}`);
+  // F4b: an open side's guard (0.90 m above the pitch line) stops where its top meets the L1 slab beside the stair (pitch
+  // 1.90 m, y ≈ 457): from there the slab edge and the void railing on it guard the stair — one railing, not two side by side
+  check('guards on both open sides (no wall within 5 cm), 0.90 m above the pitch line, up to the L1 slab (top 2.80, y ≥ 4.57)', rails.min.x >= 5.2 - 1e-4 && rails.max.x <= 6.2 + 1e-4 && near(rails.max.y, 2.8, 0.03) && near(rails.min.z, 4.574, 0.03),
+    `x ${rails.min.x.toFixed(3)}..${rails.max.x.toFixed(3)} top ${rails.max.y.toFixed(3)} z from ${rails.min.z.toFixed(3)}`);
   // the void railing's open edge = the stair's arrival edge
   const rail = (() => { let m = null; house.group.getObjectByName('level:L1').traverse((o) => { if (o.isMesh && o.name === 'railing') m = o; }); return m; })();
   const rp = rail.geometry.attributes.position;

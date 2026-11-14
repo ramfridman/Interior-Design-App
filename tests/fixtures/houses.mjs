@@ -76,13 +76,13 @@ export const DUPLEX = {
         { id: 'door-part-1', kind: 'door', style: 'interior', axis: 'v', x: 300, y: 100, w: 10, h: 90, width: 90, height: 210, sill: 0, hinge: 'n', swing: 'e' },
         { id: 'win-east-1', kind: 'window', style: 'sliding', axis: 'v', x: 980, y: 300, w: 20, h: 120, width: 120, height: 120, sill: 90, assumed: ['height', 'sill'] },
       ],
-      voids: [{ id: 'v1', polygon: [[520, 266], [620, 266], [620, 640], [520, 640]], stair: 'st1', railing: true }],
+      voids: [{ id: 'v1', polygon: [[520, 266], [620, 266], [620, 670], [520, 670]], stair: 'st1', railing: true }],   // y 670 (F4b): the sourced 2.10 m headroom needs the slab open to y 666.2
       outdoorAreas: [],
     },
   ],
   expect: {
     roomsPerLevel: 2,
-    l1EastRoomFloorArea: 670 * 760 - 100 * 374,   // cm²
+    l1EastRoomFloorArea: 670 * 760 - 100 * 404,   // cm² (void v1: 100 × 404)
     twoRPlusT: 62.3,
     shrunkVoidFailsHeadroom: { y0: 266, y1: 560 },
     l1FloorY: 3.0,                                 // m

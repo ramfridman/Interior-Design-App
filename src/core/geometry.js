@@ -42,7 +42,12 @@ export const rectsOverlap = (a, b, eps = 0) =>
 
 /** The room / outdoor area / 'garden' / null (off the lot) containing a plan point. */
 export function spaceAt(x, y, plan = PLAN) {
-  for (const r of plan.rooms) if (pointInPolygon(x, y, r.polygon)) return { kind: 'room', ...r };
+  for (const r of plan.rooms) {
+    if (!pointInPolygon(x, y, r.polygon)) continue;
+    // over an opening in the floor (a void of an upper level, stage F4b): still the room, flagged with the void's id
+    const v = Array.isArray(plan.voids) && plan.voids.length ? plan.voids.find((q) => q && Array.isArray(q.polygon) && q.polygon.length >= 3 && pointInPolygon(x, y, q.polygon)) : null;
+    return v ? { kind: 'room', ...r, void: v.id } : { kind: 'room', ...r };
+  }
   for (const o of plan.outdoorAreas) if (pointInPolygon(x, y, o.polygon)) return { kind: 'outdoor-area', ...o };
   for (const p of plan.site.parking) if (pointInRect(x, y, p)) return { kind: 'parking', ...p };
   if (pointInPolygon(x, y, plan.site.boundary)) return { kind: 'garden', id: 'garden', name: 'Garden' };

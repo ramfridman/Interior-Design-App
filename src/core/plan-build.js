@@ -50,7 +50,7 @@
  */
 import { analyseWalls, wallBounds, BUILTIN_PLAN } from './plan-edit.js';
 import { FEATURES } from './features.js';
-import { isLevelId, recomputeElevations } from './levels.js';
+import { isLevelId, recomputeElevations, annotateVoids } from './levels.js';
 import { optionalKeysProblem, optionalPart, normalizeOptionalKeys, setOptionalKeys } from './plan-schema.js';
 import { polygonArea } from './geometry.js';
 import { slantFrame, freePoly, slantJoins } from './slant-geom.js';
@@ -93,6 +93,8 @@ export function buildPlan(input = {}, { passThrough = false, levels: levelsOptio
     const meta = readMeta(src.meta, say, firstClass ? 1 + src.levels.length : extra ? 1 + (extra.levels ? extra.levels.length : 0) : 1);
     const heights = readHeights(src.heights, say);
     const ups = firstClass ? readLevelInputs(src.levels, heights, say, angled) : null;
+    // first-class floors (stage F4b): the ground floor's stairs come along (validated; moved with the origin like the walls)
+    let groundStairs = ups && !passThrough ? readStairs(src.stairs, say, 'Ground floor') : null;
     const rawSlants = angled ? [] : null;
     let walls = readWalls(src.walls, say, rawSlants);
     const sl = angled ? readSlants([...rawSlants, ...(Array.isArray(src.slants) ? src.slants : [])], say) : null;
@@ -116,6 +118,7 @@ export function buildPlan(input = {}, { passThrough = false, levels: levelsOptio
         if (u.sl) u.sl.slants = shiftSlants(u.sl.slants, shift);
       }
       if (extra) extra = shiftOptional(extra, shift);
+      if (groundStairs) groundStairs = shiftOptional({ stairs: groundStairs }, shift).stairs;
       say('info', `The plan was moved by ${-shift.x} cm east–west and ${-shift.y} cm north–south so that the house's north-west corner is the origin.`);
     }
     const outdoorAreas = readOutdoorAreas(src.outdoorAreas, shift, say);
@@ -161,7 +164,7 @@ export function buildPlan(input = {}, { passThrough = false, levels: levelsOptio
       site,
       assumptions: assumptionsFor(src, meta, heights),
     };
-    if (levels || finalSlants) setOptionalKeys(plan, optionalPart(normalizeOptionalKeys({ ...(extra || {}), ...(finalSlants ? { slants: finalSlants } : {}), ...(levels ? { levels } : {}) })));
+    if (levels || finalSlants) setOptionalKeys(plan, optionalPart(normalizeOptionalKeys({ ...(extra || {}), ...(groundStairs ? { stairs: groundStairs } : {}), ...(finalSlants ? { slants: finalSlants } : {}), ...(levels ? { levels: levels.map(annotateVoids) } : {}) })));
     else if (extra) setOptionalKeys(plan, extra);
     return { ok: !warnings.some((w) => w.level === 'error'), plan, warnings };
   } catch (err) {
@@ -239,7 +242,10 @@ function readLevelInputs(raw, heights, say, angled = false) {
       if (num(v) && v >= lo && v <= hi) h[k] = Math.round(v); else lsay('warning', `Height "${k}" is not ${lo}–${hi} cm — ${h[k]} cm was used.`);
     }
     const extra = {};
-    for (const k of ['voids', 'stairs', ...(angled ? [] : ['slants'])]) if (Array.isArray(l[k]) && l[k].length) extra[k] = clone(l[k]);
+    for (const k of angled ? [] : ['slants']) if (Array.isArray(l[k]) && l[k].length) extra[k] = clone(l[k]);
+    const voids = readVoids(l.voids, lsay), stairs = readStairs(l.stairs, lsay);
+    if (voids) extra.voids = voids;
+    if (stairs) extra.stairs = stairs;
     const raw = angled ? [] : null;
     const walls = readWalls(Array.isArray(l.walls) ? l.walls.map((w) => (w && typeof w === 'object' && !Array.isArray(w) && w.floor != null ? { ...w, floor: undefined } : w)) : l.walls, lsay, raw);
     const sl = angled ? readSlants([...raw, ...(Array.isArray(l.slants) ? l.slants : [])], lsay) : null;
@@ -285,6 +291,40 @@ function buildLevels(ups, groundRooms, heights, segOut = null) {
 }
 
 // ---------------------------------------------------------------- readers
+const STAIR_FIELDS = ['id', 'to', 'shape', 'x', 'y', 'rot', 'width', 'risers', 'going', 'landing', 'turn', 'gap', 'nosing', 'guard', 'handrail'];
+/**
+ * Stairs of a floor (stage F4b): the data fields of each readable stair (derived ones such as `up`, `riser` or `footprint`
+ * are dropped — core/stairs.js derives them), or null when there are none. Unreadable ones are left out (an error each).
+ */
+function readStairs(raw, say, label = '') {
+  if (raw == null) return null;
+  const pre = label ? `${label}: ` : '';
+  if (!Array.isArray(raw)) { say('error', `${pre}The stairs are not a list — they were left out.`); return null; }
+  const out = [], ids = new Set();
+  for (const s of raw) {
+    const problem = optionalKeysProblem({ stairs: [s] });
+    if (problem || ids.has(s.id)) { say('error', `${pre}A stair is not readable (${problem || `the id ${s.id} is used twice`}) — it was left out.`); continue; }
+    ids.add(s.id);
+    const st = {};
+    for (const k of STAIR_FIELDS) if (s[k] !== undefined) st[k] = clone(s[k]);
+    out.push(st);
+  }
+  return out.length ? out : null;
+}
+/** Openings in a floor (voids) of an upper floor: `{ id, polygon, stair, railing }`, or null when there are none. */
+function readVoids(raw, say) {
+  if (raw == null) return null;
+  if (!Array.isArray(raw)) { say('error', 'The openings in the floor (voids) are not a list — they were left out.'); return null; }
+  const out = [], ids = new Set();
+  for (const v of raw) {
+    const ok = v && typeof v === 'object' && typeof v.id === 'string' && v.id && !ids.has(v.id) && Array.isArray(v.polygon) && v.polygon.length >= 3
+      && v.polygon.every((p) => Array.isArray(p) && num(toNum(p[0])) && num(toNum(p[1]))) && Math.abs(polygonArea(v.polygon.map((p) => [toNum(p[0]), toNum(p[1])]))) > 0;
+    if (!ok) { say('error', `An opening in the floor${v && v.id ? ` (${v.id})` : ''} is not readable — it was left out.`); continue; }
+    ids.add(v.id);
+    out.push({ id: v.id, polygon: v.polygon.map((p) => [toNum(p[0]), toNum(p[1])]), stair: typeof v.stair === 'string' && v.stair ? v.stair : null, railing: v.railing !== false });
+  }
+  return out.length ? out : null;
+}
 const word = (o) => (o.kind === 'window' ? 'window' : o.kind === 'opening' ? 'passage' : o.kind === 'sliding-door' ? 'sliding door' : 'door');
 
 /** Optional schema-2 data (passThrough): a deep copy with the lazy schema applied, or {} when unreadable / absent. */
