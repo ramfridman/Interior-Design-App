@@ -339,7 +339,7 @@ export function stairSides(stair, geometry, lowerPlan, { near = 5, step = 5 } = 
       const b = ring[(i + 1) % ring.length], L = len2(a, b);
       if (L < EPS) return;
       const u = [(b[0] - a[0]) / L, (b[1] - a[1]) / L];
-      candidates.push({ a, b, outward: [-u[1] * sgn, u[0] * sgn], piece: 'landing', index: l.index });
+      candidates.push({ a, b, outward: [u[1] * sgn, -u[0] * sgn], piece: 'landing', index: l.index });   // right-hand normal of a ring with positive signed area points out of it
     });
   });
   // U with no (or a narrow) well: the first flight's inner side lies against the second flight, which is higher
@@ -372,7 +372,9 @@ export function stairSides(stair, geometry, lowerPlan, { near = 5, step = 5 } = 
         const ta = k0 + ((k1 - k0) * Math.max(0, i0 - 0.5)) / (nS - 1), tb = k0 + ((k1 - k0) * Math.min(nS - 1, i - 0.5)) / (nS - 1);
         const a = add(c.a, mul(u, i0 === 0 ? k0 : ta)), b = add(c.a, mul(u, i === nS ? k1 : tb));
         const inside = (p) => add(p, mul(c.outward, -0.01));
-        const ha = pitchHeightAt(stair, geo, ...inside(a)), hb = pitchHeightAt(stair, geo, ...inside(b));
+        let ha = pitchHeightAt(stair, geo, ...inside(a)), hb = pitchHeightAt(stair, geo, ...inside(b));
+        // a landing is flat: a corner that touches the next flight must not pick up that flight's first step
+        if (c.piece === 'landing' && ha != null && hb != null) ha = hb = Math.min(ha, hb);
         out.push({ a: a.map((v) => Math.round(v * 1e4) / 1e4), b: b.map((v) => Math.round(v * 1e4) / 1e4), wall: cls[i0], piece: c.piece, index: c.index, outward: c.outward, ha: ha == null ? 0 : ha, hb: hb == null ? 0 : hb });
         i0 = i;
       }
