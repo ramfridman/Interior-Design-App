@@ -27,7 +27,16 @@ export const DEFAULT_WALL = {
 };
 
 export const allSpaces = (plan = PLAN) => [...plan.rooms, ...plan.outdoorAreas];
-export const getSpace = (id, plan = PLAN) => allSpaces(plan).find((s) => s.id === id) || null;
+/** A room or outdoor area by id. Room ids are unique across floors, so upper floors are searched too. */
+export function getSpace(id, plan = PLAN) {
+  const here = allSpaces(plan).find((s) => s.id === id);
+  if (here) return here;
+  for (const lv of plan.levels || []) {
+    const r = (lv.rooms || []).find((s) => s.id === id) || (lv.outdoorAreas || []).find((s) => s.id === id);
+    if (r) return r;
+  }
+  return null;
+}
 
 /**
  * Resolve the look of a space's floor or walls.
