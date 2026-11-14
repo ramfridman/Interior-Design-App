@@ -42,12 +42,23 @@ Small follow-ups noted: island stools do not travel with the island; overlap of 
 - [x] Check-and-fix pass on the night's features: two-finger pan and an offset loupe when measuring on a phone; no shader errors after switching projects several times; project name stays visible in Structure mode; lamp thumbnails always lit; stools move and turn with the kitchen island; duplicate price-tier selector removed. Verified working: re-align of the sketch underlay, dark theme, password-protected PDF message, project create / switch / duplicate / rename / export / import / delete on phone and desktop, the whole carpentry path on a phone, real drag of finishes onto the 3D view.
 - [x] Carpentry on a phone (version 13): the drawings are a half / full bottom sheet that leaves the bottom navigation free, picking a run closes the Runs sheet and opens its drawings, elevations open at a readable size with one-finger pan (press and hold to reorder units). At half height the elevation text is still small; full height is clearly readable.
 
-## Waiting for the owner
-1. **Sketch import scope** — built as: vector PDFs read exactly, photos / scans traced with guidance, straight right-angled walls, one floor. Confirm, or say what matters more (DXF / DWG, angled walls, several floors).
-2. **Hosting** — the site build is ready (`node dev/build-site.mjs`). Needed: a free Cloudflare account, authorising its GitHub app for the repo, the email addresses to invite, and whether the working branch is merged into the default branch first (a pull request).
-3. **Online saving with several people on one project** — must people edit at the same moment, or is taking turns enough? Sign-in by email code, Google, or both? Roughly how many people and projects?
-4. **Hebrew PDF wording** — a native speaker should check the terms listed above under version 8.
-5. **Try version 12 on the real devices** — 3D speed on a real graphics card and touch gestures of the structure tools have only been tested in emulation.
+## Owner's answers (14 Nov 2026) and the plan that follows
+1. Sketch import: **"Support all the important possibilities."** Read as: add DXF (AutoCAD's exchange format), angled walls, several floors. DWG itself is a closed format: the dialog explains how to save a DXF; a built-in DWG reader would need a GPL-licensed library — the owner must decide before that is added. Curved walls: flagged, redrawn as straight pieces.
+2. Hosting account: the owner will create it.
+3. Online work: **several people must work together at the same time** (live). Not yet answered: sign-in method and group size — default taken: people are identified by the email they sign in with through Cloudflare Access (the invite-only choice already made), small group (up to about ten at once).
+
+Order of work:
+- [ ] A. Live collaboration core: operations over the store, convergence rules, per-person undo, shared room logic, Node dev server, presence (pointers, selections, soft locks) [Opus, running].
+- [ ] B. DXF import with layers and true units [Opus, running].
+- [ ] C. Cloudflare Worker + Durable Object around the room logic, online storage adapter, sharing dialog and roles (owner / editor / viewer), version history, deployment steps.
+- [ ] D. Angled walls in the plan engine (2D, 3D, daylight, regulations, carpentry, import).
+- [ ] E. Several floors (stairs, per-floor plans, 3D stacking, daylight and walk-through across floors).
+
+## Still waiting for the owner
+1. **Hosting** — a free Cloudflare account, authorising its GitHub app for the repo, the email addresses to invite, and whether the working branch is merged into the default branch first (a pull request). With live collaboration the site becomes a Cloudflare Worker with static files instead of plain Pages; steps will be updated when part C is done.
+2. **DWG** — is a GPL-licensed DWG reader acceptable inside the app, or is "save as DXF" enough?
+3. **Hebrew PDF wording** — a native speaker should check the terms listed above under version 8.
+4. **Try the current version on the real devices** — 3D speed on a real graphics card and touch gestures have only been tested in emulation.
 
 ## Next
 - [x] **Stretched display on a phone** — fixed in version 6 (13 Nov): off-screen sheets made the page itself scrollable, so the app could slide up and out of view. The root and the app shell are now clipped and page scroll is reset; the top bar fits down to 360 px wide (at 320 px the File menu is still cut off).
