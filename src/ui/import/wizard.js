@@ -15,7 +15,7 @@
  */
 import { h, setKids } from '../dom.js';
 import { icon } from '../icons.js';
-import { btn, segmented } from '../components.js';
+import { btn, segmented, iconBtn } from '../components.js';
 import { openDialog, toast, layer } from '../dialogs.js';
 import { field, numInput, readNum, placeFields, ceilingField } from '../projects.js';
 import { buildPlan } from '../../core/plan-build.js';
@@ -25,6 +25,10 @@ import { createSheet } from './sheet.js';
 import { runTask } from './engine-client.js';
 import { sniff, plainError, pdfInfo, renderPage, pagePrims, decodeImage, pixelsOf, encodeUnderlay, affThen, affInv, affApply, ImportError } from './source.js';
 import { renderPrims } from '../../import/dxf-render.js';
+import { addStair } from '../../core/plan-edit.js';
+import { stairGeometry } from '../../core/stairs.js';
+import { alignFloors, alignmentReport, detectStairSymbols, detectVoidSymbols, matchStairs, levelsInput, shiftOf, snapFaces, placeFloor } from '../../import/floors.js';
+import { createAlignView } from './align-view.js';
 
 const PT_CM = 2.54 / 72;            // one PDF point on paper, in cm
 const ROLES_ORDER = { wall: 0, door: 1, window: 2, other: 3 };
@@ -35,11 +39,19 @@ const STEPS = [
   { id: 'review', label: 'Review' },
   { id: 'create', label: 'Create' },
 ];
+// several floors (stage F8, only while FEATURES.levels is on and the list holds ≥ 2 floors): "Align floors" after Orientation
+const STEPS_FLOORS = [STEPS[0], STEPS[1], STEPS[2], { id: 'align', label: 'Align floors' }, STEPS[3], STEPS[4]];
+// what each floor of the list reads (swapped into the dialog's state while that floor is the one shown)
+const FLOOR_KEYS = ['file', 'fileName', 'kind', 'dxf', 'bytes', 'pdf', 'page', 'thumbs', 'prims', 'snapIndex', 'sheet', 'image', 'first', 'drawing',
+  'scale', 'measure', 'ratio', 'dpi', 'rotate', 'mirror', 'result', 'resultKey'];
+const FLOOR_NAMES = ['Ground floor', 'First floor', 'Second floor', 'Third floor', 'Fourth floor', 'Fifth floor', 'Sixth floor'];
+const floorDefaultName = (i) => FLOOR_NAMES[i] || `Floor ${i}`;
 const confWords = (c) => (c >= 0.85 ? 'confident' : c >= 0.65 ? 'fairly confident' : c >= 0.45 ? 'unsure' : 'a rough guess');
 const m2 = (cm) => (cm / 100).toFixed(2);
 const fmtLen = (cm) => (cm >= 100 ? `${m2(cm)} m` : `${Math.round(cm)} cm`);
 const DXF_UNITS = [['millimetres', 'mm', 0.1], ['centimetres', 'cm', 1], ['metres', 'm', 100], ['inches', 'inch', 2.54], ['feet', 'foot', 30.48]];
 const ROLE_LABEL = { wall: 'Walls', door: 'Doors', window: 'Windows', other: 'Other' };
+const lowerFirst = (t) => (t && /^[A-Z][a-z]/.test(t) ? t[0].toLowerCase() + t.slice(1) : t);
 const baseName = (name) => String(name || '').replace(/\.[a-z0-9]+$/i, '').replace(/[_]+/g, ' ').trim().slice(0, 60);
 
 /**
@@ -65,12 +77,16 @@ export function openImportWizard(app, opts = {}) {
     result: null, resultKey: '',
     name: opts.name || '',
     built: null, createAnyway: false,
+    floors: FEATURES.levels ? [] : null,            // several floors (F8): [{ name, ceiling (cm), sameScale, orientSet, align, marks, plainVoids, …FLOOR_KEYS }]
+    cur: 0,                                         // the floor shown (its FLOOR_KEYS live in S itself)
+    stairs: null,                                   // stairs / openings between the floors: { list, verdicts, checked }
   };
   let task = null;
 
   // ── shell ──
-  const stepper = h('ol', { class: 'istep', 'aria-label': 'Steps' }, STEPS.map((s, i) => h('li', { class: 'istep__item', dataset: { i: String(i) } },
-    h('span', { class: 'istep__num' }, String(i + 1)), h('span', { class: 'istep__label' }, s.label))));
+  const stepItems = (list) => list.map((s, i) => h('li', { class: 'istep__item', dataset: { i: String(i), id: s.id } },
+    h('span', { class: 'istep__num' }, String(i + 1)), h('span', { class: 'istep__label' }, s.label)));
+  const stepper = h('ol', { class: 'istep', 'aria-label': 'Steps' }, stepItems(STEPS));
   const content = h('div', { class: 'iwiz__content' });
   const errorBox = h('div', { class: 'ierror', role: 'alert', hidden: true });
   const progress = h('div', { class: 'iprogress', hidden: true, role: 'status', 'aria-live': 'polite' });
@@ -100,6 +116,59 @@ export function openImportWizard(app, opts = {}) {
   });
 
   const vector = () => S.kind === 'pdf' || S.kind === 'dxf';
+  // ── several floors (F8): the list, the floor shown, swapping its source into S ──
+  const multi = () => !!(S.floors && S.floors.length >= 2);
+  const steps = () => (multi() ? STEPS_FLOORS : STEPS);
+  /** Keep the shown floor's source in its list entry. */
+  function stash() { const F = S.floors && S.floors[S.cur]; if (F) for (const k of FLOOR_KEYS) F[k] = S[k]; }
+  /** Make floor i the one shown (its source into S) — no rendering. */
+  function unstash(i) { const F = S.floors[i]; for (const k of FLOOR_KEYS) S[k] = F[k]; S.cur = i; }
+  /** Show floor i: its drawing in the viewer. */
+  function showFloor(i) {
+    if (!S.floors || i === S.cur || !S.floors[i]) return;
+    stash(); unstash(i);
+    if (S.sheet) sheet.setImage(S.sheet.canvas, S.sheet.ppu);
+  }
+  /** Run fn(i, F) with each floor in turn shown (sync or async); the floor shown before comes back. */
+  async function eachFloor(fn) {
+    stash();
+    const was = S.cur;
+    try { for (let i = 0; i < S.floors.length; i++) { unstash(i); const r = await fn(i, S.floors[i]); stash(); if (r === false) return false; } } finally { unstash(was); }
+    return true;
+  }
+  function withFloorSync(i, fn) {
+    if (!S.floors || i === S.cur) return fn();
+    stash(); const was = S.cur; unstash(i);
+    try { return fn(); } finally { stash(); unstash(was); }
+  }
+  const floorAt = (i) => S.floors[i];
+  const valOf = (i, k) => (i === S.cur ? S[k] : S.floors[i][k]);
+  function newFloor(src = null) {
+    const i = S.floors.length, prev = S.floors[i - 1];
+    const F = { name: floorDefaultName(i), nameEdited: false, ceiling: prev ? prev.ceiling : 300, sameScale: false, orientSet: false, align: null, marks: null, plainVoids: [] };
+    for (const k of FLOOR_KEYS) F[k] = null;
+    Object.assign(F, { page: 1, thumbs: new Map(), drawing: 0, scale: { method: null, cmPerUnit: null, label: '' }, measure: { pts: [], cm: '' }, ratio: '', dpi: '150', rotate: 0, mirror: false, resultKey: '' });
+    if (src) Object.assign(F, src);
+    S.floors.push(F);
+    return i;
+  }
+  /** The floor's own scale, or the ground floor's when "same scale as the ground floor" is ticked. */
+  function effScale() {
+    if (multi() && S.cur > 0 && floorAt(S.cur).sameScale) return withFloorSync(0, currentScale);
+    return currentScale();
+  }
+  /** The floors as tabs (Scale, Orientation, Review): a horizontally scrollable strip on phones. */
+  function floorTabs(status) {
+    return h('div', { class: 'ifloortabs', role: 'tablist', 'aria-label': 'Floors' }, S.floors.map((F, i) => h('button', { type: 'button', role: 'tab', class: `ifloortabs__tab${i === S.cur ? ' is-on' : ''}`,
+      'aria-selected': String(i === S.cur), dataset: { floor: String(i) }, onClick: () => { if (i !== S.cur) { showFloor(i); render(); } } },
+      h('span', { class: 'ifloortabs__name' }, F.name), status ? h('span', { class: 'ifloortabs__meta' }, status(i)) : null)));
+  }
+  /** Where floor i's own origin lies in the ground floor's frame (sum of the alignments below it). */
+  function offsetOf(i) {
+    let x = 0, y = 0;
+    for (let k = 1; k <= i; k++) { const a = floorAt(k).align; if (a) { x += a.dx; y += a.dy; } }
+    return { x, y };
+  }
   // ── state helpers ──
   function setError(text) { S.error = text || ''; errorBox.hidden = !text; setKids(errorBox, text ? [icon('warn', { size: 16 }), h('span', null, text)] : []); }
   function setBusy(text, cancellable = true) {
@@ -135,11 +204,12 @@ export function openImportWizard(app, opts = {}) {
   // ── navigation ──
   function canNext() {
     if (S.busy) return false;
-    switch (STEPS[S.step].id) {
-      case 'file': return !!S.sheet;
-      case 'scale': return !!currentScale();
+    switch (steps()[S.step].id) {
+      case 'file': return multi() ? (stash(), S.floors.every((F) => !!F.sheet && F.kind !== 'dwg')) : !!S.sheet;
+      case 'scale': return multi() ? S.floors.every((_, i) => !!withFloorSync(i, effScale)) : !!currentScale();
       case 'orient': return true;
-      case 'review': return !!S.result;
+      case 'align': return true;
+      case 'review': return multi() ? (stash(), S.floors.every((F) => !!F.result)) : !!S.result;
       default: return true;
     }
   }
@@ -147,9 +217,10 @@ export function openImportWizard(app, opts = {}) {
     backBtn.hidden = S.step === 0;
     backBtn.disabled = !!S.busy;
     nextBtn.disabled = !canNext();
-    const last = S.step === STEPS.length - 1;
+    if (stepper.children.length !== steps().length) setKids(stepper, stepItems(steps()));
+    const last = S.step === steps().length - 1;
     nextBtn.querySelector('.btn__label').textContent = last ? (S.built && !S.built.ok ? 'Create anyway' : 'Create project')
-      : STEPS[S.step].id === 'scale' ? 'Use this scale' : 'Next';
+      : steps()[S.step].id === 'scale' ? 'Use this scale' : 'Next';
     stepper.querySelectorAll('.istep__item').forEach((li, i) => {
       li.classList.toggle('is-done', i < S.step); li.classList.toggle('is-current', i === S.step);
       if (i === S.step) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current');
@@ -157,26 +228,29 @@ export function openImportWizard(app, opts = {}) {
   }
   async function next() {
     if (!canNext()) return;
-    const id = STEPS[S.step].id;
+    const id = steps()[S.step].id;
     if (id === 'orient') {
       if (!readOrient()) return;
-      if (!(await analyse())) return;            // the review shows the detection at the confirmed scale and orientation
+      if (multi()) { if (!(await analyseAll())) return; }
+      else if (!(await analyse())) return;            // the review shows the detection at the confirmed scale and orientation
     }
+    if (id === 'align') { if (!(await prepareStairs())) return; }
     if (id === 'create') { await create(); return; }
     go(S.step + 1);
   }
   function go(i) {
-    S.step = Math.max(0, Math.min(STEPS.length - 1, i));
+    S.step = Math.max(0, Math.min(steps().length - 1, i));
     if (S.dxf && S.dxf.highlight && S.prims) { S.dxf.highlight = null; drawDxfSheet(); }   // the other steps show every layer
     setError('');
     render();
   }
   function render() {
-    const id = STEPS[S.step].id;
+    const id = steps()[S.step].id;
     content.dataset.step = id;
     if (id === 'file') renderFile();
     else if (id === 'scale') renderScale();
     else if (id === 'orient') renderOrient();
+    else if (id === 'align') renderAlign();
     else if (id === 'review') renderReview();
     else renderCreate();
     syncFoot();
@@ -213,11 +287,132 @@ export function openImportWizard(app, opts = {}) {
             : S.kind === 'image' ? (S.sheet.fromPdf ? 'This PDF page is a scanned picture: it is read like a photo.' : 'The picture you chose. Next, set its scale.')
               : S.kind === 'dxf' ? 'The drawing’s model space. Check which layers hold the walls, doors and windows below; then confirm the scale.' : 'This is the page that will be read. Next, confirm its scale.'),
           many ? h('ol', { class: 'idrawings' }, S.first.drawings.map((d, i) => h('li', null, h('button', { type: 'button', class: `idrawings__btn${i === S.drawing ? ' is-on' : ''}`, onClick: () => pickDrawing(i) },
-            `Drawing ${i + 1}`, h('span', { class: 'faint' }, ` · ${d.walls} wall pieces`))))) : null,
+            `Drawing ${i + 1}`, h('span', { class: 'faint' }, ` · ${d.walls} wall pieces`), S.floors && drawingFloor(i) >= 0 ? h('span', { class: 'idrawings__floor' }, ` — ${floorAt(drawingFloor(i)).name}`) : null)))) : null,
+          S.floors ? floorPanel() : null,
           S.kind === 'dxf' ? layerPanel() : null)));
     }
     setKids(content, kids);
     if (S.sheet) requestAnimationFrame(() => sheet.resize());
+  }
+  // ── the floor list (several floors, F8) ──
+  const floorFileInput = h('input', { type: 'file', accept: '.pdf,application/pdf,.dxf,image/vnd.dxf,application/dxf,.png,image/png,.jpg,.jpeg,image/jpeg', class: 'sr-only', id: 'import-floor-file',
+    onChange: () => { const f = floorFileInput.files && floorFileInput.files[0]; floorFileInput.value = ''; if (f) chooseFile(f, { asFloor: true }); } });
+  /** The floor (index) that reads drawing k of the sheet shown, or −1. */
+  function drawingFloor(k) {
+    stash();
+    return S.floors.findIndex((F) => F.prims && F.prims === S.prims && F.drawing === k && F.sheet);
+  }
+  const pageFloor = (n) => { stash(); return S.floors.findIndex((F) => F.bytes && F.bytes === S.bytes && F.page === n && F.sheet); };
+  function floorSource(F) {
+    const parts = [F.fileName || 'Drawing'];
+    if (F.pdf && F.pdf.pageCount > 1) parts.push(`page ${F.page}`);
+    if (F.first && F.first.drawings && F.first.drawings.length > 1) parts.push(`drawing ${F.drawing + 1}`);
+    return parts.join(' · ');
+  }
+  /** A small picture of the floor's drawing (its part of the sheet when the sheet holds several). */
+  function floorThumb(F) {
+    const c = document.createElement('canvas');
+    c.width = 120; c.height = 84; c.className = 'ifloor__canvas';
+    const g = c.getContext('2d');
+    g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height);
+    if (!F.sheet || !F.sheet.canvas) return c;
+    let box = { x: 0, y: 0, w: F.sheet.w, h: F.sheet.h };
+    const d = F.first && F.first.drawings && F.first.drawings.length > 1 ? F.first.drawings[F.drawing] : null;
+    if (d && F.first.transform) {
+      const inv = affInv(F.first.transform), pts = rectPts(d.bbox, 60).map(([x, y]) => affApply(inv, x, y));
+      const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+      box = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+    }
+    const k = Math.min(c.width / box.w, c.height / box.h), ppu = F.sheet.ppu || 1;
+    try {
+      g.drawImage(F.sheet.canvas, box.x * ppu, box.y * ppu, box.w * ppu, box.h * ppu, (c.width - box.w * k) / 2, (c.height - box.h * k) / 2, box.w * k, box.h * k);
+    } catch (e) { /* a thumbnail is optional */ }
+    return c;
+  }
+  function floorPanel() {
+    stash();
+    const n = S.floors.length;
+    const items = S.floors.map((F, i) => {
+      const name = h('input', { class: 'field__input ifloor__name', type: 'text', value: F.name, maxlength: '40', autocomplete: 'off', spellcheck: 'false', 'aria-label': `Name of floor ${i + 1}`,
+        onInput: () => { F.name = name.value || floorDefaultName(i); F.nameEdited = true; } });
+      const ceil = numInput(((F.ceiling || 300) / 100).toFixed(2), { 'aria-label': `Ceiling height of ${F.name} in metres`,
+        onInput: () => { const v = readNum(ceil); if (v >= 2 && v <= 6) F.ceiling = Math.round(v * 100); } });
+      const tools = n > 1 ? h('div', { class: 'ifloor__tools' },
+        iconBtn('chevron-up', `Move ${F.name} up a floor`, { size: 16, disabled: i === n - 1, onClick: () => moveFloor(i, +1) }),
+        iconBtn('chevron-down', `Move ${F.name} down a floor`, { size: 16, disabled: i === 0, onClick: () => moveFloor(i, -1) }),
+        iconBtn('trash', `Remove ${F.name}`, { size: 16, onClick: () => removeFloor(i) })) : null;
+      return h('li', { class: `ifloor${i === S.cur ? ' is-on' : ''}`, dataset: { floor: String(i) } },
+        h('button', { type: 'button', class: 'ifloor__pick', 'aria-label': `Show ${F.name}`, 'aria-pressed': String(i === S.cur), onClick: () => { showFloor(i); renderFile(); syncFoot(); } }, floorThumb(F)),
+        h('div', { class: 'ifloor__body' },
+          name,
+          n > 1 ? h('label', { class: 'ifloor__ceil' }, h('span', null, 'Ceiling'), ceil, h('span', { class: 'faint' }, 'm')) : null,
+          h('p', { class: 'ifloor__src', dir: 'auto' }, F.sheet ? floorSource(F) : F.kind === 'dwg' ? 'DWG — cannot be read' : 'reading…')),
+        tools);
+    });
+    const adds = [];
+    if (S.first && S.first.drawings && S.first.drawings.length > 1) S.first.drawings.forEach((d, k) => { if (drawingFloor(k) < 0) adds.push(btn(`Add drawing ${k + 1} as a floor`, { small: true, icon: 'plus', onClick: () => addFloorDrawing(k) })); });
+    if (S.pdf && S.pdf.pageCount > 1 && S.kind !== 'dwg') S.pdf.pages.forEach((p) => { if (pageFloor(p.page) < 0) adds.push(btn(`Add page ${p.page} as a floor`, { small: true, icon: 'plus', onClick: () => addFloorPage(p.page) })); });
+    adds.push(h('label', { class: 'btn btn--default btn--sm filepick', for: 'import-floor-file', tabindex: '0',
+      onKeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); floorFileInput.click(); } } }, icon('open', { size: 14 }), h('span', { class: 'btn__label' }, 'Add a floor from another file…')), floorFileInput);
+    return h('div', { class: 'ifloorsbox' },
+      h('p', { class: 'iside__title' }, icon('levels', { size: 16 }), n > 1 ? `Floors (${n}), bottom-up` : 'Floors'),
+      h('p', { class: 'iside__text' }, n > 1 ? 'Each floor is read with its own scale and orientation, then lined up over the floor below. Click a floor to see its drawing.'
+        : 'A house with several floors? Add each floor’s drawing — another page, another drawing on this sheet or another file (PDF, DXF or picture).'),
+      h('ol', { class: 'ifloors', 'aria-label': 'Floors of the house, ground floor first' }, items),
+      h('div', { class: 'ifloors__add' }, adds));
+  }
+  function resetFloorWork() { S.stairs = null; S.built = null; for (const F of S.floors) { F.align = null; F.plainVoids = []; } }
+  function addFloorDrawing(k) {
+    stash();
+    const src = {};
+    for (const key of FLOOR_KEYS) src[key] = S[key];
+    Object.assign(src, { drawing: k, result: null, resultKey: '', scale: { ...S.scale }, measure: { pts: S.measure.pts.slice(), cm: S.measure.cm } });
+    const i = newFloor(src);
+    floorAt(i).sameScale = true;
+    resetFloorWork();
+    unstash(i);
+    if (S.sheet) sheet.setImage(S.sheet.canvas, S.sheet.ppu);
+    render();
+  }
+  async function addFloorPage(n) {
+    stash();
+    const src = { file: S.file, fileName: S.fileName, kind: S.kind, bytes: S.bytes, pdf: S.pdf, thumbs: S.thumbs, page: n };
+    const i = newFloor(src);
+    resetFloorWork();
+    unstash(i);
+    render();
+    await work('Reading the page…', () => loadPage(n));
+    // a page of the same PDF whose detected scale agrees with the ground floor's: "same scale" is pre-ticked
+    const g = floorAt(0), gs = g.first && g.first.scale, ms = S.first && S.first.scale;
+    if (i > 0 && g.bytes === S.bytes && gs && ms && Math.abs(gs.cmPerUnit / ms.cmPerUnit - 1) < 0.01) floorAt(i).sameScale = true;
+    stash();
+    render();
+  }
+  function moveFloor(i, d) {
+    const j = i + d;
+    if (j < 0 || j >= S.floors.length) return;
+    stash();
+    const was = S.floors[S.cur];
+    [S.floors[i], S.floors[j]] = [S.floors[j], S.floors[i]];
+    S.floors.forEach((F, k) => { if (!F.nameEdited) F.name = floorDefaultName(k); });
+    resetFloorWork();
+    S.cur = S.floors.indexOf(was);
+    if (S.floors[0].sameScale) S.floors[0].sameScale = false;
+    renderFile(); syncFoot();
+  }
+  function removeFloor(i) {
+    if (S.floors.length < 2) return;
+    stash();
+    const was = S.floors[S.cur];
+    S.floors.splice(i, 1);
+    S.floors.forEach((F, k) => { if (!F.nameEdited) F.name = floorDefaultName(k); });
+    resetFloorWork();
+    if (S.floors[0].sameScale) S.floors[0].sameScale = false;
+    const keep = S.floors.indexOf(was);
+    unstash(keep >= 0 ? keep : Math.min(i, S.floors.length - 1));
+    if (S.sheet) sheet.setImage(S.sheet.canvas, S.sheet.ppu);
+    if (S.step >= steps().length) S.step = 0;
+    render();
   }
   function fileFacts() {
     if (S.kind === 'dwg') return 'AutoCAD DWG — not readable here (see below)';
@@ -242,13 +437,23 @@ export function openImportWizard(app, opts = {}) {
     return h('div', { class: 'ipagesbox' }, h('p', { class: 'iside__title' }, 'Which page holds the floor plan?'), grid);
   }
 
-  async function chooseFile(f) {
+  async function chooseFile(f, { asFloor = false } = {}) {
     S.gen++;
     if (task) task.cancel();
+    if (S.floors) {
+      // several floors: the file is the source of the floor shown (the first file starts the list); "Add a floor from
+      // another file…" adds a floor on top and reads the file into it
+      if (asFloor && S.floors.length && S.sheet) { stash(); unstash(newFloor()); }
+      if (!S.floors.length) { newFloor(); S.cur = 0; }
+      Object.assign(floorAt(S.cur), { align: null, marks: null, plainVoids: [] });
+      S.stairs = null;
+    }
     Object.assign(S, { file: f, fileName: f.name || 'Drawing', kind: null, bytes: null, pdf: null, dxf: null, page: 1, thumbs: new Map(), prims: null, snapIndex: null, sheet: null, image: null, first: null, drawing: 0,
       scale: { method: null, cmPerUnit: null, label: '' }, measure: { pts: [], cm: '' }, ratio: '', result: null, resultKey: '', built: null });
-    if (!S.name) S.nameFromFile = true;
-    if (S.nameFromFile) S.name = baseName(f.name);
+    if (!asFloor) {
+      if (!S.name) S.nameFromFile = true;
+      if (S.nameFromFile) S.name = baseName(f.name);
+    }
     render();
     const gen = S.gen;
     await work('Opening the file…', async () => {
@@ -269,6 +474,7 @@ export function openImportWizard(app, opts = {}) {
         sheet.setImage(S.sheet.canvas, 1);
       }
     });
+    stash();
     render();
   }
   async function thumbnails() {
@@ -278,7 +484,7 @@ export function openImportWizard(app, opts = {}) {
         const r = await renderPage(S.bytes, p.page, 220, p);
         r.canvas.className = 'ipages__canvas';
         S.thumbs.set(p.page, r.canvas);
-        if (STEPS[S.step].id === 'file' && !S.busy) { const slot = content.querySelectorAll('.ipages__img')[p.page - 1]; if (slot) setKids(slot, r.canvas); }
+        if (steps()[S.step].id === 'file' && !S.busy) { const slot = content.querySelectorAll('.ipages__img')[p.page - 1]; if (slot) setKids(slot, r.canvas); }
       } catch (e) { /* a thumbnail is optional */ }
     }
   }
@@ -409,10 +615,11 @@ export function openImportWizard(app, opts = {}) {
     if (!S.first || !S.first.drawings || i === S.drawing) return;
     S.drawing = i;
     S.result = null; S.resultKey = '';
+    if (S.floors) { stash(); resetFloorWork(); }
     renderFile(); syncFoot();
   }
   function onSheetClick(pt) {
-    if (STEPS[S.step].id !== 'file' || !S.first || !S.first.drawings) return;
+    if (steps()[S.step].id !== 'file' || !S.first || !S.first.drawings) return;
     // drawings' boxes are in plan cm of the first analysis; find the one under the click
     const [px, py] = affApply(S.first.transform, pt[0], pt[1]);
     const hit = S.first.drawings.findIndex((d) => px >= d.bbox.x - 100 && px <= d.bbox.x + d.bbox.w + 100 && py >= d.bbox.y - 100 && py <= d.bbox.y + d.bbox.h + 100);
@@ -429,7 +636,8 @@ export function openImportWizard(app, opts = {}) {
       ctx.fill();
       ctx.setLineDash(on ? [] : [6, 4]); ctx.lineWidth = on ? 2 : 1; ctx.strokeStyle = on ? V.pal.accent : V.pal.line2; ctx.stroke(); ctx.setLineDash([]);
       const xs = pts.map((p) => V.X(p[0])), ys = pts.map((p) => V.Y(p[1]));
-      label(ctx, `Drawing ${i + 1}${on ? ' — chosen' : ''}`, Math.min(...xs) + 6, Math.min(...ys) + 6, on ? V.pal.accent : V.pal.line2);
+      const fl = S.floors && S.floors.length > 1 ? drawingFloor(i) : -1;
+      label(ctx, `Drawing ${i + 1}${fl >= 0 ? ` — ${floorAt(fl).name}` : on ? ' — chosen' : ''}`, Math.min(...xs) + 6, Math.min(...ys) + 6, on ? V.pal.accent : V.pal.line2);
     });
   }
 
@@ -532,13 +740,20 @@ export function openImportWizard(app, opts = {}) {
     ];
     S._guess = guess; S._text = text;
     const info = h('div', { class: 'isanity', 'aria-live': 'polite' });
+    // several floors: an upper floor may take the ground floor's scale (pre-ticked when both come from one file and agree)
+    const F = multi() ? floorAt(S.cur) : null, g = multi() ? floorAt(0) : null;
+    const offerSame = !!(F && S.cur > 0 && g.kind === S.kind && (S.kind !== 'image' || g.file === S.file));
+    const same = offerSame && F.sameScale;
+    if (same) { sheet.setMode('view'); sheet.setHint(''); }
     setKids(content, h('div', { class: 'isplit' },
       h('div', { class: 'isplit__main' }, sheet.el),
       h('div', { class: 'isplit__side' },
-        h('p', { class: 'iside__title' }, 'How big is the drawing?'),
-        h('p', { class: 'iside__text' }, 'Every length in the new project comes from this, so please confirm it.'),
-        h('div', { class: 'iopts', role: 'radiogroup', 'aria-label': 'How to set the scale' }, opts),
+        h('p', { class: 'iside__title' }, multi() ? `How big is the drawing of the ${lowerFirst(floorAt(S.cur).name)}?` : 'How big is the drawing?'),
+        h('p', { class: 'iside__text' }, multi() ? 'Each floor has its own scale. Every length of that floor comes from it, so please confirm it.' : 'Every length in the new project comes from this, so please confirm it.'),
+        offerSame ? checkbox('Same scale as the ground floor', F.sameScale, (v) => { F.sameScale = v; S.result = null; renderScale(); syncFoot(); }) : null,
+        same ? h('p', { class: 'iside__text' }, 'This floor uses the scale confirmed for the ground floor.') : h('div', { class: 'iopts', role: 'radiogroup', 'aria-label': 'How to set the scale' }, opts),
         info)));
+    if (multi()) content.prepend(floorTabs());
     syncScaleInfo();
     requestAnimationFrame(() => sheet.resize());
   }
@@ -555,7 +770,7 @@ export function openImportWizard(app, opts = {}) {
   function syncScaleInfo() {
     const info = content.querySelector('.isanity');
     if (!info) return;
-    const sc = currentScale();
+    const sc = effScale();
     if (!sc) setKids(info, h('p', { class: 'faint' }, S.scale.method ? 'Complete the choice above to see what it means.' : 'Choose one of the ways above.'));
     else {
       const warn = plausibility(sc);
@@ -565,7 +780,7 @@ export function openImportWizard(app, opts = {}) {
     syncFoot();
   }
   function onPick(pt, snapped) {
-    if (STEPS[S.step].id === 'scale' && S.scale.method === 'measure' && S.measure.pts.length < 2) {
+    if (steps()[S.step].id === 'scale' && S.scale.method === 'measure' && S.measure.pts.length < 2) {
       S.measure.pts.push(pt);
       void snapped;
       renderScale();
@@ -596,7 +811,7 @@ export function openImportWizard(app, opts = {}) {
     return { cell, map };
   }
   function snapTo(pt, r) {
-    if (!S.snapIndex || STEPS[S.step].id !== 'scale') return null;
+    if (!S.snapIndex || steps()[S.step].id !== 'scale') return null;
     const { cell, map } = S.snapIndex;
     let best = null, bd = r * r;
     const n = Math.ceil(r / cell);
@@ -610,7 +825,7 @@ export function openImportWizard(app, opts = {}) {
   }
 
   // ════════════════════════ 3. orientation ════════════════════════
-  let place, ceiling, northInput;
+  let place, ceiling, northInput, curDial;
   function renderOrient() {
     const preview = h('div', { class: 'iorient__page' });
     const img = h('div', { class: 'iorient__img' });
@@ -630,22 +845,29 @@ export function openImportWizard(app, opts = {}) {
       dial.set(S.north);
     };
     const rot = segmented({ options: [0, 90, 180, 270].map((v) => ({ value: v, label: `${v}°` })), value: S.rotate, label: 'Rotate the drawing clockwise',
-      onChange: (v) => { S.rotate = v; S.result = null; syncPreview(); } });
+      onChange: (v) => { S.rotate = v; S.result = null; if (S.floors && S.floors[S.cur]) S.floors[S.cur].orientSet = true; syncPreview(); } });
     const mir = segmented({ options: [{ value: false, label: 'As drawn' }, { value: 'ns', label: 'Flip north–south' }, { value: 'ew', label: 'Flip east–west' }], value: S.mirror, label: 'Mirror',
-      onChange: (v) => { S.mirror = v; S.result = null; syncPreview(); } });
-    place = placeFields({ north: S.north, northHint: 'Clockwise from the top of the plan as shown; drag the arrow or type degrees.' });
-    northInput = place.north;
-    northInput.addEventListener('input', () => { const n = readNum(northInput); if (Number.isFinite(n)) { S.north = n; dial.set(n); } });
-    ceiling = ceilingField(S.ceiling || 3.0);
+      onChange: (v) => { S.mirror = v; S.result = null; if (S.floors && S.floors[S.cur]) S.floors[S.cur].orientSet = true; syncPreview(); } });
+    // several floors: one set of location / north fields for the whole house, kept while the floor tabs switch
+    if (!(multi() && place && place.keep)) {
+      place = placeFields({ north: S.north, northHint: 'Clockwise from the top of the plan as shown; drag the arrow or type degrees.' });
+      place.keep = multi();
+      northInput = place.north;
+      northInput.addEventListener('input', () => { const n = readNum(northInput); if (Number.isFinite(n)) { S.north = n; curDial && curDial.set(n); } });
+    }
+    curDial = dial;
+    ceiling = multi() ? null : ceilingField(S.ceiling || 3.0);    // several floors: each floor's ceiling is in the floor list (step 1)
     setKids(content, h('div', { class: 'isplit isplit--orient' },
       h('div', { class: 'isplit__main' }, preview),
       h('div', { class: 'isplit__side newproj' },
-        h('p', { class: 'iside__title' }, 'Which way up?'),
-        h('p', { class: 'iside__text' }, 'Turn the drawing so it shows the house the way you want to see the plan. A plan drawn for the mirror-image twin house can be flipped.'),
+        h('p', { class: 'iside__title' }, multi() ? `Which way up is the ${lowerFirst(floorAt(S.cur).name)}?` : 'Which way up?'),
+        h('p', { class: 'iside__text' }, multi() ? 'Turn or flip each floor’s drawing so it shows the house the way you want to see the plan (if you leave it as it is, the next step tries the four turns to fit it over the floor below). North and the location are for the whole house.'
+          : 'Turn the drawing so it shows the house the way you want to see the plan. A plan drawn for the mirror-image twin house can be flipped.'),
         h('div', { class: 'newproj__group' }, h('p', { class: 'newproj__label' }, 'Rotate'), rot),
         h('div', { class: 'newproj__group' }, h('p', { class: 'newproj__label' }, 'Mirror'), mir),
         place.el,
-        ceiling.el)));
+        ceiling ? ceiling.el : h('p', { class: 'iside__text' }, `Ceiling heights: ${S.floors.map((F) => `${F.name} ${(F.ceiling / 100).toFixed(2)} m`).join(', ')} — change them in the floor list (step 1).`))));
+    if (multi()) content.prepend(floorTabs());
     syncPreview();
   }
   function northDial() {
@@ -679,15 +901,17 @@ export function openImportWizard(app, opts = {}) {
     if (!place) return true;
     const p = place.read();
     if (!p.ok) { setError(p.reason); return false; }
+    if (!ceiling) { S.location = p.location; S.north = p.northAngle; S.ceilingCm = floorAt(0).ceiling; return true; }
     const c = ceiling.read();
     if (!c.ok) { setError(c.reason); return false; }
     S.location = p.location; S.north = p.northAngle; S.ceilingCm = c.cm; S.ceiling = c.cm / 100;
+    if (S.floors && S.floors[0]) S.floors[0].ceiling = c.cm;
     return true;
   }
 
   // ════════════════════════ analysis at the confirmed scale ════════════════════════
   async function analyse() {
-    const sc = currentScale();
+    const sc = effScale();
     if (!sc) return false;
     const slantsOn = !!FEATURES.angledWalls && vector();      // angled / curved walls are converted only while the Settings switch is on (pictures have none)
     const key = JSON.stringify([S.kind, S.page, sc.cmPerUnit, S.drawing, S.rotate, S.mirror, S.dxf ? S.dxf.roles : null, slantsOn]);
@@ -722,6 +946,24 @@ export function openImportWizard(app, opts = {}) {
     res.slantsOn = slantsOn;
     S.result = res; S.resultKey = key; S.built = null;
     return true;
+  }
+  // ── several floors (F8): every floor read at its scale and orientation, stairs / openings looked for on each ──
+  const marksOf = () => (vector() && S.prims && S.result && S.result.walls.length
+    ? { stairs: detectStairSymbols(S.prims, S.result), voids: detectVoidSymbols(S.prims, S.result) } : { stairs: [], voids: [] });
+  async function analyseAll() {
+    let ok = true;
+    await eachFloor(async (i, F) => {
+      const before = S.resultKey, had = !!S.result;
+      if (!(await analyse())) { ok = false; return false; }
+      if (!had || S.resultKey !== before || !F.marks) {
+        F.marks = marksOf();
+        // this floor changed: its own alignment and the one of the floor above are proposed again
+        F.align = null;
+        if (S.floors[i + 1]) S.floors[i + 1].align = null;
+        S.stairs = null; S.built = null;
+      }
+    });
+    return ok;
   }
   /** No walls found: place the sheet by scale, rotation and mirror alone, its top-left corner at the plan origin. */
   function fallbackTransform(cmPerUnit) {
