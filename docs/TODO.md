@@ -1,6 +1,6 @@
 # TODO — E7 House Designer
 
-Last updated: 13 Nov 2026. Published preview (version 20): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
+Last updated: 13 Nov 2026. Published preview (version 21): https://claude.ai/artifact/8ZvK3RLvmdmFnunBS8Mi1R
 
 ## Done (published as version 3, 13 Nov 2026)
 - [x] Exact plan of house 98 from the architect's drawings; 2D editor; 3D view; walk-through.
@@ -81,7 +81,11 @@ Stairs tool in the plan (straight / L / U, move, turn, resize, opening above fol
 - [x] Catalogue 1,108 products from 59 suppliers: +126 indoor (Habitat, KARE, StudioKnob, Tollman's DOT, Kado Home, Kkids, Design4You, Home 26, Zilber, Shpitzer, Tzemer Rugs, Beitili) and +104 outdoor / kitchen / bath / finishes (Argaman4U, Rocking Chair, Canopia, Izraela, Bol Parket, Bath Boutique, Golan Westline, Porcelanita and others). Evidence for every supplier and every skipped one is in `docs/CATALOG-RESEARCH.md`.
 - [x] Owner's decisions: no "boutique" category; the supplier filter stays; a small star (top-rated supplier, only with a recorded public rating ≥ 4.5 from ≥ 100 reviews) and gem (design studio / boutique) beside the supplier's name.
 - [x] Phone: catalogue category chips no longer overlap (version 17).
-- [ ] Second research pass on the suppliers that were skipped and the ones the owner named (Kaza, Ubject, Zaga…) [Sonnet, running]. Will return two lists for the owner: suppliers with no public price (carry them as "price on request"?) and sites that block automated reading.
+- [x] Second research pass (version 21): +158 → 1,266 products from 66 suppliers. Added Kaza 45, Ubject (ubject.co.il) 35, Zaga 26, Tollman's (tollmans.co.il sale pages) 15, Items Gallery 15, Daniel Light Design 14, Moka Home 7, one Home 26 item.
+  - Block automated reading (the owner can add items by hand with "Add your own product"): Golf & Co, Vardinon, CWC, HouseIn, Deco-Or, Rugsil, SHW, Zara Home Israel, H&M Home, Vitra.
+  - No public price in shekels: Aqua Creations (USD only). Could not be reached: Karney Tchelet, Kastiel, KualaStyle, Million Chairs.
+  - Still skipped for missing / ambiguous sizes: Studio Cheha, Etzmaleh, Kidikids, Rahitale, HaNamal Online, about 200 Ubject items whose two size numbers have no fixed order, Habitat's Vitra chairs.
+  - Notes: Kaza sizes are read as depth × height × width following the site's own script; Zaga and Tollman's prices are current sale prices (tagged); two Items Gallery pieces are described by the shop as replicas (tagged `replica`).
 - [x] "Add your own product" (version 20): catalogue → "+ Add your own"; link, shop, name, price or "price on request", kind of item from 3D thumbnails, sizes, live preview; saved with the project, synced in shared projects, optional library on the device; "added by you" mark and an "Only products I added" filter (`tests/own-product.test.mjs`). To check: the 3D preview was blank in one desktop screenshot (possibly a timing artefact); a lamp's preview looks dark.
 
 ## Still waiting for the owner
