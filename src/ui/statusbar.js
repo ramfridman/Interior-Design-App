@@ -9,7 +9,8 @@ import { fmtPrice, fmtLen, toUnit, unitDigits } from './format.js';
 import { LEVELS, segmentTitle, openingTitle } from './structure.js';
 import { storageAvailable } from './prefs.js';
 import { icon } from './icons.js';
-import { FEATURES } from '../core/features.js';
+import { FEATURES, onFeatureChange } from '../core/features.js';
+import { upperLevels } from '../core/levels.js';
 import { viewPlan } from './levels.js';
 
 /** @param {HTMLElement} root  @param {object} app */
@@ -26,7 +27,7 @@ export function initStatusbar(root, app) {
 
   // several floors: the floor shown (only while the levels feature is on)
   const levelText = h('span', { class: 'truncate' }, '');
-  const levelCell = FEATURES.levels && app.levels ? h('div', { class: 'sb__cell sb__cell--level', role: 'status', 'aria-live': 'polite', 'data-tip': 'Floor shown in the plan (PgUp / PgDn)', 'data-tip-side': 'top' }, icon('levels', { size: 14 }), levelText) : null;
+  const levelCell = app.levels ? h('div', { class: 'sb__cell sb__cell--level levels-only', role: 'status', 'aria-live': 'polite', 'data-tip': 'Floor shown in the plan (PgUp / PgDn)', 'data-tip-side': 'top' }, icon('levels', { size: 14 }), levelText) : null;
   if (levelCell) { const paintLevel = () => { levelText.textContent = app.levels.statusText(); }; app.levels.onChange(paintLevel); paintLevel(); }
   if (levelCell) root.append(levelCell);
   root.append(
@@ -70,7 +71,16 @@ export function initStatusbar(root, app) {
       return;
     }
     const items = store.getSelected();
-    if (!items.length) { selection.textContent = `${store.items.length} items in the design`; return; }
+    if (!items.length) {
+      // several floors: what stands on the floor shown, and in the whole design (carpentry units count on their run's floor)
+      if (FEATURES.levels && upperLevels(app.plan).length) {
+        const lv = store.ui.level || 'L0', runs = (store.carpentry && store.carpentry.runs) || {};
+        const floorOf = (it) => it.level || (it.carp && runs[it.carp.runId] && runs[it.carp.runId].level) || 'L0';
+        const here = store.items.filter((it) => floorOf(it) === lv).length;
+        selection.textContent = `${here} ${here === 1 ? 'item' : 'items'} on this floor · ${store.items.length} in the design`;
+      } else selection.textContent = `${store.items.length} items in the design`;
+      return;
+    }
     let cost = 0;
     for (const it of items) { try { cost += catalog.itemCost(it) || 0; } catch (err) { /* ignore */ } }
     const what = items.length === 1 ? items[0].name : `${items.length} items selected`;
@@ -93,10 +103,12 @@ export function initStatusbar(root, app) {
   store.on('items', (e) => { if (!e.transient) paintSelection(); });
   store.on('ui', (e) => {
     if (e.keys.includes('units')) { units.set(store.ui.units); paintCursor(); }
-    if (e.keys.includes('units') || e.keys.includes('tool') || e.keys.includes('structureSel')) paintSelection();
+    if (e.keys.includes('units') || e.keys.includes('tool') || e.keys.includes('structureSel') || e.keys.includes('level')) paintSelection();
   });
   const repaintStructure = rafThrottle(() => { if (app.structure.isActive()) paintSelection(); });
   store.on('plan', repaintStructure);
+  store.on('plan', (e) => { if (!e || !e.transient) paintSelection(); });
+  onFeatureChange(() => paintSelection());
   paintSelection();
   markSaved();
 }

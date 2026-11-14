@@ -56,7 +56,7 @@ export function initRooms(root, app) {
     const type = kind === 'floor' ? 'floor-finish' : 'wall-finish';
     let resolved = { params: {}, product: null };
     try { resolved = resolveFinish(space.id, kind, store, catalog); } catch (err) { /* keep the default */ }
-    const area = kind === 'floor' ? floorAreaM2(space) : wallAreaM2(space, store.project.ceilingHeight, plan);
+    const area = kind === 'floor' ? floorAreaM2(space) : wallAreaM2(space, plan.levelId && plan.levelId !== GROUND ? (plan.heights && plan.heights.ceiling) || store.project.ceilingHeight : store.project.ceilingHeight, plan);
     const b = h('button', { type: 'button', class: 'fpick', 'aria-haspopup': 'dialog', 'aria-label': `${kind === 'floor' ? 'Floor' : 'Wall'} finish of ${space.name}: ${resolved.product ? resolved.product.name : 'built-in default'}. Change`,
       onClick: () => openPicker(b, space, kind, type, area) },
     swatchCanvas(resolved.params, type),

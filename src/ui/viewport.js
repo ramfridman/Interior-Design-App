@@ -11,6 +11,8 @@ import { openMenu, toast } from './dialogs.js';
 import { getPref, setPref } from './prefs.js';
 import { createSunControl } from './sun.js';
 import { viewPlan } from './levels.js';
+import { levelPlan } from '../core/plan-edit.js';
+import { levelIds } from '../core/levels.js';
 
 export const DND_TYPE = 'application/x-e7-product';
 /** Extra drag type set with a finish product, so a pane can tell a floor from a wall finish while it is dragged. */
@@ -115,8 +117,17 @@ export function initViewport(app) {
   // Finishes: the room (2D: under the cursor; 3D: the floor hit, or the room a wall face looks into) is highlighted
   // while dragging — its floor for a floor finish, its walls for a wall finish — and the drop applies the finish
   // to that room exactly like the Rooms tab (one undo step, toast with Undo).
-  const spaceOf = (id) => (id && (plan.rooms.find((r) => r.id === id) ? { kind: 'room', id }
-    : plan.outdoorAreas.find((o) => o.id === id) ? { kind: 'outdoor-area', id } : null)) || null;
+  // several floors: the 3D view can hit a room of any floor shown (whole-house view included)
+  const spaceOf = (id) => {
+    if (!id) return null;
+    for (const lv of levelIds(plan)) {
+      const v = lv === 'L0' ? plan : levelPlan(plan, lv);
+      if (!v) continue;
+      if (v.rooms.some((r) => r.id === id)) return { kind: 'room', id };
+      if ((v.outdoorAreas || []).some((o) => o.id === id)) return { kind: 'outdoor-area', id };
+    }
+    return null;
+  };
   /** The space a finish dropped at this screen position goes to: { kind, id } (room / outdoor area) or null. */
   function finishSpaceAt(is2d, clientX, clientY) {
     if (is2d) {
@@ -242,7 +253,7 @@ export function initViewport(app) {
     { label: 'Front', icon: 'roof', onSelect: () => call(view3d, 'setCameraPreset', 'front', { animate: true }) },
     { label: 'Garden', icon: 'tree', onSelect: () => call(view3d, 'setCameraPreset', 'garden', { animate: true }) },
     { heading: 'Rooms' },
-    ...plan.rooms.map((r) => ({ label: r.name, onSelect: () => { store.setUI({ activeSpace: r.id }); call(view3d, 'setCameraPreset', r.id, { animate: true }); } })),
+    ...viewPlan(app).rooms.map((r) => ({ label: r.name, onSelect: () => { store.setUI({ activeSpace: r.id }); call(view3d, 'setCameraPreset', r.id, { animate: true }); } })),   // the floor shown
   ]) });
   const roofBtn = iconBtn('roof', 'Show roof', { pressed: !!store.ui.showRoof, onClick: () => store.setUI({ showRoof: !store.ui.showRoof }) });
   const cutBtn = iconBtn('cutaway', 'Cut walls low (dollhouse view)', { pressed: !!store.ui.wallsCutaway, onClick: () => store.setUI({ wallsCutaway: !store.ui.wallsCutaway }) });
@@ -270,11 +281,18 @@ export function initViewport(app) {
   ov3d.append(orbitHud, walkHud, h('div', { class: 'ov__bc sunhost' }, sun.el));
 
   let lastPos = null;
-  const drawMini = rafThrottle(() => drawMinimap(mini, viewPlan(app), lastPos));   // the floor shown
+  // several floors: the mini-map and the room label follow the WALKER's floor ('walk-position' carries `level` above
+  // the ground floor), not the floor shown in 2D; before the first position, the floor shown (the walker starts there)
+  const walkPlan = () => {
+    if (store.ui.mode !== 'walk' || !lastPos) return viewPlan(app);
+    const lv = lastPos.level || 'L0';
+    return lv === 'L0' ? plan : levelPlan(plan, lv) || plan;
+  };
+  const drawMini = rafThrottle(() => drawMinimap(mini, walkPlan(), lastPos));
   listen(view3d, 'walk-position', (pos) => {
     if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number') return;
     lastPos = pos;
-    const space = spaceAt(pos.x, pos.y, plan);
+    const space = spaceAt(pos.x, pos.y, walkPlan());
     const label = space ? space.name : 'Outside the lot';
     if (walkRoom.textContent !== label) walkRoom.textContent = label;
     drawMini();
@@ -282,7 +300,7 @@ export function initViewport(app) {
 
   /* ───────── Store wiring ───────── */
   store.on('ui', (e) => {
-    if (e.keys.includes('mode')) applyMode();
+    if (e.keys.includes('mode')) { if (store.ui.mode !== 'walk') lastPos = null; applyMode(); }
     if (e.keys.includes('showRoof')) roofBtn.setPressed(store.ui.showRoof);
     if (e.keys.includes('wallsCutaway')) cutBtn.setPressed(store.ui.wallsCutaway);
     if (e.keys.includes('level')) drawMini();

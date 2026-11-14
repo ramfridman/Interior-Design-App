@@ -16,7 +16,7 @@ const clone = (o) => (o === undefined ? undefined : JSON.parse(JSON.stringify(o)
 const TX_FIELDS = ['x', 'y', 'rot', 'elev', 'w', 'd', 'h'];
 // 'setActiveLevel' is recorded (on a plan with upper levels) before each call, so a re-run edits the same level
 const PLAN_CALLS = ['addWall', 'removeWallSegment', 'moveWallSegment', 'resizeWallSegment', 'addOpening', 'updateOpening', 'removeOpening', 'flipDoor', 'updateRoom', 'resetPlan',
-  'addLevel', 'removeLevel', 'updateLevel', 'setActiveLevel'];
+  'addLevel', 'removeLevel', 'updateLevel', 'setActiveLevel', 'rotateWallEnd'];
 
 /**
  * Drawing order → `@z`: keep the values of the longest run of items already in increasing order, give the others values

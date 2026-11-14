@@ -8,6 +8,8 @@
  *   Estimate · Quantities   the colleague's panels (slots.js), with the price-tier choice
  * The panel is rebuilt from the store on every change; focus (data-fk) and open groups are kept, so nothing jumps.
  */
+import { FEATURES } from '../../core/features.js';
+import { upperLevels, levelName } from '../../core/levels.js';
 import * as Carp from '../../carpentry/index.js';
 import { h, setKids, rafThrottle } from '../dom.js';
 import { icon } from '../icons.js';
@@ -145,7 +147,9 @@ export function initCarpentryInspector(right, app, C) {
     const upd = (patch) => { const r = C.run(() => Carp.updateRun(run.id, patch), { quiet: true }); say(err, r.refusal); };
     const spec = (path, value) => upd({ spec: nest(path, value) });
     const k = kindInfo(run.kind);
-    const rooms = [...plan.rooms].map((r) => [r.id, r.name]);
+    // several floors: the rooms (and names) of the run's own floor; the floor named in the header
+    const rplan = Carp.planOf(run), multiFloor = FEATURES.levels && upperLevels(plan).length > 0;
+    const rooms = [...rplan.rooms].map((r) => [r.id, r.name]);
     const floor = units.filter((u) => rowOf(u) === 'floor');
     const used = floor.reduce((a, u) => a + u.carp.width, 0);
     const hasWorktop = s.worktop && s.worktop.material !== 'none';
@@ -156,7 +160,7 @@ export function initCarpentryInspector(right, app, C) {
       onKeydown: (e) => { if (e.key === 'Enter') name.blur(); }, onChange: () => { const v = name.value.trim(); if (v && v !== run.name) upd({ name: v }); else name.value = run.name; } });
     const head = h('div', { class: 'cinsp__runhead' },
       h('span', { class: 'cinsp__tile' }, icon(k.icon, { size: 24 })),
-      h('div', { class: 'insp__id' }, name, h('p', { class: 'insp__meta' }, `${run.code} · ${k.label} · ${roomName(plan, run.roomId)}`)));
+      h('div', { class: 'insp__id' }, name, h('p', { class: 'insp__meta' }, `${run.code} · ${k.label} · ${roomName(rplan, run.roomId)}${multiFloor ? ` · ${levelName(plan, Carp.runLevel(run)) || Carp.runLevel(run)}` : ''}`)));
 
     const basics = h('div', { class: 'cbasics' },
       h('div', { class: 'grid2' },
@@ -174,7 +178,7 @@ export function initCarpentryInspector(right, app, C) {
       Carp.isFreeRun(run) ? h('p', { class: 'crow__hint' }, `Drag it in the plan to move it (5 cm steps), arrow keys nudge 5 cm (Shift: 1 cm), R turns it. Keep ≥ ${Carp.RULES.aisleMin} cm all round, ${Carp.RULES.aisleRecommended}–${Carp.RULES.aisleTwoCooks} cm preferred.`) : null,
       err);
 
-    const place = group('place', 'Kind, room and ends', `${k.label} · ${roomName(plan, run.roomId)}`,
+    const place = group('place', 'Kind, room and ends', `${k.label} · ${roomName(rplan, run.roomId)}`,
       select('run-kind', 'Kind', KINDS.map((x) => [x.id, x.label]), run.kind, (v) => upd({ kind: v })),
       select('run-room', 'Room', rooms, run.roomId, (v) => upd({ roomId: v })),
       isIsland ? null : h('div', { class: 'grid2' },

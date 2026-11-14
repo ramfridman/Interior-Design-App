@@ -7,6 +7,9 @@ import { h, setKids, debounce } from './dom.js';
 import { icon } from './icons.js';
 import { btn, section, emptyState, extLink } from './components.js';
 import { changesSection } from './structure-panels.js';
+import { FEATURES } from '../core/features.js';
+import { levelIds, levelName, upperLevels } from '../core/levels.js';
+import { levelPlan } from '../core/plan-edit.js';
 
 const ORDER = ['fail', 'warn', 'info', 'pass'];
 const LABEL = { fail: 'Problems', warn: 'Warnings', info: 'Notes', pass: 'Passed' };
@@ -70,11 +73,23 @@ export function initChecks(root, app, onCounts) {
     if (stale) run();
   }
 
+  // several floors (stage F7): findings carry `level` (and `scope` for site / whole-house rules)
+  const multi = () => FEATURES.levels && upperLevels(plan).length > 0 && (results || []).some((r) => r.level);
+  const viewOf = (id) => (!id || id === 'L0' ? plan : levelPlan(plan, id) || plan);
   function focus(check) {
+    // go to the finding's floor first (a whole-house finding: the floor of the room it names)
+    if (check.level && FEATURES.levels && app.levels && levelIds(plan).includes(check.level)) app.levels.set(check.level);
+    const v = viewOf(check.level);
     if (check.itemIds && check.itemIds.length) actions.focusItems(check.itemIds);
-    else if (check.spaceId && plan.rooms.concat(plan.outdoorAreas || []).some((s) => s.id === check.spaceId)) actions.focusSpace(check.spaceId);
+    else if (check.spaceId && v.rooms.concat(v.outdoorAreas || []).some((s) => s.id === check.spaceId)) actions.focusSpace(check.spaceId);
     else if (check.at) app.structure.focusPoint(check.at);
   }
+  /** Category sections of a list of findings. */
+  const categorySections = (rows) => {
+    const groups = new Map();
+    for (const r of rows) { const k = r.category || 'General'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+    return [...groups.entries()].map(([name, list]) => section(name, h('ul', { class: 'checklist' }, list.map(rowOf))));
+  };
 
   function render(counts) {
     changes.refresh();
@@ -94,9 +109,22 @@ export function initChecks(root, app, onCounts) {
       setKids(list, emptyState({ icon: 'pass', title: results && results.length ? 'Nothing in this filter' : 'No checks to show', text: results && results.length ? 'Choose “All” to see every result.' : 'Checks run automatically as you change the design.' }));
       return;
     }
-    const groups = new Map();
-    for (const r of shown) { const k = r.category || 'General'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
-    setKids(list, [...groups.entries()].map(([name, rows]) => section(name, h('ul', { class: 'checklist' }, rows.map((r) => {
+    if (!multi()) { setKids(list, categorySections(shown)); return; }
+    // grouped by floor: the whole house and the site first, then each floor (the one shown first among them)
+    const cur = store.ui.level || 'L0';
+    const floors = [cur, ...levelIds(plan).filter((id) => id !== cur)];
+    const blocks = [{ key: 'house', title: 'Whole house and site', rows: shown.filter((r) => r.scope === 'site' || r.scope === 'house') },
+      ...floors.map((id) => ({ key: id, title: levelName(plan, id) || id, rows: shown.filter((r) => !(r.scope === 'site' || r.scope === 'house') && (r.level || 'L0') === id), current: id === cur }))];
+    setKids(list, blocks.filter((b) => b.rows.length).map((b) => {
+      const bad = b.rows.filter((r) => r.severity === 'fail' || r.severity === 'warn').length;
+      return h('div', { class: `floorgroup${b.current ? ' floorgroup--current' : ''}`, dataset: { floor: b.key } },
+        h('h3', { class: 'floorgroup__head' }, icon(b.key === 'house' ? 'home' : 'levels', { size: 14 }), h('span', null, b.title + (b.current ? ' (shown)' : '')),
+          h('span', { class: 'num' }, `${b.rows.length} ${b.rows.length === 1 ? 'check' : 'checks'}${bad ? ` · ${bad} to look at` : ''}`)),
+        categorySections(b.rows));
+    }));
+  }
+  function rowOf(r) {
+    {
       const clickable = (r.itemIds && r.itemIds.length) || r.spaceId || r.at;
       // The source is a real link, so it sits beside the row button rather than inside it.
       const link = r.reference ? extLink(r.reference, sourceUrl(r), 'checkrow__ref checkrow__ref--link') : null;
@@ -106,7 +134,7 @@ export function initChecks(root, app, onCounts) {
       return h('li', { class: 'checkitem' }, clickable
         ? h('button', { type: 'button', class: 'checkrow is-link', onClick: () => focus(r), 'data-tip': 'Show in the design', 'data-tip-side': 'left' }, body)
         : h('div', { class: 'checkrow' }, body), link);
-    })))));
+    }
   }
 
   // Re-run in the background too, so the tab badge stays right while another tab is open.
@@ -120,7 +148,7 @@ export function initChecks(root, app, onCounts) {
     if (active) changes.refresh();
     schedule();
   });
-  store.on('ui', (e) => { if (active && e.keys.includes('tool')) changes.refresh(); });
+  store.on('ui', (e) => { if (active && e.keys.includes('tool')) changes.refresh(); if (active && e.keys.includes('level') && multi()) render(); });
 
   // First run in the background so the tab badge is right before the tab is opened.
   setTimeout(run, 900);

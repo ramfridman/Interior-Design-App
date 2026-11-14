@@ -194,6 +194,101 @@ async function main() {
   const back = await page.evaluate((id) => ({ levels: (window.app.plan.levels || []).length, bed: (window.app.store.getItem(id) || {}).level }), bed.id);
   check('one undo brings the floor and the bed on it back', back.levels === 1 && back.bed === 'L1', JSON.stringify(back));
 
+  // ── stage F7: checks grouped by floor, click-through to the finding's floor ──
+  await page.evaluate(() => { window.app.store.setUI({ level: 'L0', mode: '2d' }); window.app.ui.openPanel('checks'); });
+  await page.waitForFunction(() => document.querySelectorAll('#panel-checks .floorgroup').length >= 2, null, { timeout: 20000 }).catch(() => {});
+  const groups = await page.evaluate(() => [...document.querySelectorAll('#panel-checks .floorgroup')].map((g) => g.dataset.floor));
+  check('Checks tab: findings grouped by floor (whole house / site, then each floor)', groups.includes('house') && groups.includes('L0') && groups.includes('L1') && groups[0] === 'house', JSON.stringify(groups));
+  if (shots) {
+    const box = await page.locator('#panel-checks').boundingBox();
+    if (box) await page.screenshot({ path: path.join(shotDir, 'e2e-levels-checks.png'), clip: { x: box.x, y: box.y, width: box.width, height: Math.min(box.height, 620) } });
+  }
+  const upRow = page.locator('#panel-checks .floorgroup[data-floor="L1"] .checkrow.is-link').first();
+  const hasUpRow = await upRow.count();
+  if (hasUpRow) { await upRow.click(); await sleep(400); }
+  const afterClick = await page.evaluate(() => window.app.store.ui.level);
+  check('clicking a first-floor finding shows the first floor', hasUpRow > 0 && afterClick === 'L1', `${hasUpRow} rows, level ${afterClick}`);
+
+  // ── a carpentry run created on the first floor stands at that floor's height in 3D ──
+  const runUp = await page.evaluate(async () => {
+    const { store } = window.app;
+    const C = await import('/src/carpentry/index.js');
+    store.setUI({ level: 'L1' });
+    const res = C.createRun({ kind: 'wardrobe', x: 1200, y: 530, units: [{ module: 'wardrobe-hinged', width: 100 }] });
+    if (!res.ok) return { ok: false, reason: res.reason && res.reason.en };
+    const got = C.getRun(res.runId);
+    return { ok: true, runId: res.runId, level: got.run.level, unitLevels: got.units.map((u) => u.level), unit: got.units[0].id };
+  });
+  check('createRun on the first floor (active floor): run and units carry L1', runUp.ok && runUp.level === 'L1' && runUp.unitLevels.every((l) => l === 'L1'), JSON.stringify(runUp));
+  const in3d = await page.evaluate(async (unitId) => {
+    const { store, view3d } = window.app;
+    store.setUI({ mode: '3d' });
+    await new Promise((r) => setTimeout(r, 2500));
+    const d = view3d.debug, THREE = d.scene.constructor;
+    let obj = null; d.scene.traverse((o) => { if (!obj && o.userData && o.userData.itemId === unitId) obj = o; });
+    const L1 = d.levels().list.find((l) => l.id === 'L1');
+    if (!obj || !L1) return { found: !!obj, L1: !!L1 };
+    obj.updateMatrixWorld(true);
+    let minY = Infinity;
+    obj.traverse((m) => { if (m.isMesh && m.geometry) { m.geometry.computeBoundingBox(); const b = m.geometry.boundingBox.clone().applyMatrix4(m.matrixWorld); minY = Math.min(minY, b.min.y); } });
+    store.setUI({ mode: '2d' });
+    return { found: true, minY, floorY: L1.y };
+  }, runUp.unitId || runUp.unit);
+  check('…its unit stands on the first floor in 3D (bottom at the floor height)', in3d.found && Math.abs(in3d.minY - in3d.floorY) < 0.2, JSON.stringify(in3d));
+  await page.evaluate(() => { window.app.ui.carpentry.enter(); });
+  await sleep(500);
+  if (shots) {
+    await page.evaluate(() => window.app.ui.openPanel('catalog'));
+    await sleep(300);
+    const box = await page.locator('.cpanel').boundingBox();
+    if (box) await page.screenshot({ path: path.join(shotDir, 'e2e-levels-runs.png'), clip: { x: box.x, y: box.y, width: box.width, height: Math.min(box.height, 520) } });
+  }
+  const runsPanel = await page.evaluate(() => [...document.querySelectorAll('.cpanel .floorgroup')].map((g) => g.dataset.floor));
+  check('runs panel: runs grouped by floor, the floor shown first', runsPanel[0] === 'L1', JSON.stringify(runsPanel));
+  await page.evaluate(() => window.app.ui.carpentry.exit());
+  await sleep(200);
+
+  // ── remove the first floor with "move everything down": the bed and the run come down ──
+  await page.locator('.lvlswitch').click();
+  await sleep(200);
+  await page.getByRole('menuitem', { name: 'Remove floor…' }).click();
+  await sleep(300);
+  const dlg2 = await page.locator('.lvldlg--remove').textContent().catch(() => '');
+  const moveEnabled = await page.getByRole('button', { name: 'Move everything to Ground floor' }).isEnabled();
+  check('remove dialog lists the carpentry run, both actions enabled', /1 carpentry run/.test(dlg2) && moveEnabled && await page.getByRole('button', { name: 'Delete it with the floor' }).isEnabled(), dlg2.slice(0, 200));
+  await page.getByRole('button', { name: 'Move everything to Ground floor' }).click();
+  await sleep(500);
+  const down2 = await page.evaluate(({ bedId, runId }) => {
+    const { store, plan } = window.app, run = store.carpentry.runs[runId];
+    return { levels: (plan.levels || []).length, bed: (store.getItem(bedId) || {}).level || 'L0', run: run ? run.level || 'L0' : null, units: run ? run.unitIds.map((id) => (store.getItem(id) || {}).level || 'L0') : [] };
+  }, { bedId: bed.id, runId: runUp.runId });
+  check('floor removed: the bed and the run (with its units) are on the ground floor', down2.levels === 0 && down2.bed === 'L0' && down2.run === 'L0' && down2.units.every((l) => l === 'L0'), JSON.stringify(down2));
+  await page.keyboard.press('Control+z');
+  await sleep(400);
+  const back2 = await page.evaluate(({ runId }) => ({ levels: (window.app.plan.levels || []).length, run: (window.app.store.carpentry.runs[runId] || {}).level }), { runId: runUp.runId });
+  check('one undo brings the floor, the bed and the run back', back2.levels === 1 && back2.run === 'L1', JSON.stringify(back2));
+
+  // ── Settings → Experimental: the floors switch hides / shows the floor controls at runtime ──
+  await page.evaluate(() => window.app.store.setUI({ level: 'L1' }));
+  await page.locator('button[aria-label="Settings"]').first().click();
+  await sleep(300);
+  const sw = page.getByRole('switch', { name: /Several floors/ });
+  check('Settings has the "Several floors (in development)" switch, on', await sw.isChecked());
+  await sw.click({ force: true });
+  await sleep(300);
+  const off = await page.evaluate(() => ({ on: 'levels' in document.documentElement.dataset, switcher: document.querySelector('.lvlswitch').offsetParent !== null, status: !!document.querySelector('.sb__cell--level') && document.querySelector('.sb__cell--level').offsetParent !== null, level: window.app.store.ui.level, levels: (window.app.plan.levels || []).length, note: document.querySelector('.setnote--warn') && !document.querySelector('.setnote--warn').hidden ? document.querySelector('.setnote--warn').textContent : '' }));
+  if (shots) {
+    const box = await page.locator('.settings__group--exp').boundingBox();
+    if (box) await page.screenshot({ path: path.join(shotDir, 'e2e-levels-settings.png'), clip: { x: box.x - 12, y: box.y - 8, width: box.width + 24, height: box.height + 16 } });
+  }
+  check('switch off: floor controls hidden, ground floor shown, the upper floor kept (with a note)', !off.on && !off.switcher && !off.status && off.level === 'L0' && off.levels === 1 && /kept/.test(off.note), JSON.stringify(off));
+  await sw.click({ force: true });
+  await sleep(300);
+  const on2 = await page.evaluate(() => ({ on: 'levels' in document.documentElement.dataset, switcher: document.querySelector('.lvlswitch').offsetParent !== null }));
+  check('switch on again: the floor controls are back', on2.on && on2.switcher, JSON.stringify(on2));
+  await page.getByRole('button', { name: 'Done' }).click();
+  await sleep(200);
+
   // ── phone: the floors are in the mode menu ──
   await page.setViewportSize({ width: 390, height: 800 });
   await sleep(500);

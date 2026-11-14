@@ -12,6 +12,7 @@ import { saveFile, canPrint, printPage, copyText } from './exporter.js';
 import { shoppingCSV, shoppingText } from './shopping.js';
 import { getPref } from './prefs.js';
 import { viewPlan } from './levels.js';
+import { levelPlan } from '../core/plan-edit.js';
 import { isOnLevel } from '../view2d/levels.js';
 
 const slug = (name) => (String(name || 'design').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'design');
@@ -22,6 +23,7 @@ export function createActions(app) {
   /** The floor shown in the plan (PLAN itself on the ground floor): rooms, spaces and finishes are looked up there. */
   const plan0 = app.plan;
   const vp = () => viewPlan(app);
+  const viewPlanOfLevel = (id) => (id === 'L0' ? app.plan : levelPlan(app.plan, id));
   /** Carpentry units are made to measure: the furniture tools leave them to Carpentry mode (docs/CONTRACT.md § 8). */
   const isCarp = (it) => !!(it && it.carp);
   const carpRefusal = (ids) => { const it = ids.map((id) => store.getItem(id)).find(isCarp); if (it && app.carpentry) app.carpentry.lockedToast(it); return !!it; };
@@ -111,6 +113,7 @@ export function createActions(app) {
     focusItems(ids) {
       ids = ids.filter((id) => store.getItem(id));
       if (!ids.length) return;
+      if (app.levels) app.levels.showFloorOf({ itemIds: ids });     // several floors: go to the items' floor first
       app.selectingFromPanel = true;
       store.select(ids);
       app.selectingFromPanel = false;
@@ -119,6 +122,7 @@ export function createActions(app) {
     },
     /** Make a room / outdoor area the active space and frame it. */
     focusSpace(spaceId, { view } = {}) {
+      if (app.levels) app.levels.showFloorOf({ spaceId });          // several floors: the room's floor (2D and 3D follow it)
       const space = getSpace(spaceId, vp());
       store.setUI({ activeSpace: spaceId });
       if (!space) return;
@@ -129,7 +133,9 @@ export function createActions(app) {
       if (show3d() && store.ui.mode !== 'walk' && view !== '2d') call(app.view3d, 'setCameraPreset', spaceId, { animate: true });
     },
     walkTo(spaceId) {
-      const space = getSpace(spaceId, plan0);
+      // several floors: the walker starts on the floor shown, so show the room's floor first
+      if (app.levels && app.levels.showFloorOf({ spaceId }) && store.ui.mode === 'walk') store.setUI({ mode: '3d' });
+      const space = getSpace(spaceId, vp());
       const at = space && space.label ? { x: space.label[0], y: space.label[1], heading: 0 } : undefined;
       app.pendingWalk = at || null;
       if (store.ui.mode === 'walk') { call(app.view3d, 'enterWalk', at); app.pendingWalk = null; }
@@ -167,7 +173,9 @@ export function createActions(app) {
     applyFinish(product, spaceId, anchor) {
       const kind = product.type === 'wall-finish' ? 'wall' : 'floor';
       const target = spaceId || store.ui.activeSpace;
-      const plan = vp();
+      // several floors: a room hit in the 3D view may be on another floor than the one shown in the plan
+      const own = target && app.levels ? app.levels.levelOfSpace(target) : null;
+      const plan = own && own !== (store.ui.level || 'L0') ? (viewPlanOfLevel(own) || vp()) : vp();
       const candidates = kind === 'wall' ? plan.rooms : allSpaces(plan);
       const apply = (id) => {
         const space = getSpace(id, plan);

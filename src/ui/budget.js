@@ -9,6 +9,8 @@ import { canPrint } from './exporter.js';
 import { fmtPrice, fmtUnitPrice } from './format.js';
 import { buildShopping, fmtQty, carpentryLine, onCarpentryBudget } from './shopping.js';
 import { getPref, setPref } from './prefs.js';
+import { FEATURES, onFeatureChange } from '../core/features.js';
+import { levelIds, levelName, upperLevels } from '../core/levels.js';
 
 /** @param {HTMLElement} root  @param {object} app */
 export function initBudget(root, app) {
@@ -21,9 +23,21 @@ export function initBudget(root, app) {
   const grouping = segmented({ options: [{ value: 'room', label: 'By room' }, { value: 'retailer', label: 'By retailer' }], value: groupBy, label: 'Group the list', cls: 'seg--block',
     onChange: (v) => { groupBy = v; setPref('budgetGroup', v); render(); } });
   const list = h('div', { class: 'blist' });
+  // several floors (stage F7): a floor filter; the total stays the whole design's
+  let floor = 'all';
+  const multi = () => FEATURES.levels && upperLevels(app.plan).length > 0;
+  const floorHost = h('div', { class: 'budget-floors' });
+  const floorName = (id) => levelName(app.plan, id) || id;
+  function paintFloors() {
+    if (!multi()) { floor = 'all'; setKids(floorHost); floorHost.hidden = true; return; }
+    if (floor !== 'all' && !levelIds(app.plan).includes(floor)) floor = 'all';
+    floorHost.hidden = false;
+    setKids(floorHost, segmented({ options: [{ value: 'all', label: 'All floors' }, ...levelIds(app.plan).map((id) => ({ value: id, label: floorName(id) }))], value: floor, label: 'Floor', cls: 'seg--mini seg--wrap',
+      onChange: (v) => { floor = v; render(); } }));
+  }
   root.append(
     h('div', { class: 'budget-total' }, h('p', { class: 'budget-total__label' }, 'Total so far'), total, caption),
-    h('div', { class: 'budget-tools' }, grouping,
+    h('div', { class: 'budget-tools' }, grouping, floorHost,
       h('div', { class: 'budget-tools__row' },
         btn('Export CSV', { small: true, icon: 'table', onClick: actions.exportCSV }),
         canPrint() ? btn('Print', { small: true, icon: 'print', onClick: actions.printShoppingList }) : btn('Copy list', { small: true, icon: 'copy', onClick: actions.copyShoppingList }))),
@@ -39,7 +53,7 @@ export function initBudget(root, app) {
         h('span', { class: 'brow__text' },
           h('span', { class: 'brow__name truncate' }, r.name),
           h('span', { class: 'brow__meta truncate num' }, r.note ? `${r.note}, ${meta}` : meta),
-          h('span', { class: 'brow__sub truncate' }, groupBy === 'retailer' ? r.spaceName : r.retailer))),
+          h('span', { class: 'brow__sub truncate' }, (groupBy === 'retailer' ? r.spaceName : r.retailer) + (multi() && floor === 'all' && r.level ? ` · ${floorName(r.level)}` : '')))),
       h('span', { class: 'brow__end' },
         h('span', { class: 'brow__cost num' }, fmtPrice(r.cost)),
         href ? h('a', { class: 'brow__link', href, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `Open ${r.name} at ${r.retailer || 'the retailer'}`, 'data-tip': 'Open at retailer' }, 'Buy', icon('external', { size: 12 })) : null));
@@ -47,13 +61,14 @@ export function initBudget(root, app) {
 
   function render() {
     dirty = false;
-    const s = buildShopping(app, groupBy);
+    paintFloors();
+    const s = buildShopping(app, groupBy, floor !== 'all' ? { level: floor } : {});
     const pendingCount = s.pending.reduce((n, r) => n + r.qty, 0);
     total.textContent = fmtPrice(s.total);
     caption.textContent = s.pieces === 0 ? 'Nothing placed yet'
-      : `${s.chosen} of ${s.pieces} items have a product${pendingCount ? `, ${pendingCount} still to choose` : ''}`;
+      : `${s.chosen} of ${s.pieces} items have a product${pendingCount ? `, ${pendingCount} still to choose` : ''}` + (floor !== 'all' ? ` · ${fmtPrice(s.shownTotal)} on the ${floorName(floor).toLowerCase()}` : '');
     const cl = carpentryLine(s.carpentry);
-    const carpRow = cl ? h('section', { class: 'bgroup bgroup--carp' },
+    const carpRow = cl && floor === 'all' ? h('section', { class: 'bgroup bgroup--carp' },
       h('ul', { class: 'bgroup__rows' }, h('li', { class: 'brow' },
         h('button', { type: 'button', class: 'brow__main', 'aria-label': `${cl.title}, ${cl.what}, ${cl.amount}. Open Carpentry`, onClick: () => { app.carpentry.enter(); store.setUI({ carpentryTab: 'estimate' }); } },
           h('span', { class: 'brow__thumb brow__thumb--icon' }, icon('carpentry', { size: 22 })),
@@ -66,7 +81,7 @@ export function initBudget(root, app) {
     }
     setKids(list, carpRow,
       s.groups.map((g) => h('section', { class: 'bgroup' },
-        h('header', { class: 'bgroup__head' }, h('h3', { class: 'bgroup__title truncate' }, g.title), h('span', { class: 'bgroup__sum num' }, fmtPrice(g.subtotal))),
+        h('header', { class: 'bgroup__head' }, h('h3', { class: 'bgroup__title truncate' }, g.title, multi() && floor === 'all' && g.level ? h('small', { class: 'bgroup__floor' }, ` · ${floorName(g.level)}`) : null), h('span', { class: 'bgroup__sum num' }, fmtPrice(g.subtotal))),
         h('ul', { class: 'bgroup__rows' }, g.rows.map(row)))),
       s.pending.length ? h('section', { class: 'bgroup bgroup--pending' },
         h('header', { class: 'bgroup__head' }, h('h3', { class: 'bgroup__title' }, 'Still to choose'), h('span', { class: 'bgroup__sum num' }, String(pendingCount))),
@@ -101,6 +116,7 @@ export function initBudget(root, app) {
   store.on('project', invalidate);
   store.on('carpentry', (e) => { if (!e || !e.transient) invalidate(); });
   onCarpentryBudget(invalidate);
+  onFeatureChange(invalidate);
   store.on('plan', (e) => { if (!e || !e.transient) invalidate(); });   // rooms group the list; a plan edit can add or merge rooms
 
   return {

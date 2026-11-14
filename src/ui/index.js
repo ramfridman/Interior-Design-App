@@ -17,6 +17,7 @@ import { createThumbs } from './thumbs.js';
 import { createActions } from './actions.js';
 import { createStructure } from './structure.js';
 import { createLevels } from './levels.js';
+import { FEATURES, onFeatureChange } from '../core/features.js';
 import { initStructureGuide } from './structure-panels.js';
 import { createCarpentry } from './carpentry/index.js';
 import { setCarpentryBudget } from './shopping.js';
@@ -73,6 +74,14 @@ export function initUI(ctx) {
   };
   app.thumbs = createThumbs(app);
   app.levels = createLevels(app);           // floors: UI entry points only while FEATURES.levels is on
+  // The floor controls are built once and shown only while the feature is on (html[data-levels]); Settings →
+  // Experimental turns it on / off at runtime. Off: the plan shows the ground floor, the other floors' data is kept.
+  const syncLevelsFeature = () => {
+    if (FEATURES.levels) document.documentElement.dataset.levels = ''; else delete document.documentElement.dataset.levels;
+    if (!FEATURES.levels && (store.ui.level || 'L0') !== 'L0') store.setUI({ level: 'L0' });
+  };
+  syncLevelsFeature();
+  onFeatureChange((name) => { if (name === 'levels') syncLevelsFeature(); });
   app.structure = createStructure(app);
   app.carpentry = createCarpentry(app);
   app.actions = createActions(app);

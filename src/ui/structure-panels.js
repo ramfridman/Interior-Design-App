@@ -40,7 +40,7 @@ export function initStructureGuide(root, app) {
   const { store, structure } = app;
   const toolRows = new Map();
   // several floors: which floor the tools work on (only while the levels feature is on)
-  const floorNote = FEATURES.levels && app.levels ? h('p', { class: 'guide__floor' }) : null;
+  const floorNote = app.levels ? h('p', { class: 'guide__floor levels-only' }) : null;
   if (floorNote) {
     const paint = () => setKids(floorNote, icon('levels', { size: 14 }), h('span', null, `Editing ${app.levels.name(app.levels.current())}. `), kbd('PgUp'), ' ', kbd('PgDn'), h('span', null, ' switch floors.'));
     app.levels.onChange(paint); paint();

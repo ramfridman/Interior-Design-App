@@ -177,8 +177,8 @@ Both views show the same store state live (move in 2D → moves in 3D, and vice-
   of each level = its footprint minus the footprint of the level above (top level: all of it), parapet + coping on the
   open edges only — a smaller upper level leaves a terrace roof below. Voids cut the upper floor finish and the
   ceiling below and get a guard rail (mesh `railing`, 1.05 m, posts + top / mid / bottom rail, 5 cm onto the floor;
-  the edge a `void.stair`'s walking direction (`stair.up` 'n'|'s'|'e'|'w', else `rot`) arrives at stays open; no stair
-  → all round). Plinth / ground contact: L0 only. Upper-level wall ids contain `|` — mesh names use room ids only.
+  the edge facing a `void.stair`'s arrival direction stays open — `stairArrivalDir(stair)` of `core/stairs.js` since F4a,
+  derived from `rot` / `shape` / `turn`, a stored `up` is ignored; no stair → all round). Plinth / ground contact: L0 only. Upper-level wall ids contain `|` — mesh names use room ids only.
 * **House API** (internal, additive): `rebuildPlan(e?)` (L0 on its own edits, an upper level when its arrays / heights /
   voids changed or `e.levelId` names it, a level's roof alone when only the footprint above moved; no `e` = all),
   `setLevel(id)`, `setWholeHouse(bool)`, `viewLevel()`, `levels()` → `[{ id, y, wallTop, top, visible }]` (m),
@@ -567,6 +567,40 @@ default, `buildPlan`'s default).
   `openingFrame` (slant-aware now); `largestInnerRect`, `roomSides` etc. still treat rooms as rectilinear.
 * Performance (Node, unloaded): mixed derive of the Wedge ≈ 1.4 ms, House 98 + two slants ≈ 3.3 ms (the first derive
   after adding them, label points recomputed, ≈ 5.4 ms). Tests: `node tests/slants.test.mjs`.
+
+### Regulations, carpentry and the UI per floor (stage F7, additive; one-level plans unchanged byte for byte)
+* **Regulations** (`src/regulations/levels.js`, `footprint.js`; `runChecks` branches only when `plan.levels` exists):
+  every room / opening / clearance / furniture rule runs on each level's view with that level's items (`item.level`,
+  absent = ground; a carpentry unit without one: its run's). Every finding then carries `level`; upper-level ids get
+  the suffix `@L1`…; site / whole-house findings carry `scope: 'site' | 'house'`. Ceiling rules use each level's
+  heights (L0: `store.project.ceilingHeight` as before); sill guards add the level's elevation to the drop.
+  Site rules (setbacks, building line) use `houseFootprint(plan)` = the ground footprint ∪ the upper levels'
+  projections (`footprintOf` + polykernel `union`); new rule `built-area` (coverage of the lot, gross floor area per
+  floor and in total; pergola exemption and garden area use the coverage). Whole dwelling, once: largest habitable
+  room ≥ 12 m², one 70 cm door to a toilet room, the changes summary. Ground-floor only: the routes from the entrance,
+  garden, entry path, parking (an upper floor gets an info note `walkway:ground-only:<id>`), assumptions.
+  `checkChanges` tags each diff entry with its `levelId` and checks rooms of every level against the base plan's.
+* **Carpentry** (`src/carpentry/`): `run.level` (absent = L0). `planOf(run | levelId)` = the level view (PLAN on L0),
+  `runLevel(run)`, `itemFloor(item, view)`, `currentLevel()` (the engine's active level = `store.ui.level`),
+  `ceilingOf(run)`. `createRun({ …, level })` defaults to the active level; spans, openings, rooms, clearances,
+  door swings, `checkRun`, drawings (plan walls), heights all use that level; other floors' items and runs never clash.
+  Layout writes `level` on every unit item of an upper-level run (deleted on L0). `moveRunToLevel(runId, levelId)`
+  ('move-run', one undo step): wall-bound runs need a wall at the same place, long enough and without a doorway to
+  cross, else `{ ok: false, reason: { en, he } }`; islands move freely; links to runs left behind become open ends.
+  With levels: drawings get `level` and titles `… · First floor` / `… · קומה א׳`; take-off runs and schedule unit rows
+  get `floor { en, he }` + `floorId`; the quotation document names the floor in run titles (TOC, scope table, sheets),
+  draws each run on its floor's plan, and the cover shows one key plan per floor with runs.
+* **UI**: `FEATURES.levels` can change at runtime — `setFeature(name, on)` / `onFeatureChange(fn)` (core/features.js,
+  remembered in localStorage `e7-interior-design/features/v1`; `?levels=1` still wins). The floor controls are built
+  once and carry `.levels-only` (hidden unless `html[data-levels]`); turning the feature off shows L0 and keeps the
+  data. Settings → Experimental holds the switch. `app.levels.levelOfSpace(id)`, `levelOfItem(it)`,
+  `showFloorOf({ level, spaceId, itemIds })`: `focusItems`, `focusSpace` (Look in 3D), `walkTo`, Checks rows and
+  carpentry run selection show the right floor first. Every toast "Undo" calls `app.actions.undo()` (floor-following).
+  Checks tab and Carpentry runs panel group by floor (`.floorgroup[data-floor]`, `house` = whole house and site).
+  `buildShopping(ctx, groupBy, { level })`: rows / groups carry `level`, upper-floor finishes are priced with their own
+  ceiling, `total` is always the whole design (`shownTotal` = the filter); the budget tab has a floor filter and the
+  CSV a Floor column (plans with levels only). Walk HUD: mini-map and room label follow `'walk-position'.level`.
+* Tests: `node tests/levels-rules.test.mjs`, `node tests/e2e.levels.mjs [--shots]`.
 
 ### Notes for the view / UI teams
 * New opening kind `'opening'` (style `'open'`): draw it as a clear gap with jambs — no leaf, no swing arc; it is
@@ -1697,3 +1731,93 @@ along the centre line from (x1, y1).
   junction (the editor / import must snap them). A T join and a rect-end joint fill need at least 5° between the walls.
 * Walls overlapping along their length (parallel, collinear) are not merged into one wall; their union is still exact.
 * Curved walls are polylines of slants (A6). Openings across a junction or in a joint fill are not supported (§ 5).
+
+## 15. Stairs (stage F4a, additive — `src/core/stairs.js`, `src/regulations/stairs.js`, `src/view3d/stairs.js`)
+
+Plans without stairs are unchanged (no finding, no mesh, no group). Design: docs/DESIGN-ANGLED-WALLS-AND-FLOORS.md § 2
+"Stair", § 3 "Stairs (F4)". The numbers are sourced in docs/REGULATIONS.md § 1.14.
+
+### Data (on the stair's bottom level: `plan.stairs` for L0, `plan.levels[i].stairs` above)
+```js
+{ id: 'st1', to: 'L1', shape: 'straight' | 'L' | 'U', x, y, rot, width: 100, risers: 18, going: 29,
+  landing?: { at: 9, size: 100 }, turn?: 'left' | 'right', gap?: 0, nosing?: 3, guard?: false, handrail?: false }
+```
+* `risers` = the count from the lower finished floor to the upper one; the riser height is **derived**:
+  `riser = rise / risers`, `rise = levelElevation(to) − levelElevation(bottom level)`. `to` absent = the next level up.
+* `going` = nosing to nosing; `width` = clear width of every flight. Each flight of m risers has m − 1 treads; its last
+  riser lands on the landing / upper floor. Straight run without landing = (risers − 1) × going.
+* `landing.at` = risers below the landing (landing height = at × riser), `landing.size` = depth along the first flight.
+  Optional on a straight stair; L / U default to `{ at: ceil(risers / 2), size: width }`. L: `size ≥ width`.
+* `turn` (L / U, default 'right'): the side the second flight leaves to, seen walking up the first. `gap`: U well (cm).
+* Derived, ignored if stored: `up`, `w`, `d`, `riser`, `footprint` (the test fixture writes them for convenience).
+
+### Direction convention
+* The pose is an item pose: `{ x, y }` = centre of the stair's bounding box in its own frame, `rot` clockwise degrees.
+  **`rot` 0 = the first flight goes up towards the north (−y)**; 90 east, 180 south, 270 west. Walking up, "right" is
+  local +x. `itemCorners({ x, y, rot, w: geo.size.w, d: geo.size.d })` is the bounding rectangle (= the footprint for a
+  straight stair or a U); `itemLocalToPlan` / `planToItemLocal` (`toStairLocal`) convert.
+* `stairArrivalDir(stair)` → plan unit vector of the last flight (straight: up; L: ±90°; U: back). The F3 void railing
+  (`house.js`) opens the void edge facing it — the single source of truth.
+
+### API (`core/stairs.js`, pure; imports geometry.js pose helpers and polykernel only)
+* `stairGeometry(stair, { rise })` → `null` (unbuildable) or `{ shape, rise, risers, riser, going, width, turn, gap,
+  flights[{ index, risers, firstRiser, h0, h1, length, origin, dir, right, poly, start{a,b,h}, end{a,b,h},
+  treads[{ index, h, poly }] }], landings[{ index, at, h, size, poly }], walkingLine[[x, y, h]], walkLength, run,
+  footprint (ring, outer of the union), start{a,b,mid,h:0,dir}, arrival{a,b,mid,h:rise,dir}, size{w,d}, treadCount }`.
+  Plan cm; h = cm above the lower finished floor; tread `index` = the riser it stands on.
+* `floorHeightAt(stair, geo, x, y, { stepped })` → walking-surface height (cm) or `null` off the stair. Default:
+  interpolated along the walking line (linear per flight from its start edge to its end edge, flat on landings);
+  `stepped: true` → the actual tread height. `pitchHeightAt(stair, geo, x, y)` → nosing-line height (landings: their level).
+* `headroomEnvelope(stair, geo, { headroom = 210 })` → `{ headroom, pieces[{ kind, index, poly, origin?, dir?, base,
+  slope, top }] }`; `envelopeHeightAt(...)`.
+* `requiredVoid(stair, geo, { slabUnderside, headroom = 210 })` → rings (plan cm): where the upper slab underside
+  (cm above the lower floor = rise − upper `heights.slab`) is less than `headroom` above the nosing line / landing.
+  `uncoveredVoid(voids, required)` → expolygons; `voidCovers(voids, required, { tol = 1 cm² })` → bool. A void may be
+  enlarged by the user, never made smaller than this.
+* `stairSides(stair, geo, lowerLevelView, { near = 5 })` → side runs `{ a, b, wall, piece, index, outward, ha, hb }`
+  (flight sides, landing edges; start, arrival and joints excluded; split where a wall of the lower level is within
+  5 cm outside → `wall: true`; `ha / hb` = nosing-line heights). A U with a well < 10 cm drops the first flight's inner side.
+* `stairProblems(stair, geo?, { rise? })` → `[{ code, en }]` (codes: stair, shape, risers, width, going, rise,
+  landing-at, landing-size, turn) — geometric impossibilities, not regulation findings.
+* `proposeStair({ rise, shape = 'straight', width = 90, turn })` → `{ shape, x: 0, y: 0, rot: 0, width, risers, going,
+  landing?, turn? }`: fewest risers ≤ 17.5 cm, going = round½(62 − 2R) (≥ 26), a middle landing (size = width) for L / U
+  and for a straight stair of more than 18 risers. Add `id`, `to` and the pose.
+* `SHAPES`, `DEFAULT_HEADROOM` (210), `PROPOSAL` (the limits used).
+
+### Regulations (`regulations/stairs.js`, registered in `regulations/index.js`, category "Stairs")
+`checkStairs({ plan })` runs on every stair of every level (`stairsOfPlan(plan)` → `[{ stair, level, to, rise }]`);
+findings `<rule>:<stairId>` with `level` (bottom level) and `stairId`. Rules: `stair-geometry`, `stair-riser`,
+`stair-going`, `stair-comfort`, `stair-width`, `stair-flight`, `stair-landing`, `stair-nosing`, `stair-headroom`,
+`stair-void`, `stair-handrail`, `stair-guard` (fail / pass) and `stair-guard-height` (info — unverified secondary
+source). Upper-level voids of a stair: those with `void.stair === stair.id`, else those overlapping its footprint.
+`STAIR_LIMITS` exports the numbers.
+
+### 3D (`view3d/stairs.js`, hook in `view3d/house.js`)
+* One mesh per stair, `stair:<id>` (group `house-stairs`, created only when a plan has stairs), 3 geometry groups /
+  materials: treads (timber plank finish), body (painted: waist, steps, risers, landings), rails (metal like the F3
+  railing); `userData { stairId, levelId, parts: { treads, body, rail }: [indexStart, count] }`. Placed at the bottom
+  level's elevation; spans 0 → rise (the top nosing strip is flush with the upper floor).
+* Closed risers, 4 cm treads with a 3 cm nosing (`stair.nosing`), an 18 cm waist, 20 cm landings. Sides from
+  `stairSides`: wall runs get a wall handrail on brackets 0.90 m above the nosing line; open runs a guard (posts ≤ 1.20 m,
+  top / mid / bottom rails following the pitch, 0.90 m). The arrival riser is drawn only below the upper slab.
+* Shown whenever its bottom level is shown (so also while a level above is the shown one); rebuilt by
+  `rebuildPlan()` when stairs, elevations, slab heights or the bottom level's walls change. No selection / hover yet.
+* Tests: `node tests/stairs.test.mjs` (geometry, heights, required void, rules, L / U, proposals, headless 3D).
+
+### Notes for F4b (mutations, 2D symbol, drawing tool)
+* Store only the data fields above; derive everything else from `stairGeometry` (never store `up`, `riser`, footprint).
+  The 2D symbol: `geo.flights[].treads[].poly` (tread lines), `geo.landings[].poly`, `geo.walkingLine` (arrow from
+  `start.mid` to `arrival.mid`, plus the "UP" label), `geo.footprint` (outline / hit-test), the bounding box pose for
+  handles (`size`), and the cut line convention of your choice. Hidden part above the cut plane is up to F4b.
+* `addStair` should seed from `proposeStair({ rise })` and create / grow the upper void to `requiredVoid(...)` (with
+  `void.stair = id`); `updateStair` must grow the void when `voidCovers` turns false and must never shrink a user-enlarged
+  void below the requirement; `removeStair` should ask about the void. Refuse a stair when `stairProblems` is not empty.
+* The 3D view rebuilds on `rebuildPlan()`; a stair-only change on an upper level is picked up through `stairsSig`
+  (no per-level shell rebuild needed). Stairs in `plan.levels[i].stairs` are supported by geometry, rules and 3D.
+
+### Notes for F5 (walk)
+* Floor under the walker: `floorHeightAt(stair, geo, x, y)` (smooth, along the walking line) + the bottom level's
+  elevation; `null` = not on this stair. Reaching `arrival` (h = rise) switches to `to`; below `start` back down.
+* Blockers on a stair: its open `stairSides` runs (guards, 0.90 m) and the void railing of the upper level; the lower
+  level's walls only while h < the upper slab underside.
+

@@ -10,6 +10,8 @@ import { SHORTCUTS } from './keyboard.js';
 import { planSvg } from './plan-svg.js';
 import { applyTheme, getPref, setPref } from './prefs.js';
 import { isBuiltinBase, planPhase } from '../core/plan-edit.js';
+import { FEATURES, setFeature } from '../core/features.js';
+import { upperLevels } from '../core/levels.js';
 
 const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
 
@@ -126,9 +128,31 @@ export function openSettings(app) {
     h('section', { class: 'settings__group' }, h('h3', { class: 'sec__title' }, 'Design'),
       h('div', { class: 'settings__buttons' },
         btn('Show the welcome again', { small: true, onClick: () => { dlg.close(); openWelcome(app); } }),
-        isBuiltinBase() ? btn("Reset to architect's layout…", { small: true, icon: 'reset', onClick: () => { dlg.close(); actions.resetLayout(); } }) : null)));
+        isBuiltinBase() ? btn("Reset to architect's layout…", { small: true, icon: 'reset', onClick: () => { dlg.close(); actions.resetLayout(); } }) : null)),
+    experimentalGroup(app));
   const dlg = openDialog({ title: 'Settings', size: 'md', body, actions: [btn('Done', { variant: 'primary', onClick: () => dlg.close() })] });
   return dlg;
+}
+
+/**
+ * Settings → Experimental: features still in development that the owner can try in the published preview (where a URL
+ * switch is not reachable). The choice is remembered in this browser (core/features.js).
+ */
+function experimentalGroup(app) {
+  const note = h('p', { class: 'setnote setnote--warn', role: 'status', hidden: true });
+  const paintNote = () => {
+    const kept = !FEATURES.levels && upperLevels(app.plan).length > 0;
+    note.hidden = !kept;
+    note.textContent = kept ? `This project has ${upperLevels(app.plan).length + 1} floors. They are kept with the project; with the switch off only the ground floor's controls are shown. Turn it on again to see and edit the other floors.` : '';
+  };
+  const sw = toggle({ label: 'Several floors (in development)', checked: !!FEATURES.levels, onChange: (on) => { setFeature('levels', on); paintNote(); } });
+  sw.classList.add('setrow--levels');
+  paintNote();
+  return h('section', { class: 'settings__group settings__group--exp' }, h('h3', { class: 'sec__title' }, 'Experimental'),
+    sw,
+    h('p', { class: 'setnote' }, 'Works: adding floors and switching between them in the plan and in 3D, furniture, carpentry and the checks per floor.'),
+    h('p', { class: 'setnote' }, 'Not yet: stairs, realistic daylight on the upper floors, walking between floors, and importing a drawing with several floors.'),
+    note);
 }
 
 /** Context menu for the current selection, at a screen point. */

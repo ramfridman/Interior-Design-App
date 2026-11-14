@@ -137,13 +137,15 @@ group('existing mutations on a level with slants (decision: walls refused until 
   const events = [];
   const off = store.on('plan', (e) => events.push(e));
   const part = E.wallSegments().find((s) => s.axis === 'v' && s.core.x === 500);
-  const refusals = [
-    E.canAddWall({ x1: 600, y1: 100, x2: 600, y2: 600 }), E.addWall({ x1: 600, y1: 100, x2: 600, y2: 600 }), E.removeWallSegment(part.id), E.moveWallSegment(part.id, 20),
-    E.resizeWallSegment(part.id, { end: 700 }), E.removeWallSegment('seg:a:s02'),
+  // stage A2 lifted the A1 refusals: wall edits (rect or slant) and openings in slants work here — each call is undone
+  const tries = [
+    () => E.addWall({ x1: 600, y1: 100, x2: 600, y2: 600 }), () => E.removeWallSegment(part.id), () => E.resizeWallSegment('seg:a:s02', { end: 0.5 }),
+    () => E.removeWallSegment('seg:a:s02'), () => E.updateOpening('door-s02', { width: 90 }), () => E.flipDoor('door-s02', 'hinge'), () => E.addOpening({ kind: 'door', x: 162, y: 162 }),
   ];
-  check('addWall / canAddWall / remove / move / resize (rect or slant) are refused with the angled-walls reason, nothing changes', refusals.every((r) => !r.ok && r.reason === E.REASONS.angledWalls) && !E.isPlanModified() && events.length === 0);
-  check('updateOpening / flipDoor of an opening in a slant: refused with its reason', !E.updateOpening('door-s02', { width: 90 }).ok && E.updateOpening('door-s02', { width: 90 }).reason === E.REASONS.angledOpening && E.flipDoor('door-s02', 'hinge').reason === E.REASONS.angledOpening);
-  check('addOpening next to a slant → refused (A2); in a rect wall → works', E.addOpening({ kind: 'door', x: 162, y: 162 }).reason === E.REASONS.angledOpening);
+  const results = tries.map((f) => { const r = f(); if (r.ok && E.isPlanModified()) store.undo(); return r; });
+  check('(A2) addWall / canAddWall / remove / resize (rect or slant), updateOpening / flipDoor / addOpening in a slant work on a level with slants; undone', E.canAddWall({ x1: 600, y1: 100, x2: 600, y2: 600 }).ok
+    && results.every((r) => r.ok) && !E.isPlanModified(), JSON.stringify(results.filter((r) => !r.ok)));
+  events.length = 0;
   const add = E.addOpening({ kind: 'door', x: 505, y: 200, width: 80 });
   const nd = PLAN.openings.find((o) => o.id === add.ids[0]);
   check('…a door in the partition: added with its rooms, the slants and their openings kept and re-derived', add.ok && nd && nd.rooms.length === 2 && JSON.stringify(PLAN.slants) === JSON.stringify(W.slants)
@@ -257,7 +259,8 @@ group('the Wedge as level L1 above a rectangular L0');
   E.setActiveLevel('L1');
   const [mx, my] = SG.pointAt(S01, 300);
   check('segmentAt on the active level L1 → L1|seg:a:s01', E.segmentAt(mx, my)?.id === 'L1|seg:a:s01');
-  check('wall edits on L1 are refused (angled walls); a door in an L1 rect wall works', E.addWall({ x1: 700, y1: 100, x2: 700, y2: 500 }).reason === E.REASONS.angledWalls && E.addOpening({ kind: 'door', x: 505, y: 650, width: 80 }).ok);
+  const w1 = E.addWall({ x1: 700, y1: 100, x2: 700, y2: 500 });
+  check('(A2) a wall drawn on L1 (a level with slants) works, ids prefixed; a door in an L1 rect wall works', w1.ok && w1.ids[0].startsWith('L1|') && E.addOpening({ kind: 'door', x: 505, y: 650, width: 80 }).ok, w1.reason);
   check('…the L1 slants are kept after the edit; L0 untouched', JSON.stringify(PLAN.levels[0].slants) === JSON.stringify(up.slants) && JSON.stringify(PLAN.walls) === JSON.stringify(p.walls));
   const fp = L.footprintOf(E.levelPlan(PLAN, 'L1')), outer = K.union([...W.walls, ...W.openings.map((o) => G.openingPoly(o, W)), ...G.slantPolys(W), ...W.rooms.map((r) => ({ polygon: r.polygon }))]);
   check('footprintOf(L1 view) includes the slants (one polygon, the Wedge\'s outline)', fp.polygons.length === 1 && near(fp.area, K.netArea([{ outer: outer[0].outer, holes: [] }]), 2), `${fp.area} vs ${K.netArea(outer)}`);

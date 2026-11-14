@@ -8,7 +8,9 @@ import { h, setKids, rafThrottle } from '../dom.js';
 import { icon } from '../icons.js';
 import { btn, iconBtn, kbd } from '../components.js';
 import { openPopover, openMenu } from '../dialogs.js';
-import { isBuiltinBase } from '../../core/plan-edit.js';
+import { isBuiltinBase, levelPlan } from '../../core/plan-edit.js';
+import { FEATURES } from '../../core/features.js';
+import { levelIds, levelName, upperLevels } from '../../core/levels.js';
 import { KINDS, kindInfo, LEVEL_GROUPS, moduleGlyph, num, metres, roomName } from './vocab.js';
 
 export const DND_MODULE = 'application/x-carp-module';
@@ -96,13 +98,30 @@ export function initRunsPanel(root, app, C) {
         iconBtn('trash', 'Remove run…', { size: 16, variant: 'danger', onClick: () => C.removeRun(run.id) })));
   }
 
-  function renderList(sel) {
-    const runs = Carp.listRuns();
+  /** Runs grouped by room (on one floor's view). */
+  function roomGroups(runs, sel, view) {
     const groups = new Map();
     for (const r of runs) { const key = r.roomId || 'other'; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(r); }
-    return h('div', { class: `cruns${sel && sel.runId ? ' cruns--compact' : ''}` }, [...groups.entries()].map(([roomId, list]) => h('section', { class: 'cruns__group' },
-      h('h3', { class: 'cruns__room' }, roomName(plan, roomId), h('span', { class: 'num faint' }, String(list.length))),
-      h('ul', { class: 'cruns__list' }, list.map((r) => runRow(r, sel && sel.runId === r.id))))));
+    return [...groups.entries()].map(([roomId, list]) => h('section', { class: 'cruns__group' },
+      h('h3', { class: 'cruns__room' }, roomName(view, roomId), h('span', { class: 'num faint' }, String(list.length))),
+      h('ul', { class: 'cruns__list' }, list.map((r) => runRow(r, sel && sel.runId === r.id)))));
+  }
+  function renderList(sel) {
+    const runs = Carp.listRuns();
+    const cls = `cruns${sel && sel.runId ? ' cruns--compact' : ''}`;
+    // several floors (stage F7): one block per floor, the floor shown first; runs of other floors can be selected here
+    // (selecting one shows its floor), only the floor shown is pickable in the plan
+    if (!(FEATURES.levels && upperLevels(plan).length)) return h('div', { class: cls }, roomGroups(runs, sel, plan));
+    const cur = store.ui.level || 'L0';
+    const floors = [cur, ...levelIds(plan).filter((id) => id !== cur)];
+    return h('div', { class: cls }, floors.map((id) => {
+      const list = runs.filter((r) => Carp.runLevel(r) === id);
+      if (!list.length && id !== cur) return null;
+      const view = id === 'L0' ? plan : levelPlan(plan, id) || plan;
+      return h('div', { class: `floorgroup${id === cur ? ' floorgroup--current' : ''}`, dataset: { floor: id } },
+        h('h3', { class: 'floorgroup__head' }, icon('levels', { size: 14 }), h('span', null, (levelName(plan, id) || id) + (id === cur ? ' (shown)' : '')), h('span', { class: 'num' }, `${list.length} ${list.length === 1 ? 'run' : 'runs'}`)),
+        list.length ? roomGroups(list, sel, view) : h('p', { class: 'sec__note' }, 'No runs on this floor yet. Pick “New run”, then a wall of this floor in the plan.'));
+    }));
   }
 
   /* ───────── module palette ───────── */
@@ -176,7 +195,7 @@ export function initRunsPanel(root, app, C) {
   store.on('history', schedule);
   store.on('load', schedule);
   store.on('ui', (e) => {
-    if (e.keys.includes('carpentrySel')) schedule();
+    if (e.keys.includes('carpentrySel') || e.keys.includes('level')) schedule();
     if (e.keys.includes('tool') && C.isActive() && dirty) { dirty = false; render(); }
   });
   render();

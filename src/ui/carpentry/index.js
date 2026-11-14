@@ -26,6 +26,7 @@ import { KINDS, kindInfo, starterUnits, num, roomName } from './vocab.js';
 import { initRunsPanel } from './runs-panel.js';
 import { initWorkbench } from './workbench.js';
 import { initCarpentryInspector } from './inspector.js';
+import { FEATURES } from '../../core/features.js';
 
 const FLOOR = new Set(['base', 'tall', 'full', 'island']);
 /** 'floor' | 'wall' — the row a unit is laid out in. */
@@ -79,6 +80,9 @@ export function createCarpentry(app) {
     select(runId, unitId = null) {
       const cur = store.ui.carpentrySel;
       if (!runId) { if (cur) store.setUI({ carpentrySel: null }); return; }
+      // several floors: selecting a run shows its floor
+      const got = Carp.getRun(runId);
+      if (got && FEATURES.levels && app.levels && Carp.runLevel(got.run) !== (store.ui.level || 'L0')) app.levels.set(Carp.runLevel(got.run));
       if (!cur || cur.runId !== runId || (cur.unitId || null) !== (unitId || null)) store.setUI({ carpentrySel: unitId ? { runId, unitId } : { runId } });
     },
     selectUnit(unitId) {
@@ -372,7 +376,7 @@ export function createCarpentry(app) {
   }
   /** The free stretch createRun() would use at (x, y) for `kind`: { span, from, to } or null. */
   function stretchAt(kind, x, y) {
-    const span = Carp.wallSpanAt(x, y);
+    const span = Carp.wallSpanAt(x, y, { plan: Carp.planOf(store.ui.level || 'L0') });   // the floor shown
     if (!span) return null;
     const levels = Carp.KIND_LEVELS[kind] || ['base'];
     const floorRun = levels.some((l) => FLOOR.has(l));
@@ -471,13 +475,14 @@ export function createCarpentry(app) {
     ctx.save();
     ctx.globalAlpha = 0.62;
     ctx.fillStyle = pal.paper;
+    const shownLevel = store.ui.level || 'L0';
     for (const it of store.items) {
-      if (it.carp || it.hidden) continue;
+      if (it.carp || it.hidden || (it.level || 'L0') !== shownLevel) continue;
       G.poly(itemCorners(it)); ctx.fill();
     }
     ctx.restore();
-    // 2. Runs: outline by run; the selected run in the accent; the selected unit filled.
-    const runs = Carp.listRuns();
+    // 2. Runs of the floor shown: outline by run; the selected run in the accent; the selected unit filled.
+    const runs = Carp.listRuns().filter((r) => Carp.runLevel(r) === shownLevel);
     ctx.save();
     ctx.lineJoin = 'round';
     for (const run of runs) {

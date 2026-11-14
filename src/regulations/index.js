@@ -26,6 +26,7 @@ import { buildContext, checkInterior } from './interior.js';
 import { checkOutdoor } from './outdoor.js';
 import { hasLevels } from '../core/levels.js';
 import { levelsBuilding, levelsInterior, levelsOutdoor } from './levels.js';
+import { checkStairs } from './stairs.js';
 
 export { RULES, DISCLAIMER, CATEGORIES, ruleById };
 
@@ -76,6 +77,7 @@ export function runChecks(args) {
     guarded('interior layout', () => (floors ? levelsInterior(args, ctx) : checkInterior(ctx)), out);
     guarded('garden', () => (floors ? levelsOutdoor(ctx) : checkOutdoor(ctx)), out);
   }
+  if (floors || Array.isArray(args.plan.stairs)) guarded('stairs', () => checkStairs(args), out);   // stage F4a: every stair of every level
   const cat = (f) => { const i = CATEGORIES.indexOf(f.category); return i < 0 ? CATEGORIES.length : i; };
   return out
     .map((f, i) => ({ f, i }))

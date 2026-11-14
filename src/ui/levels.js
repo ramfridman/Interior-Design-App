@@ -17,6 +17,7 @@ import { h } from './dom.js';
 import { icon } from './icons.js';
 import { btn } from './components.js';
 import { openDialog, openMenu, toast, confirmDialog } from './dialogs.js';
+import { moveRunToLevel, removeRun } from '../carpentry/index.js';
 import { levelBanner } from './structure.js';
 import { field, numInput, readNum } from './projects.js';
 
@@ -219,8 +220,10 @@ export function createLevels(app) {
     const below = levelBelow(plan, id) || GROUND, name = nameOf(id);
     // what is on it (the same question the engine asks the store)
     const roomIds = (viewPlanOf(id).rooms || []).map((r) => r.id);
-    const items = store.items.filter((it) => itemLevel(it) === id).map((it) => it.id);
+    // carpentry units go with their runs (never moved as items)
+    const items = store.items.filter((it) => !it.carp && itemLevel(it) === id).map((it) => it.id);
     const runs = Object.values((store.carpentry && store.carpentry.runs) || {}).filter((r) => r && r.level === id).map((r) => r.id);
+    const runCodes = runs.map((rid) => store.carpentry.runs[rid].code);
     const finishes = roomIds.filter((r) => store.finishes[r]);
     const content = { items, runs, finishes, stairs: [] };
     const busy = items.length + runs.length > 0;
@@ -238,27 +241,39 @@ export function createLevels(app) {
         store.begin();
         if (how === 'move') {
           const patch = levelPatch(below);
-          store.updateItems(items, () => (below === GROUND ? { level: undefined } : patch));
-        } else store.removeItems(items);
+          if (items.length) store.updateItems(items, () => (below === GROUND ? { level: undefined } : patch));
+          // carpentry runs: a wall-bound run needs a wall at the same place on the floor below
+          for (const rid of runs) {
+            const r = moveRunToLevel(rid, below);
+            if (!r || !r.ok) {
+              store.cancel();
+              const why = (r && r.reason && r.reason.en) || 'A carpentry run could not be moved.';
+              toast(`${why} Nothing was changed: move or remove that run in Carpentry mode first, or delete it with the floor.`, { kind: 'warn', duration: 8000 });
+              end(r || { ok: false }); return;
+            }
+          }
+        } else {
+          if (items.length) store.removeItems(items);
+          for (const rid of runs) removeRun(rid);
+        }
         const res = removeLevel(id, { force: true });
         if (!res || !res.ok) { store.cancel(); toast((res && res.reason) || 'The floor could not be removed.', { kind: 'warn' }); end(res || { ok: false }); return; }
         store.commit();
-        end(finish(res, id, how === 'move' ? `${items.length} ${items.length === 1 ? 'item' : 'items'} moved to ${nameOf(below)}` : null));
+        const what = [items.length && `${items.length} ${items.length === 1 ? 'item' : 'items'}`, runs.length && `${runs.length} carpentry ${runs.length === 1 ? 'run' : 'runs'}`].filter(Boolean).join(' and ');
+        end(finish(res, id, how === 'move' ? `${what} moved to ${nameOf(below)}` : null));
       };
-      const runsBlock = runs.length > 0;
       const dlg = openDialog({
         title: `Remove ${name}?`, size: 'md', cls: 'lvldlg lvldlg--remove', onClose: () => end({ ok: false, cancelled: true }),
         body: [
           h('p', { class: 'dialog__text' }, `${name} still holds:`),
           contentList(content),
-          runsBlock ? h('p', { class: 'form__error' }, 'Remove its carpentry runs in Carpentry mode first.') : null,
-          h('p', { class: 'dialog__text dialog__text--after' }, `Move the furniture to ${nameOf(below)} (it keeps its place on the plan), or delete it together with the floor. You can undo either.`),
+          h('p', { class: 'dialog__text dialog__text--after' }, `Move ${runs.length ? 'the furniture and the carpentry' : 'the furniture'} to ${nameOf(below)} (${runs.length ? 'everything keeps' : 'it keeps'} its place on the plan${runs.length ? `; a run along a wall needs a wall at the same place there — ${runCodes.join(', ')}` : ''}), or delete it together with the floor. You can undo either.`),
           permitNote(),
         ],
         actions: [
           btn('Cancel', { variant: 'quiet', onClick: () => dlg.close() }),
-          btn('Delete it with the floor', { variant: 'danger', disabled: runsBlock, onClick: () => choose('delete') }),
-          btn(`Move everything to ${nameOf(below)}`, { variant: 'primary', disabled: runsBlock, onClick: () => choose('move') }),
+          btn('Delete it with the floor', { variant: 'danger', onClick: () => choose('delete') }),
+          btn(`Move everything to ${nameOf(below)}`, { variant: 'primary', onClick: () => choose('move') }),
         ],
       });
     });
@@ -318,8 +333,29 @@ export function createLevels(app) {
     return el;
   }
 
+  /* ───────── where things are (stage F7) ───────── */
+  /** The floor that holds a room / outdoor area (null when unknown). */
+  function levelOfSpace(spaceId) {
+    if (!spaceId) return null;
+    for (const id of ids()) { const v = viewPlanOf(id); if ([...(v.rooms || []), ...(v.outdoorAreas || [])].some((s) => s.id === spaceId)) return id; }
+    return null;
+  }
+  /** The floor of an item (a carpentry unit without `level`: its run's). */
+  function levelOfItem(it) {
+    if (!it) return GROUND;
+    if (it.level) return it.level;
+    const run = it.carp && store.carpentry && store.carpentry.runs && store.carpentry.runs[it.carp.runId];
+    return (run && run.level) || GROUND;
+  }
+  /** Show the floor of a space, items or an explicit level before something is focused there (feature on only). */
+  function showFloorOf({ level, spaceId, itemIds } = {}) {
+    if (!enabled() || !upperLevels(plan).length) return false;
+    const want = level || levelOfSpace(spaceId) || (itemIds && itemIds.length ? levelOfItem(store.getItem(itemIds[0])) : null);
+    return want ? set(want) : false;
+  }
+
   const api = {
-    enabled, current, ids, set, step, name: nameOf, menuItems, switcher,
+    enabled, current, ids, set, step, name: nameOf, menuItems, switcher, levelOfSpace, levelOfItem, showFloorOf,
     openAdd, openRename, openHeights, remove, moveItemsTo, moveMenuItems, openMoveMenu,
     followHistory,
     undo() { api.followHistory(() => store.undo()); },

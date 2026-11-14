@@ -5,6 +5,19 @@
 import { allSpaces, floorAreaM2, wallAreaM2, finishCost } from '../core/finishes.js';
 import { csvCell } from './dom.js';
 import { itemQuantity, fmtPrice } from './format.js';
+import { GROUND, levelIds, levelName, hasLevels } from '../core/levels.js';
+import { levelPlan } from '../core/plan-edit.js';
+
+/**
+ * Several floors (stage F7): every space of every floor with its floor id and view ([{ space, level, view }]).
+ * One-level plans: the plan's own spaces on 'L0'.
+ */
+function spacesByFloor(plan) {
+  if (!hasLevels(plan)) return allSpaces(plan).map((space) => ({ space, level: GROUND, view: plan }));
+  return levelIds(plan).flatMap((id) => { const view = id === GROUND ? plan : levelPlan(plan, id); return view ? allSpaces(view).map((space) => ({ space, level: id, view })) : []; });
+}
+/** Floor of a store item (absent = ground). */
+const itemFloor = (item) => (item && typeof item.level === 'string' && item.level ? item.level : GROUND);
 
 const OTHER = { id: 'elsewhere', name: 'Outside the lot' };
 
@@ -26,17 +39,20 @@ export function onCarpentryBudget(fn) { budgetListeners.add(fn); return () => bu
 
 /** Display order of spaces: rooms, outdoor areas, garden, parking, everything else. */
 function spaceOrder(plan) {
-  const ids = [...allSpaces(plan).map((s) => s.id), 'garden', ...(plan.site?.parking || []).map((p) => p.id), OTHER.id];
+  const ids = [...spacesByFloor(plan).map((s) => s.space.id), 'garden', ...(plan.site?.parking || []).map((p) => p.id), OTHER.id];
   return (id) => { const i = ids.indexOf(id); return i < 0 ? ids.length : i; };
 }
 
 /**
  * @param {{ store: object, plan: object, catalog: object }} ctx
  * @param {'room'|'retailer'} groupBy
- * @returns {{ groups: Array<{id:string,title:string,rows:object[],subtotal:number}>, pending: object[], total: number,
- *             pieces: number, chosen: number }}
+ * @param {{ level?: string }} [opts]  several floors: only the rows of this floor (the `total` stays the whole design's)
+ * @returns {{ groups: Array<{id:string,title:string,rows:object[],subtotal:number,level?}>, pending: object[], total: number,
+ *             pieces: number, chosen: number, multi: boolean, shownTotal: number }}  rows carry `level` (floor id)
  */
-export function buildShopping({ store, plan, catalog }, groupBy = 'room') {
+export function buildShopping({ store, plan, catalog }, groupBy = 'room', opts = {}) {
+  const multi = hasLevels(plan), only = multi && opts.level ? opts.level : null;
+  let shownTotal = 0;
   const groups = new Map();
   const pendingMap = new Map();
   let total = 0, pieces = 0, chosen = 0;
@@ -49,10 +65,11 @@ export function buildShopping({ store, plan, catalog }, groupBy = 'room') {
   for (const item of store.items) {
     if (item.carp) { if (!item.hidden) carpentry.units++; carpentry.runs.add(item.carp.runId); continue; }   // made to measure: see Carpentry
     const space = safeSpace(store, item) || OTHER;
+    const level = itemFloor(item);
     pieces++;
     if (item.price == null || !item.productId) {
       const key = `${space.id}|${item.type}|${item.name}`;
-      const row = pendingMap.get(key) || { key, name: item.name, type: item.type, spaceId: space.id, spaceName: space.name, qty: 0, ids: [], subject: item };
+      const row = pendingMap.get(key) || { key, name: item.name, type: item.type, spaceId: space.id, spaceName: space.name, qty: 0, ids: [], subject: item, level };
       row.qty++; row.ids.push(item.id);
       pendingMap.set(key, row);
       continue;
@@ -60,34 +77,42 @@ export function buildShopping({ store, plan, catalog }, groupBy = 'room') {
     chosen++;
     const cost = safeCost(catalog, item);
     const q = itemQuantity(item);
+    total += cost;
+    if (only && level !== only) continue;
     const g = groupBy === 'retailer' ? group('r:' + (item.retailer || 'Other'), item.retailer || 'Other') : group(space.id, space.name);
     const key = `${item.productId}|${item.priceUnit || 'item'}`;
     const row = g.rows.get(key) || {
       key: g.id + '|' + key, kind: 'item', name: item.name, retailer: item.retailer || '', url: item.url || null,
       unitPrice: item.price, priceUnit: item.priceUnit || 'item', qty: 0, qtyUnit: q.unit, cost: 0, ids: [],
-      spaceId: space.id, spaceName: space.name, productId: item.productId, subject: item,
+      spaceId: space.id, spaceName: space.name, productId: item.productId, subject: item, level,
     };
     row.qty += q.qty; row.cost += cost; row.ids.push(item.id);
     g.rows.set(key, row);
-    g.subtotal += cost; total += cost;
+    if (groupBy !== 'retailer') g.level = level;
+    g.subtotal += cost; shownTotal += cost;
   }
 
-  for (const space of allSpaces(plan)) {
+  for (const { space, level, view } of spacesByFloor(plan)) {
     const f = store.finishes[space.id];
     if (!f) continue;
-    const cost = finishCost(space.id, store, catalog);
+    // an upper floor's walls are as high as its own ceiling
+    const ceiling = level === GROUND ? store.project.ceilingHeight : ((view.heights && view.heights.ceiling) || store.project.ceilingHeight);
+    const cost = level === GROUND ? finishCost(space.id, store, catalog) : upperFinishCost(space, view, ceiling, f, catalog);
     for (const kind of ['floor', 'wall']) {
       const product = f[kind] && catalog.getProduct(f[kind]);
       if (!product) continue;
-      const area = kind === 'floor' ? floorAreaM2(space) : wallAreaM2(space, store.project.ceilingHeight, plan);
+      total += cost[kind];
+      if (only && level !== only) continue;
+      const area = kind === 'floor' ? floorAreaM2(space) : wallAreaM2(space, ceiling, view);
       const g = groupBy === 'retailer' ? group('r:' + (product.retailer || 'Other'), product.retailer || 'Other') : group(space.id, space.name);
       g.rows.set(`${kind}|${space.id}`, {
         key: `${g.id}|${kind}|${space.id}`, kind, name: product.name, retailer: product.retailer || '', url: product.url || null,
         unitPrice: product.price, priceUnit: product.priceUnit || 'm2', qty: area, qtyUnit: 'm²', cost: cost[kind], ids: [],
         spaceId: space.id, spaceName: space.name, productId: product.id, subject: product,
-        note: kind === 'floor' ? 'Floor finish' : 'Wall finish',
+        note: kind === 'floor' ? 'Floor finish' : 'Wall finish', level,
       });
-      g.subtotal += cost[kind]; total += cost[kind];
+      if (groupBy !== 'retailer') g.level = level;
+      g.subtotal += cost[kind]; shownTotal += cost[kind];
     }
   }
 
@@ -95,9 +120,9 @@ export function buildShopping({ store, plan, catalog }, groupBy = 'room') {
   const list = [...groups.values()].map((g) => ({ ...g, rows: [...g.rows.values()].sort((a, b) => b.cost - a.cost) }));
   if (groupBy === 'retailer') list.sort((a, b) => b.subtotal - a.subtotal);
   else list.sort((a, b) => order(a.id) - order(b.id));
-  const pending = [...pendingMap.values()].sort((a, b) => order(a.spaceId) - order(b.spaceId) || a.name.localeCompare(b.name));
-  if (carpentry.budget) total += carpentry.budget.typical;
-  return { groups: list, pending, total, pieces, chosen, carpentry: carpentry.units ? { units: carpentry.units, runs: carpentry.runs.size, budget: carpentry.budget } : null };
+  const pending = [...pendingMap.values()].filter((r) => !only || r.level === only).sort((a, b) => order(a.spaceId) - order(b.spaceId) || a.name.localeCompare(b.name));
+  if (carpentry.budget) { total += carpentry.budget.typical; if (!only) shownTotal += carpentry.budget.typical; }
+  return { groups: list, pending, total, shownTotal, multi, pieces, chosen, carpentry: carpentry.units ? { units: carpentry.units, runs: carpentry.runs.size, budget: carpentry.budget } : null };
 }
 
 /** "Custom carpentry — see Carpentry estimate" line text. */
@@ -105,6 +130,12 @@ export function carpentryLine(c) {
   if (!c) return null;
   const what = `${c.runs} ${c.runs === 1 ? 'run' : 'runs'}, ${c.units} units`;
   return { title: 'Custom carpentry — see Carpentry estimate', what, amount: c.budget ? `${fmtPrice(c.budget.low)}–${fmtPrice(c.budget.high)}` : 'Estimate in Carpentry', typical: c.budget ? c.budget.typical : null };
+}
+
+/** Finish cost of a room on an upper floor (its own ceiling height for the walls), as finishCost() does on the ground floor. */
+function upperFinishCost(space, view, ceiling, f, catalog) {
+  const price = (id) => { const p = id && catalog.getProduct(id); return p && Number.isFinite(+p.price) ? +p.price : 0; };
+  return { floor: price(f.floor) * floorAreaM2(space), wall: price(f.wall) * wallAreaM2(space, ceiling, view) };
 }
 
 function safeSpace(store, item) {
@@ -128,14 +159,17 @@ export function shoppingTotal(ctx) {
 /** CSV of the full list (one line per merged row, then the items still to choose). */
 export function shoppingCSV(ctx, groupBy = 'room') {
   const s = buildShopping(ctx, groupBy);
-  const lines = [['Group', 'Product', 'Retailer', 'Quantity', 'Unit', 'Unit price (ILS)', 'Cost (ILS)', 'Room', 'Link'].join(',')];
+  // several floors: a Floor column after the room (one-level plans: the columns as before)
+  const fl = (r) => (s.multi ? [levelName(ctx.plan, r.level || GROUND) || r.level] : []);
+  const lines = [['Group', 'Product', 'Retailer', 'Quantity', 'Unit', 'Unit price (ILS)', 'Cost (ILS)', 'Room', ...(s.multi ? ['Floor'] : []), 'Link'].join(',')];
   for (const g of s.groups) for (const r of g.rows) {
-    lines.push([g.title, r.name, r.retailer, r.qtyUnit ? r.qty.toFixed(2) : Math.round(r.qty), r.qtyUnit || 'pcs', r.unitPrice, Math.round(r.cost), r.spaceName, r.url || ''].map(csvCell).join(','));
+    lines.push([g.title, r.name, r.retailer, r.qtyUnit ? r.qty.toFixed(2) : Math.round(r.qty), r.qtyUnit || 'pcs', r.unitPrice, Math.round(r.cost), r.spaceName, ...fl(r), r.url || ''].map(csvCell).join(','));
   }
-  for (const r of s.pending) lines.push(['Still to choose', r.name, '', r.qty, 'pcs', '', '', r.spaceName, ''].map(csvCell).join(','));
+  for (const r of s.pending) lines.push(['Still to choose', r.name, '', r.qty, 'pcs', '', '', r.spaceName, ...fl(r), ''].map(csvCell).join(','));
   const cl = carpentryLine(s.carpentry);
-  if (cl) lines.push(['Custom carpentry', cl.title, '', cl.what, '', '', cl.typical != null ? cl.typical : '', '', ''].map(csvCell).join(','));
-  lines.push(['Total', '', '', '', '', '', Math.round(s.total), '', ''].join(','));
+  const pad = s.multi ? [''] : [];
+  if (cl) lines.push(['Custom carpentry', cl.title, '', cl.what, '', '', cl.typical != null ? cl.typical : '', '', ...pad, ''].map(csvCell).join(','));
+  lines.push(['Total', '', '', '', '', '', Math.round(s.total), '', ...pad, ''].join(','));
   return '﻿' + lines.join('\r\n');
 }
 

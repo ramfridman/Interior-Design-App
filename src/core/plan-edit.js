@@ -31,7 +31,10 @@ import { pointInPolygon, polygonArea, invalidatePlanCaches } from './geometry.js
 import { OPTIONAL_KEYS, optionalKeysProblem, optionalPart, setOptionalKeys, normalizeOptionalKeys } from './plan-schema.js';
 import { GROUND, upperLevels, levelOf, levelIndex, nextLevelId, recomputeElevations, levelName, footprintOf } from './levels.js';
 import { faces as polyFaces, intersectArea, netArea, union as polyUnion, slitJoin } from './polykernel.js';
-import { isAngledOpening, hasSlants, slantLevel, checkAngledOpenings, spaceLocator, labelCells, outlineEdges, slantSolids, quadOfOpening, denoiseFaces } from './slants.js';
+import { slantFrame, slantJoins, freePoly, atOf, openingQuad } from './slant-geom.js';
+import { isAngledOpening, hasSlants, slantLevel, checkAngledOpenings, spaceLocator, labelCells, outlineEdges, slantSolids, quadOfOpening, denoiseFaces,
+  r01, nearAxis, lineCross, snapSlantEnd, nearRects, centreIn, polyGap, bandExtent, clearPieces, bothFaces, openingRanges } from './slants.js';
+import { normalizeOptionalKeys as normOpt } from './plan-schema.js';
 
 /** Plan keys written only when needed (schema 2: angled walls, several levels — see plan-schema.js). Never on House 98. */
 export { OPTIONAL_KEYS };
@@ -713,7 +716,7 @@ function deriveMixed(solids, openings, prevRooms, prevWalls, slants) {
   for (const g of L.list) segments.push(slantSegment(g, locate, spaceAtFace, nextOpenings));
 
   const wallOutline = outlineEdges([...rectSolids, ...polys], [...rOpenings, ...cuts]);
-  return { walls: buildWalls(m, prevWalls), openings: nextOpenings, rooms, wallOutline, segments, problems, narrow: narrowArea(m), m, slantLevel: L };
+  return { walls: buildWalls(m, prevWalls), openings: nextOpenings, rooms, wallOutline, segments, problems, narrow: narrowArea(m), m, slantLevel: L, locate, faces: F, slants };
 }
 const boxOfRing = (ring) => {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -802,7 +805,8 @@ function tracked(name, impl, args) {
 
 const solidsOf = (plan) => [...plan.walls, ...rectOpenings(plan.openings)];
 /** The angled walls of the level being edited (L0's, or the swapped-in level's). */
-const liveSlants = () => (swap ? swap.lv.slants : PLAN.slants);
+let slantsOverride;                // a temporary slant list (rect ↔ slant conversion), else undefined
+const liveSlants = () => (slantsOverride !== undefined ? slantsOverride : swap ? swap.lv.slants : PLAN.slants);
 const current = () => analysis || (analysis = derive(solidsOf(PLAN), PLAN.openings, PLAN.rooms, PLAN.walls, liveSlants()));
 const analysisOf = (plan) => {
   if (plan === PLAN) return current();
@@ -1077,9 +1081,11 @@ function installOptional(opt) {
 
 /** A level object with the derived arrays `d` installed (the exact base level again when it equals it). */
 function withDerived(lv, d) {
-  const base = levelOf(BASE_PLAN, lv.id);
-  if (base && sameAsBase(d, levelState(base).arrays)) return clone(base);
-  return { ...lv, walls: d.walls, wallOutline: d.wallOutline, openings: d.openings, rooms: d.rooms };
+  const base = levelOf(BASE_PLAN, lv.id), sl = d.slants !== undefined ? d.slants : lv.slants;
+  if (base && sameAsBase(d, levelState(base).arrays) && JSON.stringify(sl || []) === JSON.stringify(base.slants || [])) return clone(base);
+  const next = { ...lv, walls: d.walls, wallOutline: d.wallOutline, openings: d.openings, rooms: d.rooms };
+  if (d.slants !== undefined) { if (d.slants.length) next.slants = d.slants; else delete next.slants; }
+  return next;
 }
 /** Install derived arrays into upper level `id`. */
 function installLevel(id, d) {
@@ -1097,7 +1103,9 @@ function commit(d, reason, res, opts = {}) {
   if (swap) return commitLevel(d, reason, res, opts);
   const had = new Set(doorless(PLAN.rooms, PLAN.openings).map((r) => r.id));
   host.record(opts);
-  const changed = install(d);
+  // an edit of the angled walls installs the new slant list too (lazy schema: no slant left → no `slants`, no `schema`)
+  const opt = d.slants !== undefined && d.slants !== liveSlants() ? optionalPart(normOpt({ ...optionalPart(PLAN), slants: d.slants })) : undefined;
+  const changed = install(d, opt);
   const warnings = [...(res.warnings || [])];
   if (res.level === 'warn' && res.reason) warnings.unshift(res.reason);
   if (res.level === 'permit') warnings.unshift(REASONS.permit);
@@ -1248,12 +1256,80 @@ export function isPlanModified() { return modified && !ENV.draft; }
 /** Edit model of the current plan with extra grid lines, plus axis-agnostic accessors (u = across the wall, v = along it). */
 function editModel(axis, alongExtra, crossExtra) {
   const h = axis === 'h';
+  if (angledHere()) return mixedEditModel(axis, alongExtra, crossExtra);
   const m = buildModel(PLAN.walls, PLAN.openings, h ? alongExtra : crossExtra, h ? crossExtra : alongExtra);
   floodOutdoor(m); computeTypes(m);
   const A = h ? m.xs : m.ys, C = h ? m.ys : m.xs, K = h ? (u, v) => u * m.nx + v : (u, v) => v * m.nx + u;
   const rect = (c0, c1, a0, a1) => (h ? { x: a0, y: c0, w: a1 - a0, h: c1 - c0 } : { x: c0, y: a0, w: c1 - c0, h: a1 - a0 });
   return { m, A, C, K, rect, ai: (v) => lowerBound(A, v), ci: (v) => lowerBound(C, v) };
 }
+/**
+ * Edit model of a level with angled walls: the rect walls / rect openings on the grid (slant footprint vertices add grid
+ * lines); free cells that touch a slant footprint or the gap of an opening in one are SLANT (supercover: a rect wall
+ * stops before them and is then fitted exactly to the face), outdoors comes from the polygon faces.
+ */
+function mixedEditModel(axis, alongExtra, crossExtra) {
+  const h = axis === 'h', cur = current(), L = cur.slantLevel;
+  const polys = L ? slantSolids(L, PLAN.openings.filter(isAngledOpening)) : { polys: [], quads: [] };
+  const all = [...polys.polys, ...polys.quads];
+  const ex = [...(h ? alongExtra : crossExtra)], ey = [...(h ? crossExtra : alongExtra)];
+  for (const p of all) for (const [x, y] of p) { ex.push(x); ey.push(y); }
+  const m = buildModel(PLAN.walls, rectOpenings(PLAN.openings), ex, ey);
+  const { nx, ny, xs, ys } = m, out = new Uint8Array(nx * ny);
+  const label = cur.locate ? labelCells(xs, ys, cur.locate) : null;
+  for (let k = 0; k < nx * ny; k++) if (m.cell[k] === FREE && label) { if (label[k] === -2) m.cell[k] = SLANT; else if (label[k] === -1) out[k] = 1; }
+  for (const p of all) {
+    const b = boxOfRing(p), i0 = Math.max(0, lowerBound(xs, b.x) - 1), i1 = Math.min(nx, lowerBound(xs, b.x + b.w) + 1), j0 = Math.max(0, lowerBound(ys, b.y) - 1), j1 = Math.min(ny, lowerBound(ys, b.y + b.h) + 1);
+    for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
+      const k = j * nx + i;
+      if (m.cell[k] !== FREE) continue;
+      if (cellHits(xs[i], ys[j], xs[i + 1], ys[j + 1], p)) m.cell[k] = SLANT;
+    }
+  }
+  m.out = out;
+  { const cell = m.cell; m.cell = cell.map((v) => (v === SLANT ? FREE : v)); computeTypes(m); m.cell = cell; }
+  const A = h ? m.xs : m.ys, C = h ? m.ys : m.xs, K = h ? (u, v) => u * m.nx + v : (u, v) => v * m.nx + u;
+  const rect = (c0, c1, a0, a1) => (h ? { x: a0, y: c0, w: a1 - a0, h: c1 - c0 } : { x: c0, y: a0, w: c1 - c0, h: a1 - a0 });
+  return { m, A, C, K, rect, ai: (v) => lowerBound(A, v), ci: (v) => lowerBound(C, v), mixed: true, polys: polys.polys, quads: polys.quads };
+}
+
+/** Does polygon p overlap the open rectangle (x0, y0)–(x1, y1) (more than touching it)? */
+function cellHits(x0, y0, x1, y1, p) {
+  if (pointInPolygon((x0 + x1) / 2, (y0 + y1) / 2, p)) return true;
+  const e = 1e-7;
+  for (let i = 0; i < p.length; i++) {
+    const [ax, ay] = p[i], [bx, by] = p[(i + 1) % p.length];
+    let t0 = 0, t1 = 1;
+    const dx = bx - ax, dy = by - ay;
+    let ok = true;
+    for (const [q, r] of [[-dx, ax - x0 - e], [dx, x1 - e - ax], [-dy, ay - y0 - e], [dy, y1 - e - ay]]) {
+      if (Math.abs(q) < 1e-15) { if (r < 0) { ok = false; break; } continue; }
+      const t = r / q;
+      if (q < 0) { if (t > t1) { ok = false; break; } if (t > t0) t0 = t; } else { if (t < t0) { ok = false; break; } if (t < t1) t1 = t; }
+    }
+    if (ok && t1 - t0 > 1e-9) return true;
+  }
+  return false;
+}
+
+/**
+ * Exact end of a rect wall (cross-section [c0, c1], axis) heading `dir` (±1) from `end` into an angled wall: the last
+ * 5 cm grid position before the slant footprint (the joint fill closes the rest); null when nothing angled is ahead
+ * within `reach`. `quad: true` when what it meets is the gap of an opening.
+ */
+function slantContact(E, axis, c0, c1, end, dir, reach) {
+  let best = null;
+  for (const [list, quad] of [[E.polys, false], [E.quads, true]]) for (const p of list) {
+    const ext = bandExtent(p, axis, c0, c1);
+    if (!ext) continue;
+    const d = dir > 0 ? ext[0] - end : end - ext[1];
+    if (d < -TMAX || d > reach) continue;
+    if (!best || d < best.d) best = { d, quad, at: dir > 0 ? ext[0] : ext[1] };
+  }
+  if (!best) return null;
+  return { quad: best.quad, end: dir > 0 ? Math.floor(best.at / SNAP + 1e-9) * SNAP : Math.ceil(best.at / SNAP - 1e-9) * SNAP };
+}
+
 function wallRects(m) {
   const { nx, ny, cell, xs, ys } = m, rects = [];
   let open = new Map();
@@ -1269,7 +1345,7 @@ function wallRects(m) {
   }
   return rects;
 }
-const lockedAt = (rect) => current().segments.find((s) => s.policy.level === 'locked' && overlapArea(s, rect) > 0) || null;
+const lockedAt = (rect) => current().segments.find((s) => s.policy.level === 'locked' && overlapArea(s, rect) > 0 && (s.axis !== 'a' || intersectArea([s.poly], rect) > 0.01)) || null;
 const problemText = (d) => {
   const p = d.problems[0], o = d.openings.find((x) => x.id === p.id);
   const what = o ? (o.kind === 'window' ? 'a window' : o.kind === 'opening' ? 'a passage' : 'a door') : 'an opening';
@@ -1292,7 +1368,7 @@ const stubs = (d) => d.segments.filter((s) => (s.freeEnds[0] || s.freeEnds[1]) &
 function fitChecks(d, rect, axis) {
   if (d.problems.length) return problemText(d);
   if (!isCleanBar(d, rect, axis)) return 'A wall cannot run along or on top of another wall.';
-  if (d.narrow > current().narrow + 1) return `That would leave a space narrower than ${MIN_CLEAR} cm — join the wall to the next wall or leave at least ${MIN_CLEAR} cm.`;
+  if (d.slantLevel || current().slantLevel ? narrowRooms(d) : d.narrow > current().narrow + 1) return `That would leave a space narrower than ${MIN_CLEAR} cm — join the wall to the next wall or leave at least ${MIN_CLEAR} cm.`;
   const old = new Set(stubs(current()));
   if (stubs(d).some((id) => !old.has(id))) return `That would leave a wall stub shorter than ${MIN_WALL} cm.`;
   return null;
@@ -1307,20 +1383,21 @@ function fitWall(E, c0, c1, a, b) {
   const slab = (v) => {
     if (v < 0 || v >= A.length - 1) return 'out';
     let walls = 0, free = 0;
-    for (let u = u0; u < u1; u++) { const k = K(u, v), c = m.cell[k]; if (c === GAP) return 'opening'; if (c === WALL) walls++; else if (m.out[k] && !ENV.draft) return 'out'; else free++; }
-    return walls === 0 ? 'free' : free === 0 ? 'wall' : 'mixed';
+    let slanted = 0;
+    for (let u = u0; u < u1; u++) { const k = K(u, v), c = m.cell[k]; if (c === GAP) return 'opening'; if (c === SLANT) slanted++; else if (c === WALL) walls++; else if (m.out[k] && !ENV.draft) return 'out'; else free++; }
+    return slanted ? 'slant' : walls === 0 ? 'free' : free === 0 ? 'wall' : 'mixed';
   };
   let ka = E.ai(a), kb = E.ai(b);
   if (slab(ka) === 'free') {
     let k = ka - 1, gap = 0;
     while (slab(k) === 'free' && gap <= TRIM) { gap += A[k + 1] - A[k]; k--; }
-    if (gap <= TRIM && slab(k) === 'wall') ka = k + 1;
-  } else while (ka < kb && slab(ka) === 'wall') ka++;
+    if (gap <= TRIM && (slab(k) === 'wall' || slab(k) === 'slant')) ka = k + 1;
+  } else while (ka < kb && (slab(ka) === 'wall' || slab(ka) === 'slant')) ka++;
   if (slab(kb - 1) === 'free') {
     let k = kb, gap = 0;
     while (slab(k) === 'free' && gap <= TRIM) { gap += A[k + 1] - A[k]; k++; }
-    if (gap <= TRIM && slab(k) === 'wall') kb = k;
-  } else while (kb > ka && slab(kb - 1) === 'wall') kb--;
+    if (gap <= TRIM && (slab(k) === 'wall' || slab(k) === 'slant')) kb = k;
+  } else while (kb > ka && (slab(kb - 1) === 'wall' || slab(kb - 1) === 'slant')) kb--;
   // While drafting, a wall drawn by its centre line from / to the centre line of another wall overlaps it partly at
   // the corner: take in the whole overlap (both walls' thickness) so the two make a clean corner.
   let lead = ka, trail = kb;
@@ -1339,12 +1416,27 @@ function fitWall(E, c0, c1, a, b) {
     if (s === 'opening') return fail('A wall cannot run through a door or window.');
     if (s === 'mixed' && v >= lead && v < trail) return fail('A wall cannot run along or on top of another wall.');
     if (s === 'mixed') { fresh += A[v + 1] - A[v]; continue; }
+    if (s === 'slant') {                                   // crossing an angled wall: only an unlocked one, never its door / window
+      const r = E.rect(c0, c1, A[v], A[v + 1]), hit = lockedAt(r);
+      if (hit) return fail(hit.cls === 'mamad' ? REASONS.mamad : 'A new wall cannot cross an exterior wall. ' + REASONS.exteriorWall);
+      if (E.quads.some((q) => intersectArea([q], r) > 0.01)) return fail('A wall cannot run through a door or window.');
+      continue;
+    }
     if (s === 'free') fresh += A[v + 1] - A[v];
     else { const hit = lockedAt(E.rect(c0, c1, A[v], A[v + 1])); if (hit) return fail(hit.cls === 'mamad' ? REASONS.mamad : 'A new wall cannot cross an exterior wall. ' + REASONS.exteriorWall); }
   }
   if (!fresh) return fail('There is already a wall here.');
   if (ENV.mamad.shell && overlapArea(rect, ENV.mamad.shell) > 0) return fail('No walls may be built inside the safe room. ' + REASONS.mamad);
   if (slab(ka - 1) === 'opening' || slab(kb) === 'opening') return fail('A wall cannot end on a door or window.');
+  if (E.mixed) {
+    // ends next to an angled wall: fitted exactly to its face on the 5 cm grid (the slant's joint fill closes the rest)
+    let a0 = A[ka], a1 = A[kb];
+    const axis = E.rect(0, 1, 0, 1).w === 1 ? 'h' : 'v';
+    if (slab(ka - 1) === 'slant') { const q = slantContact(E, axis, c0, c1, a0, -1, TRIM + TMAX); if (q) { if (q.quad) return fail('A wall cannot end on a door or window.'); a0 = q.end; } }
+    if (slab(kb) === 'slant') { const q = slantContact(E, axis, c0, c1, a1, 1, TRIM + TMAX); if (q) { if (q.quad) return fail('A wall cannot end on a door or window.'); a1 = q.end; } }
+    if (a1 - a0 < MIN_WALL) return fail(`A wall must be at least ${MIN_WALL} cm long.`);
+    return { ok: true, rect: E.rect(c0, c1, a0, a1), ka, kb, u0, u1, exact: true };
+  }
   return { ok: true, rect, ka, kb, u0, u1 };
 }
 
@@ -1352,9 +1444,9 @@ function fitWall(E, c0, c1, a, b) {
 const angledHere = () => { const sl = liveSlants(); return (Array.isArray(sl) && sl.length > 0) || PLAN.openings.some(isAngledOpening); };
 
 function planAddWall(input) {
-  if (angledHere()) return fail(REASONS.angledWalls);
   const p = input || {};
   if (![p.x1, p.y1, p.x2, p.y2].every(num)) return fail('A wall needs two points.');
+  if (p.angled === true && !nearAxis(p.x1, p.y1, p.x2, p.y2)) return planAddSlant(p);
   const t = Math.round(p.thickness == null ? NEW_WALL.def : p.thickness), max = ENV.draft ? NEW_WALL.draftMax : NEW_WALL.max;
   if (!(t >= NEW_WALL.min && t <= max)) return fail(ENV.draft ? `Walls are ${NEW_WALL.min}–${max} cm thick.` : `New partitions are ${NEW_WALL.min}–${max} cm thick.`);
   const x1 = snap(p.x1), y1 = snap(p.y1), x2 = snap(p.x2), y2 = snap(p.y2);
@@ -1365,8 +1457,9 @@ function planAddWall(input) {
   const E = editModel(axis, [a, b], [c0, c1]);
   const fit = fitWall(E, c0, c1, a, b);
   if (!fit.ok) return fit;
-  paint(E.m, fit.rect, WALL);
-  const d = derive([...wallRects(E.m), ...PLAN.openings], PLAN.openings, PLAN.rooms, PLAN.walls, liveSlants());
+  let d;
+  if (fit.exact) d = derive([...PLAN.walls, fit.rect, ...rectOpenings(PLAN.openings)], PLAN.openings, PLAN.rooms, PLAN.walls, liveSlants());
+  else { paint(E.m, fit.rect, WALL); d = derive([...wallRects(E.m), ...PLAN.openings], PLAN.openings, PLAN.rooms, PLAN.walls, liveSlants()); }
   const bad = fitChecks(d, fit.rect, axis);
   if (bad) return fail(bad);
   return { ok: true, rect: fit.rect, level: 'free', axis, d };
@@ -1376,6 +1469,7 @@ function planAddWall(input) {
 export function canAddWall(input) { return onLevel(activeLevel(), () => canAddWallImpl(input)); }
 function canAddWallImpl(input) {
   const r = planAddWall(input);
+  if (r.ok && r.slant) return { ok: true, slant: r.slant, poly: r.poly, level: r.level };
   return r.ok ? { ok: true, rect: r.rect, level: r.level } : r;
 }
 
@@ -1389,6 +1483,7 @@ export function addWall(...args) { return tracked('addWall', onActive(addWallImp
 function addWallImpl(input, opts) {
   const r = planAddWall(input);
   if (!r.ok) return r;
+  if (r.slant) return commit(r.d, 'add-wall', { level: 'free', ids: [r.segId] }, opts);
   return commit(r.d, 'add-wall', { level: 'free', ids: idsIn(r.d, r.rect, r.axis) }, opts);
 }
 
@@ -1405,9 +1500,9 @@ const inCore = (s) => (o) => o.axis !== 'a' && overlapArea(o, s.core) > 0;
 /** Remove a wall segment and the openings in it. Junction squares stay with the walls that meet there. */
 export function removeWallSegment(...args) { return tracked('removeWallSegment', onActive(removeWallSegmentImpl), args); }
 function removeWallSegmentImpl(segmentId, opts) {
-  if (angledHere()) return fail(REASONS.angledWalls);
   const q = editableSegment(segmentId);
   if (!q.ok) return q;
+  if (q.s.axis === 'a') return removeSlant(q.s, opts);
   const { s } = q, E = editModel(s.axis, [], []);
   paint(E.m, s.core, FREE);
   const openings = PLAN.openings.filter((o) => !inCore(s)(o));
@@ -1422,9 +1517,9 @@ function removeWallSegmentImpl(segmentId, opts) {
  */
 export function moveWallSegment(...args) { return tracked('moveWallSegment', onActive(moveWallSegmentImpl), args); }
 function moveWallSegmentImpl(segmentId, delta, opts) {
-  if (angledHere()) return fail(REASONS.angledWalls);
   const q = editableSegment(segmentId);
   if (!q.ok) return q;
+  if (q.s.axis === 'a') return moveSlant(q.s, delta, opts);
   const d0 = snap(num(delta) ? delta : 0), { s } = q;
   if (!d0) return { ok: true, level: s.policy.level, warnings: [], ids: [segmentId] };
   const riders = cornerOpenings(s, d0);
@@ -1445,7 +1540,7 @@ function cornerOpenings(s, d0) {
   const { c0, c1, a0, a1 } = coreSpan(s), out = [];
   const hz = s.axis === 'h';
   for (const o of PLAN.openings) {
-    if (o.axis === s.axis) continue;
+    if (o.axis === s.axis || o.axis === 'a') continue;
     // flush with one end of the core: the opening's wall is the wall this one ends on
     const across0 = hz ? o.x : o.y, across1 = hz ? o.x + o.w : o.y + o.h;
     if (across1 !== a0 && across0 !== a1) continue;
@@ -1501,14 +1596,19 @@ function planMoveWall(s, d0) {
   const E = editModel(s.axis, [a0 + t, a1 - t], [n0, n1]), { m, K } = E;
   const uc0 = E.ci(c0), uc1 = E.ci(c1), un0 = E.ci(n0), un1 = E.ci(n1), va0 = E.ai(a0), va1 = E.ai(a1);
   const cross = 'That would cross another wall.';
+  // a level with angled walls: an end of this wall on an angled wall is refitted to its face at the new place
+  const slantEnd = [false, false];
+  if (E.mixed) for (const [n, v] of [[0, va0 - 1], [1, va1]]) for (let u = uc0; u < uc1; u++) if (v >= 0 && m.cell[K(u, v)] === SLANT) slantEnd[n] = true;
   for (let v = va0; v < va1; v++) for (let u = d0 > 0 ? uc1 : un0; u < (d0 > 0 ? un1 : uc0); u++) {
     const k = K(u, v);
+    if (m.cell[k] === SLANT && E.mixed) continue;
     if (m.cell[k]) return fail(cross);
     if (m.out[k] && !ENV.draft) return fail('A wall cannot leave the house.');
   }
   const hull0 = Math.min(uc0, un0), hull1 = Math.max(uc1, un1), fill = [], clear = [];
-  for (const end of [{ v: va0 - 1, dir: -1 }, { v: va1, dir: 1 }]) {
+  for (const end of [{ v: va0 - 1, dir: -1, n: 0 }, { v: va1, dir: 1, n: 1 }]) {
     const across = (v, u0, u1, test) => { for (let u = u0; u < u1; u++) if (!test(K(u, v))) return false; return true; };
+    if (slantEnd[end.n]) continue;                                                             // refitted below
     if (across(end.v, uc0, uc1, (k) => !m.cell[k])) continue;                                    // free end
     if (!across(end.v, uc0, uc1, (k) => m.cell[k] !== GAP)) return fail('That wall end meets a door or window — it cannot move.');
     if (!across(end.v, uc0, uc1, (k) => m.cell[k] === WALL)) return fail('That wall is only partly joined to its neighbour — remove it and draw it again instead.');
@@ -1534,13 +1634,29 @@ function planMoveWall(s, d0) {
     }
   }
   for (let v = va0; v < va1; v++) { for (let u = uc0; u < uc1; u++) m.cell[K(u, v)] = FREE; }
-  for (let v = va0; v < va1; v++) { for (let u = un0; u < un1; u++) m.cell[K(u, v)] = WALL; }
+  if (!E.mixed) for (let v = va0; v < va1; v++) { for (let u = un0; u < un1; u++) m.cell[K(u, v)] = WALL; }
   for (const k of clear) m.cell[k] = FREE;
   for (const k of fill) m.cell[k] = WALL;
   const moved = inCore(s), shift = s.axis === 'h' ? { y: d0 } : { x: d0 };
   const openings = PLAN.openings.map((o) => (moved(o) ? { ...o, x: o.x + (shift.x || 0), y: o.y + (shift.y || 0) } : o));
-  const target = E.rect(n0, n1, a0, a1);
-  const d = derive([...wallRects(m), ...openings], openings, PLAN.rooms, PLAN.walls, liveSlants());
+  let target = E.rect(n0, n1, a0, a1), extra = [];
+  if (E.mixed) {
+    let b0 = a0, b1 = a1;
+    for (const [n, dir] of [[0, -1], [1, 1]]) {
+      if (!slantEnd[n]) continue;
+      const q = slantContact(E, s.axis, n0, n1, n ? a1 : a0, dir, 200);
+      if (!q) return fail('That wall would come off the angled wall it ends on.');
+      if (q.quad) return fail('That wall would end on a door or window.');
+      if (n) b1 = q.end; else b0 = q.end;
+    }
+    if (b1 - b0 < MIN_WALL) return fail(`A wall must be at least ${MIN_WALL} cm long.`);
+    if (openings.some((o) => moved(o) && (along(o) < b0 + MIN_JAMB || along(o) + o.width > b1 - MIN_JAMB))) return fail('That wall would end on a door or window.');
+    target = E.rect(n0, n1, b0, b1);
+    const sweep = E.rect(Math.min(c0, n0), Math.max(c1, n1), b0 + (slantEnd[0] ? TMAX : 0), b1 - (slantEnd[1] ? TMAX : 0));
+    if ([...E.polys, ...E.quads].some((p) => intersectArea([p], target) > 0.5 || (sweep.w > 0 && sweep.h > 0 && intersectArea([p], sweep) > 0.5))) return fail(cross);
+    extra = [target];
+  }
+  const d = derive([...wallRects(m), ...extra, ...(E.mixed ? rectOpenings(openings) : openings)], openings, PLAN.rooms, PLAN.walls, liveSlants());
   const bad = fitChecks(d, target, s.axis);
   if (bad) return fail(bad === 'A wall cannot run along or on top of another wall.' ? cross : bad);
   return { ok: true, d, target };
@@ -1552,9 +1668,9 @@ function planMoveWall(s, d0) {
  */
 export function resizeWallSegment(...args) { return tracked('resizeWallSegment', onActive(resizeWallSegmentImpl), args); }
 function resizeWallSegmentImpl(segmentId, range, opts) {
-  if (angledHere()) return fail(REASONS.angledWalls);
   const q = editableSegment(segmentId);
   if (!q.ok) return q;
+  if (q.s.axis === 'a') return resizeSlant(q.s, range, opts);
   const { s } = q, { c0, c1, a0, a1 } = coreSpan(s), r = range || {};
   const a = num(r.start) ? snap(r.start) : a0, b = num(r.end) ? snap(r.end) : a1;
   if (a === a0 && b === a1) return { ok: true, level: s.policy.level, warnings: [], ids: [segmentId] };
@@ -1563,12 +1679,439 @@ function resizeWallSegmentImpl(segmentId, range, opts) {
   paint(E.m, s.core, FREE);
   const fit = fitWall(E, c0, c1, a, b);
   if (!fit.ok) return fit;
-  paint(E.m, fit.rect, WALL);
   if (PLAN.openings.some((o) => inCore(s)(o) && overlapArea(o, fit.rect) < o.w * o.h)) return fail('Remove the door in this part of the wall first.');
-  const d = derive([...wallRects(E.m), ...PLAN.openings], PLAN.openings, PLAN.rooms, PLAN.walls, liveSlants());
+  let d;
+  if (fit.exact) d = derive([...wallRects(E.m), fit.rect, ...rectOpenings(PLAN.openings)], PLAN.openings, PLAN.rooms, PLAN.walls, liveSlants());
+  else { paint(E.m, fit.rect, WALL); d = derive([...wallRects(E.m), ...PLAN.openings], PLAN.openings, PLAN.rooms, PLAN.walls, liveSlants()); }
   const bad = fitChecks(d, fit.rect, s.axis);
   if (bad) return fail(bad);
   return commit(d, 'resize-wall', { level: s.policy.level, reason: s.policy.reason, ids: idsIn(d, fit.rect, s.axis) }, opts);
+}
+
+// ---------------------------------------------------------------- angled walls: editing (stage A2)
+/*
+ * A slant is edited as data (its centre line + thickness in `slants`), then the level is derived (mixed derive) and the
+ * result is checked with the same rules as rect walls, on polygons:
+ *   problems of openings (jambs, overlaps) · a space narrower than 60 cm (every changed room shrunk by 30 cm with the
+ *   polygon kernel: nothing left, or more pieces than before → too narrow) · crossing a locked wall (its centre line
+ *   passes through one) · outside the house in a fixed plan · shorter than 30 cm · on top of / along another wall ·
+ *   through, ending on or < 10 cm beside a door / window · inside the safe room.
+ * Centre lines are kept on 0.1 cm; ends are snapped (slants.js snapSlantEnd). The joins are slant-geom's.
+ */
+const rectSolidsNow = () => [...PLAN.walls, ...rectOpenings(PLAN.openings)];
+const slantOf = (seg) => (liveSlants() || []).find((x) => x.id === seg.slantId) || null;
+const setEnd = (s, k, P) => (k ? { ...s, x2: P[0], y2: P[1] } : { ...s, x1: P[0], y1: P[1] });
+const endOf = (s, k) => (k ? [s.x2, s.y2] : [s.x1, s.y1]);
+const roundSlant = (s) => ({ ...s, x1: r01(s.x1), y1: r01(s.y1), x2: r01(s.x2), y2: r01(s.y2) });
+/** A new slant id on the level being edited ('s<n>', above every id the level and its base level have used). */
+function newSlantId(list) {
+  const base = ENV.level ? levelOf(BASE_PLAN, ENV.level) : BASE_PLAN;
+  let n = 0;
+  for (const s of [...list, ...((base && base.slants) || [])]) { const k = /^s(\d+)$/.exec(s.id); if (k) n = Math.max(n, +k[1]); }
+  return 's' + String(n + 1).padStart(2, '0');
+}
+/** Derive the level with these slants / openings / rect walls (nothing installed); `d.slants` = the slant list. */
+function slantState(slants, openings, walls = PLAN.walls) {
+  const d = derive([...walls, ...rectOpenings(openings)], openings, PLAN.rooms, PLAN.walls, slants);
+  d.slants = slants;
+  return d;
+}
+/** Is (x, y) outdoors in a derived level (polygon faces, or the grid of an orthogonal level)? */
+function outdoorPoint(an, x, y) {
+  if (an.locate) return an.locate(x, y) === -1;
+  const m = an.m, i = lowerBound(m.xs, x) - 1, j = lowerBound(m.ys, y) - 1;
+  if (i < 0 || j < 0 || i >= m.nx || j >= m.ny) return true;
+  const k = j * m.nx + i;
+  return !m.cell[k] && !!m.out[k];
+}
+/** A changed room narrower than MIN_CLEAR somewhere (see the block comment)? */
+function narrowRooms(d) {
+  const prev = new Map(PLAN.rooms.map((r) => [r.id, r])), half = MIN_CLEAR / 2;
+  for (const r of d.rooms) {
+    const p = prev.get(r.id);
+    if (p && p.polygon === r.polygon) continue;
+    const n = clearPieces(r.polygon, half);
+    if (n === 0 || (n > 1 && n > (p ? clearPieces(p.polygon, half) : 1))) return true;
+  }
+  return false;
+}
+const ringOf = (r) => [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]];
+const NARROW = `That would leave a space narrower than ${MIN_CLEAR} cm — join the wall to the next wall or leave at least ${MIN_CLEAR} cm.`;
+
+/**
+ * The rules for changed slants `changed` (new objects) in the derived level `d`, against the level before (`before`).
+ * `move`: wording of a move. Returns a refusal text or null.
+ */
+function slantChecks(d, changed, before, move = false) {
+  const L = d.slantLevel, ids = new Set(changed.map((s) => s.id));
+  for (const s of changed) {
+    const g = L && L.byId.get(s.id);
+    if (!g) continue;
+    const f = g.f;
+    if (f.len < MIN_WALL) return `A wall must be at least ${MIN_WALL} cm long.`;
+    if (!ENV.draft && ENV.mamad.shell && intersectArea([g.poly], ENV.mamad.rects) > 1) return 'No walls may be built inside the safe room. ' + REASONS.mamad;
+    const box = g.box, near = (r) => overlapsBox(Array.isArray(r) ? boxOfRing(r) : r, { x: box.x - 15, y: box.y - 15, w: box.w + 30, h: box.h + 30 });
+    for (const seg of before.segments) {
+      if (seg.policy.level !== 'locked' || (seg.axis === 'a' && ids.has(seg.slantId)) || !overlapsBox(seg, box)) continue;
+      const ring = seg.axis === 'a' ? seg.poly : ringOf(seg);
+      if (centreIn(s, ring).some(([a, b]) => a > 0.5 && b < f.len - 0.5)) return seg.cls === 'mamad' ? REASONS.mamad : (move ? 'A wall cannot cross an exterior wall. ' : 'A new wall cannot cross an exterior wall. ') + REASONS.exteriorWall;
+    }
+    if (!ENV.draft) for (let a = 0; a <= f.len; a += Math.max(5, f.len / Math.ceil(f.len / 20))) {
+      if (outdoorPoint(before, s.x1 + f.ux * a, s.y1 + f.uy * a)) return move ? 'A wall cannot leave the house.' : 'A new wall must stay inside the house.';
+    }
+    // on top of / along another wall: the middle of its strip (ends excluded: joins overlap there)
+    const cut = Math.min(f.len / 4, 1.5 * TMAX), mid = f.len - 2 * cut;
+    if (mid > 1) {
+      const strip = freePoly({ ...s, x1: s.x1 + f.ux * cut, y1: s.y1 + f.uy * cut, x2: s.x2 - f.ux * cut, y2: s.y2 - f.uy * cut });
+      const others = [...PLAN.walls.filter(near), ...L.list.filter((o) => !ids.has(o.s.id) && near(o.poly)).map((o) => o.poly)];
+      const ov = others.length ? intersectArea([strip], others) : 0, own = mid * f.t;
+      if (ov > 0.9 * own) return 'There is already a wall here.';
+      if (ov > 0.5 * own) return move ? 'That would cross another wall.' : 'A wall cannot run along or on top of another wall.';
+    }
+    // doors / windows of OTHER walls: not through them, not ending on them, ≥ 10 cm of wall beside them
+    const gaps = [...rectOpenings(d.openings).filter(near).map((o) => ({ o, ring: ringOf(o) })),
+      ...d.openings.filter((o) => isAngledOpening(o) && !ids.has(o.wall)).map((o) => ({ o, ring: quadOfOpening(o) })).filter((q) => q.ring && near(q.ring))];
+    for (const { o, ring } of gaps) {
+      if (intersectArea([g.poly], [ring]) > 0.01) return 'A wall cannot run through a door or window.';
+      if (polyGap(g.poly, ring) < MIN_JAMB - 1e-6) return `Too close to ${o.kind === 'window' ? 'a window' : o.kind === 'opening' ? 'a passage' : 'a door'} — keep at least ${MIN_JAMB} cm of wall beside it.`;
+    }
+  }
+  if (d.problems.length) return problemText(d);
+  if (narrowRooms(d)) return NARROW;
+  return null;
+}
+/** The new slants get their kind from their derived class (exterior / mamad / interior), as plan-build does. */
+function withKinds(d, ids) {
+  d.slants = d.slants.map((s) => {
+    if (!ids.has(s.id)) return s;
+    const g = d.segments.find((x) => x.axis === 'a' && x.slantId === s.id), k = g ? KIND_OF[g.cls] : s.kind;
+    return k === s.kind ? s : { ...s, kind: k };
+  });
+  return d;
+}
+/** Openings of slant `old` re-measured on `next`, keeping their centre (moved by dx, dy). */
+function remeasure(openings, old, next, dx = 0, dy = 0) {
+  const fo = slantFrame(old);
+  return openings.map((o) => {
+    if (!isAngledOpening(o) || o.wall !== old.id) return o;
+    const at = atOf(next, old.x1 + fo.ux * o.at + dx, old.y1 + fo.uy * o.at + dy);
+    return Math.abs(at - o.at) < 1e-6 ? o : { ...o, at };
+  });
+}
+/** Thickness of a wall being drawn (as addWall) → { t } or { reason }. */
+function newThickness(p) {
+  const t = Math.round(p.thickness == null ? NEW_WALL.def : p.thickness), max = ENV.draft ? NEW_WALL.draftMax : NEW_WALL.max;
+  if (!(t >= NEW_WALL.min && t <= max)) return { reason: ENV.draft ? `Walls are ${NEW_WALL.min}–${max} cm thick.` : `New partitions are ${NEW_WALL.min}–${max} cm thick.` };
+  return { t };
+}
+
+/** addWall({ …, angled: true }) off the axes: { ok, slant, poly, level, d, segId } or a refusal. */
+function planAddSlant(p) {
+  const th = newThickness(p);
+  if (th.reason) return fail(th.reason);
+  const list = liveSlants() || [], rects = rectSolidsNow();
+  let s = { id: newSlantId(list), x1: r01(p.x1), y1: r01(p.y1), x2: r01(p.x2), y2: r01(p.y2), t: th.t, kind: 'interior' };
+  if (Math.hypot(s.x2 - s.x1, s.y2 - s.y1) < MIN_WALL) return fail(`A wall must be at least ${MIN_WALL} cm long.`);
+  s = setEnd(s, 0, snapSlantEnd(s, 0, list, rects));
+  s = setEnd(s, 1, snapSlantEnd(s, 1, list, rects));
+  if (Math.hypot(s.x2 - s.x1, s.y2 - s.y1) < MIN_WALL) return fail(`A wall must be at least ${MIN_WALL} cm long.`);
+  const before = current(), d = slantState([...list, s], PLAN.openings);
+  const bad = slantChecks(d, [s], before);
+  if (bad) return fail(bad);
+  withKinds(d, new Set([s.id]));
+  const g = d.segments.find((x) => x.axis === 'a' && x.slantId === s.id);
+  return { ok: true, slant: d.slants[d.slants.length - 1], poly: g.poly, level: 'free', d, segId: g.id };
+}
+
+/** Remove an angled wall and the openings in it (rooms merge). */
+function removeSlant(seg, opts) {
+  const s = slantOf(seg);
+  if (!s) return fail('No such wall.');
+  const d = slantState(liveSlants().filter((x) => x !== s), PLAN.openings.filter((o) => !(isAngledOpening(o) && o.wall === s.id)));
+  if (d.problems.length) return fail(problemText(d));
+  return commit(d, 'remove-wall', { level: seg.policy.level, reason: seg.policy.reason, ids: [seg.id] }, opts);
+}
+
+/**
+ * The end face of rect wall `r` that heads into the slant with frame f (both corners on one side, the nearer one):
+ * { axis, dir, c0, c1 } or null.
+ */
+function rectHeading(r, f) {
+  const cand = r.w >= r.h ? [{ axis: 'h', dir: -1, c: [[r.x, r.y], [r.x, r.y + r.h]] }, { axis: 'h', dir: 1, c: [[r.x + r.w, r.y], [r.x + r.w, r.y + r.h]] }]
+    : [{ axis: 'v', dir: -1, c: [[r.x, r.y], [r.x + r.w, r.y]] }, { axis: 'v', dir: 1, c: [[r.x, r.y + r.h], [r.x + r.w, r.y + r.h]] }];
+  let best = null;
+  for (const q of cand) {
+    const d = q.c.map(([x, y]) => (x - f.x1) * f.nx + (y - f.y1) * f.ny);
+    if (!(d[0] * d[1] > 0)) continue;
+    const m = Math.min(Math.abs(d[0]), Math.abs(d[1]));
+    if (!best || m < best.m) best = { ...q, m, c0: q.axis === 'h' ? r.y : r.x, c1: q.axis === 'h' ? r.y + r.h : r.x + r.w };
+  }
+  return best;
+}
+/**
+ * Rect walls whose end met slant `old` (its joint fills) stretched / shrunk on the 5 cm grid to the face of `next`.
+ * @returns {{ walls } | { reason }}
+ */
+function followRects(old, next, idx, joins, walls) {
+  const nw = walls.length, out = walls.slice();
+  const fo = slantFrame(old), fn = slantFrame(next), E = Math.max(200, 4 * TMAX);
+  const strip = freePoly({ ...next, x1: next.x1 - fn.ux * E, y1: next.y1 - fn.uy * E, x2: next.x2 + fn.ux * E, y2: next.y2 + fn.uy * E });
+  for (const ri of joins[idx].fills) {
+    if (ri >= nw) return { reason: 'A door or window meets this wall at its end — it cannot move.' };
+    const r = walls[ri], h = rectHeading(r, fo);
+    if (!h) continue;
+    const hit = lockedAt(r);
+    if (hit && hit.axis !== 'a') return { reason: hit.cls === 'mamad' ? REASONS.mamad : REASONS.exteriorWall };
+    const ext = bandExtent(strip, h.axis, h.c0, h.c1);
+    if (!ext) return { reason: 'A wall that ends on this one would be left behind.' };
+    const at = h.dir > 0 ? Math.floor(ext[0] / SNAP + 1e-9) * SNAP : Math.ceil(ext[1] / SNAP - 1e-9) * SNAP;
+    const hz = h.axis === 'h', lo = hz ? r.x : r.y, hi = lo + (hz ? r.w : r.h);
+    const a0 = h.dir > 0 ? lo : at, a1 = h.dir > 0 ? at : hi;
+    if (a1 - a0 < SNAP) return { reason: 'That would squeeze a wall that ends on this one to nothing.' };
+    out[ri] = hz ? { ...r, x: a0, w: a1 - a0 } : { ...r, y: a0, h: a1 - a0 };
+  }
+  return { walls: out };
+}
+/** Slants whose end makes a T on slant `old` (index idx): that end slides along its own line onto `next`. */
+function followTees(list, idx, old, next, joins, changed) {
+  const fo = slantFrame(old), fn = slantFrame(next);
+  joins.forEach((jn, j) => {
+    if (j === idx) return;
+    jn.ends.forEach((e, k) => {
+      if (e.type !== 'tee' || e.with[0] !== idx) return;
+      const o = changed.get(list[j].id) || list[j], f = slantFrame(o), E = endOf(o, k);
+      const X0 = lineCross(E[0], E[1], f.ux, f.uy, old.x1, old.y1, fo.ux, fo.uy), X1 = lineCross(E[0], E[1], f.ux, f.uy, next.x1, next.y1, fn.ux, fn.uy);
+      if (X0 && X1) changed.set(o.id, setEnd(o, k, [r01(E[0] + X1[0] - X0[0]), r01(E[1] + X1[1] - X0[1])]));
+    });
+  });
+}
+/** Apply changed slants (Map id → slant) to the list and re-measure their openings. */
+function applySlants(list, changed, openings, moved = null) {
+  let ops = openings;
+  const next = list.map((s) => changed.get(s.id) || s);
+  for (const s of list) {
+    const n = changed.get(s.id);
+    if (n && n !== s) ops = moved && moved.id === s.id ? remeasure(ops, s, n, moved.dx, moved.dy) : remeasure(ops, s, n);
+  }
+  return { slants: next, openings: ops };
+}
+
+/**
+ * Move an angled wall sideways by `delta` cm along its right-hand normal (+ = towards its 'r' side). Its ends slide along
+ * the walls they meet (a slant end at a corner: the neighbour's end slides along the neighbour's own line, by line
+ * intersection; on a rect: along the rect), walls that T onto it slide along their own lines, rect walls that end on it
+ * stretch / shrink on the 5 cm grid; its openings travel with it.
+ */
+function moveSlant(seg, delta, opts) {
+  const dl = r01(num(delta) ? delta : 0);
+  if (!dl) return { ok: true, level: seg.policy.level, warnings: [], ids: [seg.id] };
+  const list = liveSlants(), i = list.findIndex((x) => x.id === seg.slantId), s = list[i];
+  if (!s) return fail('No such wall.');
+  const f = slantFrame(s), rects = rectSolidsNow(), nw = PLAN.walls.length, joins = slantJoins(list, rects);
+  const dx = f.nx * dl, dy = f.ny * dl, base = { ...s, x1: s.x1 + dx, y1: s.y1 + dy, x2: s.x2 + dx, y2: s.y2 + dy };
+  const changed = new Map(), joinedRects = new Set();
+  let me = base;
+  for (const k of [0, 1]) {
+    const e = joins[i].ends[k], E0 = endOf(s, k);
+    if (e.type === 'free' || e.type === 'degenerate') { me = setEnd(me, k, [r01(endOf(me, k)[0]), r01(endOf(me, k)[1])]); continue; }
+    if (e.type === 'tee') {
+      const b = list[e.with[0]], fb = slantFrame(b), P = lineCross(base.x1, base.y1, f.ux, f.uy, E0[0], E0[1], fb.ux, fb.uy);
+      if (!P) return fail('That wall cannot slide along the wall it meets.');
+      me = setEnd(me, k, [r01(P[0]), r01(P[1])]);
+    } else if (e.type === 'rect') {
+      if (e.with[0] >= nw) return fail('That wall end meets a door or window — it cannot move.');
+      const r = rects[e.with[0]], hz = r.w >= r.h, P = lineCross(base.x1, base.y1, f.ux, f.uy, E0[0], E0[1], hz ? 1 : 0, hz ? 0 : 1);
+      if (!P) return fail('That wall cannot slide along the wall it meets.');
+      const a = hz ? P[0] : P[1], lo = hz ? r.x : r.y, hi = lo + (hz ? r.w : r.h);
+      if (a < lo - s.t || a > hi + s.t) return fail('That wall would slide off the wall it ends on.');
+      joinedRects.add(e.with[0]);
+      me = setEnd(me, k, [r01(P[0]), r01(P[1])]);
+    } else {
+      const pts = [];
+      for (const j of e.with) {
+        const o = changed.get(list[j].id) || list[j], fo = slantFrame(o);
+        const ko = Math.hypot(o.x1 - E0[0], o.y1 - E0[1]) <= Math.hypot(o.x2 - E0[0], o.y2 - E0[1]) ? 0 : 1, Q = endOf(o, ko);
+        const P = lineCross(base.x1, base.y1, f.ux, f.uy, Q[0], Q[1], fo.ux, fo.uy);
+        if (!P) return fail('That wall cannot slide along the wall it meets.');
+        pts.push({ o, ko, P });
+      }
+      if (pts.some((q) => Math.hypot(q.P[0] - pts[0].P[0], q.P[1] - pts[0].P[1]) > 1)) return fail('Several walls meet at this wall\'s corner — it cannot be moved on its own.');
+      const P = [r01(pts[0].P[0]), r01(pts[0].P[1])];
+      me = setEnd(me, k, P);
+      for (const q of pts) {
+        const lockedO = current().segments.find((g) => g.axis === 'a' && g.slantId === q.o.id && g.policy.level === 'locked');
+        if (lockedO) return fail(lockedO.cls === 'mamad' ? REASONS.mamad : REASONS.exteriorWall);
+        changed.set(q.o.id, setEnd(q.o, q.ko, P));
+      }
+    }
+  }
+  changed.set(s.id, me);
+  followTees(list, i, s, me, joins, changed);
+  for (const id of changed.keys()) {
+    if (id === s.id) continue;
+    const g = current().segments.find((x) => x.axis === 'a' && x.slantId === id);
+    if (g && g.policy.level === 'locked') return fail(g.cls === 'mamad' ? REASONS.mamad : REASONS.exteriorWall);
+  }
+  const fr = followRects(s, me, i, joins, PLAN.walls);
+  if (fr.reason) return fail(fr.reason);
+  // the strip it sweeps (its own ends and the walls that follow it excluded) must be clear of other walls
+  const cut = Math.min(f.len / 3, 1.5 * TMAX), sg = Math.sign(dl), far = dl + sg * f.hw;
+  const P1 = [s.x1 + f.ux * cut, s.y1 + f.uy * cut], P2 = [s.x2 - f.ux * cut, s.y2 - f.uy * cut];
+  const sweep = [P1, P2, [P2[0] + f.nx * far, P2[1] + f.ny * far], [P1[0] + f.nx * far, P1[1] + f.ny * far]];
+  const L0 = current().slantLevel, sb = boxOfRing(sweep);
+  const obstacles = [...rects.filter((r, ri) => !joins[i].fills.includes(ri) && !joinedRects.has(ri) && overlapsBox(r, sb)),
+    ...(L0 ? L0.list.filter((g) => !changed.has(g.s.id) && overlapsBox(g.box, sb)).map((g) => g.poly) : [])];
+  if (obstacles.length && intersectArea([sweep], obstacles) > 0.5) return fail('That would cross another wall.');
+  const { slants, openings } = applySlants(list, changed, PLAN.openings, { id: s.id, dx, dy });
+  const before = current(), d = slantState(slants, openings, fr.walls);
+  const bad = slantChecks(d, [...changed.values()], before, true);
+  if (bad) return fail(bad);
+  return commit(d, 'move-wall', { level: seg.policy.level, reason: seg.policy.reason, ids: [seg.id] }, opts);
+}
+
+/**
+ * Lengthen / shorten an angled wall along its centre line: `start` / `end` = cm its start (x1, y1) / end (x2, y2) moves
+ * OUTWARDS (+ longer, − shorter; omitted = 0). A moved end is snapped / joined like a drawn one; openings keep their place.
+ */
+function resizeSlant(seg, range, opts) {
+  const r = range || {}, st = num(r.start) ? r01(r.start) : 0, en = num(r.end) ? r01(r.end) : 0;
+  if (!st && !en) return { ok: true, level: seg.policy.level, warnings: [], ids: [seg.id] };
+  const list = liveSlants(), s = slantOf(seg);
+  if (!s) return fail('No such wall.');
+  const f = slantFrame(s), others = list.filter((x) => x !== s), rects = rectSolidsNow();
+  if (f.len + st + en < MIN_WALL) return fail(`A wall must be at least ${MIN_WALL} cm long.`);
+  let ns = roundSlant({ ...s, x1: s.x1 - f.ux * st, y1: s.y1 - f.uy * st, x2: s.x2 + f.ux * en, y2: s.y2 + f.uy * en });
+  if (st) ns = setEnd(ns, 0, snapSlantEnd(ns, 0, others, rects));
+  if (en) ns = setEnd(ns, 1, snapSlantEnd(ns, 1, others, rects));
+  const { slants, openings } = applySlants(list, new Map([[s.id, ns]]), PLAN.openings);
+  const before = current(), d = slantState(slants, openings);
+  const bad = slantChecks(d, [ns], before);
+  if (bad) return fail(bad);
+  return commit(d, 'resize-wall', { level: seg.policy.level, reason: seg.policy.reason, ids: [seg.id] }, opts);
+}
+
+/**
+ * Drag one end of a wall to (x, y); the other end stays.
+ *   An angled wall: the point is taken as given, then snapped / joined like a drawn end; other slant ends at the dragged
+ *   corner follow it, walls that T onto it slide along their own lines, rect walls ending on it stretch; its openings
+ *   keep their distance from the fixed end. Within 0.5° of an axis it becomes a rect wall (drawn as addWall would).
+ *   A rect wall: with `angled: true` and the point off its axis it becomes an angled wall; otherwise the end moves along
+ *   its own axis (= resizeWallSegment of that end).
+ * @param {string} segmentId  'seg:a:<id>' or a rect segment id (prefixed on upper levels)
+ * @param {'a' | 'b'} end     'a' = the start (x1, y1) of a slant / the west or north end of a rect core; 'b' = the other
+ * @param {{ x, y, angled? }} point
+ */
+export function rotateWallEnd(...args) { return tracked('rotateWallEnd', onActive(rotateWallEndImpl), args); }
+function rotateWallEndImpl(segmentId, end, point, opts) {
+  const q = editableSegment(segmentId);
+  if (!q.ok) return q;
+  if (end !== 'a' && end !== 'b') return fail('The end must be \'a\' (start) or \'b\' (end).');
+  const p = point || {};
+  if (!num(p.x) || !num(p.y)) return fail('A wall end needs a point.');
+  const seg = q.s, k = end === 'b' ? 1 : 0;
+  if (seg.axis !== 'a') {
+    const { c0, c1, a0, a1 } = coreSpan(seg), cm = (c0 + c1) / 2, h = seg.axis === 'h';
+    const fixed = h ? [k ? a0 : a1, cm] : [cm, k ? a0 : a1];
+    if (p.angled === true && !nearAxis(fixed[0], fixed[1], p.x, p.y)) return rectToSlant(seg, k, [p.x, p.y], opts);
+    return resizeWallSegmentImpl(segmentId, k ? { end: h ? p.x : p.y } : { start: h ? p.x : p.y }, opts);
+  }
+  const list = liveSlants(), i = list.findIndex((x) => x.id === seg.slantId), s = list[i];
+  if (!s) return fail('No such wall.');
+  const fixed = endOf(s, 1 - k);
+  if (nearAxis(fixed[0], fixed[1], p.x, p.y)) return slantToRect(seg, s, k, [p.x, p.y], opts);
+  const E0 = endOf(s, k), atCorner = (o) => [0, 1].find((ko) => Math.hypot(endOf(o, ko)[0] - E0[0], endOf(o, ko)[1] - E0[1]) <= 1);
+  const partners = list.filter((o) => o !== s && atCorner(o) !== undefined), rects = rectSolidsNow();
+  let ns = setEnd(s, k, [r01(p.x), r01(p.y)]);
+  ns = setEnd(ns, k, snapSlantEnd(ns, k, list.filter((o) => o !== s && !partners.includes(o)), rects));
+  const P = endOf(ns, k);
+  if (Math.hypot(P[0] - fixed[0], P[1] - fixed[1]) < MIN_WALL) return fail(`A wall must be at least ${MIN_WALL} cm long.`);
+  const changed = new Map([[s.id, ns]]);
+  for (const o of partners) {
+    const g = current().segments.find((x) => x.axis === 'a' && x.slantId === o.id);
+    if (g && g.policy.level === 'locked') return fail(g.cls === 'mamad' ? REASONS.mamad : REASONS.exteriorWall);
+    changed.set(o.id, setEnd(o, atCorner(o), P));
+  }
+  const joins = slantJoins(list, rects);
+  followTees(list, i, s, ns, joins, changed);
+  const fr = followRects(s, ns, i, joins, PLAN.walls);
+  if (fr.reason) return fail(fr.reason);
+  const { slants, openings: ops0 } = applySlants(list.map((x) => (x === s ? s : x)), new Map([...changed].filter(([id]) => id !== s.id)), PLAN.openings);
+  // its own openings keep their distance from the fixed end
+  const L0 = slantFrame(s).len, L1 = slantFrame(ns).len;
+  const openings = ops0.map((o) => (isAngledOpening(o) && o.wall === s.id && !k ? { ...o, at: L1 - (L0 - o.at) } : o));
+  const sl = slants.map((x) => (x.id === s.id ? ns : x));
+  const before = current(), d = slantState(sl, openings, fr.walls);
+  const bad = slantChecks(d, [...changed.values()], before);
+  if (bad) return fail(bad);
+  return commit(d, 'rotate-wall', { level: seg.policy.level, reason: seg.policy.reason, ids: [seg.id] }, opts);
+}
+
+const HINGE_A = (h, u) => (h ? (u > 0 ? 'w' : 'e') : (u > 0 ? 'n' : 's'));          // rect jamb on the slant's 'a' side
+const SWING_R = (h, u) => (h ? (u > 0 ? 's' : 'n') : (u > 0 ? 'w' : 'e'));          // rect side of the slant's right normal
+const OPP = { n: 's', s: 'n', e: 'w', w: 'e' };
+/** An angled wall dragged onto an axis: it becomes a rect wall through its fixed end and the point (addWall's rules). */
+function slantToRect(seg, s, k, P, opts) {
+  const list = liveSlants().filter((x) => x !== s), mine = PLAN.openings.filter((o) => isAngledOpening(o) && o.wall === s.id);
+  const fixed = endOf(s, 1 - k), d0 = slantState(list, PLAN.openings.filter((o) => !mine.includes(o)));
+  const saved = { walls: PLAN.walls, openings: PLAN.openings, rooms: PLAN.rooms, wallOutline: PLAN.wallOutline, analysis };
+  PLAN.walls = d0.walls; PLAN.openings = d0.openings; PLAN.rooms = d0.rooms; PLAN.wallOutline = d0.wallOutline; analysis = d0; slantsOverride = list;
+  try {
+    const line = k ? { x1: fixed[0], y1: fixed[1], x2: P[0], y2: P[1] } : { x1: P[0], y1: P[1], x2: fixed[0], y2: fixed[1] };
+    const r = planAddWall({ ...line, thickness: s.t });
+    if (!r.ok) return r;
+    const h = r.axis === 'h', u = h ? Math.sign(line.x2 - line.x1) : Math.sign(line.y2 - line.y1);
+    const L0 = slantFrame(s).len, fa = h ? fixed[0] : fixed[1], sg = k ? u : -u;      // from the fixed end towards the moved one
+    const lo = h ? r.rect.x : r.rect.y, hi = lo + (h ? r.rect.w : r.rect.h);
+    const conv = mine.map((o) => {
+      const dist = k ? o.at : L0 - o.at, c = fa + sg * dist, start = Math.max(lo + MIN_JAMB, Math.min(hi - MIN_JAMB - o.width, snap(c - o.width / 2)));
+      const { wall, at, cx, cy, angle, t, x, y, w, h: hh, rooms, exterior, outside, hinge, swing, axis, ...rest } = o;
+      const n = { ...rest, axis: r.axis, ...(h ? { x: start, y: r.rect.y, w: o.width, h: r.rect.h } : { x: r.rect.x, y: start, w: r.rect.w, h: o.width }) };
+      if (hinge != null) n.hinge = hinge === 'a' ? HINGE_A(h, u) : OPP[HINGE_A(h, u)];
+      if (swing != null) n.swing = swing === 'r' ? SWING_R(h, u) : OPP[SWING_R(h, u)];
+      n.rooms = [];
+      return n;
+    });
+    const openings = [...r.d.openings, ...conv];
+    const d = derive([...r.d.walls, ...rectOpenings(openings)], openings, PLAN.rooms, PLAN.walls, list);
+    d.slants = list;
+    if (d.problems.length) return fail(problemText(d));
+    const ids = idsIn(d, r.rect, r.axis);
+    PLAN.walls = saved.walls; PLAN.openings = saved.openings; PLAN.rooms = saved.rooms; PLAN.wallOutline = saved.wallOutline; analysis = saved.analysis; slantsOverride = undefined;
+    return commit(d, 'rotate-wall', { level: seg.policy.level, reason: seg.policy.reason, ids }, opts);
+  } finally {
+    if (slantsOverride !== undefined) {
+      PLAN.walls = saved.walls; PLAN.openings = saved.openings; PLAN.rooms = saved.rooms; PLAN.wallOutline = saved.wallOutline; analysis = saved.analysis; slantsOverride = undefined;
+      invalidatePlanCaches();
+    }
+  }
+}
+/** A rect wall whose end is dragged off its axis with `angled: true`: it becomes an angled wall (its openings too). */
+function rectToSlant(seg, k, P, opts) {
+  const { c0, c1, a0, a1 } = coreSpan(seg), cm = (c0 + c1) / 2, h = seg.axis === 'h';
+  const A = h ? [a0, cm] : [cm, a0], B = h ? [a1, cm] : [cm, a1];
+  const list = liveSlants() || [], E = editModel(seg.axis, [], []);
+  paint(E.m, seg.core, FREE);
+  const walls = wallRects(E.m), rects = [...walls, ...rectOpenings(PLAN.openings).filter((o) => !inCore(seg)(o))];
+  let ns = { id: newSlantId(list), x1: k ? A[0] : r01(P[0]), y1: k ? A[1] : r01(P[1]), x2: k ? r01(P[0]) : B[0], y2: k ? r01(P[1]) : B[1], t: seg.thickness, kind: 'interior' };
+  ns = setEnd(ns, k, snapSlantEnd(ns, k, list, rects));
+  const f = slantFrame(ns);
+  if (f.len < MIN_WALL) return fail(`A wall must be at least ${MIN_WALL} cm long.`);
+  const fixedA = k ? a0 : a1;
+  const conv = PLAN.openings.filter(inCore(seg)).map((o) => {
+    const c = along(o) + o.width / 2, dist = Math.abs(c - fixedA);
+    const { x, y, w, h: hh, axis, rooms, exterior, outside, hinge, swing, ...rest } = o;
+    const n = { ...rest, wall: ns.id, axis: 'a', at: k ? dist : f.len - dist };
+    if (hinge != null) n.hinge = hinge === (h ? 'w' : 'n') ? 'a' : 'b';
+    if (swing != null) n.swing = swing === (h ? 's' : 'w') ? 'r' : 'l';
+    n.rooms = [];
+    return n;
+  });
+  const openings = [...PLAN.openings.filter((o) => !inCore(seg)(o)), ...conv];
+  const before = current(), d = slantState([...list, ns], openings, walls);
+  const bad = slantChecks(d, [ns], before);
+  if (bad) return fail(bad);
+  withKinds(d, new Set([ns.id]));
+  return commit(d, 'rotate-wall', { level: seg.policy.level, reason: seg.policy.reason, ids: [(ENV.pre || '') + 'seg:a:' + ns.id] }, opts);
 }
 
 // ---------------------------------------------------------------- openings
@@ -1606,24 +2149,77 @@ function checkSize(kind, width, height, sill) {
 function planAddOpening(input) {
   const p = input || {}, K = OPENING_KINDS[p.kind];
   if (!K) return fail('Unknown opening kind.');
-  if (!num(p.x) || !num(p.y)) return fail('An opening needs a position.');
   const width = snap(num(p.width) ? p.width : K.width);
-  let s = null, sd = Infinity;
-  let slanted = Infinity;
-  for (const g of current().segments) {
-    if (g.axis === 'a') { slanted = Math.min(slanted, polyDist(p.x, p.y, g.poly)); continue; }
-    if (isJunction(g)) continue; const dist = rectDist(p.x, p.y, g.core); if (dist < sd) { sd = dist; s = g; }
+  let s = null, sd = Infinity, want = null;
+  if (p.wall != null) {
+    // by wall: a slant ('seg:a:s01' / 's01', prefixed or not on upper levels) with `at`, or a rect segment with `at` = cm
+    // from the start of its core
+    const id = String(p.wall), segs = current().segments;
+    s = segs.find((g) => g.id === id || (g.axis === 'a' && (g.slantId === id || g.id === (ENV.pre || '') + 'seg:a:' + id || g.id === (ENV.pre || '') + id))) || null;
+    if (!s) return fail('There is no such wall.');
+    if (s.axis === 'a') return planAddAngledOpening(p, K, s, width);
+    if (!num(p.at)) return fail('An opening needs a position.');
+    want = coreSpan(s).a0 + p.at - width / 2;
+  } else {
+    if (!num(p.x) || !num(p.y)) return fail('An opening needs a position.');
+    let slanted = Infinity, sg = null;
+    for (const g of current().segments) {
+      if (g.axis === 'a') { const dd = polyDist(p.x, p.y, g.poly); if (dd < slanted) { slanted = dd; sg = g; } continue; }
+      if (isJunction(g)) continue; const dist = rectDist(p.x, p.y, g.core); if (dist < sd) { sd = dist; s = g; }
+    }
+    if (sg && slanted <= REACH && slanted < sd) return planAddAngledOpening(p, K, sg, width);
+    if (!s || sd > REACH) return fail('There is no wall here.');
   }
-  if (slanted <= REACH && slanted < sd) return fail(REASONS.angledOpening);
-  if (!s || sd > REACH) return fail('There is no wall here.');
   if (s.cls === 'mamad') return fail(REASONS.mamad);
   const exterior = s.cls === 'exterior';
   if (p.kind === 'window' && !exterior) return fail('Windows belong in exterior walls — use a door or an open passage between rooms.');
   if (p.kind === 'opening' && exterior) return fail('An opening in an exterior wall needs a door or a window.');
   if (!(width >= K.minW && width <= K.maxW)) return fail(`Width must be ${K.minW}–${K.maxW} cm.`);
-  const start = slot(s, width, (s.axis === 'h' ? p.x : p.y) - width / 2, null);
+  const start = slot(s, width, want != null ? want : (s.axis === 'h' ? p.x : p.y) - width / 2, null);
   if (start == null) return fail(`There is not enough free wall here for a ${width} cm opening.`);
   return { ok: true, segmentId: s.id, rect: openingRect(s, start, width), level: exterior && !ENV.draft ? 'permit' : 'free', s, width, start };
+}
+
+/** Gap extents [a0, a1] of the openings of slant `id` (except `ignoreId`). */
+const takenOn = (id, ignoreId) => PLAN.openings.filter((o) => isAngledOpening(o) && o.wall === id && o.id !== ignoreId).map((o) => [o.at - o.width / 2, o.at + o.width / 2]);
+/**
+ * Centre `at` for an opening of `width` in slant segment g: `exact` (cm from its start; checked, not moved) or, for a
+ * point, the nearest place ≥ 10 cm from the ends of its faces (after mitres / joins) and from other openings.
+ * @returns {{ at } | { reason }}
+ */
+function angledSlot(g, s, width, exact, point, ignoreId) {
+  const free = bothFaces(g.faces), taken = takenOn(s.id, ignoreId), ranges = openingRanges(free, taken, width, MIN_JAMB);
+  if (exact != null) {
+    const at = r01(exact);
+    if (ranges.some(([lo, hi]) => at >= lo - 1e-6 && at <= hi + 1e-6)) return { at };
+    if (taken.some(([a0, a1]) => at - width / 2 < a1 && at + width / 2 > a0)) return { reason: 'Openings would overlap.' };
+    if (!free.some(([p, q]) => at - width / 2 >= p - 1e-6 && at + width / 2 <= q + 1e-6)) return { reason: `Too close to the end of the wall — keep at least ${MIN_JAMB} cm of wall beside it.` };
+    return { reason: `Too close to another opening — keep at least ${MIN_JAMB} cm of wall between them.` };
+  }
+  const want = atOf(s, point[0], point[1]);
+  let best = null;
+  for (const [lo0, hi0] of ranges) {
+    const lo = Math.ceil(lo0 * 10 - 1e-6) / 10, hi = Math.floor(hi0 * 10 + 1e-6) / 10;
+    if (hi < lo) continue;
+    const at = Math.max(lo, Math.min(hi, r01(want)));
+    if (best == null || Math.abs(at - want) < Math.abs(best - want)) best = at;
+  }
+  return best == null ? { reason: `There is not enough free wall here for a ${width} cm opening.` } : { at: best };
+}
+/** planAddOpening in an angled wall (segment g). */
+function planAddAngledOpening(p, K, g, width) {
+  if (g.cls === 'mamad' && !ENV.draft) return fail(REASONS.mamad);
+  const exterior = g.cls === 'exterior', s = slantOf(g);
+  if (!s) return fail('There is no such wall.');
+  if (p.kind === 'window' && !exterior) return fail('Windows belong in exterior walls — use a door or an open passage between rooms.');
+  if (p.kind === 'opening' && exterior) return fail('An opening in an exterior wall needs a door or a window.');
+  if (!(width >= K.minW && width <= K.maxW)) return fail(`Width must be ${K.minW}–${K.maxW} cm.`);
+  const exact = p.wall != null ? (num(p.at) ? p.at : null) : null;
+  if (p.wall != null && exact == null) return fail('An opening needs a position (at).');
+  const sl = angledSlot(g, s, width, exact, [p.x, p.y], null);
+  if (sl.reason) return fail(sl.reason);
+  const quad = openingQuad(s, sl.at, width);
+  return { ok: true, angled: true, segmentId: g.id, s: g, slant: s, at: sl.at, width, quad, rect: boxOfRing(quad), level: exterior && !ENV.draft ? 'permit' : 'free' };
 }
 
 /**
@@ -1633,6 +2229,7 @@ function planAddOpening(input) {
 export function canAddOpening(input) { return onLevel(activeLevel(), () => canAddOpeningImpl(input)); }
 function canAddOpeningImpl(input) {
   const r = planAddOpening(input);
+  if (r.ok && r.angled) return { ok: true, segmentId: r.segmentId, wall: r.slant.id, at: r.at, width: r.width, quad: r.quad, rect: r.rect, level: r.level };
   return r.ok ? { ok: true, segmentId: r.segmentId, rect: r.rect, level: r.level } : r;
 }
 
@@ -1653,6 +2250,7 @@ export function addOpening(...args) { return tracked('addOpening', onActive(addO
 function addOpeningImpl(input, opts) {
   const r = planAddOpening(input);
   if (!r.ok) return r;
+  if (r.angled) return addAngledOpening(input, r, opts);
   const p = input, K = OPENING_KINDS[p.kind], { s } = r, exterior = s.cls === 'exterior';
   const height = num(p.height) ? Math.round(p.height) : K.height, sill = num(p.sill) ? Math.round(p.sill) : K.sill;
   const bad = checkSize(p.kind, r.width, height, sill);
@@ -1674,6 +2272,62 @@ function addOpeningImpl(input, opts) {
   return commit(d, 'add-opening', { level: r.level, ids: [o.id] }, opts);
 }
 
+/** addOpening in an angled wall (r = planAddAngledOpening's result). */
+function addAngledOpening(p, r, opts) {
+  const K = OPENING_KINDS[p.kind], g = r.s, exterior = g.cls === 'exterior';
+  const height = num(p.height) ? Math.round(p.height) : K.height, sill = num(p.sill) ? Math.round(p.sill) : K.sill;
+  const bad = checkSize(p.kind, r.width, height, sill);
+  if (bad) return fail(bad);
+  const style = p.style == null ? (exterior && K.extStyle) || K.style : p.style;
+  if (!K.styles.includes(style)) return fail(`Style must be one of: ${K.styles.join(', ')}.`);
+  const o = { id: newOpeningId(p.kind), kind: p.kind, style, wall: r.slant.id, axis: 'a', at: r.at, width: r.width, height, sill };
+  if (p.kind === 'door') {
+    const iv = bothFaces(g.faces).find(([a, b]) => a <= r.at && b >= r.at) || [0, g.length];
+    const size = (id) => { const room = PLAN.rooms.find((x) => x.id === id); return room ? polygonArea(room.polygon) : Infinity; };
+    o.hinge = p.hinge === 'a' || p.hinge === 'b' ? p.hinge : r.at - r.width / 2 - iv[0] <= iv[1] - (r.at + r.width / 2) ? 'a' : 'b';
+    o.swing = p.swing === 'l' || p.swing === 'r' ? p.swing : size(g.between[0]) <= size(g.between[1]) ? 'l' : 'r';
+  }
+  o.rooms = [];
+  o.label = labelOf(o);
+  const openings = [...PLAN.openings, o];
+  const d = derive(solidsOf(PLAN), openings, PLAN.rooms, PLAN.walls, liveSlants());
+  if (d.problems.length) return fail(problemText(d));
+  return commit(d, 'add-opening', { level: r.level, ids: [o.id] }, opts);
+}
+/** updateOpening of an opening in an angled wall: at / offset exact, x, y clamped; hinge 'a' | 'b', swing 'l' | 'r'. */
+function updateAngledOpening(o, p, policy, opts) {
+  const K = OPENING_KINDS[o.kind], g = current().segments.find((x) => x.axis === 'a' && x.slantId === o.wall), s = g && slantOf(g);
+  if (!g || !s || !K) return fail('This opening cannot be edited.');
+  const next = { ...o };
+  if (num(p.width)) next.width = snap(p.width);
+  if (num(p.height)) next.height = Math.round(p.height);
+  if (num(p.sill)) next.sill = Math.round(p.sill);
+  if (p.style != null) { if (!K.styles.includes(p.style)) return fail(`Style must be one of: ${K.styles.join(', ')}.`); next.style = p.style; }
+  for (const [key, pair] of [['hinge', ['a', 'b']], ['swing', ['l', 'r']]]) {
+    if (p[key] == null) continue;
+    if (o.kind !== 'door' || !pair.includes(p[key])) return fail(`A ${key} of '${p[key]}' does not fit this ${o.kind === 'door' ? 'wall' : 'opening'}.`);
+    next[key] = p[key];
+  }
+  const bad = checkSize(o.kind, next.width, next.height, next.sill);
+  if (bad) return fail(bad);
+  const exact = num(p.at) ? p.at : num(p.offset) ? p.offset : (num(p.x) && num(p.y)) ? null : next.width !== o.width ? o.at : null;
+  if (exact != null || (num(p.x) && num(p.y))) {
+    const sl = angledSlot(g, s, next.width, exact, [p.x, p.y], o.id);
+    if (sl.reason) return fail(sl.reason);
+    next.at = exact != null && r01(exact) === r01(o.at) ? o.at : sl.at;
+  }
+  const geometry = !sameOpening(next, o, ANGLED_GEOMETRY_KEYS);
+  if (!geometry && sameOpening(next, o, LOOK_KEYS)) return { ok: true, level: 'free', warnings: [], ids: [o.id] };
+  if (next.width !== o.width || next.height !== o.height || next.sill !== o.sill) {
+    if (o.label != null || o.kind === 'window') next.label = labelOf(next);
+    if (o.assumed) { const left = o.assumed.filter((k) => next[k] === o[k]); if (left.length) next.assumed = left; else delete next.assumed; }
+  }
+  const openings = PLAN.openings.map((x) => (x === o ? next : x));
+  const d = derive(solidsOf(PLAN), openings, PLAN.rooms, PLAN.walls, liveSlants());
+  if (d.problems.length) return fail(problemText(d));
+  return commit(d, 'update-opening', { level: geometry && policy.level === 'permit' ? 'permit' : 'free', ids: [o.id] }, opts);
+}
+
 /**
  * Change a door / window. patch: { offset (cm from the start of its wall segment) | x, y (new centre — it slides
  * along its own wall, kept ≥ 10 cm from wall ends and other openings), width, height, sill, style, hinge, swing }.
@@ -1684,7 +2338,7 @@ function updateOpeningImpl(id, patch, opts) {
   if (!o) return fail('No such opening.');
   const policy = policyOfOpening(o);
   if (policy.level === 'locked') return fail(policy.reason);
-  if (isAngledOpening(o)) return fail(REASONS.angledOpening);
+  if (isAngledOpening(o)) return updateAngledOpening(o, p, policy, opts);
   const s = segmentOfOpening(o), K = OPENING_KINDS[o.kind];
   if (!s || !K) return fail('This opening cannot be edited.');
   const next = { ...o };
@@ -1735,8 +2389,7 @@ function flipDoorImpl(id, how, opts) {
   const o = PLAN.openings.find((x) => x.id === id);
   if (!o) return fail('No such opening.');
   if (o.kind !== 'door' || (how !== 'hinge' && how !== 'swing')) return fail('Only hinged doors can be flipped (hinge or swing).');
-  if (isAngledOpening(o)) return fail(REASONS.angledOpening);
-  const pair = (how === 'hinge' ? HINGES : SWINGS)[o.axis];
+  const pair = isAngledOpening(o) ? (how === 'hinge' ? ['a', 'b'] : ['l', 'r']) : (how === 'hinge' ? HINGES : SWINGS)[o.axis];
   return updateOpening(id, { [how]: o[how] === pair[0] ? pair[1] : pair[0] }, opts);
 }
 
@@ -1971,7 +2624,13 @@ function diffItems(base) {
     const what = [];
     if (isAngledOpening(o) || isAngledOpening(b)) {
       if (o.wall !== b.wall || o.axis !== b.axis) what.push('moved to another wall');
-      else if (o.at !== b.at) what.push(`moved ${Math.round(Math.abs(o.at - b.at))} cm`);
+      else if (o.at !== b.at) {
+        // an opening that travelled with its wall (the wall moved sideways) is not listed as moved
+        const now = (liveSlants() || []).find((x) => x.id === o.wall), was = (base.slants || []).find((x) => x.id === b.wall);
+        let by = Math.abs(o.at - b.at);
+        if (now && was && !sameSlant(now, was) && num(o.cx) && num(b.cx)) { const f = slantFrame(now); by = Math.abs((o.cx - b.cx) * f.ux + (o.cy - b.cy) * f.uy); }
+        if (by >= 0.5) what.push(`moved ${Math.round(by)} cm`);
+      }
     } else {
       const rode = carried.some((c) => overlapArea(o, c.core) > 0 && o.x - b.x === c.dx && o.y - b.y === c.dy);   // travelled with its wall
       if ((o.x !== b.x || o.y !== b.y) && !rode) what.push(`moved ${Math.abs(o.x - b.x) + Math.abs(o.y - b.y)} cm`);
@@ -2005,7 +2664,16 @@ function diffSlants(base, baseAn, cur) {
     if (!g) continue;
     const level = g.policy.level === 'locked' ? 'permit' : g.policy.level;
     if (!n) items.push({ kind: 'slant-removed', level, text: `Removed the ${slantText(g)} ${sides(g)} (${metres(g.length)})`, at: slantMid(b), ref: g.id });
-    else if (!sameSlant(n, b)) { const c = segOf(cur, n.id) || g; items.push({ kind: 'slant-changed', level, text: `Changed the ${slantText(g)} ${sides(c)} (${metres(g.length)} → ${metres(c.length)})`, at: slantMid(n), ref: c.id }); }
+    else if (!sameSlant(n, b)) {
+      const c = segOf(cur, n.id) || g, fb = slantFrame(b), fn = slantFrame(n);
+      // what kind of change: moved (same direction, shifted sideways), resized (same line), rotated (direction), changed
+      const turn = Math.abs(((fn.angle - fb.angle + 540) % 360) - 180), shift = (n.x1 - b.x1) * fb.nx + (n.y1 - b.y1) * fb.ny;
+      const change = n.t !== b.t ? 'changed' : turn > 0.05 ? 'rotated' : Math.abs(shift) >= 0.05 ? 'moved' : 'resized';
+      const text = change === 'moved' ? `Moved the ${slantText(g)} ${sides(g)} ${Math.round(Math.abs(shift))} cm`
+        : change === 'rotated' ? `Turned the ${slantText(g)} ${sides(g)} by ${Math.round(turn)}° (${metres(g.length)} → ${metres(c.length)})`
+          : `Changed the ${slantText(g)} ${sides(c)} (${metres(g.length)} → ${metres(c.length)})`;
+      items.push({ kind: 'slant-changed', change, level, text, at: slantMid(n), ref: c.id });
+    }
   }
   for (const n of now) {
     if (was.some((b) => b.id === n.id)) continue;
